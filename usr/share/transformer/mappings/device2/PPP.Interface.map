@@ -500,30 +500,6 @@ Device_PPP_Interface_i_.getall = function(mapping,key)
   }
 end
 
-local firebinding = {config="firewall", sectionname="zone"}
-local function intfname()
-	local tabintf = {}
-	uciHelper.foreach_on_uci(firebinding, function(s)
-		if s['wan'] == "0" then
-			for i, v in pairs(s['network']) do
-			tabintf[#tabintf +1] = v
-			end
-		end
-	end
-)
-	return tabintf
-end
-
-local devbinding = {config="network", sectionname='device'}
-local function devname()
-	local tabdev = {}
-	uciHelper.foreach_on_uci(devbinding, function(s)
-		tabdev[#tabdev +1] = s['.name']
-	end
-)
-	return tabdev
-end
-
 local function setUciParam(mapping, param, value, key)
   key = model:getInterface(key)
   
@@ -532,34 +508,26 @@ local function setUciParam(mapping, param, value, key)
     binding.option = paramMap[param]
     setOnUci(binding, value, commitApply)
     configChanged = true
+	-----------------custo start TCOMITAGW-2157
 	if param == "Username" then
-		local devices = devname()
-		local interfaces = intfname()
 		local check = string.sub(value, #value-1,#value)
 		if check == "v6" then
 			setOnUci({config = "network", sectionname = key, option = "ipv6"}, "1", commitapply)
+			setOnUci({config = "network", sectionname = "waneth4", option = "ipv6"}, "1", commitapply)
+			setOnUci({config = "network", sectionname = "wanptm0", option = "ipv6"}, "1", commitapply)
 			setOnUci({config = "network", sectionname = "wan6", option = "auto"}, "1", commitapply)
-			for i, v in ipairs(interfaces) do
-				setOnUci({config = "network", sectionname = v, option = "ipv6"}, "1", commitapply)
-			end
-			for i,v in ipairs(devices) do
-				setOnUci({config = "network", sectionname = v, option = "ipv6"}, "1", commitapply)
-			end
 			setOnUci({config = "env", sectionname = "var", option = "ppp_realm_ipv6"}, value, commitapply)
 			setOnUci({config = "env", sectionname = "var", option = "ppp_realm_ipv4"}, string.sub(value, 0,#value-2), commitapply)
 		else
 			setOnUci({config = "network", sectionname = key, option = "ipv6"}, "0", commitapply)
 			setOnUci({config = "network", sectionname = "wan6", option = "auto"}, "0", commitapply)
-			for i, v in ipairs(interfaces) do
-				setOnUci({config = "network", sectionname = v, option = "ipv6"}, "0", commitapply)
-			end
-			for i,v in ipairs(devices) do
-				setOnUci({config = "network", sectionname = v, option = "ipv6"}, "0", commitapply)
-			end
+			setOnUci({config = "network", sectionname = "waneth4", option = "ipv6"}, "0", commitapply)
+			setOnUci({config = "network", sectionname = "wanptm0", option = "ipv6"}, "0", commitapply)
 			setOnUci({config = "env", sectionname = "var", option = "ppp_realm_ipv6"}, string.format("%sv6",value), commitapply)
 			setOnUci({config = "env", sectionname = "var", option = "ppp_realm_ipv4"}, value, commitapply)
 		end
 	end
+	-----------------custo end TCOMITAGW-2157
   else
     return nil, "Sectionname could not be found in the given Binding"
   end

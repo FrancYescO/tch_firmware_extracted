@@ -631,8 +631,9 @@ cs_get_device_info () {
     return
   fi
 
-  local _vendor=$(cat /sys/class/block/${disk}/device/vendor | sed 's/[*; /\]//g')
-  local _model=$(cat /sys/class/block/${disk}/device/model | sed 's/[*; /\]//g')
+  local delcharset="()\`\$*.; /\\|"
+  local _vendor=$(tr -d "${delcharset}" < /sys/class/block/${disk}/device/vendor)
+  local _model=$(tr -d "${delcharset}" < /sys/class/block/${disk}/device/model)
   eval ${2}="${_vendor}"
   eval ${3}="${_model}"
 

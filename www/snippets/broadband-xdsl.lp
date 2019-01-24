@@ -24,7 +24,8 @@ local ajax_attr = {
 
 local session = ngx.ctx.session
 local tech = false
-if session:getrole() == "engineer" then
+local role = session:getrole()
+if role == "engineer" or role == "ispuser" then
    tech = true
 end
 

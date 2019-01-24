@@ -20,7 +20,7 @@ if session:getrole() == "admin" then
 end
 
 local bmh = require("broadbandmode_helper")
-local tabdata = dyntab_helper.process(bmh)
+local tabdata = dyntab_helper.process(bmh.broadBandDetails())
 
 local mode_current = tabdata.current.name
 local mode_options = tabdata.options
@@ -35,15 +35,19 @@ mapParam = {
 			
 content_helper.getExactContent(mapParam)
 
-mapParSFP = {
-				ethsfp = "uci.ethernet.globals.eth4lanwanmode"
-			}
+local content, helpmsg
+
+if mapParam.sfp == "1" and mapParam.wsens == "1" then
+    mapParSFP = {
+	ethsfp = "uci.ethernet.globals.eth4lanwanmode"
+    }
 			
-mapValSFP = {
-				ethsfp = vB
-			}
+    mapValSFP = {
+	ethsfp = vB
+    }
+    content, helpmsg = post_helper.handleQuery(mapParSFP, mapValSFP)
+end
 			
-local content, helpmsg = post_helper.handleQuery(mapParSFP, mapValSFP)
     if not tabdata.current.ajax then
     -- only display if not doing an ajax request
 	if tech and mapParam.sfp == "1" then
@@ -60,7 +64,7 @@ ngx.print('\
 ')
 ngx.print(ui_helper.createMessages(message_helper.popMessages()))
 
-    if #bmh > 1 then
+    if #bmh.broadBandDetails() > 1 then
     -- Only included if there are 2 or more connection modes
 	if mapParam.wsens == "0" then
 ngx.print('\
@@ -86,7 +90,7 @@ ngx.print('\
     }
 
     html[#html+1] = ui_helper.createInputRadio(T"Mode", "newmode", mode_options, mode_current, mode_attributes)
-    html[#html+1] = ui_helper.createButton("", "Switch connection mode", "icon-cog", mode_button)
+    html[#html+1] = ui_helper.createButton("", T"Switch connection mode", "icon-cog", mode_button)
 
     ngx.print(html)
 ngx.print('\

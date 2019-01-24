@@ -77,7 +77,13 @@ end
         <form class="form-horizontal">\
           <fieldset>\
                 <h2>');  ngx.print( T"Sign in" ); ngx.print('</h2>\
-            <div id="erroruserpass" class="alert alert-error hide">\
+            ')
+				if httpi=='0' and httpi_wwan=='0' then
+				ngx.print('<div id="httpi" class="alert alert-error ">\
+					<strong>') ngx.print(T"You don't have internet access at this time"); ngx.print('</strong>\
+					</div>')
+			end
+           ngx.print('<div id="erroruserpass" class="alert alert-error hide">\
                <strong>');  ngx.print( T"Invalid Username or Password" ); ngx.print('</strong>\
             </div>\
             <div class="control-group">\

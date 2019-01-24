@@ -577,7 +577,7 @@ local function getValidateBandSteerPeerFields(value, object, key)
                 end
             end
         end
-        elseif object.band_steer_enabled then --to disable bandsteer
+    elseif object.band_steer_enabled then --to disable bandsteer
         return disableBandSteer(object)
     end
 

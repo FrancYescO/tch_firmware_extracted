@@ -10,6 +10,7 @@ local session = ngx.ctx.session
 local proxy = require("datamodel")
 local assistance = require("web.assistance")
 local assistant = assistance.getAssistant('remote')
+local message_helper = require("web.uimessage_helper")
 
 local cui = {
     nsplink = "uci.web.uiconfig.@uidefault.nsplink",
@@ -39,6 +40,7 @@ if ngx.req.get_method() == "POST" then
     ngx.redirect("/");
   end
 end
+message_helper.popMessages()
   ngx.print('\
 <!DOCTYPE HTML>\
 ');  ngx.print( string.format('<html lang="%s">', gettext.language()) ); ngx.print('\
@@ -141,7 +143,18 @@ end
             }else if(value == "remindlater"){\
                $("#password_reminder").modal(\'hide\');\
             }else if(value == "dontremind"){\
-               $("#password_reminder form").submit();\
+               var params = [];\
+               var target = $(".modal form").attr("action");\
+               params.push({\
+                 name : "action",\
+                 value : "SAVE"\
+               },\
+               {\
+                 name : "passwordchange",\
+                 value : value\
+               }, tch.elementCSRFtoken());\
+               $.post(target, params);\
+               $("#password_reminder").modal("hide");\
             }\
             return false;\
           });\

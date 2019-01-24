@@ -3,7 +3,7 @@
 #.2014-2017 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
 . /lib/functions.sh
 . /lib/functions/network.sh
-VERSION="2.7.6-14"
+VERSION="2.7.6-15"
 SECTION_ID=""
 VERBOSE=0
 MYPROG=$(basename $0)
@@ -31,6 +31,8 @@ ERR_UPDATE=0
 PID_SLEEP=0
 IPV4_REGEX="[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}"
 IPV6_REGEX="\(\([0-9A-Fa-f]\{1,4\}:\)\{1,\}\)\(\([0-9A-Fa-f]\{1,4\}\)\{0,1\}\)\(\(:[0-9A-Fa-f]\{1,4\}\)\{1,\}\)"
+SHELL_ESCAPE="[\"\'\`\$\!();><{}?|\[\]\*\\\\]"
+DNS_CHARSET="[@a-zA-Z0-9._-]"
 LUCI_HELPER=$(printf %s "$MYPROG" | grep -i "luci")
 BIND_HOST=$(which host)
 KNOT_HOST=$(which khost)
@@ -267,6 +269,18 @@ status=$?
 kill $timeout_pid 2>/dev/null
 wait $timeout_pid 2>/dev/null
 return $status
+}
+sanitize_variable() {
+local __VAR=$1
+eval __VALUE=\$$__VAR
+local __ALLOWED=$2
+local __REJECT=$3
+if [ -n "$__ALLOWED" ]; then
+[ -z "${__VALUE//$__ALLOWED}" ] || write_log 12 "sanitize on $__VAR found characters outside allowed subset"
+fi
+if [ -n "$__REJECT" ]; then
+[ "$__VALUE" = "${__VALUE//$__REJECT}" ] || write_log 12 "sanitize on $__VAR found rejected characters"
+fi
 }
 verify_host_port() {
 local __HOST=$1

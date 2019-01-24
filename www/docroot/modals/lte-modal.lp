@@ -74,7 +74,7 @@ local function get_profile_select(device)
 		if info and info.reuse_profiles == "1" then
 			local profiles = content_helper.getMatchedContent(device.rpc_path .. "profile.")
 			for _, profile in ipairs(profiles) do
-				tinsert(names, { "device:" .. string.untaint(profile.id), string.untaint(profile.name) })
+				tinsert(names, { "device:" .. profile.id, profile.name })
 			end
 			return names
 		end
@@ -82,7 +82,7 @@ local function get_profile_select(device)
 
 	local profiles = content_helper.getMatchedContent("uci.mobiled.profile.")
 	for _, profile in ipairs(profiles) do
-		tinsert(names, { string.untaint(profile.id), string.untaint(profile.name) })
+		tinsert(names, { profile.id, profile.name })
 	end
 
 	return names

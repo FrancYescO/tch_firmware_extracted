@@ -1,5 +1,5 @@
 --pretranslated: do not change this file
- 
+
 -- Enable localization
 -- NG-88797 WAN statistics is not automatically getting updates as LAN statistics
 -- NG-92733 CLONE - Multicast statistics counter is not getting increased in /proc/net/dev_extstats for WAN Interfaces
@@ -16,10 +16,11 @@ local iconDown = " <i class=\"icon-download icon-large gray\"></i> "
 -- Process POST query
 local post_helper = require("web.post_helper")
 local session = ngx.ctx.session
+local role = session:getrole()
 
 local tech = false
-if session:getrole() == "engineer" then
-	tech = true
+if role == "engineer" or role == "ispuser" then
+  tech = true
 end
 
 local ppp_state_map = {
@@ -98,12 +99,12 @@ local function split(str, ang)
 		table.insert(tab, vari)
 	end
 	return tab
-end 
+end
 
 local function dns_filter(tab)
 	local ipv4_dns = ""
 	local ipv6_dns = ""
-	
+
 	for _,v in ipairs(tab) do
 		if match(v, "^(%d+)%.(%d+)%.(%d+)%.(%d+)$") then
 			ipv4_dns=ipv4_dns..format("%s,", v)
@@ -111,7 +112,7 @@ local function dns_filter(tab)
 			ipv6_dns=ipv6_dns..format("%s,", v)
 		end
 	end
-	
+
 	if #ipv4_dns > 1 then
 		ipv4_dns = string.sub(ipv4_dns,1,#ipv4_dns-1)
 	end
@@ -145,6 +146,7 @@ local mapParams = {
   uci_wan_username = "uci.network.interface.@wan.username",
   uci_wan_password = "uci.network.interface.@wan.password",
   uci_wan_masq = "uci.firewall.zone."..zonenum..".masq",
+  uci_wan_ipv6 = "uci.network.interface.@wan.ipv6", --custo TCOMITAGW-2157
 }
 
 local mapPPPstats = {
@@ -232,6 +234,30 @@ local function isWanEnabled(value, object, key)
   return object["uci_wan_auto"] ~= "0"
 end
 
+------------------custo start TCOMITAGW-2157
+local function IPv6andUsername(value, object, key)
+	local valid, msg = vB(value)
+
+	local ipv6_state = proxy.get("uci.network.interface.@wan.ipv6")[1].value
+	if valid and ipv6_state ~= value then
+	local ipv6_realm = proxy.get("uci.env.var.ppp_realm_ipv6")[1].value
+	local ipv4_realm = proxy.get("uci.env.var.ppp_realm_ipv4")[1].value
+		if value == "1" then
+			proxy.set("uci.network.interface.@wan6.auto", "1")
+			proxy.set("uci.network.interface.@wan.username", ipv6_realm)
+			proxy.set("uci.network.device.@waneth4.ipv6", "1")
+			proxy.set("uci.network.device.@wanptm0.ipv6", "1")
+		else
+			proxy.set("uci.network.interface.@wan6.auto", "0")
+			proxy.set("uci.network.interface.@wan.username", ipv4_realm)
+			proxy.set("uci.network.device.@waneth4.ipv6", "0")
+			proxy.set("uci.network.device.@wanptm0.ipv6", "0")
+		end
+	proxy.apply()
+	end
+	return valid, msg
+end
+-----------------custo end TCOMITAGW-2157
 -- Validation allows empty values if wan access disabled but will stil check for validity if the parameter is set
 -- if wan is enabled then it checks for validaty anyway
 local mapValid = {
@@ -239,6 +265,7 @@ local mapValid = {
   uci_wan_username = gCV(isWanEnabled, validateUsername, gOV(validateUsername)),
   uci_wan_password = gCV(isWanEnabled, gVP(vNES), gVP()),
   uci_wan_masq = validateNat,
+  uci_wan_ipv6 = IPv6andUsername,--custo TCOMITAGW-2157
 }
 
 local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
@@ -292,7 +319,7 @@ ajax_helper.handleAjaxQuery(content_rpc, function(c)
 		c.dns = content_helper.getMergedList(proxy.get("rpc.network.interface.@wan.dnsservers")[1].value, dnsv4)
 	else
 		c.dns = dnsv4
-		
+
 	end
 	if proxy.get("uci.network.interface.@wan.ipv6")[1].value == "1" then
 	c.dnsv6 = content_helper.getMergedList(c.dnsv6, dnsv6)
@@ -382,12 +409,12 @@ end
   ngx.print('\
 \
 <fieldset>\
-');  
+');
 ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 <legend>');  ngx.print( T"PPP connection" ); ngx.print('</legend>\
 \
-');  
+');
     local html = {}
     -- Label that shows PPP status
 	ajax_attr_light.light.class = ppp_light_map[ppp_status]
@@ -395,6 +422,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     -- Switch PPP on/off
     html[#html + 1] = ui_helper.createSwitch(T"Enabled", "uci_wan_auto", content.uci_wan_auto)
     html[#html + 1] = ui_helper.createSwitch(T"NAT", "uci_wan_masq", content.uci_wan_masq)
+	html[#html + 1] = ui_helper.createSwitch(T"IPv6", "uci_wan_ipv6", content.uci_wan_ipv6)--custo TCOMITAGW-2157
     -- PPP username
     local class_username = {
       input = {
@@ -455,7 +483,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
 \
 <fieldset>\
 <legend>');  ngx.print( T"PPP statistics" ); ngx.print('</legend>\
-');  
+');
 
         local html = {}
 		ajax_attr.span.id = "discard"
@@ -464,7 +492,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
             T"Discard Packets",
             format("%s %s [Pkt] %s %s [Pkt]", iconUp, mapPPPstats.discardS, iconDown, mapPPPstats.discardR), ajax_attr
         )
-		
+
 		ajax_attr.span.id = "broadcast"
         html[#html + 1] = ui_helper.createLabel(
             T"Broadcast Packets",
@@ -510,4 +538,4 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 \
 </fieldset>\
-'); 
+');

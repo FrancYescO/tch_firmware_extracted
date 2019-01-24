@@ -47,6 +47,8 @@ end
 local modalPath = nil
 if session:hasAccess("/modals/lte-modal.lp") then
 	modalPath = "/modals/lte-modal.lp"
+elseif not session:isdefaultuser() then
+        return
 end
   ngx.print('\
 \

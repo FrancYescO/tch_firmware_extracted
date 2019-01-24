@@ -2,11 +2,9 @@
  
 gettext.textdomain('webui-core')
 
-local format = string.format
-
+local ngx = ngx
 local proxy = require("datamodel")
 local ui_helper = require("web.ui_helper")
-local content_helper = require("web.content_helper")
 local message_helper = require("web.uimessage_helper")
 local post_helper = require("web.post_helper")
 local gVP = post_helper.getValidationPassword
@@ -15,6 +13,7 @@ local gVSLIR = post_helper.getValidateStringLengthInRange(1,255)
 local gAV = post_helper.getAndValidation
 local gVNIR = post_helper.getValidateNumberInRange
 local gVWN   = post_helper.getValidateWholeNumber
+local role = ngx.ctx.session:getrole()
 
 local mapParams = {
       cwmp_url              = "uci.cwmpd.cwmpd_config.acs_url",
@@ -29,20 +28,20 @@ local mapParams = {
          in /etc/config/upnpd at the same time, for details please check NG-78919.
         connectionrequest_port = "uci.cwmpd.cwmpd_config.connectionrequest_port",
       ]]
-      ip_preference         = "uci.cwmpd.cwmpd_config.ip_preference",
+      ip_preference         = "uci.cwmpd.cwmpd_config.ip_preference"
 }
 
 local conreqauth_select = {
       { "0", T'None'},
       { "1", T'Basic'},
-      { "2", T'Digest'},
+      { "2", T'Digest'}
 }
 
 local ip_preference_select = {
       { "v4_only", T'IPv4 Only'},
       { "v6_only", T'IPv6 Only'},
       { "prefer_v4", T'Prefer IPv4'},
-      { "prefer_v6", T'Prefer IPv6'},
+      { "prefer_v6", T'Prefer IPv6'}
 }
 
 -- function that can be used to validate connectionrequest user/pass for auth mode selected as None
@@ -81,13 +80,15 @@ local mapvalid = {
       connectionrequest_auth      = post_helper.getValidateInEnumSelect(conreqauth_select),
       connectionrequest_user      = gRV(validateConnReqNone, gVSLIR),
       connectionrequest_pass      = gRV(validateConnReqNone, gVP(gVSLIR)),
-      ip_preference               = post_helper.getValidateInEnumSelect(ip_preference_select),
+      ip_preference               = post_helper.getValidateInEnumSelect(ip_preference_select)
 }
+
 local post_url = proxy.get(mapParams["cwmp_url"])[1].value
 local post_user = proxy.get(mapParams["cwmp_acs_user"])[1].value
 local post_pass = proxy.get(mapParams["cwmp_acs_pass"])[1].value
 
 local content, helpmsg = post_helper.handleQuery(mapParams, mapvalid)
+
 local conreqauthclass = {
    group = {
       class ="monitor-connectionrequest_auth monitor-1 monitor-2",
@@ -136,24 +137,25 @@ end
                   maxlength= "255",
                   class = "span2",
                 },
+                span = {                                                       
+                  class = "span4"  
+                } 
               }
-              if content["cwmp_state"] == "0" then
-                 html[#html+1] = ui_helper.createInputText(T"ACS URL", "cwmp_url", post_url, cwmpinput, helpmsg["cwmp_url"])
-                 html[#html+1] = ui_helper.createInputText(T"ACS Username", "cwmp_acs_user", post_user, cwmpinput, helpmsg["cwmp_acs_user"])
-                 html[#html+1] = ui_helper.createInputPassword(T"ACS Password", "cwmp_acs_pass", post_pass, cwmpinput, helpmsg["cwmp_acs_pass"])
-              else
-                 html[#html+1] = ui_helper.createInputText(T"ACS URL", "cwmp_url", content["cwmp_url"], cwmpinput, helpmsg["cwmp_url"])
-                 html[#html+1] = ui_helper.createInputText(T"ACS Username", "cwmp_acs_user", content["cwmp_acs_user"], cwmpinput, helpmsg["cwmp_acs_user"])
-                 html[#html+1] = ui_helper.createInputPassword(T"ACS Password", "cwmp_acs_pass", content["cwmp_acs_pass"], cwmpinput, helpmsg["cwmp_acs_pass"])
-              end
+                 if content["cwmp_state"] == "0" then
+                   html[#html+1] = ui_helper.createInputText(T"ACS URL", "cwmp_url", post_url, cwmpinput, helpmsg["cwmp_url"])
+                   html[#html+1] = ui_helper.createInputText(T"ACS Username", "cwmp_acs_user", post_user, cwmpinput, helpmsg["cwmp_acs_user"])
+                   html[#html+1] = ui_helper.createInputPassword(T"ACS Password", "cwmp_acs_pass", post_pass, cwmpinput, helpmsg["cwmp_acs_pass"])
+                else
+                   html[#html+1] = ui_helper.createInputText(T"ACS URL", "cwmp_url", content["cwmp_url"], cwmpinput, helpmsg["cwmp_url"])
+                   html[#html+1] = ui_helper.createInputText(T"ACS Username", "cwmp_acs_user", content["cwmp_acs_user"], cwmpinput, helpmsg["cwmp_acs_user"])
+                   html[#html+1] = ui_helper.createInputPassword(T"ACS Password", "cwmp_acs_pass", content["cwmp_acs_pass"], cwmpinput, helpmsg["cwmp_acs_pass"])
+                end
+                html[#html+1] = ui_helper.createInputText(T"Periodic Interval", "cwmp_periodic", content["cwmp_periodic"], numbersOnly, helpmsg["cwmp_periodic"])
+                html[#html+1] = ui_helper.createInputSelect(T"Connection Request Auth", "connectionrequest_auth", conreqauth_select, content["connectionrequest_auth"], {select={class="monitor-changes"}})
+                html[#html+1] = ui_helper.createInputText(T"Connection Request Username", "connectionrequest_user", content["connectionrequest_user"], conreqauthclass, helpmsg["connectionrequest_user"])
+                html[#html+1] = ui_helper.createInputPassword(T"Connection Request Password", "connectionrequest_pass", content["connectionrequest_pass"], conreqauthclass, helpmsg["connectionrequest_pass"])
+                html[#html+1] = ui_helper.createInputSelect(T"IPv4/IPv6", "ip_preference", ip_preference_select, content["ip_preference"])
               ngx.print(html)
-              ngx.print(
-                ui_helper.createInputText(T"Periodic Interval", "cwmp_periodic", content["cwmp_periodic"],numbersOnly,helpmsg["cwmp_periodic"]),
-                ui_helper.createInputSelect(T"Connection Request Auth", "connectionrequest_auth", conreqauth_select, content["connectionrequest_auth"],{select={class="monitor-changes"}}),
-                ui_helper.createInputText(T"Connection Request Username", "connectionrequest_user", content["connectionrequest_user"],conreqauthclass,helpmsg["connectionrequest_user"]),
-                ui_helper.createInputPassword(T"Connection Request Password", "connectionrequest_pass", content["connectionrequest_pass"],conreqauthclass,helpmsg["connectionrequest_pass"]),
-                ui_helper.createInputSelect(T"IPv4/IPv6", "ip_preference", ip_preference_select, content["ip_preference"])
-              )
               ngx.print('\
         </fieldset>\
     </form>\
