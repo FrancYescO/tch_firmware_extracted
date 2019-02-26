@@ -19,8 +19,8 @@ import gdb
 import os
 import os.path
 
-pythondir = '/var/lib/jenkins/swm-wc1/workspace/Build_3/build/openwrt/staging_dir/toolchain-arm_cortex-a9_gcc-4.6-linaro_uClibc-0.9.33.2_eabi/share/gcc-4.6.4/python'
-libdir = '/var/lib/jenkins/swm-wc1/workspace/Build_3/build/openwrt/staging_dir/toolchain-arm_cortex-a9_gcc-4.6-linaro_uClibc-0.9.33.2_eabi/arm-openwrt-linux-uclibcgnueabi/lib'
+pythondir = '/var/lib/jenkins/swm-wc1/workspace/Build_4/build/openwrt/staging_dir/toolchain-arm_cortex-a9_gcc-4.6-linaro_uClibc-0.9.33.2_eabi/share/gcc-4.6.4/python'
+libdir = '/var/lib/jenkins/swm-wc1/workspace/Build_4/build/openwrt/staging_dir/toolchain-arm_cortex-a9_gcc-4.6-linaro_uClibc-0.9.33.2_eabi/arm-openwrt-linux-uclibcgnueabi/lib'
 
 # This file might be loaded when there is no current objfile.  This
 # can happen if the user loads it manually.  In this case we don't

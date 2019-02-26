@@ -11,6 +11,7 @@ uci_section cwmpd.@single_config.-ssl_certificate,ssl_privatekey,ssl_verifypeer,
 inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','ssl_verifypeer') if (v == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','/etc/ssl/d6d84089.0') end n:commit('cwmpd')\"
 inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','backoff_multiplier') if (v == '1320') then n:set('cwmpd','cwmpd_config','backoff_multiplier','2000') end n:commit('cwmpd')\"
 
+
 #NG-92679 TI: Automatic rollback must be enabled
 inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('cwmpd','cwmpd_config','upgrade_rollback_timeout','300') n:commit('cwmpd')\"
 copy_dir /usr/share/transformer
@@ -147,7 +148,7 @@ uci_section mmpbx.@syslog
 uci_section mmpbx.@incoming_map
 uci_section mmpbx.@outgoing_map 
 #end of NG-114106
- 
+
 #NG-79932/NG-.... commented, since moved to named parameters in TI_006 :uci_section mmpbx.@service id=type
 uci_section mmpbx.@scc
 uci_section mmpbx.@dial_plan
@@ -242,10 +243,12 @@ uci_set network.ppp.graceful_restart
 uci_section network.@interface
 uci_section network.@device
 
+#NG-178641 change to neglect disabled_info param if ipv4address enabled
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','public_lan','ipaddr') if (v ~= '0.0.0.0') then n:set('network','public_lan','disabled_info','') end n:commit('network')\"
+
 #NG-101421 remove static DNS
 inline_sh_cmd uci delete network.loopback.dns
 inline_sh_cmd uci delete network.loopback.dns_metric
-
 
 inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
 
@@ -253,7 +256,10 @@ uci_set network.wwan.profile
 
 copy_file /etc/config/nslookupdiag
 
-copy_file /etc/config/parental
+uci_section parental.@parental
+uci_section parental.@URLfilter
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convparental.lua
+uci_section parental.@filterkeyword
 
 copy_file /etc/config/portmirror
 
@@ -338,7 +344,7 @@ inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:
 
 
 #NG-88414
-inline_sh_cmd uci set wireless.radio_2G.tx_power_adjust='+1'
+inline_sh_cmd uci set wireless.radio_2G.tx_power_adjust='+2'
 inline_sh_cmd uci set wireless.radio_2G.tx_power_overrule_reg='1'
 
 #NG-106403 MU-MIMO needs to be disabled
@@ -366,6 +372,13 @@ copy_file /etc/config/xtm
 copy_file /etc/config/gpon
 copy_file /etc/config/gponl3
 
+copy_file /etc/config/datausage
+
+uci_set env.var.unlockGUIbutton
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','var','unlockGUIbutton') if (v == nil) then n:set('env','var','unlockGUIbutton','1') end n:commit('env')\"
+uci_set env.var.unlockedstatus
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','var','unlockedstatus') if (v == nil) then n:set('env','var','unlockedstatus','0') end n:commit('env')\"
+
 #Change to capture the new GUI added users 
 uci_list web.default.users
 #inline_sh_cmd uci del_list web.default.users=usr_engineer
@@ -392,6 +405,7 @@ uci_section ngwfdd.@values
 #NG-95398
 uci_section ethernet.@globals
 
+
 #NG-114105
 uci_section datausage.@global
 uci_section datausage.@interface
@@ -403,3 +417,7 @@ uci_section wifi_doctor_agent.@as_config
 
 #GHG-3935
 uci_section iperf.@iperf
+
+#TCOMITAGW-2276
+uci_section webservice.@user
+

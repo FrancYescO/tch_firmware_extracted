@@ -227,7 +227,7 @@ function SessionMgr:authorizeRequest(session, resource)
 end
 
 local function hostWithoutPort(host)
-  return host:match("^([^:]+):?%d*$")
+  return host:match("^([^:]+):?%d*$") or host:match("^%[(.+)%]:?%d*$")
 end
 
 local function preventDNSRebind(http_host)

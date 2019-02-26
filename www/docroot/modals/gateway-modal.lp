@@ -24,7 +24,7 @@ local gAV = post_helper.getAndValidation
 
 --custo start NG-69530
 local tech = false
-if session:getrole() == "engineer" then
+if role == "engineer" then
 	tech = true
 end
 --custo end NG-69530
@@ -378,6 +378,7 @@ local ntp_columns = {
     name = "ntp_server",
     param = "value",
     type = "text",
+    unique = true
   }
 }
 
@@ -401,13 +402,6 @@ local function validateNTP(value, object, key)
 -- Adding localdevicemask in post to find the input is a network or broadcast IPv4 address in advancedIPValidation
   object["localdevmask"] = proxy.get("uci.network.interface.@lan.netmask")[1].value
   local ntp_servers = session:retrieve("ntp_data")
-  if ntp_servers then
-    for _,v in pairs(ntp_servers) do
-       if (v[1] == value) then
-         return nil, T"Duplicate entry is not allowed"
-       end
-    end
-  end
 
   if post_helper.validateStringIsIP(value) then
     local ipaddr = proxy.get("rpc.network.interface.@lan.ipaddr")[1].value
@@ -437,9 +431,8 @@ local ntp_options = {
   maxEntries = 3,
 }
 
-if(role ~= "engineer") then
+if(role ~= "engineer" and role ~= "ispuser") then
    ntp_options.canEdit = false
-	ntp_options.canAdd = true		--custo NG-69530
    ntp_options.canDelete = false
 end
 
@@ -732,22 +725,23 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
       html[#html + 1] = ui_helper.createButton(T"Restart Device", T"Restart", "icon-refresh", wait_for_reboot)
       html[#html + 1] = ui_helper.createAlertBlock(T"Resetting to factory defaults, please wait...", resetting)
       html[#html + 1] = ui_helper.createButton(T"Factory Defaults", T"Reset", "icon-bolt", wait_for_reset)
-      html[#html + 1] = ui_helper.createButton(T"Export Configuration", T"Export", "icon-download-alt", export_config)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Exporting configuration, please wait...", exporting_alert)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Exporting failed; please try again.", exporting_fail)
-      html[#html + 1] = '</form><form class="form-horizontal" id="form-import" method="post" action="modals/gateway-modal.lp?action=import_config" enctype="multipart/form-data">'
-      html[#html + 1] = '<div class="control-group">'
-      html[#html + 1] = format('<label class="control-label">%s</label>', T"Import Configuration")
-      html[#html + 1] = '<div class="controls">'
-      html[#html + 1] = '<input type="file" name="configfile" id="file-import">&nbsp;'
-      html[#html + 1] = ui_helper.createSimpleButton(T"Import", "icon-upload-alt", import_config)
-      html[#html + 1] = '</div></div>'
-      html[#html + 1] = ui_helper.createAlertBlock(T"No file selected.", importing_nofile)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Importing configuration, please wait...", importing_alert)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; please try again.", importing_fail)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: expected file with extension bin.  Please use correct file.", importing_wrong_ext_fail)
-      html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: file too large.  Please use correct.  Please use correct file..", importing_too_big_fail)
-
+      if role ~= "ispuser" then
+          html[#html + 1] = ui_helper.createButton(T"Export Configuration", T"Export", "icon-download-alt", export_config)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Exporting configuration, please wait...", exporting_alert)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Exporting failed; please try again.", exporting_fail)
+          html[#html + 1] = '</form><form class="form-horizontal" id="form-import" method="post" action="modals/gateway-modal.lp?action=import_config" enctype="multipart/form-data">'
+          html[#html + 1] = '<div class="control-group">'
+          html[#html + 1] = format('<label class="control-label">%s</label>', T"Import Configuration")
+          html[#html + 1] = '<div class="controls">'
+          html[#html + 1] = '<input type="file" name="configfile" id="file-import">&nbsp;'
+          html[#html + 1] = ui_helper.createSimpleButton(T"Import", "icon-upload-alt", import_config)
+          html[#html + 1] = '</div></div>'
+          html[#html + 1] = ui_helper.createAlertBlock(T"No file selected.", importing_nofile)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Importing configuration, please wait...", importing_alert)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; please try again.", importing_fail)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: expected file with extension bin.  Please use correct file.", importing_wrong_ext_fail)
+          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: file too large.  Please use correct.  Please use correct file..", importing_too_big_fail)
+      end
       if post_helper.isUpgradeAllowed(cui.upgradefw, role) then
         html[#html + 1] = '</form><form class="form-horizontal" id="form-upgradefw" method="post" action="modals/gateway-modal.lp?action=upgradefw" enctype="multipart/form-data">'
         html[#html + 1] = '<div class="control-group">'

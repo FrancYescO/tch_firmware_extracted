@@ -577,7 +577,7 @@ local function getValidateBandSteerPeerFields(value, object, key)
                 end
             end
         end
-        elseif object.band_steer_enabled then --to disable bandsteer
+    elseif object.band_steer_enabled then --to disable bandsteer
         return disableBandSteer(object)
     end
 
@@ -771,20 +771,15 @@ local mapParams, mapValid = getParamsAndValidation()
 local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
 
 if ngx.req.get_method() == "POST" and ngx.req.get_post_args().action == "bs_check" then
-    session:store("bs_check_action", "TRUE")
     local postargs = ngx.req.get_post_args()
-    if postargs.check_band_change == "1" then
-        proxy.set("uci.wireless.wifi-ap.@ap0.bandsteer_id",postargs.check_band_change=="1" and "off" or "bs0")
-        proxy.set("uci.wireless.wifi-ap.@ap1.bandsteer_id",postargs.check_band_change=="1" and "off" or "bs0")
-        proxy.apply()
-        postargs.band_steer_enabled = postargs.check_band_change=="1" and "0" or postargs.band_steer_enabled
-    else
-        proxy.set("uci.wireless.wifi-ap.@ap0.bandsteer_id",postargs.band_steer_enabled=="0" and "off" or "bs0")
-        proxy.set("uci.wireless.wifi-ap.@ap1.bandsteer_id",postargs.band_steer_enabled=="0" and "off" or "bs0")
-        proxy.apply()
-    end
-    ngx.print('{ "success":"true" }')
-    ngx.exit(ngx.HTTP_OK)
+	if content["ssid"] ~= postargs.ssidName or content["security"] ~= postargs.security or content["wep_key"] ~= postargs.wep_key or content["wpa_psk"] ~= postargs.wpa_psk then
+	session:store("bs_check_action", "TRUE")
+    proxy.set("uci.wireless.wifi-ap.@ap0.bandsteer_id", "off")
+	proxy.set("uci.wireless.wifi-ap.@ap1.bandsteer_id", "off")
+	proxy.apply()
+	end
+	ngx.print('{ "success":"true" }')
+	ngx.exit(ngx.HTTP_OK)
 end
 
 -- Process POST query
@@ -1879,22 +1874,28 @@ $(document).ready(function() {\
         $(\'option[value="wpa"]\').hide();\
     }\
 \
-    $("#ssid, #wep_key , #security , #wpa_psk").focusout(function(){\
-       var on_change =this.id=="ssid"?this.value!="');  ngx.print(content['ssid']); ngx.print('"?1:0:this.id=="security"?this.value!="');  ngx.print(content['security']); ngx.print('"?1:0:this.id=="wpa_psk"?this.value!="');  ngx.print(content['wpa_psk']); ngx.print('"?1:0:this.id=="wep_key"?this.value!="');  ngx.print(content['wep_key']); ngx.print('"?1:0:0;\
-       if($("#check_band_change").val()!=1){$("#check_band_change").val(on_change==1?1:$("#check_band_change").val());\
-       }\
-       var params = [];\
-       params.push({\
-          name : "check_band_change",\
-          value: $("#check_band_change").val()\
-          },{\
-          name : "CSRFtoken",\
-          value :$("meta[name=CSRFtoken]").attr("content")\
-          },{\
-          name : "action",\
-          value: "bs_check"\
-       });\
-          $.post("modals/wireless-modal.lp",params);\
+	$("#save-config").click(function(){\
+	var params = [];\
+	params.push({\
+	name : "ssidName",\
+	value : $("#ssid").val()\
+	},{\
+	name : "wep_key",\
+	value : $("#wep_key").val()\
+	},{\
+	name : "wpa_psk",\
+	value : $("#wpa_psk").val()\
+	},{\
+	name : "security",\
+	value : $("#security").val()\
+	},{\
+	name : "CSRFtoken",\
+	value :$("meta[name=CSRFtoken]").attr("content")\
+	},{\
+	name : "action",\
+	value: "bs_check"\
+	});\
+	$.post("modals/wireless-modal.lp",params);\
     });\
 \
 });\

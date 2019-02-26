@@ -87,9 +87,15 @@ end
 
 local roleslist = {
     { "guest", T"Guest"},
-    { "admin", T"Admin"},
     { "engineer", T"Engineer"},
 }
+
+local unlocked = proxy.get("rpc.env.var.unlockedstatus")[1].value
+if unlocked == "1" then
+	roleslist[#roleslist+1] = { "ispuser", T"Admin"}
+else
+	roleslist[#roleslist+1] = { "admin", T"Admin"}
+end
 
 local password_warning = {
     alert = {

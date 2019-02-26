@@ -133,6 +133,10 @@ uci -q commit ddns
 lookup_host="$domain"
 }
 [ -z "$lookup_host" ] && write_log 14 "Service section not configured correctly! Missing 'lookup_host'"
+[ -n "$lookup_host" ] && sanitize_variable lookup_host "$DNS_CHARSET" ""
+[ -n "$dns_server" ] && sanitize_variable dns_server "$DNS_CHARSET" ""
+[ -n "$domain" ] && sanitize_variable domain "$DNS_CHARSET" ""
+[ -n "$param_opt" ] && sanitize_variable param_opt "" "$SHELL_ESCAPE"
 [ -n "$update_url" ] && {
 [ -z "$domain" ] && $(echo "$update_url" | grep "\[DOMAIN\]" >/dev/null 2>&1) && \
 write_log 14 "Service section not configured correctly! Missing 'domain'"

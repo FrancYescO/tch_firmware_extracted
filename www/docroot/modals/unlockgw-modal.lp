@@ -26,7 +26,7 @@ if ngx.req.get_method() == "POST" and unlockGUIbutton == "1" then
   end
 end
   ngx.print('\
-');  ngx.print( ui_helper.createHeader(T"Enhanced configuration", false, false) ); ngx.print('\
+');  ngx.print( ui_helper.createHeader(T"Gateway Unlock", false, false) ); ngx.print('\
 <div class="modal-body update">\
   <form class="form-horizontal" method="post" action="modals/unlockgw-modal.lp">\
     ');  ngx.print( ui_helper.createMessages(message_helper.popMessages()) ); ngx.print('\
@@ -45,9 +45,9 @@ end
 
       local html = {}
       if unlockedStatus == "0" then
-        html[#html + 1] = "<fieldset><legend>" .. T"Enabling Modem enhanced configuration" .. "</legend>"
-        html[#html + 1] = ui_helper.createButton(T"Enhanced configuration", T"Enable", "icon-ok-sign", unlock_button)
-        html[#html + 1] = ui_helper.createAlertBlock(T"Warning! This procedure enables the access to configuration parameters that, if modified, may prejudice Gateway interoperability with TIM network and support. The procedure will be traced by TIM for technical support reasons. The unlocking can be reverted in any moment and the Gateway interoperability will be restored by executing a Reset to Factory Default.</br></br>Note: In case you want to unlock the Gateway, for security reasons the Password will be set to the Access Key as shown on the Label of the Gateway</br></br>If you want to continue, press Save. If not, press Cancel!", switch_alert)
+        html[#html + 1] = "<fieldset><legend>" .. T"Enable Modem configuration for accessing to non-TIM network" .. "</legend>"
+        html[#html + 1] = ui_helper.createButton(T"Unlock Gateway", T"Unlock", "icon-ok-sign", unlock_button)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Warning! This procedure enables the access to configuration parameters that, if modified, may prejudice Gateway interoperability with TIM network. The procedure will be traced by TIM for technical support reasons. The unlocking can be reverted in any moment and the Gateway interoperability will be restored by executing a Reset to Factory Default.</br></br>Note: In case you want to unlock the Gateway, for security reasons the Password will be set to the Access Key as shown on the Label of the Gateway</br></br>If you want to continue, press Save. If not, press Cancel!", switch_alert)
       else
         html[#html + 1] = ui_helper.createAlertBlock(T"You have to sign in again. Please wait you will be redirected to the Sign in page in 20 seconds or click close.")
       end

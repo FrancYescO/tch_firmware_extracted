@@ -21,16 +21,16 @@ else
   modal = ""
 end
 
-local unlocked_state = T"Enable modem enhanced configuration"
+local unlocked_state = T"Enable modem configuration for accessing to non-TIM network"
 if content.UnlockedStatus == "1" then
-  unlocked_state = T"Modem enhanced configuration is enabled"
+  unlocked_state = T"Gateway is in unlocked state and is ready to be configured for use on non-TIM networks"
 end
 
 if ispUser and content.GUIbuttonVisible == "1" then   ngx.print('\
   <div class="span3">\
     <div class="smallcard">\
       ');  if ispUser then
-        ngx.print(ui_helper.createCardHeader(T"Enhanced configuration", modal))
+        ngx.print(ui_helper.createCardHeader(T"Unlock Gateway", modal))
       end   ngx.print('\
         <div class="content">\
           ');  ngx.print(ui_helper.createSimpleLight(content.UnlockedStatus, unlocked_state))   ngx.print('\

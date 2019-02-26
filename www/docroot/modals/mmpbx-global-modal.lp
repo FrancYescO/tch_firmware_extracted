@@ -20,6 +20,12 @@ local mapParams = {
     mmpbx_enabled = "uci.mmpbx.mmpbx.@global.enabled",
 }
 
+local transport_types = {
+    {"TCP",T"TCP"},
+    {"UDP",T"UDP"},
+    {"undefined",T"Undefined"}
+}
+
 -- Retrieving emission state
 local emission_content = {
     emission_state = "rpc.mmpbx.dectemission.state",
@@ -27,11 +33,15 @@ local emission_content = {
 content_helper.getExactContent(emission_content)
 emission_state = format("%s", emission_content.emission_state)
 
-
-local content = post_helper.handleQuery(mapParams, mapValid)
 if ngx.req.get_method() == "POST" then
      local args = ngx.req.get_post_args()
      local action = args["action"]
+     if args["domain_state"] == "0" then
+         proxy.set("uci.mmpbxrvsipnet.network.@sip_net.domain_name","")
+     elseif args["domain_state"] then
+         mapParams.domain_name = "uci.mmpbxrvsipnet.network.@sip_net.domain_name"
+         mapValid.domain_name = post_helper.validateStringIsDomainName
+     end
      if action == "emission_on" then
 	   proxy.set("rpc.mmpbx.dectemission.state","1")
      end
@@ -40,6 +50,14 @@ if ngx.req.get_method() == "POST" then
      end
      proxy.apply()
 end
+local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
+
+local domainName = proxy.get("uci.mmpbxrvsipnet.network.@sip_net.domain_name")[1].value
+local domain_state = "0"
+if domainName ~= "" then
+    domain_state = "1"
+end
+
 -- SIP Networks
 local sipnet_columns = {
   {
@@ -85,6 +103,14 @@ local sipnet_columns = {
     type = "text",
     attr = { input = { class="span2" } },
   },
+  {
+    header = T"SIP Transport Type",
+    name = "transportType",
+    param = "transport_type",
+    type = "select",
+    values = transport_types,
+    attr = { select = { class="span2" } },
+  }
 }
 
 local function validateStringIsVoicePort(value, object, key)
@@ -102,6 +128,7 @@ local sipnet_valid = {
     primaryProxy = post_helper.getOrValidation(post_helper.validateStringIsIP,post_helper.validateStringIsDomainName),
     primaryProxyPort = validateStringIsVoicePort,
     regExpire = post_helper.validateRegExpire,
+    transportType = post_helper.getValidateInEnumSelect(transport_types)
 }
 
 local sipnet_options = {
@@ -164,6 +191,22 @@ end
      <%end%>
         <fieldset>
             <legend><%= T"SIP Network" %></legend>
+            <%local switch_class_enable = {
+                input = {
+                    class = "monitor-changes"
+                }
+            }%>
+            <%=ui_helper.createSwitch(T"Dedicated Domain", "domain_state", domain_state, switch_class_enable)%>
+            <%local domain_name = {
+                group = {
+                    class ="monitor-domain_state monitor-1",
+                },
+                input = {
+                    maxlength= "255",
+                    class = "span2",
+                },
+            }%>
+            <%=ui_helper.createInputText(T"Domain Name", "domain_name", domainName, domain_name, helpmsg["domain_name"])%>
             <%=ui_helper.createTable(sipnet_columns, sipnet_data, sipnet_options, nil, sipnet_helpmsg)%>
         </fieldset>
     <%end%>

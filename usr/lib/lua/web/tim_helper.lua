@@ -22,4 +22,35 @@ function M.ethtrans()
 			}
 end
 
+function M.getValidateNumberInRange(min, max)
+	local helptext = T"Input must be a number"
+    if min and max then
+        helptext = string.format(T"Input must be a number between %d and %d included", min, max)
+    elseif not min and not max then
+        helptext = T"Input must be a number"
+    elseif not min then
+        helptext = string.format(T"Input must be a number smaller than %d included", max)
+    elseif not max then
+        helptext = string.format(T"Input must be a number greater than %d included", min)
+    end
+
+	return function(value)
+        local num = tonumber(value)
+		local isNotNumber = string.find(value, "[^%d]+") 
+		if isNotNumber then
+			return nil, helptext
+		end
+        if not num then
+            return nil, helptext
+        end
+        if min and num < min then
+            return nil, helptext
+        end
+        if max and num > max then
+            return nil, helptext
+        end
+        return true
+	end
+end
+
 return M

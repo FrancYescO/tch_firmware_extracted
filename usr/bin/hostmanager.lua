@@ -792,7 +792,7 @@ local function handle_device_update(msg)
     changed = true
   end
   local logicalinterface = get_logical_interface_name(l3interface)
-  if device.interface ~= logicalinterface then
+  if logicalinterface and device.interface ~= logicalinterface then
     device.interface = logicalinterface
     changed = true
   end

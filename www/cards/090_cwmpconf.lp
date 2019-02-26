@@ -2,7 +2,7 @@
 -- Enable localization
 gettext.textdomain('webui-core')
 
-local format = string.format
+local format, ngx = string.format, ngx
 local ui_helper = require("web.ui_helper")
 local content_helper = require("web.content_helper")
 
@@ -45,8 +45,6 @@ end
             <%= ui_helper.createSimpleLight(nil, state, { light = { class = light, id = "cwmpconfcard_cwmpstatusled"}, span = { id = "cwmpconfcard_cwmpstatus" } }) %>
             <p class="subinfos">
                 <% ngx.print(format(T"ACS URL: <strong id=\"cwmpconfcard_acsurl\">%s</strong>",url )) %>
-            </p>
-            <p class="subinfos">
                 <% ngx.print(format(T"Periodic: <strong id=\"cwmpconfcard_periodicinterval\">%s</strong>",content["cwmp_periodic"] )) %>
             </p>
          </div>
