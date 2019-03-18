@@ -3,7 +3,7 @@ local oldConfig = uc.uci('old')
 local newConfig = uc.uci('new')
 
 oldConfig:foreach("tod", "host", function(s)
-  newConfig:set('tod',s[".name"], "host")
+  newConfig:set('tod', s[".name"], "host")
   for k,v in pairs(s) do
     if not k:find("^%.") then
       newConfig:set("tod", s[".name"], k, v)

@@ -2,7 +2,6 @@
  
 -- Enable localization
 -- NG-92675 implement changes required from the customer
--- NG-101189 Update the CPE picture in GUI Homepage
 gettext.textdomain('webui-core')
 
 local proxy = require("datamodel")
@@ -39,7 +38,7 @@ end
       <div class="light green" id="Gateway_=LED_Id"></div>\
       <p><strong id = "Version_Id">');  ngx.print( string.format(T"Release %s", name) ); ngx.print('</strong></p>\
       <div data-remote="modals/gateway-modal.lp" data-id="gateway-modal">\
-        <img class="someInfos" href="#" rel="tooltip" data-placement="top" data-original-title="');  ngx.print( T"your gateway" ); ngx.print('" src="/img/gateway.gif" alt="gateway">\
+        <img class="someInfos" href="#" rel="tooltip" data-placement="top" data-original-title="');  ngx.print( T"your gateway" ); ngx.print('" src="/img/gateway.png" alt="gateway">\
       </div>\
     </div>\
   </div>\

@@ -150,6 +150,10 @@ end
 
 local qry_data, qry_helpmsg = post_helper.handleQuery(qry_params, qry_valid)
 
+if not qry_data.upnp_igd_version or qry_data.upnp_igd_version == "" then
+  qry_data.upnp_igd_version = "igdv2"
+end
+
 local action
 if ngx.var.request_method == "POST" then
   action = ngx.req.get_post_args().action

@@ -36,6 +36,7 @@ local find, untaint = string.find, string.untaint
 local ipv42num = post_helper.ipv42num
 local broadcast_ip =post_helper.ipv42num("255.255.255.255")
 local timhelper = require("web.tim_helper")
+local role = session:getrole()
 
 -- Shortcuts to validation helpers to make lines shorter
 local aIPV = post_helper.advancedIPValidation
@@ -51,6 +52,11 @@ local tech = false
 if session:getrole() == "engineer" then
    tech = true
 end
+
+local IPv6address = proxy.get("rpc.network.interface.@lan.ipv6uniqueglobaladdr")--custo TCOMITAGW-2157
+if IPv6address then--custo TCOMITAGW-2157
+  IPv6address = IPv6address[1].value--custo TCOMITAGW-2157
+end--custo TCOMITAGW-2157
 
 local clear_network_stats = {
     controls = {
@@ -470,7 +476,7 @@ local mapParams = {
     leaseTime = "uci.dhcp.dhcp.@" .. cur_dhcp_intf .. ".leasetime",
     localdevIP = "uci.network.interface.@" .. curintf .. ".ipaddr",
     localdevmask = "uci.network.interface.@" .. curintf .. ".netmask",
-    --localIPv6 = "uci.network.interface.@" .. curintf .. ".ipv6",
+    localIPv6 = "uci.network.interface.@" .. curintf .. ".ipv6",
     eth0 = "uci.ethernet.port.@eth0.enable",
 }
 
@@ -559,23 +565,41 @@ local function validateDNS(value, object, key)
     end
 end
 
+----------------------------start custo TCOMITAGW-2157
 local IP6assign = "uci.network.interface.@" .. curintf .. ".ip6assign"
-
+local tch_IP6assign = "uci.network.interface.@" .. curintf .. ".tch_ip6assign"  -- cache variable
+local mapParam = {
+  localIPv6 = "uci.network.interface.@" .. curintf .. ".ipv6"
+}
 local function validateIPv6(value, object, key)
     local valid, msg = post_helper.validateBoolean(value, object, key)
+    local ip6assign = proxy.get(IP6assign)[1].value -- get current value and store in cache if we are switching state
+    local tch_ip6assign = proxy.get(tch_IP6assign)[1].value  -- fetching from cache
+    if not tch_ip6assign or tch_ip6assign == "" then
+        tch_ip6assign = ip6assign
+    end
     if valid then
+        local ipv6 = proxy.get(mapParam["localIPv6"])[1].value -- get current value in datamodel to know if we're switching state
         if value == "0" then
             -- In case we disable IPv6, we must first invalidate the existing prefix so that local devices know not to use IPv6 anymore
             -- Do this here by set the ip6assign pref and only on ipv6 state change
-            local ipv6 = proxy.get(ipv6Param["localIPv6"]) -- get current value in datamodel to know if we're switching state
-            if ipv6 and ipv6.value ~= "0" then -- default is enabled so anything non 0 is enabled
-                proxy.set(IP6assign, "0") -- the value will be set back to its current value by process_query
+            if ipv6 and untaint(ipv6) ~= "0" then -- default is enabled so anything non 0 is enabled
+                -- set ra to 'disabled' in dhcp config
+                proxy.set("uci.dhcp.dhcp.@" .. curintf .. ".ra", "disabled")
+                -- need to delete ip6assign entry
+                proxy.set(tch_IP6assign, ip6assign)  -- save current value to cache
+                proxy.set(IP6assign, "")
                 proxy.apply()
                 ngx.sleep(3) -- ugly but need to give it the time to complete
             end
         else
-            proxy.set(IP6assign, "64")
-            proxy.apply()
+            if ipv6 and untaint(ipv6) == "0" then
+                -- enable router advertisements and restore ip6assign value from cache
+                proxy.set("uci.dhcp.dhcp.@" .. curintf .. ".ra", "server")
+                proxy.set(IP6assign, tch_ip6assign)  -- restore value from cache
+                proxy.set(tch_IP6assign, "")         -- reset cache
+                proxy.apply()
+            end
         end
         if isQtnGuestWiFi(pppDev) then
             local ucipath = content_helper.getMatchedContent("uci.network.device.",{ifname = pppIntf})
@@ -583,14 +607,10 @@ local function validateIPv6(value, object, key)
                proxy.set(ucipath[1].path .. "ipv6", value)
             end
         end
-        -- Modify IPv6 at WAN-side accordingly:
-        -- this is especially necessary to make sure Neighbor Solicitation (for DAD etc.) messages are sent upon network reload
-        proxy.set("uci.network.interface.@wan.ipv6", value)
-        proxy.apply()
     end
     return valid, msg
 end
-
+----------------------------end custo TCOMITAGW-2157
 function isQtnGuestWiFi(intf)
   if wireless_radio[untaint(intf)] then
      local radio = proxy.get(format("rpc.wireless.ssid.@%s.radio", intf))
@@ -610,14 +630,15 @@ local validation = {
   localIPv6 = validateIPv6,
 }
 
+----------------------------start custo TCOMITAGW-2157
 --We need to update IPv6 state only when user want to update the IPv6 state alone.
-ipv6content, ipv6helpmsg = post_helper.handleQuery(ipv6Param, validation)
+--ipv6content, ipv6helpmsg = post_helper.handleQuery(ipv6Param, validation)
 if ngx.var.request_method == "POST" and ngx.req.get_post_args().iPv6StateOnlyChanged == "yes" and curintf == "lan" then
   post_helper.handleQuery(ipv6Param, validation)
   ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.exit(ngx.HTTP_OK)
 end
-
+----------------------------end custo TCOMITAGW-2157
 local function validateLeaseTime(value, postdata, key)
    if value == '-1' or value == timhelper.ethtrans().eth_infinit then -- included '-1' as a feasible set value as specified in TR 181
       postdata[key] = "infinite" -- included to ensure uci parameter is set as infinite
@@ -884,7 +905,7 @@ local dhcpv4Stateselect = {
 
 local mapValid = {
     localdevIP = validateGWIP,
-    --localIPv6 = validateIPv6,
+    localIPv6 = validateIPv6,
     dnsServer = validateDNS,
     leaseTime = validateLeaseTime,
     localdevmask = post_helper.getAndValidation(vIP4N,post_helper.validateStringIsIP),
@@ -1046,16 +1067,49 @@ end
         <ul class="nav nav-list">\
         ');
         local html = { format('<li class="nav-header">%s</li>', T"LAN Interfaces") }
-        for k,v in ipairs(lan_intfs) do
-			local prev = ""
-			if v.radio ~= prev then
-				if v.radio ~= "noradio" then
-					html[#html + 1] = format('<li class="nav-header">%s %s</li>', T"Access point", v.radio)
-				else
-					html[#html + 1] = format('<li class="nav-header">%s</li>', T"Ethernet")
-				end
-
+        local tmp_eth = {}
+	local tmp_R24 = {}
+	local tmp_R5 = {}
+	
+	for k,v in ipairs(lan_intfs) do
+		if v.radio == "noradio" then
+			tmp_eth[#tmp_eth + 1] = lan_intfs[k]
+		elseif v.radio == "2,4GHz" then
+			tmp_R24[#tmp_R24 + 1] = lan_intfs[k]
+		else
+			tmp_R5[#tmp_R5 + 1] = lan_intfs[k]
+		end
+	end
+	lan_intfs2 = tmp_eth
+	
+	for i,v in ipairs(tmp_R24) do
+		lan_intfs2[#lan_intfs2 + 1] = tmp_R24[i]
+	end
+	for i,v in ipairs(tmp_R5) do
+		lan_intfs2[#lan_intfs2 + 1] = tmp_R5[i]
+	end
+	
+	local ethExist = 0
+	local wl5GHzExist = 0
+	local wl24GHzGHzExist = 0
+    for k,v in ipairs(lan_intfs2) do
+      local prev = ""
+		if v.radio == "5GHz" then
+			if wl5GHzExist == 0 then
+				html[#html + 1] = format('<li class="nav-header">%s %s</li>', T"Access point", v.radio)
+				wl5GHzExist = 1
 			end
+		elseif v.radio == "2,4GHz" then
+			if wl24GHzGHzExist == 0 then	
+				html[#html + 1] = format('<li class="nav-header">%s %s</li>', T"Access point", v.radio)
+				wl24GHzGHzExist = 1
+			end
+		else
+			if ethExist == 0 then
+				html[#html + 1] = format('<li class="nav-header">%s</li>', T"Ethernet")
+				ethExist = 1
+			end
+		end
             local active = ""
             if v.index == curintf then
                 active = "active"
@@ -1063,7 +1117,7 @@ end
             if v.index ~= "public_lan" then
               local url = "modals/ethernet-modal.lp?intf=" .. v.index
               html[#html+1] = format('<li class="%s"><a id = "%s" href="#" data-remote="%s">%s</a></li>', active, v.index, url, v.name)
-            else
+            elseif role ~= "ispuser" then
               local url = "modals/ethernet-modal.lp?intf=" .. v.index
               html[#html+1] = format('<li class="%s"><a id = "%s" href="#" data-remote="%s">%s</a></li>', "advanced hide " ..active, v.index, url, "Public Lan")
             end
@@ -1114,18 +1168,36 @@ end
 				html[#html + 1] = ui_helper.createInputText(T"Local Device IP address", "localdevIP", content["localdevIP"],{},helpmsg["localdevIP"])
 				html[#html + 1] = ui_helper.createInputText(T"Local Network subnet", "localdevmask", content["localdevmask"], advanced, helpmsg["localdevmask"])
 				html[#html + 1] =ui_helper.createButton(T"Reset to default", T"Reset", "icon-bolt", clear_network_stats)
+				----------------------------start custo TCOMITAGW-2157
 				if curintf == "lan" then
-					html[#html + 1] = ui_helper.createSwitch(T"IPv6 state", "localIPv6", ipv6content["localIPv6"])
+					local IPv6addressGlob = proxy.get("rpc.network.interface.@".. curintf ..".ipv6uniqueglobaladdr")[1].value
+					local IPv6addressLoc = proxy.get("rpc.network.interface.@".. curintf ..".ipv6uniquelocaladdr")[1].value
 					if curintf == "lan" and tech then
+						html[#html + 1] = ui_helper.createSwitch(T"IPv6 state", "localIPv6", content["localIPv6"])
 						html[#html + 1] = ui_helper.createCheckboxGroup(T"Ethernet Ports enabled", "ethports", ethports, ethports_checked, {checkbox = { class="inline" }}, nil)
+					elseif curintf == "lan" and not tech then
+						if content["localIPv6"] == "1" then
+							html[#html + 1] = ui_helper.createLabel(T"IPv6 state", T"enabled");
+						else
+							html[#html + 1] = ui_helper.createLabel(T"IPv6 state", T"disabled");
+						end
 					end
-					local IPv6addr = proxy.get("rpc.network.interface.@"..curintf..".ip6addr")[1].value
-					if IPv6addr == "" then
-						html[#html + 1] = ui_helper.createLabel(T"LAN IPv6", T"IPv6 not assigned", advanced)
+					
+					
+					if content["localIPv6"] == "0" then
+						html[#html + 1] = ui_helper.createLabel(T"Local Device IPv6 address", T"IPv6 not assigned", advanced)
+					elseif IPv6addressGlob == "" and IPv6addressLoc == "" then
+						html[#html + 1] = ui_helper.createLabel(T"Local Device IPv6 address", T"IPv6 not assigned", advanced)
 					else
-					html[#html + 1] = ui_helper.createLabel(T"LAN IPv6", IPv6addr, advanced)
+						if IPv6addressGlob ~= "" then
+							html[#html + 1] = ui_helper.createLabel(T"Local Device IPv6 address", IPv6addressGlob, advanced)
+						else
+							html[#html + 1] = ui_helper.createLabel(T"Local Device IPv6 address", IPv6addressLoc, advanced)
+						end
 					end
+					
 				end
+				----------------------------end custo TCOMITAGW-2157
 				ngx.print(html)
                 ngx.print('\
               <legend>');  ngx.print( T"DHCP Settings" ); ngx.print('</legend>\

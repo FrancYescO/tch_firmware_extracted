@@ -1,6 +1,5 @@
 ---
 --NG-102545 GUI broadband is showing SFP Broadband GUI page when Ethernet 4 is connected
---NG-105062 Wansensing, modify to new requirements with COC Version1
 -- Module L2 Main.
 -- Module Specifies the check functions of a wansensing state
 -- @module modulename
@@ -14,10 +13,9 @@ local M = {}
 -- @SenseEventSet [parent=#M] #table SenseEventSet
 M.SenseEventSet = {
     'xdsl_0',
-	'xdsl_5',
     'network_device_eth4_down',
     'network_interface_wan_ifup', 
-    'network_interface_wan_ifdown',
+    'network_interface_wan_ifdown' ,
 }
 local xdslctl = require('transformer.shared.xdslctl')
 local sfp = require('transformer.shared.sfp')
@@ -34,24 +32,25 @@ function M.check(runtime)
 	end
    local x = uci.cursor()
 	-- check if wan ethernet port is up
-	
-	if mode then
-		if match(mode, "ATM") then
-			return "L3Sense", "ADSL"
-		elseif match(mode, "PTM") then
-			return "L3Sense", "VDSL"
+	if scripthelpers.l2HasCarrier("eth4") then
+				logger:notice("SFP connection: "..sfp.getSfpPhyState())
+				if sfp.getSfpPhyState() == "connect" and sfp.getSfpVendName() ~= "" then
+					logger:notice("SFP connected")
+					return "L3Sense", "SFP"
+				else
+					logger:notice("Ethernet wan connected")
+					return "L3Sense", "ETH"
+				end
+	else
+		-- check if xDSL is up
+		--local mode = xdslctl.infoValue("tpstc")
+		if mode then
+			if match(mode, "ATM") then
+			    return "L3Sense", "ADSL"
+			elseif match(mode, "PTM") then
+			    return "L3Sense", "VDSL"
+			end
 		end
-	end
-	
-	if sfp.getWanType() == "SFP" then
-		logger:notice("SFP connection: "..sfp.getSfpPhyState())
-		if sfp.getSfpPhyState() == "connect" then
-			logger:notice("SFP connected")
-			return "L3Sense", "SFP"
-		end
-	elseif scripthelpers.l2HasCarrier("eth4") and sfp.getWanType() == "GPHY4" then
-		logger:notice("Ethernet wan connected")
-		return "L3Sense", "ETH"
 	end
 	--DR Section to check if wwan is enabled and if not enable it (covered config errors) 
    local mobile = x:get("network", "wwan", "auto")

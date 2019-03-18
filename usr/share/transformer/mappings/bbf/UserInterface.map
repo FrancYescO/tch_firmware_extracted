@@ -23,6 +23,11 @@ local Multi_UserInterface_ = {
         access = "readOnly", -- currently readWrite not supported
         type = "boolean",
       },
+      X_TELECOMITALIA_IT_UnlockGUIButtonVisible = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Unlock gateway button to be made visible in GUI"
+      }
     --[[ TODO
       UpgradeAvailable = {
         access = "readWrite",
@@ -147,12 +152,38 @@ local Multi_UserInterface_ = {
     }
   }
 }
+
+local mapper, commitapply, register = mapper, commitapply, register
+local envBinding = { config = "env", sectionname = "var" }
+local uciHelper = mapper("ucihelper")
+
 Multi_UserInterface_.get = {
-	UserDatabaseSupported = "1",
-	SharedPassword = "0",
-	PasswordRequired = "1",
-	PasswordUserSelectable = "1",
+  UserDatabaseSupported = "1",
+  SharedPassword = "0",
+  PasswordRequired = "1",
+  PasswordUserSelectable = "1",
+  X_TELECOMITALIA_IT_UnlockGUIButtonVisible = function(mapping)
+    envBinding.option = "unlockGUIbutton"
+    local value = uciHelper.get_from_uci(envBinding)
+    return value
+  end
 }
+
+Multi_UserInterface_.set = {
+  X_TELECOMITALIA_IT_UnlockGUIButtonVisible = function(mapping, param, value)
+    envBinding.option = "unlockGUIbutton"
+    uciHelper.set_on_uci(envBinding, value, commitapply)
+  end
+}
+
+Multi_UserInterface_.commit = function()
+  uciHelper.commit(envBinding)
+end
+
+Multi_UserInterface_.revert = function()
+  uciHelper.revert(envBinding)
+end
+
 local duplicator = mapper("multiroot").duplicate
 local duplicates = duplicator(Multi_UserInterface_, "#ROOT", {"InternetGatewayDevice", "Device"})
 for _, dupli in ipairs(duplicates) do

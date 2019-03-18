@@ -326,6 +326,16 @@ local Device_WiFi_Radio_i_ = {
         list = true,
         type = "string",
       },
+	X_000E50_RSSIThreshold = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-90",
+            max = "-10",
+          },
+        },
+      },
       X_FASTWEB_ChannelQuality_LastRefreshTime = {
         access = "readOnly",
         type ="string",
@@ -659,6 +669,17 @@ Device_WiFi_Radio_i_.get = {
     end
     return table.concat(suppRates, ",")
   end,
+	--default value of rssi_threshold is -40 and rssi_5g_threshold is -80
+  X_000E50_RSSIThreshold = function(mapping, param, key)
+    wirelessBinding.sectionname = "bs0"
+    wirelessBinding.option = "rssi_threshold"
+    wirelessBinding.default = "-40"
+    if key == "radio_5G" then
+      wirelessBinding.option = "rssi_5g_threshold"
+      wirelessBinding.default = "-80"
+    end
+    return uci_helper.get_from_uci(wirelessBinding)
+  end,
   X_FASTWEB_ChannelQuality_LastRefreshTime = function(mapping, param, key)
     local data = conn:call("wireless.radio.acs", "get", { name = key }) or {}
     local time = data[key] and data[key].scan_report or ""
@@ -685,7 +706,7 @@ local function setOperatingStandards(key, value, param)
 	else
 		tmpstd = format("%s,%s", tmpstd, std)
 	end
-	
+
 	cstd = cstd + 1
     setList[std] = true
   end
@@ -818,6 +839,16 @@ Device_WiFi_Radio_i_.set = {
     else
       return nil, error
     end
+  end,
+
+	X_000E50_RSSIThreshold = function(mapping, param, value, key)
+    wirelessBinding.sectionname = "bs0"
+    wirelessBinding.option = "rssi_threshold"
+    if key == "radio_5G" then
+      wirelessBinding.option = "rssi_5g_threshold"
+    end
+    uci_helper.set_on_uci(wirelessBinding, value, commitapply)
+    uci_changed = true
   end,
 }
 

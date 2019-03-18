@@ -167,7 +167,18 @@ local function onAdd(success, content, onModify)
     return nil
   end
 
-  if not onModify then
+  content.weekdays = concat(content.weekdays, ",")
+
+  if onModify then
+    -- the action should be stopped first to restore the object setting before applying a new object value while in a active timeslot.
+    local currDay, currTime = parental_helper.getCurrentDayAndTime()
+    if content.enabled == "1" and match(content.weekdays, currDay) and currTime >= content.start_time and currTime <= content.stop_time then
+      proxy.set(format("%s@action%s.enabled", tod_action_path, index), "0")
+      proxy.apply()
+      -- action should be stopped and tod restart may take some time
+      ngx.sleep(2)
+    end
+  else
     proxy.add(tod_action_path .. "@" .. success .. ".timers.")
     proxy.add(tod_timer_path, "timer"..index)
     proxy.add(tod_wifitod_path, "wifitod"..index)
@@ -176,8 +187,6 @@ local function onAdd(success, content, onModify)
     proxy.add(tod_ap_path, "ap0"..index)
     proxy.add(tod_ap_path, "ap1"..index)
   end
-
-  content.weekdays = concat(content.weekdays, ",")
 
   content.start_time = format("%s:%s", content.weekdays, content.start_time)
   content.stop_time = format("%s:%s", content.weekdays, content.stop_time)

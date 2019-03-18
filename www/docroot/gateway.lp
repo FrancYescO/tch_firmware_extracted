@@ -1,5 +1,5 @@
 --pretranslated: do not change this file
- 
+
 -- Enable localization
 --NG-56120, NG-56248, NG-77544
 gettext.textdomain('webui-core')
@@ -10,6 +10,7 @@ local session = ngx.ctx.session
 local proxy = require("datamodel")
 local assistance = require("web.assistance")
 local assistant = assistance.getAssistant('remote')
+local message_helper = require("web.uimessage_helper")
 
 local cui = {
     nsplink = "uci.web.uiconfig.@uidefault.nsplink",
@@ -39,6 +40,7 @@ if ngx.req.get_method() == "POST" then
     ngx.redirect("/");
   end
 end
+message_helper.popMessages()
   ngx.print('\
 <!DOCTYPE HTML>\
 ');  ngx.print( string.format('<html lang="%s">', gettext.language()) ); ngx.print('\
@@ -68,7 +70,7 @@ end
     <div class="row">\
       <div class="header span12" id="logo_mobiletab">\
 	  <img class="timlogo" src="/img/TIM.png">\
-		');  
+		');
 		local attri ={ select = {style ="width:auto; padding-top:7px; padding-bottom:7px; margin:auto; height: 36px"}}
         local html = {}
 
@@ -106,7 +108,7 @@ end
       </div>\
     </div>\
     <div class="row">\
-      ');  
+      ');
         local lp = require("web.lp")
         local cards = require("cards")
         for _,v in pairs(cards.cards()) do
@@ -141,7 +143,18 @@ end
             }else if(value == "remindlater"){\
                $("#password_reminder").modal(\'hide\');\
             }else if(value == "dontremind"){\
-               $("#password_reminder form").submit();\
+               var params = [];\
+               var target = $(".modal form").attr("action");\
+               params.push({\
+                 name : "action",\
+                 value : "SAVE"\
+               },\
+               {\
+                 name : "passwordchange",\
+                 value : value\
+               }, tch.elementCSRFtoken());\
+               $.post(target, params);\
+               $("#password_reminder").modal("hide");\
             }\
             return false;\
           });\
@@ -189,4 +202,4 @@ function httpErrorMessage(err){\
     },400);\
 }\
 </script>\
-'); 
+');

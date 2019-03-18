@@ -50,9 +50,12 @@ local commitapply, mapper = commitapply, mapper
 local uci_helper = mapper("ucihelper")
 local ubus = mapper("ubus").connect()
 local lfs = require("lfs")
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local setBandSteerValue = bandSteerHelper.setBandSteerValue
 local transactions = {}
 local binding_doctor = { config = "wifi_doctor_agent" }
 local binding_conductor = { config = "wifi_conductor" }
+local binding_wireless = { config = "wireless" }
 
 local function get_uci_value(binding, section, param, default)
   binding.sectionname = section
@@ -120,6 +123,11 @@ Multi_Services_X_000E50_WiFiAgent.set = {
   end,
   ConductorEnable = function(_, _, value)
     set_uci_value(binding_conductor, "global", "enabled", value)
+    local is5G_supported = get_uci_value(binding_wireless, "radio_5G")
+    if value == "1" and is5G_supported ~= "" then
+      setBandSteerValue("0", "ap0", commitapply)
+      transactions[binding_wireless.config] = true
+    end
   end,
   AuthURL = function(_, _, value)
     set_uci_value(binding_doctor, "as_config", "url", value)

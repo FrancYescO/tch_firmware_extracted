@@ -1,5 +1,4 @@
 --NG-102545 GUI broadband is showing SFP Broadband GUI page when Ethernet 4 is connected
---NG-105062 Wansensing, modify to new requirements with COC Version1
 local M = {}
 ---
 -- List all events with will schedule the check method
@@ -32,50 +31,61 @@ local match = string.match
 
 function M.check(runtime, l2type, event)
   local scripthelpers = runtime.scripth
-  local sfp = require('transformer.shared.sfp')
   local conn = runtime.ubus
   local logger = runtime.logger
   local uci = runtime.uci
-  local x = uci.cursor()
-  local current = x:get("wansensing", "global", "l2type")
+  logger:notice("WAN Sensing L3 Up Checking")
   if not uci then
       return false
   end
-   
-	if scripthelpers.checkIfInterfaceIsUp("wan") then
-		return "L3UpSense"
-	end
-	
-	local mode = xdslctl.infoValue("tpstc")
-	if (not match(mode, "ATM")) and (not match(mode, "PTM")) and (not scripthelpers.l2HasCarrier("eth4")) then
-		logger:notice("Changing to L2 Sense")
-		return "L2Sense"
-	end
-	
-	if mode then
-		if match(mode, "ATM") and current ~= "ADSL" then
-			logger:notice("Changing to ADSL From " .. current)
-			return "L2Sense"
-		elseif match(mode, "PTM") and current ~= "VDSL" then
-			logger:notice("Changing to VDSL From " .. current)
-			return "L2Sense"
-		end
-    end
   
-	logger:notice("Current Mode " .. current)
-	 
-	-- check if wan ethernet port is up
-	if (not match(mode, "ATM")) and (not match(mode, "PTM")) then
-		if (scripthelpers.l2HasCarrier("eth4") and sfp.getWanType() == "SFP") and current ~= "SFP" then
-			logger:notice("Changing to SFP From " .. current)
-			return "L2Sense"
-		elseif (scripthelpers.l2HasCarrier("eth4") and sfp.getWanType() == "GPHY4") and current ~= "ETH" then
-			logger:notice("Changing to ETH From " .. current)
-			return "L2Sense"
-		end   
-     end
-
-   	return "L3Sense"
+-- NG-102543 check if WAN is still up, if this is the case stay on this LEUpSense mode and do nothing else  
+  if scripthelpers.checkIfInterfaceIsUp("wan") then
+     return "L3UpSense"
+  end
+ 
+  local x = uci.cursor()
+  local SETUP = x:get("env", "custovar", "setup")
+  local WS = x:get("env", "custovar", "WS")
+  
+   
+  
+  local current = x:get("wansensing", "global", "l2type")
+  logger:notice("Current Mode " .. current)
+  local mode = xdslctl.infoValue("tpstc") 
+  -- check if wan ethernet port is up
+  if (not match(mode, "ATM")) and (not match(mode, "PTM")) and (not scripthelpers.l2HasCarrier("eth4")) then
+     logger:notice("Changing to L2 Sense")
+     return "L2Sense"   
+  elseif scripthelpers.l2HasCarrier("eth4") and (current == "ETH" or current == "SFP") then
+     return "L3UpSense"
+  elseif scripthelpers.l2HasCarrier("eth4") and (current ~= "ETH" and current ~= "SFP") then
+     logger:notice("Changing to ETH From " .. current)
+     return "L2Sense"
+  else
+     
+   if mode then
+      if match(mode, "ATM") and current ~= "ADSL" then
+          logger:notice("Changing to ADSL From " .. current)
+          return "L2Sense"
+      elseif match(mode, "PTM") and current ~= "VDSL" then
+          logger:notice("Changing to VDSL From " .. current)
+          return "L2Sense"
+      end
+   else
+      if scripthelpers.checkIfCurrentL2WentDown(l2type, event, 'eth4') then
+         return "L2Sense"
+      end
+     
+   end
+  end 
+  --DR If WAN is not up at this point all L2 is Ok so the swithc back to L3Sense to turn on the wwan interface  
+  if not scripthelpers.checkIfInterfaceIsUp("wan") then
+     return "L3Sense"
+  end
+  
+  
+  return "L3UpSense"
 end
 
 return M

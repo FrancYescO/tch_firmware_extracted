@@ -16,16 +16,18 @@ set_ipaddr() {
     local interface="$1"                              
 
     if [ "{$interface}" == "{public_lan}" ] ; then
-      config_get ipaddr $interface ipaddr
-      config_get netmask $interface netmask
+		config_get ipaddr $interface ipaddr
+		config_get netmask $interface netmask
       
-      get_netmask $netmask
+		get_netmask $netmask
      
-      uci delete firewall.wan.masq_src
-      uci delete firewall.public_lan.subnet 
-      uci add_list firewall.wan.masq_src="!$ipaddr/$mask"
-      uci add_list firewall.public_lan.subnet="$ipaddr/$mask"
-      uci commit   
+		uci delete firewall.wan.masq_src
+		uci delete firewall.public_lan.subnet
+		if [ "{$ipaddr}" != "{0.0.0.0}" ] ; then
+			uci add_list firewall.wan.masq_src="!$ipaddr/$mask"
+			uci add_list firewall.public_lan.subnet="$ipaddr/$mask"
+		fi
+		uci commit
     fi
 }
 
