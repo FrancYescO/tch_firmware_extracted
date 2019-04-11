@@ -10,26 +10,6 @@ Device.__index = Device
 
 local M = {}
 
-function Device:send_command(command, timeout)
-	return nil, "error"
-end
-
-function Device:get_model()
-	return nil
-end
-
-function Device:get_manufacturer()
-	return nil
-end
-
-function Device:get_revision()
-	return nil
-end
-
-function Device:get_hardware_revision()
-	return nil
-end
-
 function Device:send_event(id, data)
 	local conn = ubus.connect()
 	if not conn then

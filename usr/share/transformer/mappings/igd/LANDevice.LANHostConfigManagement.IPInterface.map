@@ -43,13 +43,31 @@ local uci_helper = mapper("ucihelper")
 local get_from_uci = uci_helper.get_from_uci
 local inet = require "tch.inet"
 local isValidIP = inet.isValidIPv4
+local nwCommon = require("transformer.mapper.nwcommon")
+local conn = mapper("ubus").connect()
+local network = require("transformer.shared.common.network")
+local binding = { config = "network", state = false }
 
--- Standard says that support for more than one interface is optional. No reason to go beyond.
 InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.entries = function(mapping, parentkey)
-    return { parentkey }
+  local entries = {}
+  local parentref = "@"..parentkey
+  local lanIntf = network.getLanInterfaces()
+  entries[#entries+1] = parentkey
+  binding.sectionname = "interface"
+  uci_helper.foreach_on_uci(binding, function(s)
+    if lanIntf[s['.name']] and s.ifname == parentref then
+       entries[#entries+1] = s['.name']
+    end
+  end)
+  return entries
 end
 
-local binding = { config = "network", sectionname = "", option = ""}
+local function getproto(key)
+  binding.sectionname = key
+  binding.option = "proto"
+  return get_from_uci(binding)
+end
+
 InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.get = {
   Enable = function(mapping, param, key)
     binding.sectionname = key
@@ -62,11 +80,33 @@ InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.get = {
     end
   end,
   IPInterfaceIPAddress = function(mapping, param, key)
+    local proto = getproto(key)
+    if proto == "dhcp" then
+      local networkstatus = conn:call("network.interface." .. key  , "status", {})
+      local ipaddr = networkstatus and networkstatus["ipv4-address"] and networkstatus["ipv4-address"][1] and networkstatus["ipv4-address"][1]["address"]
+      if not ipaddr then
+        return ""
+      end
+      return ipaddr
+    end
     binding.sectionname = key
     binding.option = "ipaddr"
-    return get_from_uci(binding)
+    local addr = get_from_uci(binding)
+    if type(addr) == "table" then
+      return addr[1]
+    end
+    return addr
   end,
   IPInterfaceSubnetMask = function(mapping, param, key)
+    local proto = getproto(key)
+    if proto == "dhcp" then
+      local networkstatus = conn:call("network.interface." .. key  , "status", {})
+      local mask = networkstatus and networkstatus["ipv4-address"] and networkstatus["ipv4-address"][1] and networkstatus["ipv4-address"][1]["mask"]
+      if not mask then
+        return ""
+      end
+      return nwCommon.netmask2mask(mask)
+    end
     binding.sectionname = key
     binding.option = "netmask"
     return get_from_uci(binding)
@@ -94,19 +134,25 @@ InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.set = f
   end
   if param == "IPInterfaceIPAddress" then
     if isValidIP(paramvalue) then
-      binding.sectionname = key
-      binding.option = "ipaddr"
-      uci_helper.set_on_uci(binding, paramvalue, commitapply)
-      uci_helper.commit(binding)
+      local proto = getproto(key)
+      if proto == "static" then
+        binding.sectionname = key
+        binding.option = "ipaddr"
+        uci_helper.set_on_uci(binding, paramvalue, commitapply)
+        uci_helper.commit(binding)
+      end
     else
       return nil,format("%s is not a valid IP Address", paramvalue or "nil")
     end
   end
   if param == "IPInterfaceSubnetMask" then
-    binding.sectionname = key
-    binding.option = "netmask"
-    uci_helper.set_on_uci(binding, paramvalue, commitapply)
-    uci_helper.commit(binding)
+    local proto = getproto(key)
+    if proto == "static" then
+      binding.sectionname = key
+      binding.option = "netmask"
+      uci_helper.set_on_uci(binding, paramvalue, commitapply)
+      uci_helper.commit(binding)
+    end
   end
   if param == "IPInterfaceAddressingType" then
     binding.sectionname = key

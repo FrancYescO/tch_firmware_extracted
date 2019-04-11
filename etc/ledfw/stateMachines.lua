@@ -275,7 +275,8 @@ stateMachines = {
 -- timerLed("internet:red", 500, 500), was not behaving as expected; using same values since last time when setting timerLed for same LED can cause LED *NOT* to blink at all;
 -- Probably LED driver problem; workaround is setting twice with different values
                 timerLed("internet:red", 498, 502),
-                timerLed("internet:red", 499, 501)
+                timerLed("internet:red", 499, 501),
+                staticLed(get_itf_depending_led, false)
             },
             internet_connected_ipv4_or_v6 = {
                 netdevLedOWRT("internet:green", 'wan', 'link tx rx'),

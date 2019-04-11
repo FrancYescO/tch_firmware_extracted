@@ -91,21 +91,8 @@
   }
 }
 
-local conn = mapper("ubus").connect()
-
-local dummy_values = setmetatable({}, {
-  __index = function()
-    return "0"
-  end
-})
-
-local function getSSIDStats(ssidkey)
-  local data = conn:call("wireless.ssid.stats", "get",  { name = ssidkey })
-  if data == nil then
-    return dummy_values
-  end
-  return data[ssidkey] or dummy_values
-end
+local network = require("transformer.shared.common.network")
+local tostring = tostring
 
 local statsEntries = {
   BytesSent = "tx_bytes",
@@ -128,16 +115,16 @@ local statsEntries = {
 Device_WiFi_SSID_i_Stats_.get = function(mapping, param, key)
   local field = statsEntries[param]
   if field then
-    return tostring(getSSIDStats(key)[field]) or "0"
+    return tostring(network.getSSIDStats(key)[field] or 0)
   end
   return "0"
-end 
+end
 
 Device_WiFi_SSID_i_Stats_.getall = function(mapping, key)
   local all = {}
-  local data = getSSIDStats(key)
+  local data = network.getSSIDStats(key)
   for param, field in pairs(statsEntries) do
-    all[param] = tostring(data[field]) or "0"
+    all[param] = tostring(data[field] or 0)
   end
   return all
 end

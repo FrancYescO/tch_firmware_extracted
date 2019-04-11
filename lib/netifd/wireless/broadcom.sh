@@ -30,8 +30,10 @@ broadcom_get_if_name() {
 
 	if [ "$g_broadcom_radio_name" = "radio_2G" ] ; then
 		temp=wl0
-	else
+	elif [ "$g_broadcom_radio_name" = "radio_5G" ] ; then
 		temp=wl1
+	elif [ "$g_broadcom_radio_name" = "radio2" ] ; then
+		temp=wl2
 	fi
 	
 	if [ "$name" = "0" ] ; then

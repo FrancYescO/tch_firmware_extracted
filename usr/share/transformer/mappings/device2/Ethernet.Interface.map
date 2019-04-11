@@ -88,6 +88,15 @@ local Device_Ethernet_Interface_i_ = {
         access = "readOnly",
         type = "boolean",
       },
+      X_ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
     }
   },
   aliasDefault = "Name",
@@ -98,12 +107,13 @@ local nwCommon = mapper("nwcommon")
 local getIntfInfo = nwCommon.getIntfInfo
 local uciHelper = mapper("ucihelper")
 local getFromUci = uciHelper.get_from_uci
+local getallFromUci = uciHelper.getall_from_uci
 local setOnUci = uciHelper.set_on_uci
 local ethernetBinding = {config = "ethernet", sectionname = "", option = "", default = ""}
-local commitApply = commitapply
 local lfs = require("lfs")
 local nwmodel = require "transformer.shared.models.device2.network"
 local EthInterface = nwmodel.register("EthInterface", Device_Ethernet_Interface_i_.objectType.name)
+local process = require ("tch.process")
 
 local fileCheck = lfs.attributes("/etc/config/power", "mode") == "file"
 local model
@@ -113,6 +123,58 @@ local powerBinding = {config = "power", sectionname = "ethernet", option = "eee"
 local posix = require("tch.posix")
 local getClockTime = posix.clock_gettime
 local lastStateChangeTime = {}
+
+local function getAllSpeedDuplex(key)
+  ethernetBinding.sectionname = key
+  local allValues = getallFromUci(ethernetBinding)
+  local speed = allValues.speed or "auto"
+  local duplex = allValues.duplex or "full"
+  return speed, duplex
+end
+
+local function getProcessStatus(port)
+  local linkStatus = process.popen("ethctl", {port, "media-type"})
+  local autoNegotiation, speed, duplex
+  if linkStatus then
+    for line in linkStatus:lines() do
+      autoNegotiation = line:match("%s+(%S+),")
+      if autoNegotiation == "enabled" then
+        speed = "auto"
+        duplex = "auto"
+      else
+        speed, duplex = line:match("%s+(%S+)M+(%S+)$")
+        if duplex then
+          duplex = duplex == "HD" and "half" or "full"
+        else
+          speed, duplex = getAllSpeedDuplex(port)
+        end
+      end
+      linkStatus:close()
+      return speed, duplex
+    end
+    linkStatus:close()
+  end
+  speed, duplex = getAllSpeedDuplex(port)
+  return speed, duplex
+end
+
+local function updateConfig(key, checkValue)
+  local value
+  local configSpeed, configDuplex = getAllSpeedDuplex(model:getUciKey(key))
+  local cmdSpeed, cmdDuplex = getProcessStatus(key)
+  ethernetBinding.sectionname = key
+  if cmdSpeed ~= configSpeed or cmdDuplex ~= configDuplex then
+    if checkValue == "DuplexMode" then
+      ethernetBinding.option = "speed"
+      value = cmdSpeed
+    else
+      ethernetBinding.option = "duplex"
+      value = cmdDuplex
+    end
+    setOnUci(ethernetBinding, value, commitapply)
+    transactions[ethernetBinding] = true
+  end
+end
 
 Device_Ethernet_Interface_i_.entries = function(mapping)
   model = nwmodel.load()
@@ -155,33 +217,21 @@ Device_Ethernet_Interface_i_.get = {
     return getIntfInfo(model:getUciKey(key), "address", "")
   end,
   MaxBitRate = function(mapping, param, key)
-    ethernetBinding.sectionname = model:getUciKey(key)
-    ethernetBinding.option = "speed"
-    ethernetBinding.default = "auto"
-    local value = getFromUci(ethernetBinding)
-    if value == "auto" then
+    local value = getProcessStatus(key)
+    if value == "auto"  then
       value = "-1"
     end
     return value
   end,
   DuplexMode = function(mapping, param, key)
-    ethernetBinding.sectionname = model:getUciKey(key)
-    ethernetBinding.option = "duplex"
-    ethernetBinding.default = "full"
-    local duplexValue = getFromUci(ethernetBinding)
-    ethernetBinding.option = "speed"
-    ethernetBinding.default = "auto"
-    local speedValue = getFromUci(ethernetBinding)
-    if speedValue == "auto" then
+    local speed, value = getProcessStatus(key)
+    if speed  == "auto" then
       return "Auto"
-    elseif speedValue == "10" or speedValue == "100" then
-      if duplexValue == "half" then
-        return "Half"
-      elseif duplexValue == "full" then
-        return "Full"
-      end
+    elseif value == "full" then
+      return "Full"
+    elseif value == "half" then
+      return "Half"
     end
-    return "Auto"
   end,
   LastChange = function(mapping, param, key)
     return tostring(getClockTime(posix.CLOCK_MONOTONIC) - (lastStateChangeTime[model:getUciKey(key)] or 0))
@@ -195,16 +245,21 @@ Device_Ethernet_Interface_i_.get = {
   EEEEnable = function(mapping, param, key)
     return getFromUci(powerBinding)
   end,
+  X_ShapingRate = function(mapping, param, key)
+    local devName = model:getName(key)
+    return nwmodel.getShapingRate(devName, key)
+  end,
 }
 
 Device_Ethernet_Interface_i_.set = {
   Enable = function(mapping, param, value, key)
     ethernetBinding.sectionname = model:getUciKey(key)
     ethernetBinding.option = "enable"
-    setOnUci(ethernetBinding,value,commitApply)
-    transactions[ethernetBinding.config] = true
+    setOnUci(ethernetBinding,value,commitapply)
+    transactions[ethernetBinding] = true
   end,
   MaxBitRate = function(mapping, param, value, key)
+    updateConfig(key, param)
     ethernetBinding.sectionname = model:getUciKey(key)
     ethernetBinding.option = "speed"
     local maxBitRate = "auto"
@@ -213,10 +268,11 @@ Device_Ethernet_Interface_i_.set = {
     elseif value ~= "-1" then
       return nil,"Invalid value"
     end
-    setOnUci(ethernetBinding,maxBitRate,commitApply)
-    transactions[ethernetBinding.config] = true
+    setOnUci(ethernetBinding,maxBitRate,commitapply)
+    transactions[ethernetBinding] = true
   end,
   DuplexMode = function(mapping, param, value, key)
+    updateConfig(key, param)
     ethernetBinding.sectionname = model:getUciKey(key)
     ethernetBinding.option = "speed"
     local speedValue = getFromUci(ethernetBinding)
@@ -230,27 +286,37 @@ Device_Ethernet_Interface_i_.set = {
       end
     elseif value == "Auto" then -- Allow to set Auto if the value of speed is "auto" in uci.
       return true -- Do nothing
+    else
+      return nil,"Cannot set DuplexMode when MaxBitRate is '-1'"
     end
     ethernetBinding.option = "duplex"
-    setOnUci(ethernetBinding,value,commitApply)
-    transactions[ethernetBinding.config] = true
+    setOnUci(ethernetBinding,value,commitapply)
+    transactions[ethernetBinding] = true
   end,
   EEEEnable = function(mapping, param, value, key)
-    setOnUci(powerBinding, value, commitApply)
-    transactions[powerBinding.config] = true
+    setOnUci(powerBinding, value, commitapply)
+    transactions[powerBinding] = true
+  end,
+  X_ShapingRate = function(mapping, param, value, key)
+    local devName = model:getName(key)
+    local shapingRate, errMsg = nwmodel.setShapingRate(value, key, devName)
+    if not shapingRate then
+      return nil, errMsg
+    end
+    transactions[ethernetBinding] = true
   end,
 }
 
 Device_Ethernet_Interface_i_.commit = function()
-  for config,_ in pairs(transactions) do
-    uciHelper.commit({config = config})
+  for binding in pairs(transactions) do
+    uciHelper.commit(binding)
   end
   transactions = {}
 end
 
 Device_Ethernet_Interface_i_.revert = function()
-  for config,_ in pairs(transactions) do
-    uciHelper.revert({config = config})
+  for binding in pairs(transactions) do
+    uciHelper.revert(binding)
   end
   transactions = {}
 end

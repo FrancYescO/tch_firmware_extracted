@@ -647,14 +647,13 @@ function M.delete_on_uci(binding, commitapply)
       end
     end
   end
-  local save_result
   if result then
     -- We save here so the delete is persisted to file, although it is not
     -- yet committed! We persist to file, so if we lose or reload our cursor for
     -- some reason, the delete won't be lost.
-    save_result = save_cursor(cursor, config, true)
+    result = save_cursor(cursor, config, true)
   end
-  if result and save_result and commitapply then
+  if result and commitapply then
     if option then
       commitapply:newdelete(config .. "." .. stype .. '.' .. section .. "." .. option)
     else
@@ -693,15 +692,65 @@ function M.reorder_on_uci(binding, index, commitapply)
       result = cursor:reorder(config, section, index)
     end
   end
-  local save_result
   if result then
     -- We save here so the reorder is persisted to file, although it is not
     -- yet committed! We persist to file, so if we lose or reload our cursor for
     -- some reason, the reorder won't be lost.
-    save_result = save_cursor(cursor, config, true)
+    result = save_cursor(cursor, config, true)
   end
-  if result and save_result and commitapply then
+  if result and commitapply then
     commitapply:newreorder(config .. "." .. stype .. '.' .. section)
+  end
+end
+
+--- Rename a section or an option inside the UCI datamodel
+-- @param #binding binding The binding representing the instance that needs to be deleted
+--                This binding should contain at least 2 named table entries:
+--                config (string), sectionname (string), option (string, optional)
+--                When option is defined, it is the option that is renamed, otherwise
+--                the sectionname is renamed.
+-- @param #string newname   The new name to use for the section or option
+-- @param commitapply The Commit & Apply context (optional)
+-- WARNING: This function will not commit!
+function M.rename_on_uci(binding, newname, commitapply)
+  --trace_binding(binding, "rename_on_uci")
+  local config = binding.config
+  local section = binding.sectionname
+  local option = binding.option
+  local stype = get_section_type(binding)
+  if not config then
+    error("No config could be found in the given binding", 2)
+  end
+  if not section then
+    error("No section name could be found in the given binding", 2)
+  end
+  
+  local result = refresh_cursor(binding, cursor)
+  local errmsg
+  if result then
+    if option then
+      result, errmsg = cursor:rename(config, section, option, newname)
+    else
+      result, errmsg = cursor:rename(config, section, newname)
+    end
+  end
+  if result then
+    -- We save here so the rename is persisted to file, although it is not
+    -- yet committed! We persist to file, so if we lose or reload our cursor for
+    -- some reason, the rename won't be lost.
+    -- Invalidate the cache for this config to avoid inconsistencies between our internal cursors.
+    result = save_cursor(cursor, config, true)
+  else
+    logger:error("Rename failed on %s.%s%s => %s: %s", tostring(config), tostring(section), option and "." .. tostring(option) or "", tostring(newname), tostring(errmsg))
+  end
+  if result and commitapply then
+    if option then
+      commitapply:newset(config .. "." .. stype .. '.' .. section .. '.' .. option)
+      commitapply:newset(config .. "." .. stype .. '.' .. section .. '.' .. newname)
+    else
+      commitapply:newdelete(config .. "." .. stype .. '.' .. section)
+      commitapply:newadd(config .. "." .. stype .. '.' .. newname)
+    end
   end
 end
 

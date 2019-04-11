@@ -25,10 +25,12 @@ drv_atheros_init_iface_config() {
 atheros_get_if_name() {
 	name=$1
 
-	if [ "$g_atheros_radio_name" = "radio_2G" ] ; then
+	if [ "$g_atheros_radio_name" = "radio_2G" ]; then
 		temp=wl0
-	else
+	elif [ "$g_atheros_radio_name" = "radio_5G" ]; then
 		temp=wl1
+	else
+		temp=wl2
 	fi
 
 	if [ "$name" = "0" ] ; then

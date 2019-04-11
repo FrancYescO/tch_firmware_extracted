@@ -1,5 +1,7 @@
-<%
+--pretranslated: do not change this file
+ 
 -- Enable localization
+-- TCOMITAGW-2087; TCOMITAGW-2088
 gettext.textdomain('webui-core')
 
 local content_helper = require("web.content_helper")
@@ -73,7 +75,7 @@ local ppp_state_map = {
     NEGOTIATION_FAILED = T"PPP negotiation failed",
 }
 
-local untaint_mt = require("web.taint").untaint_mt 
+local untaint_mt = require("web.taint").untaint_mt
 setmetatable(ppp_state_map, untaint_mt)
 
 local ppp_light_map = {
@@ -120,13 +122,13 @@ if session:hasAccess("/modals/internet-modal.lp") then
     switchName = "uci_wan_auto"
     modalPath = "/modals/internet-modal.lp"
 end
-%>
-
-<%= ui_helper.createCardHeader(T"Internet Access", modalPath) %>
-<div class="content">
-  <%= ui_helper.createSimpleLight(nil, ppp_state_map[ppp_status], { light = { class = ppp_light_map[ppp_status] } }) %>
-  <p class="subinfos">
-     <%if ppp_status == "connected" then
+  ngx.print('\
+\
+');  ngx.print( ui_helper.createCardHeader(T"Internet Access", modalPath) ); ngx.print('\
+<div class="content">\
+  ');  ngx.print( ui_helper.createSimpleLight(nil, ppp_state_map[ppp_status], { light = { class = ppp_light_map[ppp_status] } }) ); ngx.print('\
+  <p class="subinfos">\
+     ');  if ppp_status == "connected" then
        if content_rpc["ipaddr"] and content_rpc["ipaddr"]:len() > 0 then
          ngx.print(format(T'WAN IP is <strong>%s</strong>', content_rpc["ipaddr"]))
        elseif content_rpc["ip6addr"] and content_rpc["ip6addr"]:len() > 0 then
@@ -135,6 +137,30 @@ end
 	   if ppp_status == "connected" and IPv6State ~= "disabled" then
          ngx.print(ui_helper.createSimpleLight(nil, ipv6_state_map[IPv6State] or T"Unknown", { light = { class = ipv6_light_map[IPv6State] or "red" } }))
         end
-     end%>
-  </p>
-</div>
+     end  ngx.print('\
+  </p>\
+</div>\
+<script>\
+function refreshInternetCard(){\
+  var timeOutId=0;\
+  $.get("/ajax/internet.lua", function(data){\
+    data =  $.parseJSON(data);\
+    if(data.ppp_status == "connected" && data.ipv6_state == "IPv6 Connected"){\
+      var html =  "<span class=\\"simple-desc\\"><div class=\\"light " + data.ppp_light+"\\"></div>"+data.ppp_state+"</span>";\
+      html = html + "<p class=\\"subinfos\\">";\
+      html = html + "');  ngx.print(T'WAN IP is'); ngx.print(' <strong>" + data.WAN_IP + "</strong><span class=\\"simple-desc\\"></span></p>";\
+      html = html + "<div class=\\"light " + data.ipv6_light+"\\"></div>"+data.ipv6_state+"<p></p>";\
+      clearTimeout(timeOutId);\
+    }\
+    else\
+    {\
+      timeOutId=setTimeout(refreshInternetCard,5000);\
+    }\
+    $("#internetCard .content").html(html);\
+  });\
+}\
+$(document).ready(function(){\
+refreshInternetCard();\
+});\
+</script>\
+'); 

@@ -13,6 +13,11 @@ local Device_DeviceInfo_NetworkProperties_ = {
           "ADSL",
           "VDSL",
           "ETH_WAN",
+	  "MOBILE",
+	  "GFAST",
+	  "GPON",
+	  "FIBER",
+          "SFP",
           "SENS",
         },
         default = "SENS",
@@ -24,28 +29,114 @@ local Device_DeviceInfo_NetworkProperties_ = {
           "ADSL",
           "VDSL",
           "ETH_WAN",
+	  "MOBILE",
+          "GFAST",
+          "GPON",
+          "FIBER",
+          "SFP",
           "SENS",
         },
         default = "SENS",
         description = "WAN synchronous status",
+      },
+      X_BELGACOM_NetworkTopology = {
+        access = "readWrite",
+	type = "string",
+	enumeration = {
+          "TITAN",
+	  "Legacy",
+        },
+        default = "Legacy",
+        description = "Brings about the mode switch from Proximus 1IP mode which is referred to as 'TITAN' and 3IP mode referred to as 'Legacy' mode",
       },
     }
   }
 }
 
 local uciHelper = mapper("ucihelper")
-local wanSensingBinding = { config = "wansensing", sectionname = "global", option = "l2type" }
+local getFromUci = uciHelper.get_from_uci
+local wanSensingBinding = { config = "wansensing"}
+local configChanged
+local networkBinding = { config = "network", sectionname = "globals", option = "mode", default = "Legacy" }
+local envBinding = { config = "env", sectionname = "var", option = "PXS_TV_MODE_REQ" }
+local match = string.match
+local conn = mapper("ubus").connect()
+local luabcm
+do
+  local ok, m = pcall(require, "luabcm")
+  if ok then
+    luabcm = m
+  end
+end
 
 local valueMap = {
   ["ADSL"] = "ADSL",
   ["VDSL"] = "VDSL",
   ["ETH"]  = "ETH_WAN",
+  ["MOBILE"] = "MOBILE",
+  ["GFAST"] = "GFAST",
+  ["GPON"] = "GPON",
+  ["FIBER"] = "FIBER",
   ["SFP"]  = "SFP",
-  [""]     = "SENS",
+  ["Sensing"] = "SENS",
 }
 
-Device_DeviceInfo_NetworkProperties_.get = function()
-  return valueMap[uciHelper.get_from_uci(wanSensingBinding)] or ""
+Device_DeviceInfo_NetworkProperties_.get = {
+  X_000E50_WanSyncStatus = function(mapping, param)
+    wanSensingBinding.sectionname = "global"
+    wanSensingBinding.option = "l2type"
+    return valueMap[getFromUci(wanSensingBinding)] or "SENS"
+  end,
+  X_BELGACOM_WanSyncStatus = function(mapping, param)
+    if luabcm then
+      local xdslStatus = conn:call("xdsl", "status", {}) or {}
+      local dslStatus = luabcm.getAdslMib(0).Mode
+      if xdslStatus["status"] == "Showtime" and dslStatus then
+        return dslStatus:match("%a+") or "SENS"
+      end
+    end
+    wanSensingBinding.sectionname = "state"
+    wanSensingBinding.option = "wanSyncStatus"
+    return valueMap[getFromUci(wanSensingBinding)] or "SENS"
+  end,
+  X_BELGACOM_NetworkTopology = function(mapping, param)
+    return getFromUci(networkBinding)
+  end
+}
+
+Device_DeviceInfo_NetworkProperties_.set = {
+  X_BELGACOM_NetworkTopology = function(mapping, param, value)
+    local mode = getFromUci(networkBinding)
+    wanSensingBinding.sectionname = "state"
+    wanSensingBinding.option = "wanSyncStatus"
+    local state = getFromUci(wanSensingBinding)
+    local videoMode = getFromUci(envBinding)
+    if value == "TITAN" then
+      if videoMode == "Bridged" then
+        return nil, "Switchover refused: TV bridged not supported in Single IP mode."
+      elseif state and state:match("ADSL") then
+        return nil, "Switchover refused: Single IP mode not supported on ADSL"
+      end
+    end
+    if value ~= mode then
+      uciHelper.set_on_uci(networkBinding, value, commitapply)
+      configChanged = true
+    end
+  end
+}
+
+Device_DeviceInfo_NetworkProperties_.commit = function()
+  if configChanged then
+    uciHelper.commit(networkBinding)
+    configChanged = false
+  end
+end
+
+Device_DeviceInfo_NetworkProperties_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+    configChanged = false
+  end
 end
 
 local function setUciEvent(mapping, action, config, sectionType, sectionName, option)

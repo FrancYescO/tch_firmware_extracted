@@ -28,11 +28,17 @@ local cmd_assist = require("helper.command")
 local cmd_name = "ip6tables"
 local usage_msg = [[
   List ip6tables rules
-    -L (iptables_chain) List the rules in a chain;
+    -L (optional iptables_chain) List the rules in a chain;
         to list all chains from a table:
            `ip6tables -L all`
         to list all rules  from a chain, e.g. `INPUT`:
            `ip6tables -L INPUT`
+    -Z (optional iptables_chain) Zero the packet and byte counters in a chain;
+        to zero all chains from a table:
+           `iptables -Z all`
+        to zero all rules  from a chain, e.g. `INPUT`:
+           `iptables -Z INPUT`
+           `iptables -t nat -Z INPUT`
     -n  Numeric output of addresses and ports
     -t (optional string) Table to list (default: `filter`)
     -v  Verbose mode

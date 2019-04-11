@@ -2,7 +2,7 @@ local string, table, tonumber, pcall = string, table, tonumber, pcall
 
 local helper = require("mobiled.scripthelpers")
 local json = require("dkjson")
-local cURL = require("cURL")
+local lcurl = require("lcurl")
 
 local runtime
 
@@ -12,32 +12,33 @@ Mapper.__index = Mapper
 local M = {}
 
 local function curl_get(url, headers)
-	local curl = cURL.easy_init()
+	local curl = lcurl.easy()
 	curl:setopt_url(url)
 	curl:setopt_timeout(5)
 	curl:setopt_httpheader(headers)
 	local t = {}
-	local result = pcall(curl.perform, curl, { writefunction=function(buf) table.insert(t, buf) end })
+	curl:setopt_writefunction(function(buf) table.insert(t, buf) end)
+	local result = pcall(curl.perform, curl)
 	if not result then return nil end
 	return t
 end
 
 local function curl_post(url, headers, post_data)
-	local curl = cURL.easy_init()
+	local curl = lcurl.easy()
 	curl:setopt_url(url)
 	curl:setopt_timeout(5)
 	curl:setopt_httpheader(headers)
 	curl:setopt_post(1)
 	curl:setopt_postfields(post_data)
-	curl:setopt_postfieldsize(#post_data)
 	local t = {}
-	local result = pcall(curl.perform, curl, { writefunction=function(buf) table.insert(t, buf) end })
+	curl:setopt_writefunction(function(buf) table.insert(t, buf) end)
+	local result = pcall(curl.perform, curl)
 	if not result then return nil end
 	return t
 end
 
 local function get_parameter(device, params)
-	if not device.web_info.ip then return nil end
+	if not device.web_info.ip then return {} end
 	local paramStr = "isTest=false"
 	for k, v in pairs(params) do
 		paramStr = paramStr .. "&" .. k .. "=" .. v
@@ -170,7 +171,7 @@ local function delete_profile(device, index)
 	set_parameter(device, params)
 end
 
-function Mapper:start_data_session(device, session_id, profile)
+function Mapper:start_data_session(device, session_id, profile) -- luacheck: no unused args
 	local index
 	local dev_profile_id = string.match(profile.id, "^device:(.*)$")
 	if not dev_profile_id then
@@ -210,18 +211,19 @@ function Mapper:start_data_session(device, session_id, profile)
 	return true
 end
 
-function Mapper:stop_data_session(device, session_id)
+function Mapper:stop_data_session(device, session_id) -- luacheck: no unused args
 	set_parameter(device, { goformId = "DISCONNECT_NETWORK" })
 	return true
 end
 
 function Mapper:get_device_capabilities(device, info)
-	local hardware_version_request = {
-		"hardware_version"
+	local version_request = {
+		"hardware_version",
+		"wa_inner_version"
 	}
-	local hardware_version_data = get_parameters(device, hardware_version_request)
-	if hardware_version_data.hardware_version then
-		local model = string.match(hardware_version_data.hardware_version, "^(.-)-")
+	local data = get_parameters(device, version_request)
+	if data.hardware_version then
+		local model = string.match(data.hardware_version, "^(.-)-")
 		if model == "MF730M" then
 			info.radio_interfaces = {
 				{ radio_interface = "gsm" },
@@ -243,6 +245,16 @@ function Mapper:get_device_capabilities(device, info)
 			}
 		end
 	end
+	if not info.radio_interfaces and data.wa_inner_version then
+		local model = string.match(data.wa_inner_version, "_(.-)V")
+		if model == "K4203" then
+			info.radio_interfaces = {
+				{ radio_interface = "gsm" },
+				{ radio_interface = "umts" },
+				{ radio_interface = "auto" }
+			}
+		end
+	end
 
 	local sms_supported_request = {
 		"sms_unread_num"
@@ -254,28 +266,35 @@ function Mapper:get_device_capabilities(device, info)
 	end
 
 	info.reuse_profiles = true
+	info.supported_auth_types = "none pap chap papchap"
+	info.supported_pdp_types = { "ipv4", "ipv6", "ipv4v6" }
 	return true
 end
 
 function Mapper:get_device_info(device, info)
 	local request = {
 		"imei",
+		"modem_msn",
 		"hardware_version",
 		"wa_inner_version"
 	}
 	local data = get_parameters(device, request)
 	info.device_config_parameter = "imei"
 	info.imei = data.imei
+	info.serial = data.modem_msn
 	info.hardware_version = data.hardware_version
 	info.software_version = data.wa_inner_version
 	if data.hardware_version then
 		info.model = string.match(data.hardware_version, "^(.-)-")
 	end
+	if not info.model and data.wa_inner_version then
+		info.model = string.match(data.wa_inner_version, "_(.-)V")
+	end
 	info.manufacturer = "ZTE"
 	return true
 end
 
-function Mapper:get_session_info(device, info, session_id)
+function Mapper:get_session_info(device, info, session_id) -- luacheck: no unused args
 	local request = {
 		"ppp_status",
 		"realtime_tx_bytes",
@@ -316,13 +335,13 @@ function Mapper:get_radio_signal_info(device, info)
 	}
 	local data = get_parameters(device, request)
 	if data.network_type then
-		if string.match(data.network_type, "HSPA") or data.network_type == "UMTS" then
+		if string.match(data.network_type, "HS[DU]?PA") or data.network_type == "UMTS" or data.network_type == "WCDMA" then
 			info.radio_interface = "umts"
 		elseif data.network_type == "LTE" then
 			info.radio_interface = "lte"
-		elseif data.network_type == "EDGE" then
+		elseif data.network_type == "GSM" or data.network_type == "GPRS" or data.network_type == "EDGE" then
 			info.radio_interface = "gsm"
-		elseif data.network_type == "NO_SERVICE" then
+		elseif data.network_type == "NO_SERVICE" or data.network_type == "" then
 			info.radio_interface = "no_service"
 		end
 	end
@@ -351,7 +370,7 @@ function Mapper:get_network_info(device, info)
 	elseif data.simcard_roam == "Roaming" then
 		info.roaming = "roaming"
 	end
-	if data.network_type ~= "NO_SERVICE" then
+	if data.network_type ~= "NO_SERVICE" and data.network_type ~= "" then
 		info.nas_state = "registered"
 	else
 		info.nas_state = "not_registered"
@@ -425,7 +444,7 @@ function Mapper:get_pin_info(device, info)
 	return true
 end
 
-function Mapper:unlock_pin(device, pin_type, pin)
+function Mapper:unlock_pin(device, pin_type, pin) -- luacheck: no unused args
 	local params = {
 		goformId = "ENTER_PIN",
 		PinNumber = pin,
@@ -434,7 +453,7 @@ function Mapper:unlock_pin(device, pin_type, pin)
 	return set_parameter(device, params)
 end
 
-function Mapper:unblock_pin(device, pin_type, pin)
+function Mapper:unblock_pin(device, pin_type, pin) -- luacheck: no unused args
 	local params = {
 		goformId = "ENTER_PUK",
 		PinNumber = pin,
@@ -443,7 +462,7 @@ function Mapper:unblock_pin(device, pin_type, pin)
 	return set_parameter(device, params)
 end
 
-function Mapper:change_pin(device, pin_type, pin, newpin)
+function Mapper:change_pin(device, pin_type, pin, newpin) -- luacheck: no unused args
 	local params = {
 		goformId = "ENABLE_PIN",
 		OldPinNumber = pin,
@@ -453,7 +472,7 @@ function Mapper:change_pin(device, pin_type, pin, newpin)
 	return set_parameter(device, params)
 end
 
-function Mapper:enable_pin(device, pin_type, pin)
+function Mapper:enable_pin(device, pin_type, pin) -- luacheck: no unused args
 	local params = {
 		goformId = "ENABLE_PIN",
 		OldPinNumber = pin,
@@ -462,7 +481,7 @@ function Mapper:enable_pin(device, pin_type, pin)
 	return set_parameter(device, params)
 end
 
-function Mapper:disable_pin(device, pin_type, pin)
+function Mapper:disable_pin(device, pin_type, pin) -- luacheck: no unused args
 	local params = {
 		goformId = "DISABLE_PIN",
 		OldPinNumber = pin,
@@ -681,7 +700,7 @@ local function decode_sms_message(encoded_text)
 end
 
 local function decode_sms_date(date_string)
-	local year, month, day, hour, minute, second, timezone = date_string:match("(%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;]([+-]%d+)")
+	local year, month, day, hour, minute, second = date_string:match("(%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;](%d+)[,;][+-]%d+")
 	local date = {
 		year = tonumber(year) + 2000,
 		month = tonumber(month),
@@ -728,13 +747,23 @@ function Mapper:get_sms_messages(device)
 	return { messages = messages }
 end
 
-local function login(device, username, password)
-	local params = {
+local function login(device, username, password) -- luacheck: no unused args
+	-- Check whether login is required.
+	local loginfo_params = {
+		"loginfo"
+	}
+	local loginfo_data = get_parameters(device, loginfo_params)
+	if loginfo_data.loginfo == "ok" then
+		return true
+	end
+
+	-- Login on the device.
+	local login_params = {
 		goformId = "LOGIN",
 		password = helper.encode_base64(password)
 	}
-	set_parameter(device, params)
-	return true
+	local login_result = set_parameter(device, login_params)
+	return login_result.result == "0"
 end
 
 local function enable_dmz(device)
@@ -765,7 +794,6 @@ function Mapper:init_device(device)
 		}
 		return true
 	end
-	return nil
 end
 
 local function disable_dmz(device)
@@ -784,7 +812,7 @@ function Mapper:destroy_device(device, force)
 	return nil
 end
 
-function M.create(rt, pid)
+function M.create(rt, pid) -- luacheck: no unused args
 	runtime = rt
 
 	local mapper = {

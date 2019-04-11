@@ -15,7 +15,7 @@ local message_helper = require("web.uimessage_helper")
 local post_helper = require("web.post_helper")
 local content_helper = require("web.content_helper")
 local valEnumSel = post_helper.getValidateInEnumSelect
-local format, match = string.format, string.match
+local format, match, ngx = string.format, string.match, ngx
 
 local function resetreboot(path,value)
   proxy.set(path, value)
@@ -61,6 +61,7 @@ local vSII = post_helper.validateStringIsIP
 local aIPV = post_helper.advancedIPValidation
 local pIPV = post_helper.isPublicIP
 local gAV = post_helper.getAndValidation
+local vLXC = post_helper.validateLXC
 
 --the [value] a valid IPv4 address
 --the [value] is not the GW IP address
@@ -75,6 +76,10 @@ local function validateRelay(value, object, key)
     end
     if wan_ipaddr == value then
        return nil, T"Cannot use the gateway WAN IP address."
+    end
+    local success, errmsg = post_helper.reservedIPValidation(value)
+    if not success then
+       return nil, errmsg
     end
     --Adding localdevicemask in post to find the input is a network or broadcast IPv4 address in advancedIPValidation
     object["localdevmask"] = proxy.get("uci.network.interface.@lan.netmask")[1].value
@@ -121,8 +126,8 @@ for _, data in ipairs(wanConInfo) do
 end
 
 local relay_valid = {
-  uci_relay_server_ip = gAV(validateRelay, aIPV),
-  uci_relay_local_ip  = gAV(validateRelay, pIPV),
+  uci_relay_server_ip = gAV(validateRelay, aIPV, vLXC),
+  uci_relay_local_ip  = gAV(validateRelay, pIPV, vLXC),
   uci_relay_interface = valEnumSel(WanDetails),
 }
 
@@ -204,14 +209,14 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
           id = "resetting-msg"
         }
       }
-        local html = {}
-        html[#html + 1] = ui_helper.createAlertBlock(T"Restarting, please wait...", rebooting)
-        html[#html + 1] = ui_helper.createButton(T"Restart Device", T"Restart", "icon-refresh", wait_for_reboot)
-        html[#html + 1] = ui_helper.createAlertBlock(T"Resetting to factory defaults, please wait...", resetting)
-        html[#html + 1] = ui_helper.createButton(T"Factory Defaults", T"Reset", "icon-bolt", wait_for_reset)
-        ngx.print(html)
+      html = {}
+      html[#html + 1] = ui_helper.createAlertBlock(T"Restarting, please wait...", rebooting)
+      html[#html + 1] = ui_helper.createButton(T"Restart Device", T"Restart", "icon-refresh", wait_for_reboot)
+      html[#html + 1] = ui_helper.createAlertBlock(T"Resetting to factory defaults, please wait...", resetting)
+      html[#html + 1] = ui_helper.createButton(T"Factory Defaults", T"Reset", "icon-bolt", wait_for_reset)
+      ngx.print(html)
 
-         ngx.print('\
+        ngx.print('\
 \
 </fieldset>\
 \
@@ -222,26 +227,8 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   var refreshTimeOut = 5000;\
   var refreshDelay = 3000;\
   var target = $(".modal form").attr("action");\
+  var restartState = 0\
 \
-  function wait_for_webserver_running() {\
-    $.ajax({ url: target, timeout: refreshTimeOut, data: { check: "1"} })\
-    .done(function(data) {\
-      window.location.href = "/";\
-    })\
-    .fail(function() {\
-      window.setTimeout(wait_for_webserver_running, refreshDelay);\
-    });\
-  }\
-\
-  function wait_for_webserver_down() {\
-    $.ajax({ url: target, timeout: refreshTimeOut, data: { check: "1"}  })\
-    .done(function() {\
-      window.setTimeout(wait_for_webserver_down, refreshDelay);\
-    })\
-    .fail(function() {\
-      window.setTimeout(wait_for_webserver_running, refreshDelay);\
-    });\
-  }\
   function resetreboot(msg, msg_dst, action) {\
     msg_dst.after(msg);\
     msg.removeClass("hide");\
@@ -255,13 +242,25 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     return false;\
   }\
 \
-   $("#btn-system-reboot").click(function() {\
+  $("#btn-system-reboot").click(function() {\
+    restartState = 1;\
     return resetreboot($("#rebooting-msg"), $(this), "system_reboot");\
   });\
 \
-\
-$("#btn-system-reset").click(function() {\
-    return resetreboot($("#resetting-msg"), $(this), "system_reset");\
+  $("#btn-system-reset").click(function() {\
+    if (restartState === 1) {\
+      confirmationDialogue(\'');  ngx.print(T"Restart is in progress. Do you want to reset the gateway to Factory Defaults also?"); ngx.print('\', "');  ngx.print('Reset'); ngx.print('");\
+      $("#popUp").css("left", "27%");\
+      $("#ok, #cancel").click(function() {\
+        tch.removeProgress();\
+        if ($(this).attr("id") === "ok") {\
+          tch.showProgress("');  ngx.print(T'Resetting the Gateway to Factory defaults...'); ngx.print('");\
+          return resetreboot($("#resetting-msg"), $(this), "system_reset");\
+        }\
+      });\
+    } else {\
+      return resetreboot($("#resetting-msg"), $(this), "system_reset");\
+    }\
   });\
 \
 }());\

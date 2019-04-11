@@ -78,7 +78,9 @@ samba_device_valid () {
 # Set permission of MOUNTPOINT to 777.
 #
 samba_mountpoint_chmod777 () {
-  chmod 777 "${MOUNTPOINT}"
+  if [ -b "/dev/${DEVICE}" ] ; then
+    chmod 777 "${MOUNTPOINT}"
+  fi
 }
 
 # samba_get_sharename <sharename>
@@ -89,19 +91,24 @@ samba_get_sharename () {
   local _sharename=""
 
   if [ -n "${VENDOR}" ] ; then
-    _sharename="${_sharename}${VENDOR}_"
+    _sharename="${VENDOR}"
   fi
 
   if [ -n "${MODEL}" ] ; then
-    _sharename="${_sharename}${MODEL}_"
+    _sharename="${_sharename}_${MODEL}"
   fi
 
   if [ -n "${PARTITION}" ] ; then
-    _sharename="${_sharename}${PARTITION}_"
+    _sharename="${_sharename}_${PARTITION}"
   fi
 
+  # Remove all not allowed UCI section name chars from sharename because it will be used as a UCI section name (in samba config)
+  _sharename=${_sharename//[!a-zA-Z0-9_]}
+  # Trim share name formed to 30 characters so that total share name length will not cross 35 chars
+  _sharename=${_sharename:0:30}
+
   if [ -n "${HASH}" ] ; then
-    _sharename="${_sharename}${HASH}"
+    _sharename="${_sharename}_${HASH}"
   fi
 
   eval ${1}="${_sharename}"
@@ -147,7 +154,12 @@ samba_add_share () {
   fi
 
   cs_add_device_sambauci "${sharename}" "${shareconfig}" "${DEVICE}" "${filesystem}" "${MOUNTPOINT}" "${available}"
-  cs_add_device_sambaconfig "${sharename}" "${shareconfig}" "${MOUNTPOINT}" "${available}"
+
+  if [ "${available}" == "yes" ] ; then
+    /usr/bin/nqcsctrl +S $sharename $MOUNTPOINT $sharename
+  fi
+
+#  cs_add_device_sambaconfig "${sharename}" "${shareconfig}" "${MOUNTPOINT}" "${available}"
   cs_update_sambaconfig
 }
 
@@ -167,7 +179,14 @@ samba_del_share () {
   samba_log "Remove share ${sharename} (${shareconfig})"
 
   cs_del_device_sambauci "${sharename}"
-  cs_del_device_sambaconfig "${shareconfig}"
+
+  local available=""
+  cs_get_samba_filesharing "available"
+  if [ "${available}" == "yes" ] ; then
+    /usr/bin/nqcsctrl -S $sharename
+  fi
+
+#  cs_del_device_sambaconfig "${shareconfig}"
   cs_update_sambaconfig
 }
 
@@ -187,19 +206,21 @@ if [ "${ACTION}" == "add" ]; then
   # event was on the last device present. If so, reload/restart Samba to
   # (re)read the configuration.
   local disk=""
+  local count=""
   cs_get_device_disk "${DEVICE}" "disk"
+  cs_get_device_count "${disk}" "count"
 
-  if cs_is_disk_added "${disk}" ; then
+  if [ "${count}" -ge "1" ] ; then
     #turn on USB LED
     ubus send usb.usb_led '{"status":"on"}'
 
-    if cs_is_samba_running ; then
-      samba_log "Added disk ${disk} ... reload"
-      cs_reload_samba
-    else
-      samba_log "Added disk ${disk} ... restart"
-      cs_restart_samba
-    fi
+#    if cs_is_samba_running ; then
+#      samba_log "Added disk ${disk} ... reload"
+#      cs_reload_samba
+#    else
+#      samba_log "Added disk ${disk} ... restart"
+#      cs_restart_samba
+#    fi
   fi
 fi
 
@@ -220,12 +241,12 @@ if [ "${ACTION}" == "remove" ]; then
     #turn off USB LED
     ubus send usb.usb_led '{"status":"off"}'
 
-    if cs_is_samba_running ; then
-      samba_log "Removed disk ${disk} ... reload"
-      cs_reload_samba
-    else
-      samba_log "Removed disk ${disk} ... restart"
-      cs_restart_samba
-    fi
+#    if cs_is_samba_running ; then
+#      samba_log "Removed disk ${disk} ... reload"
+#      cs_reload_samba
+#    else
+#      samba_log "Removed disk ${disk} ... restart"
+#      cs_restart_samba
+#    fi
   fi
 fi

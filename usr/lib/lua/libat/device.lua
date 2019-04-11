@@ -1,5 +1,3 @@
-local pairs, string, type = pairs, string, type
-
 local ubus = require("ubus")
 local socket = require("socket")
 local atchannel = require("atchannel")
@@ -28,7 +26,10 @@ local vid_mappings = {
 	["19d2"] = "zte",
 	["0f3d"] = "sierra",
 	["1199"] = "sierra",
-	["2001"] = "mediatek",
+	["2001"] = { -- D-Link
+		["7e3d"] = "broadmobi",
+		default  = "mediatek"
+	},
 	["2020"] = "mediatek",
 	["2c7c"] = "quectel"
 }
@@ -41,11 +42,19 @@ local M = {}
 function Device:get_interface(interface_type)
 	interface_type = interface_type or self.default_interface_type
 	for _, i in pairs(self.interfaces) do
-		if i.type == interface_type and i.interface and type(i.interface.channel) == "userdata" then
+		if i.type == interface_type and i.interface and i.interface.channel then
 			return i.interface
 		end
 	end
 	return nil, "No AT channel available"
+end
+
+function Device:get_mode()
+	local intf, errMsg = self:get_interface()
+	if not intf then
+		return nil, errMsg
+	end
+	return intf.mode
 end
 
 function Device:probe()
@@ -55,7 +64,7 @@ function Device:probe()
 end
 
 local function command_blacklisted(device, command)
-	for _, blacklisted_command in ipairs(device.command_blacklist) do
+	for _, blacklisted_command in pairs(device.command_blacklist) do
 		if string.match(command, blacklisted_command) then
 			return true
 		end
@@ -71,18 +80,18 @@ local function do_send(device, send_function, params, retry, interface_type)
 	local intf, errMsg = device:get_interface(interface_type)
 	if not intf then return nil, errMsg end
 	if not retry then retry = 1 end
-	local ret, err, cme_err
 
-	if not atchannel.running(intf.channel) then
-		return nil, "channel closed"
+	if not intf:is_available() then
+		return nil, "channel not available"
 	end
 
-	for i=1, retry do
+	local ret, err, cme_err
+	for _=1, retry do
 		local start = (socket.gettime()*1000)
 		ret, err, cme_err = send_function(intf.channel, unpack(params))
 		local duration = ((socket.gettime()*1000)-start)
 		if not ret then
-			device.runtime.log:warning(string.format('Command "%s" failed after %.2fms', params[1], duration))
+			device.runtime.log:info(string.format('Command "%s" failed after %.2fms', params[1], duration))
 		else
 			device.runtime.log:debug(string.format('Command "%s" took %.2fms', params[1], duration))
 		end
@@ -98,12 +107,7 @@ end
 function Device:is_busy(interface_type)
 	local intf, errMsg = self:get_interface(interface_type)
 	if not intf then return nil, errMsg end
-
-	if not atchannel.running(intf.channel) then
-		return nil, "channel closed"
-	end
-
-	return atchannel.is_busy(intf.channel)
+	return intf:is_busy()
 end
 
 function Device:send_command(command, timeout, retry, interface_type)
@@ -142,8 +146,8 @@ local function do_start(device, start_function, params, interface_type)
 	local intf, errMsg = device:get_interface(interface_type)
 	if not intf then return nil, errMsg end
 
-	if not atchannel.running(intf.channel) then
-		return nil, "channel closed"
+	if not intf:is_available() then
+		return nil, "channel not available"
 	end
 
 	local ret, err, cme_err = start_function(intf.channel, unpack(params))
@@ -179,8 +183,8 @@ local function do_poll(device, poll_function, interface_type)
 	local intf, errMsg = device:get_interface(interface_type)
 	if not intf then return nil, errMsg end
 
-	if not atchannel.running(intf.channel) then
-		return nil, "channel closed"
+	if not intf:is_available() then
+		return nil, "channel not available"
 	end
 
 	local ret, err, cme_err = poll_function(intf.channel)
@@ -213,33 +217,61 @@ function Device:get_unsolicited_messages()
 						end
 					end
 					if not handled then
-						if helper.startswith(line, "+CREG:") then
+						if helper.startswith(line, "+CGREG:") then
 							local stat = network.parse_creg_state(line)
 							local state = network.creg_state_to_string(stat)
 							if state then
-								self.runtime.log:info("Network registration state changed to: " .. state)
+								self.runtime.log:notice("Network registration state changed to: " .. state)
 								if state == "registered" then
 									self:send_event("mobiled", { event = "network_registered", dev_idx = self.dev_idx })
-								elseif state == "not_registered" then
+								elseif state == "not_registered" or state == "not_registered_searching" then
+									self.runtime.log:debug("Flushing cache")
+									if self.cache['get_session_info'] then
+										self.cache['get_session_info'].info = {}
+									end
+									if self.cache['get_network_info'] then
+										self.cache['get_network_info'].info = {}
+									end
 									self:send_event("mobiled", { event = "network_deregistered", dev_idx = self.dev_idx })
 								end
 							end
 							handled = true
 						elseif helper.startswith(line, "RING") then
 							self:send_event("mobiled.voice", { event = "ring", dev_idx = self.dev_idx })
+							handled = true
 						elseif helper.startswith(line, "+CMT:") then
 							self:send_event("mobiled", { event = "sms_received", dev_idx = self.dev_idx })
+							handled = true
 						elseif helper.startswith(line, "+CMTI:") then
 							local id = tonumber(string.match(line, '+CMTI:%s?".-",(%d+)'))
 							self:send_event("mobiled", { event = "sms_received", dev_idx = self.dev_idx, message_id = id })
+							handled = true
+						elseif helper.startswith(line, "+CPIN:") then
+							local status = string.match(line, '^+CPIN:%s?(.-)$')
+							if status == "NOT READY" then
+								self.buffer.sim_info = {}
+								self:send_event("mobiled", { event = "sim_removed", dev_idx = self.dev_idx })
+							elseif status == "READY" then
+								self.buffer.sim_info = {}
+								self:send_event("mobiled", { event = "sim_initialized", dev_idx = self.dev_idx })
+							end
+							handled = true
+						elseif helper.startswith(line, "+CNEMIU:") then
+							local supported = string.match(line, '^+CNEMIU:%s?([01])$')
+							self:send_event("mobiled.voice", { dev_idx = self.dev_idx, event = "cs_emergency", supported = supported == '1' })
+							handled = true
+						elseif helper.startswith(line, "+CNEMS1:") then
+							local supported = string.match(line, '^+CNEMS1:%s?([01])$')
+							self:send_event("mobiled.voice", { dev_idx = self.dev_idx, event = "volte_emergency", supported = supported == '1' })
+							handled = true
 						end
 					end
 					if not handled then
-						self.runtime.log:debug("Received unsolicited data: " .. line .. " on port " .. interface.port)
+						self.runtime.log:info("Received unsolicited data: " .. line .. " on port " .. interface.port)
 					end
 				end
 				if entry.sms_pdu then
-					self.runtime.log:debug("SMS PDU received")
+					self.runtime.log:info("SMS PDU received")
 				end
 			end
 		end
@@ -309,6 +341,7 @@ function M.create(runtime, params, tracelevel)
 			{ proto = "dhcp" }
 		},
 		calls = {},
+		mmpbx_call_id_counter = 1,
 		command_blacklist = {},
 		buffer = {
 			sim_info = {},
@@ -318,7 +351,8 @@ function M.create(runtime, params, tracelevel)
 			network_info = {},
 			radio_signal_info = {},
 			device_capabilities = {},
-			firmware_upgrade_info = {}
+			firmware_upgrade_info = {},
+			voice_info = {}
 		},
 		interfaces = {},
 		network_interfaces = params.network_interfaces,
@@ -332,19 +366,33 @@ function M.create(runtime, params, tracelevel)
 	device.pid = params.pid
 	device.product = params.product
 
-	if vid_mappings[device.vid] then
-		local status, m = pcall(require, "libat." .. vid_mappings[device.vid])
-		if status and m then
-			device.mapper = m.create(runtime, device)
+	local create_interface = atinterface.create
+
+	-- Determine which vendor's flavour of AT commands to use.
+	local vendor = "generic"
+	local vid_mapping = vid_mappings[device.vid]
+	if vid_mapping then
+		local vid_type = type(vid_mapping)
+		if vid_type == "string" then
+			vendor = vid_mapping
+		elseif vid_type == "table" then
+			vendor = vid_mapping[device.pid] or vid_mapping.default or vendor
+		else
+			runtime.log:error("VID mapping is neither a string nor a table but a %s", vid_type)
 		end
-	else
-		local m = require("libat.generic")
+	end
+
+	local status, m = pcall(require, "libat." .. vendor)
+	if status and m then
 		device.mapper = m.create(runtime, device)
+		create_interface = m.create_interface or create_interface
+	elseif m then
+		runtime.log:error(m)
 	end
 
 	for _, port in pairs(device.interfaces) do
 		if port.type == device.default_interface_type then
-			local interface = atinterface.create(runtime, port.port)
+			local interface = create_interface(runtime, port.port)
 			local ret, errMsg = interface:open(tracelevel)
 			if not ret then
 				if errMsg then runtime.log:warning(errMsg) end

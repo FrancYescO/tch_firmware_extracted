@@ -20,7 +20,7 @@ local ddns = {
 
 local uci_helper = mapper("ucihelper")
 local open, popen, strmatch = io.open, io.popen, string.match
-local find, lower = string.find, string.lower
+local find, lower, format = string.find, string.lower, string.format
 
 local loadServices
 do
@@ -30,23 +30,24 @@ do
     local services = {}
     uci_helper.foreach_on_uci(ddns_binding, function(s)
       local name = s['.name']
-      serviceNames[#serviceNames + 1] = name
-      services[name] = s
+      if s['enabled'] == '1' then
+        serviceNames[#serviceNames + 1] = name
+        services[name] = s
+      end
     end)
     return serviceNames, services
   end
 end
 
-local function ddnsStatus()
+local function ddnsServiceStatus(service)
     local state = "No error received from server"
-    local services = loadServices()
 
     -- Currently we only support one service
-    if services[1] then
+    if service then
         --special process for namecheap,zoneedit,easydns,free
-        local errFile = "/var/run/ddns/" .. services[1] .. ".err"
-        local datFile = "/var/run/ddns/" .. services[1] .. ".dat"
-        local logFile = "/var/log/ddns/" .. services[1] .. ".log"
+        local errFile = "/var/run/ddns/" .. service .. ".err"
+        local datFile = "/var/run/ddns/" .. service .. ".dat"
+        local logFile = "/var/log/ddns/" .. service .. ".log"
         local cmdResult = nil
         local handle = open(errFile)
         if handle then
@@ -145,6 +146,16 @@ local function ddnsStatus()
         end
     end
     return state
+end
+
+local function ddnsStatus()
+  local services = loadServices()
+  local str = ''
+  for i, v in ipairs(services) do
+    local status = ddnsServiceStatus(v)
+    str = format("%s[%s]%s", v, status, str)
+  end
+  return str
 end
 
 local function ddnsActiveServices()

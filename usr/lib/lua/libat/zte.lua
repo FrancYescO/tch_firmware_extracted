@@ -1,4 +1,4 @@
-local pairs, string, tonumber = pairs, string, tonumber
+local match, tinsert = string.match, table.insert
 
 local helper = require("mobiled.scripthelpers")
 local atchannel = require("atchannel")
@@ -29,7 +29,7 @@ end
 function Mapper:get_radio_signal_info(device, info)
 	local ret = device:send_singleline_command('AT+ZRSSI', '+ZRSSI:')
 	if ret then
-		local rssi, ecio, rscp = string.match(ret, '+ZRSSI:%s*(%d+),(%d+),(%d+)')
+		local rssi, ecio, rscp = match(ret, '+ZRSSI:%s*(%d+),(%d+),(%d+)')
 		if rssi then info.rssi = (tonumber(rssi)*-1) end
 		if ecio and ecio ~= "1000" then info.ecio = (tonumber(ecio)*-1)/2 end
 		if rscp and rscp ~= "1000" then info.rscp = (tonumber(rscp)*-1)/2 end
@@ -40,7 +40,7 @@ function Mapper:get_pin_info(device, info, type)
 	if type == "pin1" then
 		local ret = device:send_singleline_command('AT+ZPINPUK=?', '+ZPINPUK:')
 		if ret then
-			info.unlock_retries_left, info.unblock_retries_left = string.match(ret, '+ZPINPUK:%s*(%d+),(%d+)')
+			info.unlock_retries_left, info.unblock_retries_left = match(ret, '+ZPINPUK:%s*(%d+),(%d+)')
 		end
 	end
 end
@@ -53,7 +53,7 @@ function Mapper:configure_device(device, config)
 	-- ZTE workaround for the +ZUSIMR:2 messages
 	for _, intf in pairs(device.interfaces) do
 		if intf.interface and intf.interface.channel then
-			for i=1,3 do
+			for _=1,3 do
 				local ret = atchannel.send_singleline_command(intf.interface.channel, 'AT+CPMS?', '+CPMS:')
 				if ret then break end
 				helper.sleep(2)
@@ -77,9 +77,9 @@ function Mapper:configure_device(device, config)
 	return true
 end
 
-function Mapper:unsolicited(device, data, sms_data)
+function Mapper:unsolicited(device, data)
 	if helper.startswith(data, "+ZDONR:") then
-		local roaming_state = string.match(data, '+ZDONR:%s*".-",%d*,%d*,".-","(.-)"')
+		local roaming_state = match(data, '+ZDONR:%s*".-",%d*,%d*,".-","(.-)"')
 		if roaming_state then
 			if roaming_state == "ROAM_OFF" then
 				device.buffer.network_info.roaming_state = "home"
@@ -93,13 +93,13 @@ function Mapper:unsolicited(device, data, sms_data)
 end
 
 -- TODO check if this is still needed
-function Mapper:network_scan(device, start)
+function Mapper:network_scan(device, start) --luacheck: no unused args
 	if start then
 		helper.sleep(2)
 	end
 end
 
-function M.create(runtime, device)
+function M.create(runtime, device) --luacheck: no unused args
 	local mapper = {
 		mappings = {
 			network_scan = "runfirst"
@@ -124,13 +124,13 @@ function M.create(runtime, device)
 
 	if modem_ports then
 		for _, port in pairs(modem_ports) do
-			table.insert(device.interfaces, { port = port, type = "modem" })
+			tinsert(device.interfaces, { port = port, type = "modem" })
 		end
 	end
 
 	if control_ports then
 		for _, port in pairs(control_ports) do
-			table.insert(device.interfaces, { port = port, type = "control" })
+			tinsert(device.interfaces, { port = port, type = "control" })
 		end
 	end
 

@@ -113,8 +113,8 @@ local codec_valid = {
 
 local codec_options = {}
 for i=1,2,1 do
-  codec_options[#codec_options+1]={
-    canEdit = true,
+codec_options[#codec_options+1]={
+	canEdit = true,
     canAdd = false,
     canDelete = false,
     tableid = string.format("codecFXS%s",i),
@@ -157,14 +157,14 @@ end
 			ngx.print(html)
 		%>
     </fieldset>
-  <% if role == "engineer"  or role == "ispuser" then %>
+  <% if role == "engineer" or role == "ispuser" then %>
     <fieldset>
       <legend><%= T"Codec Assignment on FXS1" %></legend>
 		<%= ui_helper.createTable(codec_columns, codec_data_FXS1, codec_options[1], nil, codec_helpmsg_FXS1) %>
     </fieldset>
 	<fieldset>
       <legend><%= T"Codec Assignment on FXS2" %></legend>
-	  	<%= ui_helper.createTable(codec_columns, codec_data_FXS2, codec_options[2], nil, codec_helpmsg_FXS2) %>
+		<%= ui_helper.createTable(codec_columns, codec_data_FXS2, codec_options[2], nil, codec_helpmsg_FXS2) %>
     </fieldset>
 	<% end %>
   </form>

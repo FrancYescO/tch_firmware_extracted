@@ -13,17 +13,12 @@ local message_helper = require("web.uimessage_helper")
 local content_helper = require("web.content_helper")
 local portslist = require("portslist_helper")
 local protolist = require("protolist_helper")
-local hosts_ac, hosts_ac_v6 = require("web.uinetwork_helper").getAutocompleteHostsList()
+local hosts_ac, hosts_ac_v6 = require("web.uinetwork_helper").getAutocompleteHostsList(true)
 local remove = table.remove
 local role = ngx.ctx.session:getrole()
 local str_format, str_match, str_untaint = string.format, string.match, string.untaint
 local uniqueKey = post_helper.getRandomKey()
-
-
-local tech = false
-if role == "engineer" then
-	tech = true
-end
+local proxy = require("datamodel")
 
 local outgoingpolicy = {
     {"ACCEPT", T"ACCEPT"},
@@ -42,17 +37,19 @@ local fw_levels = {
     {"high", T"<strong>High</strong>"},
 }
 
-if tech then
-	fw_levels[#fw_levels + 1] = {"user", T"<strong>User</strong>"}
+if role == "engineer" then
+  fw_levels[#fw_levels + 1] = {"user", T"<strong>User</strong>"}
 end
 
 local fw_params = {
     fwv4_ping = "rpc.network.firewall.internetpingipv4",
-	fw_ipv6 = "Device.Firewall.X_000E50_EnableIPv6",
+    fw_ipv6 = "Device.Firewall.X_000E50_EnableIPv6",
     fwv6_ping = "rpc.network.firewall.internetpingipv6",
     fw_level = "rpc.network.firewall.mode",
     fw_outgoing_policy = "rpc.network.firewall.useroutgoingdefault",
     fw_incoming_policy = "rpc.network.firewall.userincomingdefault",
+    fwv4_stealthmode = "rpc.network.firewall.stealthmode_ipv4",
+    fwv6_stealthmode = "rpc.network.firewall.stealthmode_ipv6"
 }
 
 -- Retrieve GW IP + netmask for use by validation function
@@ -81,11 +78,13 @@ local isNA = post_helper.isNetworkAddress
 
 local fw_valid = {
     fwv4_ping = vB,
-	fw_ipv6 = vB,
+    fw_ipv6 = vB,
     fwv6_ping = vB,
     fw_level = gVIES(fw_levels),
     fw_outgoing_policy = gVIES(outgoingpolicy),
     fw_incoming_policy = gVIES(incomingpolicy),
+    fwv4_stealthmode = vB,
+    fwv6_stealthmode = vB,
 }
 
 local content = post_helper.handleQuery(fw_params, fw_valid)
@@ -167,7 +166,7 @@ local fwrule_columns = {
     name = "src_port",
     param = "src_port",
     type = "text",
-    attr = { input = { class="span1", maxlength="5" }, autocomplete = portslist },
+    attr = { input = { class="span1", maxlength="11" }, autocomplete = portslist },
   },
   {
     header = T"Dst IP/Subnet",
@@ -181,7 +180,7 @@ local fwrule_columns = {
     name = "dest_port",
     param = "dest_port",
     type = "text",
-    attr = { input = { class="span1", maxlength="5" }, autocomplete = portslist },
+    attr = { input = { class="span1", maxlength="11" }, autocomplete = portslist },
   },
   {
     header = T"DSCP",
@@ -333,16 +332,16 @@ local fwrule_valid = {
     enabled = vB,
     target = gVIES(fwrules_targets),
     protocol = gVIES(protolist.IPv4Protocol),
-    src_ip = validateSourceIP,
+    src_ip = gAV(validateSourceIP, post_helper.reservedIPValidation),
     src_port = gOV(vSIPR),
-    dest_ip = vIP4AS,
+    dest_ip = gAV(vIP4AS, post_helper.reservedIPValidation),
     dest_port = rulesDuplicateCheck("rpc.network.firewall.userrule.", "fwrules",fwrule_columns),
     dscp = gVIES(fwrules_dscp),
 }
 
 local fwrule_defaultObject = {
-    src = "lan",
-    dest = "wan"
+    src = "wan",
+    dest = "lan"
 }
 
 -- PING WHITELIST RULES START
@@ -414,6 +413,13 @@ local fwrulev4_ping_columns = {
     type = "hidden",
     default = "ipv4",
   },
+  {
+    header = "",
+    name = "proto",
+    param = "proto.@1.value",
+    default = "icmp",
+    type = "hidden",
+  },
 }
 
 local fwrulev6_ping_columns = {
@@ -448,6 +454,13 @@ local fwrulev6_ping_columns = {
      param = "family",
      type = "hidden",
      default = "ipv6",
+  },
+  {
+    header = "",
+    name = "proto",
+    param = "proto.@1.value",
+    default = "icmp",
+    type = "hidden",
   },
 }
 
@@ -504,7 +517,6 @@ local fwrule_ping_defaultObject = {
     src = "wan",
     target = "ACCEPT",
     name = "WhiteList",
-    proto = { "icmp" }
 }
 
 -- pingrule handleTableQuery parameter to check validity of new entry values
@@ -696,6 +708,16 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
             class = "alert-info monitor-fw_level monitor-user " .. fwallmsg_visible_status["user"]
         },
     }
+    local ipv4_stealthmode_attr = {
+        alert = {
+            class = "alert-info monitor-fwv4_stealthmode monitor-1"
+        },
+    }
+    local ipv6_stealthmode_attr = {
+        alert = {
+            class = "alert-info monitor-fwv6_stealthmode monitor-1"
+        },
+    }
     ngx.print(
         ui_helper.createSliderSelect(T"Level", "fw_level", fw_levels, content["fw_level"], fwlevel_attr),
         ui_helper.createAlertBlock(T"In <strong>low mode</strong>, firewall allows all outbound connections and rejects unknown incoming connections but acknowledges presence of the gateway.", lax_attr),
@@ -703,6 +725,12 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
         ui_helper.createAlertBlock(T"In <strong>high mode</strong>, firewall allows outgoing connections to HTTP, HTTPS, SMTP, POP3, IMAP, SSH services and silently drops unknown incoming connections. This may impact on web services like Internet Speed Test.", high_attr),
         ui_helper.createAlertBlock(T"In <strong>user mode</strong>, individual firewall rules may be configured as well as the default behavior.", user_attr)
     )
+    if role == "engineer" then
+      ngx.print(ui_helper.createSwitch(T"IPv4 Stealth Mode ", "fwv4_stealthmode", content["fwv4_stealthmode"], switch_class_enable))
+      ngx.print(ui_helper.createAlertBlock(T"<strong>Enabling this will overwrite InternetIPv4 ping selections</strong>,firewall will drop all ICMPv4 services for incoming connections",ipv6_stealthmode_attr))
+      ngx.print(ui_helper.createSwitch(T"IPv6 Stealth Mode ", "fwv6_stealthmode", content["fwv6_stealthmode"], switch_class_enable))
+      ngx.print(ui_helper.createAlertBlock(T"<strong>Enabling this will overwrite InternetIPv6 ping selections</strong>,firewall will drop all ICMPv6 services for incoming connections",ipv4_stealthmode_attr))
+    end
   ngx.print('\
 </fieldset>\
 \
@@ -759,9 +787,9 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     ngx.print(ui_helper.createSwitch(T"Answer All IPv4 Internet pings", "fwv4_ping", content["fwv4_ping"], switch_class_enable))
     ngx.print(ui_helper.createAlertBlock(T"Answer only these selected Internet IPv4 pings", pingrespv4_alert_attr))
     ngx.print(ui_helper.createTable(fwrulev4_ping_columns, fwrulev4_ping_data, fwrulev4_ping_options, pingrespv4_table_attr, fwrulev4_ping_helpmsg))
+    ngx.print(ui_helper.createSwitch(T"IPv6 Firewall", "fw_ipv6", content["fw_ipv6"]))
 
-	ngx.print(ui_helper.createSwitch(T"IPv6 Firewall", "fw_ipv6", content["fw_ipv6"]))
-	
+
     ngx.print(ui_helper.createSwitch(T"Answer All IPv6 Internet pings", "fwv6_ping", content["fwv6_ping"], switch_class_enable))
     ngx.print(ui_helper.createAlertBlock(T"Answer only these selected Internet IPv6 pings", pingrespv6_alert_attr))
     ngx.print(ui_helper.createTable(fwrulev6_ping_columns, fwrulev6_ping_data, fwrulev6_ping_options, pingrespv6_table_attr, fwrulev6_ping_helpmsg))

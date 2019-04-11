@@ -12,6 +12,8 @@ local switchName = nil
 local session = ngx.ctx.session
 if session:hasAccess("/modals/firewall-modal.lp") then
     modalPath = "/modals/firewall-modal.lp"
+elseif not session:isdefaultuser() then
+    return
 end
 local content = {
     mode = "rpc.network.firewall.mode",

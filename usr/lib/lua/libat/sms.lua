@@ -1,4 +1,4 @@
-local string = string
+local format, match, gmatch, tinsert = string.format, string.match, string.gmatch, table.insert
 
 local pdu = require("pdu")
 
@@ -12,7 +12,7 @@ function M.get_messages(device)
 			if line.response and line.pdu then
 				local message = pdu.decode(line.pdu)
 				if message then
-					local id, status = string.match(line.response, "+CMGL:%s?(%d+),%s?(%d+)")
+					local id, status = match(line.response, "+CMGL:%s?(%d+),%s?(%d+)")
 					id = tonumber(id)
 					if id then
 						if status == "0" then
@@ -21,7 +21,7 @@ function M.get_messages(device)
 							message.status = "read"
 						end
 						message.id = id
-						table.insert(messages, message)
+						tinsert(messages, message)
 					end
 				end
 			end
@@ -35,13 +35,13 @@ function M.send(device, number, message)
 	if pdu_str then
 		-- Set tpLayerLength to half (hex encoding) of string length and subtract 1 for default SMSC added in PDU library
 		local tpLayerLength = ((#pdu_str/2) - 1)
-		return device:send_sms(string.format("AT+CMGS=%d", tpLayerLength), pdu_str, "+CMGS:", 60 * 1000) or nil, "Failed to send message"
+		return device:send_sms(format("AT+CMGS=%d", tpLayerLength), pdu_str, "+CMGS:", 60 * 1000) or nil, "Failed to send message"
 	end
 	return nil, errMsg
 end
 
 function M.delete(device, message_id)
-	return device:send_command(string.format("AT+CMGD=%d", message_id))
+	return device:send_command(format("AT+CMGD=%d", message_id))
 end
 
 function M.info(device)
@@ -52,7 +52,7 @@ function M.info(device)
 	}
 	local ret = device:send_singleline_command("AT+CPMS?", "+CPMS:")
 	if ret then
-		info.max_messages = tonumber(string.match(ret, '+CPMS:%s?".-",%s?%d+,%s?(%d+)'))
+		info.max_messages = tonumber(match(ret, '+CPMS:%s?".-",%s?%d+,%s?(%d+)'))
 	end
 	ret = M.get_messages(device)
 	if ret then
@@ -78,13 +78,13 @@ function M.init(device)
 	local ret = device:send_singleline_command('AT+CPMS=?', '+CPMS:')
 	if ret then
 		local storages = {}
-		for section in string.gmatch(ret, '%(([A-Z0-9a-z ",/_]-)%)') do
+		for section in gmatch(ret, '%(([A-Z0-9a-z ",/_]-)%)') do
 			local store = {}
-			for storage in string.gmatch(section, '([^,]+)') do
+			for storage in gmatch(section, '([^,]+)') do
 				storage = string.gsub(storage, '"', '')
 				store[storage] = true
 			end
-			table.insert(storages, store)
+			tinsert(storages, store)
 		end
 		if storages[1] and storages[1]["ME"] then
 			device:send_singleline_command('AT+CPMS="ME","ME","ME"', '+CPMS:')

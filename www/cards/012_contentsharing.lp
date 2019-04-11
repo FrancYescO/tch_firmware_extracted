@@ -84,7 +84,7 @@ for i, v in ipairs(usb_sys_content) do
                 end
         end
         if check == 1 then
-                local port = sub(v["path"],#v["path"])
+		local port = sub(v["path"],#v["path"])
                 usbtab["usb"..port] = {value=T"USB Port"..port..": "..v["product"], usbcon = "green"}
         end
 end

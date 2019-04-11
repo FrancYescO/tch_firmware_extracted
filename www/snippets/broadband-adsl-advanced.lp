@@ -1,6 +1,7 @@
-<%
--- NG-59939
+--pretranslated: do not change this file
+ 
 -- Enable localization
+-- NG-59939
 gettext.textdomain('webui-core')
 
 local lp = require("web.lp")
@@ -8,7 +9,7 @@ local post_helper = require("web.post_helper")
 local content_helper = require("web.content_helper")
 local message_helper = require("web.uimessage_helper")
 local ui_helper = require("web.ui_helper")
-local tim_helper = require("web.tim_helper")
+local tim_helper = require("tim_helper")
 
 lp.include("broadband-xdsl.lp")
 
@@ -19,10 +20,10 @@ if role == "engineer" or role == "ispuser" then
 	tech = true
 end
 
-local allowed_encs = {                                                                                        
-    {"llc",T"LLC"},                                                                                           
-    {"vcmux",T"VCMUX"}                                                                                        
-}           
+local allowed_encs = {
+    {"llc",T"LLC"},
+    {"vcmux",T"VCMUX"}
+}
 
 local wan = {
     iface = "uci.network.interface.@wan.ifname",
@@ -50,14 +51,14 @@ if iface then
     }
     content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
 end
-%>
-
-<fieldset>
-  <%
+  ngx.print('\
+\
+<fieldset>\
+  ');  
     ngx.print(ui_helper.createMessages(message_helper.popMessages()))
-  %>
-  <legend><%= T"Internet VPC" %></legend>
-  <%
+    ngx.print('\
+  <legend>');  ngx.print( T"Internet VPC" ); ngx.print('</legend>\
+  ');  
     local html = {}
     if tech then
       if content and content.adsl_vp and content.adsl_vc and content.adsl_enc then
@@ -70,14 +71,14 @@ end
         html[#html + 1]=  ui_helper.createAlertBlock(T"Configuration of VP/VC not available")
       end
     else
-	if content and content.adsl_vp and content.adsl_vc then
-          html[#html + 1] = ui_helper.createLabel(T"VP", content["adsl_vp"])
-	  html[#html + 1] = ui_helper.createLabel(T"VC", content["adsl_vc"])
-	else
- 	  html[#html + 1]=  ui_helper.createAlertBlock(T"VP/VC is not configured")
-	end
+      if content and content.adsl_vp and content.adsl_vc then
+        html[#html + 1] = ui_helper.createLabel(T"VP", content["adsl_vp"])
+	html[#html + 1] = ui_helper.createLabel(T"VC", content["adsl_vc"])
+      else
+	html[#html + 1]=  ui_helper.createAlertBlock(T"VP/VC is not configured")
+      end
     end
-
     ngx.print(html)
-  %>
-</fieldset>
+    ngx.print('\
+</fieldset>\
+'); 

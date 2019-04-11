@@ -8,7 +8,11 @@ local dyntab_helper = require("web.dyntab_helper")
 
 local imh = require("internetmode_helper")
 local tabdata = dyntab_helper.process(imh)
+local session = ngx.ctx.session
 
+if not session:hasAccess("/modals/internet-modal.lp") and not session:isdefaultuser() then
+  return
+end
   ngx.print('\
 \
 <div class="span3">\

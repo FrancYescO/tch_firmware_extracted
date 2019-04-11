@@ -11,10 +11,6 @@ local cursor = uci.cursor()
 
 local IPTABLES_CMDS = { "iptables", "ip6tables" }
 
--- Logger
-
-local log
-
 -- Uloop timer
 
 local timer
@@ -24,7 +20,6 @@ local interval = (tonumber(gwfd.get_uci_param("ngwfdd.interval.conntrack")) or 1
 
 local fifo_file_path = arg[1]
 local conntrack_cache
-local accel_type
 
 local REGEX_CONNTRACK_STAT = "(%x+)%s+%x+%s+%x+%s+(%x+)%s+%x+%s+%x+%s+%x+%s+%x+%s+%x+%s+%x+%s+(%x+)%s+(%x+)%s+%x+%s+(%x+)"
 local function parse_conntrack_stat()
@@ -113,7 +108,7 @@ local function parse_uci(state)
   local config = "firewall"
   local counter
 
-  local function increment_counter(s)
+  local function increment_counter()
     counter = counter + 1
   end
 
@@ -194,7 +189,7 @@ end
 -- Main code
 uloop.init()
 
-log = gwfd.init("gwfd_conntrack", 6, { init_transformer = true })
+gwfd.init("gwfd_conntrack", 6, { init_transformer = true })
 
 conntrack_cache = read_cached_values()
 

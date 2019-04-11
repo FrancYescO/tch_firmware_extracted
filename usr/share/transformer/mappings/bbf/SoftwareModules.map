@@ -53,7 +53,6 @@ local Device_SoftwareModules_ExecEnv_i_ = {
     minEntries = 0,
     maxEntries = math.huge,
     aliasParameter = "Alias",
-    aliasDefault = "Name",
     parameters = {
       Enable = {
         access = "readOnly",  -- readWrite currently not supported
@@ -203,8 +202,14 @@ local Device_SoftwareModules_ExecEnv_i_ = {
         targetParent = "#ROOT.DeviceInfo.Processor.{i}.",
       },
 --]]
+      X_000E50_Reboot = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
     }
-  }
+  },
+  aliasDefault = "Name",
 }
 
 do
@@ -275,7 +280,8 @@ do
     Vendor = get,
     Version = get,
     ParentExecEnv = "",
-    ActiveExecutionUnits = get_active_EUs
+    ActiveExecutionUnits = get_active_EUs,
+    X_000E50_Reboot = "0"
   }
 
   Device_SoftwareModules_ExecEnv_i_.getall = function(_, key)
@@ -293,10 +299,28 @@ do
   local function dummy_set()
   end
 
+  local function lxc_reboot(mapping, param, value, key)
+    if value == "1" then
+      local container_name = get(mapping, "Name", key)
+      if container_name == "native" then
+         return nil,"cannot reboot native ExecEnv"
+      end
+      local f = io.open("/tmp/.lxc_name","w")
+      if f then
+        f:write(container_name)
+        f:close()
+        commitapply:newset("Device.SoftwareModules.ExecEnv.{i}.X_000E50_Reboot")
+      else
+        return nil, "unexpected write error"
+      end
+    end
+  end
+
   Device_SoftwareModules_ExecEnv_i_.set = {
     InitialRunLevel = dummy_set,
     RequestedRunLevel = dummy_set,
-    InitialExecutionUnitRunLevel = dummy_set
+    InitialExecutionUnitRunLevel = dummy_set,
+    X_000E50_Reboot = lxc_reboot,
   }
 end
 
@@ -584,11 +608,11 @@ local Device_SoftwareModules_ExecutionUnit_i_ = {
         type = "string",
         max = "256",
       },
+--]]
       AutoStart = {
         access = "readWrite",
         type = "boolean",
       },
---]]
       RunLevel = {
         access = "readWrite",
         type = "unsignedInt",
@@ -681,6 +705,7 @@ local Device_SoftwareModules_ExecutionUnit_i_ = {
 
 do
   local dm_to_ubus_names = {
+    AutoStart = "autostart",
     EUID = "ID",
     Name = "name",
     ExecEnvLabel = "name",
@@ -732,6 +757,8 @@ do
     if paramname == "RequestedState" then
       local method = (paramvalue == "Idle") and "stop" or "start"
       actions[#actions + 1] = { method = method, properties = { ID = key } }
+    elseif paramname == "AutoStart" then
+      actions[#actions + 1] = { method = "modify_package", ID = key, properties = { autostart = paramvalue }}
     end
   end
 

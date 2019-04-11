@@ -1,4 +1,3 @@
--- NG-70976 commented line #85, NG-79929 reverted NG-70976 to use unhide_patterns
 -- Automatically generated from InternetGatewayDevice:1.14 and Device:2.10
 -- using generator version 2.3
 local Multi_ManagementServer_ = {
@@ -82,7 +81,6 @@ local Multi_ManagementServer_ = {
       },
       ConnectionRequestPassword = {
         access = "readWrite",
---NG-79929 reverted workaround to now supported unhide_pattern
         hidden = "true",
         type = "string",
         max = "256",
@@ -308,6 +306,12 @@ local Multi_ManagementServer_ = {
         type = "string",
         description = "Comma-separated list of IP address ranges (ip/mask) that are allowed to initiate a connection request."
       },
+      X_000E50_LastConnectionTime = {
+        access = "readOnly",
+        type = "string",
+        description = "The last time an attempt was made to setup a TR-069 session in format, Wed Jan 25 14:05:53 2017."
+      },
+
       -- InformParameterNumberOfEntries
       -- automatically created when Device.ManagementServer.InformParameter.{i}. is loaded
 
@@ -335,6 +339,7 @@ local cwmpOption = {
   ["ManageableDeviceNotificationLimit"] = "manageabledevice_notification_limit",
   ["X_000E50_DelayUpgrade"] = "upgrade_switchovertype",
   ["X_000E50_ConnectionRequestAllowedIPs"] = "connectionrequest_allowedips",
+  ["X_000E50_LastConnectionTime"] = "last_session_try",
 }
 
 local mapper = mapper
@@ -349,11 +354,29 @@ local transactions = {}
 local uci = require("uci")
 local find, sub, gmatch = string.find, string.sub, string.gmatch
 local inet = require("tch.inet")
+local crypto = require("tch.simplecrypto")
+local posix = require("tch.posix")
+local clock_gettime = posix.clock_gettime
+local CLOCK_MONOTONIC = posix.CLOCK_MONOTONIC
 
 local function removeFromState(option)
   local cursor = uci.cursor(nil,"/var/state") -- Can not use ucihelper, because it does not contain this kind of cursor.
   cursor:revert("cwmpd", "cwmpd_config", option)
   cursor:close()
+end
+
+local function getLastConnectionTime(param)
+  local last_connection_time
+  cwmpBinding.option = cwmpOption[param]
+  local last_session_try_time = tonumber(getFromUci(cwmpBinding))
+
+  if last_session_try_time then
+    local current_mono_time = clock_gettime(CLOCK_MONOTONIC)
+    local current_real_time = clock_gettime(posix.CLOCK_REALTIME)
+    local session_try_real_time = current_real_time - (current_mono_time - last_session_try_time)
+    last_connection_time = os.date("%c", session_try_real_time)
+  end
+  return last_connection_time or ""
 end
 
 local function getManageableDeviceNotificationLimit(param)
@@ -462,6 +485,8 @@ Multi_ManagementServer_.get = function(mapping, param)
     return "0"
   elseif param == "ManageableDeviceNotificationLimit" then
     return getManageableDeviceNotificationLimit(param)
+  elseif param == "X_000E50_LastConnectionTime" then
+    return getLastConnectionTime(param)
   end
   local default
   if param == "X_000E50_DelayUpgrade" then
@@ -486,6 +511,16 @@ Multi_ManagementServer_.set = function(mapping, param, value)
     value, errMsg = setConnectionRequestAllowedIPs(value)
     if not value then
       return nil, errMsg
+    end
+  end
+  if param == "Password" or param == "ConnectionRequestPassword" then
+    cwmpBinding.option = "encrypt_passwords"
+    local encryptPasswords = getFromUci(cwmpBinding)
+    if encryptPasswords == "1" then
+      value, errMsg = crypto.encrypt(value, crypto.AES_256_CBC)
+      if not value then
+        return nil, errMsg
+      end
     end
   end
   cwmpBinding.option = cwmpOption[param]

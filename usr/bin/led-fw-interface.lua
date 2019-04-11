@@ -67,6 +67,8 @@ events['mmbrcmfxs.profile.status'] = function(data)
             packet[device] = "OK-OFF"
         elseif ((status["incMapStatus"] == "MMMAP_INCMAP_DEVICE_MAPPED_ERROR") or (status["outMapStatus"] == "MMMAP_OUTMAP_DEVICE_MAPPED_ERROR")) then
             packet[device] = "NOK"
+        elseif ((status["incMapStatus"] == "MMMAP_INCMAP_DEVICE_MAPPED_EMERGENCY") or (status["outMapStatus"] == "MMMAP_INCMAP_DEVICE_MAPPED_EMERGENCY")) then
+            packet[device] = "OK-EMERGENCY"
         else
             packet[device] = "OK-ON"
         end

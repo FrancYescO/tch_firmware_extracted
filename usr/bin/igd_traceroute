@@ -2,7 +2,7 @@
 
 local tonumber, assert, io, math, string =
       tonumber, assert, io, math, string
-local format, match, open = string.format, string.match, io.open
+local format, match, open, lower = string.format, string.match, io.open, string.lower
 local logger = require 'transformer.logger'
 local cursor = require("uci").cursor()
 local common = require 'transformer.mapper.nwcommon'
@@ -52,7 +52,7 @@ local function traceroute(user)
   timeout = math.floor(tonumber(timeout) / 1000)
   size = tonumber(size)
   hopcount = tonumber(hopcount)
-  type = type == "ipv6" and 6 or 4
+  type = lower(type) == "ipv6" and 6 or 4
 
   -- get logical interface and convert to physical
   local iface = cursor:get(config, user, "interface")
@@ -110,8 +110,10 @@ local function traceroute(user)
   --    traceroute: bad address 'foo.bar'
   if match(output, "^traceroute: bad address") then
     state = "Error_CannotResolveHostName"
+  elseif match(output, "traceroute: can't connect to remote host") then
+    state = user == "igd" and "Error_Other" or "Error_NoRouteToHost"
   else
-    local fh, msg = io.open("/tmp/traceroute_"..user, "w")
+    local fh, msg = open("/tmp/traceroute_"..user, "w")
     assert(fh, msg)
     fh:write(format('%d\n', elapsed))
     fh:write(format('%s\n', ipaddr_used or ""))

@@ -31,7 +31,6 @@ local usage_msg = [[
     -F  Set the don't fragment bit
     -I  Use ICMP ECHO instead of UDP datagrams
     -l  Display the TTL value of the returned packet
-    -d  Set SO_DEBUG options to socket
     -n  Print numeric addresses
     -r  Bypass routing tables, send directly to HOST
     -v  Verbose

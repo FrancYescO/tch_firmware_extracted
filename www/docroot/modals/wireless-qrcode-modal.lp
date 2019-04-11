@@ -24,6 +24,7 @@ local secmodes = setmetatable({
 
 local content = {
     ssid = ifacepath .. getiface .. ".ssid",
+    device = ifacepath .. getiface .. ".device",
     secmode = appath .. getap .. ".security_mode",
     wepkey = appath .. getap .. ".wep_key",
     wpakey = appath .. getap .. ".wpa_psk_key",
@@ -86,7 +87,9 @@ end
     </form>\
 </div>\
 \
-');  ngx.print( ui_helper.createFooter() ); ngx.print('\
+<div class="modal-footer">\
+  <div id="btn-close" class="btn btn-primary btn-large">');  ngx.print(T"Close"); ngx.print('</div>\
+</div>\
 \
 <script>\
 $(function(){\
@@ -100,6 +103,12 @@ $(function(){\
     qr.createImgTag(typeNumber);\
     var html = qr.createTableTag(typeNumber);\
     $("#qrcode").html(html)\
+\
+    $("#btn-close").click(function() {\
+      tch.loadModal(\'modals/wireless-modal.lp?radio=');  ngx.print(content.device); ngx.print('&iface=');  ngx.print(getiface); ngx.print('\', \'\', function() {\
+        $(".modal").modal();\
+      });\
+    });\
   });\
 </script>\
 '); 

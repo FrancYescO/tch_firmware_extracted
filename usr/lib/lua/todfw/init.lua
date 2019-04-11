@@ -17,6 +17,42 @@ local log_config = {
 
 local weektimems = 604800000 -- in msec
 
+function systimesynched()
+    local ntpsynced = '0'
+	local i, j
+
+    io.input("/var/state/system")
+    while true do
+        local line = io.read()
+        if line == nil then
+            break
+        end
+
+        i, j = string.find(line, "system.ntp.synced=")
+        if i ~= nil and j ~= nil then
+            ntpsynced = string.sub(line, j + 2, j + 2)
+            break
+        end
+    end
+
+    if ntpsynced == nil or ntpsynced == "" then
+        ntpsynced = '0'
+    end
+
+    return ntpsynced
+end
+
+function resettimer(timetb)
+    if timetb.tout < 0 then
+        local newtout = weektimems + timetb.tout
+        timetb.utimer:set(newtout)
+        timetb.tout = newtout
+    else
+        timetb.utimer:set(weektimems)
+        timetb.tout = weektimems
+    end
+end
+
 function M.start(global, actionconfig)
     -- action list structure:
     -- { action_sectionname1 = { 
@@ -135,14 +171,7 @@ function M.start(global, actionconfig)
 
         -- reset the timer with new timeout of next week this time
         if timetb.periodic == true then
-            if timetb.tout < 0 then
-                local newtout = weektimems + timetb.tout
-                timetb.utimer:set(newtout)
-                timetb.tout = newtout
-            else
-                timetb.utimer:set(weektimems)
-                timetb.tout = weektimems
-            end
+            resettimer(timetb)
         elseif timetb.periodic == false then
             if timetb.cbtype == "start" and timetb.active == false then
                 -- aperiodic timer, cancel the start timer if it has no corresponding timeslot.
@@ -153,39 +182,51 @@ function M.start(global, actionconfig)
                 -- turn off aperiodic timer, it must be reenabled explicitly if user wants to trigger it again.
                 cursor:set(config, timername, "enabled", '0')
                 cursor:commit(config)
+            elseif timetb.cbtype == "start" and timetb.active == true then
+                -- still reset start timer for aperiodic timeslot, which should be cancelled when stop triggered.
+                resettimer(timetb)
             elseif timetb.cbtype == "stop" then
                 local startday, starttime
                 local has_incompleted_timeslot = false
+                local ntpsynced = systimesynched()
+                local ntpenabled = cursor:get("system", "ntp", "enabled")
+
                 startday = timetb.pairday
                 starttime = timetb.pairtime
                 
-                if startday ~= nil and starttime ~= nil and timertb[startday] ~= nil and timertb[startday][starttime] ~= nil and timertb[startday][starttime].cbtype == "start" and timertb[startday][starttime].active == false then
-                    -- only cancel the start timer when its corresponding stop timer has been triggered, i.e. timeslot passed.
-                    timertb[startday][starttime].utimer:cancel()
-                    timertb[startday][starttime].utimer = nil
-                    runtime.logger:info("cancel "..actionname.." start "..timername..":"..day..":"..time)
-                end
+                if ntpenabled == '0' or ntpsynced == '1' then
+                    -- turns off the aperiodic timer
+                    if startday ~= nil and starttime ~= nil and timertb[startday] ~= nil and timertb[startday][starttime] ~= nil and timertb[startday][starttime].cbtype == "start" and timertb[startday][starttime].active == false then
+                        -- only cancel the start timer when its corresponding stop timer has been triggered, i.e. timeslot passed.
+                        timertb[startday][starttime].utimer:cancel()
+                        timertb[startday][starttime].utimer = nil
+                        runtime.logger:info("cancel "..actionname.." start "..timername..":"..startday..":"..starttime)
+                    end
 
-                -- aperiodic timer, cancel the uloop timer once its action was triggered
-                timetb.utimer:cancel()
-                timetb.utimer = nil
-                runtime.logger:info("cancel "..actionname.." "..timetb.cbtype.." "..timername..":"..day..":"..time)
+                    -- aperiodic timer, cancel the uloop timer once its action was triggered
+                    timetb.utimer:cancel()
+                    timetb.utimer = nil
+                    runtime.logger:info("cancel "..actionname.." "..timetb.cbtype.." "..timername..":"..day..":"..time)
 
-                -- turn off aperiodic timer if all its timeslot has been triggered, it must be reenabled explicitly if user wants to trigger it again.
-                for didx,day in ipairs(timertb.dayorder) do
-                    if timertb[day] ~= nil and timertb[day] ~= "" then
-                        for tidx,t in ipairs(timertb[day].timeorder) do
-                            if timertb[day][t].utimer ~= nil then
-                                has_incompleted_timeslot = true
-                                break
+                    -- turn off aperiodic timer if all its timeslot has been triggered, it must be reenabled explicitly if user wants to trigger it again.
+                    for didx,day in ipairs(timertb.dayorder) do
+                        if timertb[day] ~= nil and timertb[day] ~= "" then
+                            for tidx,t in ipairs(timertb[day].timeorder) do
+                                if timertb[day][t].utimer ~= nil then
+                                    has_incompleted_timeslot = true
+                                    break
+                                end
                             end
                         end
                     end
-                end
 
-                if has_incompleted_timeslot == false then
-                    cursor:set(config, timername, "enabled", '0')
-                    cursor:commit(config)
+                    if has_incompleted_timeslot == false then
+                        cursor:set(config, timername, "enabled", '0')
+                        cursor:commit(config)
+                    end
+                else
+                    -- not a real stop action of aperiodic timer as time was not synched, resets the timer.
+                    resettimer(timetb)
                 end
             end
         end

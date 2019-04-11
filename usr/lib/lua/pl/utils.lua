@@ -1,23 +1,24 @@
 --- Generally useful routines.
 -- See  @{01-introduction.md.Generally_useful_functions|the Guide}.
+--
+-- Dependencies: `pl.compat`
+--
 -- @module pl.utils
-local format,gsub,byte = string.format,string.gsub,string.byte
+local format = string.format
 local compat = require 'pl.compat'
-local clock = os.clock
 local stdout = io.stdout
 local append = table.insert
 local unpack = rawget(_G,'unpack') or rawget(table,'unpack')
 
-local collisions = {}
-
 local utils = {
-    _VERSION = "1.2.1",
+    _VERSION = "1.5.2",
     lua51 = compat.lua51,
     setfenv = compat.setfenv,
     getfenv = compat.getfenv,
     load = compat.load,
     execute = compat.execute,
-    dir_separator = _G.package.config:sub(1,1),
+    dir_separator = compat.dir_separator,
+    is_windows = compat.is_windows,
     unpack = unpack
 }
 
@@ -57,7 +58,7 @@ local function import_symbol(T,k,v,libname)
     local key = rawget(T,k)
     -- warn about collisions!
     if key and k ~= '_M' and k ~= '_NAME' and k ~= '_PACKAGE' and k ~= '_VERSION' then
-        utils.printf("warning: '%s.%s' will not override existing symbol\n",libname,k)
+        utils.fprintf(io.stderr,"warning: '%s.%s' will not override existing symbol\n",libname,k)
         return
     end
     rawset(T,k,v)
@@ -122,24 +123,30 @@ local raise
 function utils.readfile(filename,is_bin)
     local mode = is_bin and 'b' or ''
     utils.assert_string(1,filename)
-    local f,err = io.open(filename,'r'..mode)
-    if not f then return utils.raise (err) end
-    local res,err = f:read('*a')
+    local f,open_err = io.open(filename,'r'..mode)
+    if not f then return utils.raise (open_err) end
+    local res,read_err = f:read('*a')
     f:close()
-    if not res then return raise (err) end
+    if not res then
+        -- Errors in io.open have "filename: " prefix,
+        -- error in file:read don't, add it.
+        return raise (filename..": "..read_err)
+    end
     return res
 end
 
 --- write a string to a file
 -- @param filename The file path
 -- @param str The string
+-- @param is_bin open in binary mode
 -- @return true or nil
 -- @return error message
 -- @raise error if filename or str aren't strings
-function utils.writefile(filename,str)
+function utils.writefile(filename,str,is_bin)
+    local mode = is_bin and 'b' or ''
     utils.assert_string(1,filename)
     utils.assert_string(2,str)
-    local f,err = io.open(filename,'w')
+    local f,err = io.open(filename,'w'..mode)
     if not f then return raise(err) end
     f:write(str)
     f:close()
@@ -219,6 +226,39 @@ function utils.array_tostring (t,temp,tostr)
     return temp
 end
 
+local is_windows = utils.is_windows
+
+--- Quote an argument of a command.
+-- Quotes a single argument of a command to be passed
+-- to `os.execute`, `pl.utils.execute` or `pl.utils.executeex`.
+-- @string argument the argument.
+-- @return quoted argument.
+function utils.quote_arg(argument)
+    if is_windows then
+        if argument == "" or argument:find('[ \f\t\v]') then
+            -- Need to quote the argument.
+            -- Quotes need to be escaped with backslashes;
+            -- additionally, backslashes before a quote, escaped or not,
+            -- need to be doubled.
+            -- See documentation for CommandLineToArgvW Windows function.
+            argument = '"' .. argument:gsub([[(\*)"]], [[%1%1\"]]):gsub([[\+$]], "%0%0") .. '"'
+        end
+
+        -- os.execute() uses system() C function, which on Windows passes command
+        -- to cmd.exe. Escape its special characters.
+        return (argument:gsub('["^<>!|&%%]', "^%0"))
+    else
+        if argument == "" or argument:find('[^a-zA-Z0-9_@%+=:,./-]') then
+            -- To quote arguments on posix-like systems use single quotes.
+            -- To represent an embedded single quote close quoted string ('),
+            -- add escaped quote (\'), open quoted string again (').
+            argument = "'" .. argument:gsub("'", [['\'']]) .. "'"
+        end
+
+        return argument
+    end
+end
+
 --- execute a shell command and return the output.
 -- This function redirects the output to tempfiles and returns the content of those files.
 -- @param cmd a shell command
@@ -232,11 +272,11 @@ function utils.executeex(cmd, bin)
     local outfile = os.tmpname()
     local errfile = os.tmpname()
 
-    if utils.dir_separator == '\\' then
+    if is_windows and not outfile:find(':') then
         outfile = os.getenv('TEMP')..outfile
         errfile = os.getenv('TEMP')..errfile
     end
-    cmd = cmd .. [[ >"]]..outfile..[[" 2>"]]..errfile..[["]]
+    cmd = cmd .. " > " .. utils.quote_arg(outfile) .. " 2> " .. utils.quote_arg(errfile)
 
     local success, retcode = utils.execute(cmd)
     local outcontent = utils.readfile(outfile, bin)
@@ -253,14 +293,15 @@ end
 -- @param func a function of at least one argument
 -- @return a function with at least one argument, which is used as the key.
 function utils.memoize(func)
-    return setmetatable({}, {
-        __index = function(self, k, ...)
-            local v = func(k,...)
-            self[k] = v
-            return v
-        end,
-        __call = function(self, k) return self[k] end
-    })
+    local cache = {}
+    return function(k)
+        local res = cache[k]
+        if res == nil then
+            res = func(k)
+            cache[k] = res
+        end
+        return res
+    end
 end
 
 
@@ -304,7 +345,7 @@ end
 -- @param lf function as a string
 -- @return a function
 -- @usage string_lambda '|x|x+1' (2) == 3
--- @usage string_lambda '_+1 (2) == 3
+-- @usage string_lambda '_+1' (2) == 3
 -- @function utils.string_lambda
 utils.string_lambda = utils.memoize(_string_lambda)
 
@@ -377,7 +418,7 @@ end
 -- @param n argument index
 -- @param val the value
 -- @param tp the type
--- @param verify an optional verfication function
+-- @param verify an optional verification function
 -- @param msg an optional custom message
 -- @param lev optional stack position for trace, default 2
 -- @raise if the argument n is not the correct type

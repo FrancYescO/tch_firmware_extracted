@@ -16,31 +16,30 @@ local Device_Hosts_Host_i_IPv6Address_i_ = {
   }
 }
 
-local conn = mapper("ubus").connect()
-local split_key = mapper("nwcommon").split_key
+local network = require("transformer.shared.common.network")
 
-local function getDataForHost(hostkey)
-  local data = {}
-  data = conn:call("hostmanager.device", "get",  { name = hostkey })
-  return data[hostkey] or data
-end
+local ipcache = {}
 
-Device_Hosts_Host_i_IPv6Address_i_.entries = function(mapping, parentkey)
-  local data = getDataForHost(parentkey)
-  local hostkeys = {}
-  for k,v in pairs(data.ipv6) do
-    if v.state == "connected" then
-      hostkeys[#hostkeys + 1] = parentkey .. "|" .. k
+function Device_Hosts_Host_i_IPv6Address_i_.entries(_, parentMAC)
+  local data = network.getHostDataByMAC(parentMAC)
+  local keys = {}
+  local ips = {}
+  for _, ip in pairs(data.ipv6 or {}) do
+    if ip.state == "connected" then
+      local idx = #keys+1
+      local key = parentMAC .. "|" .. idx
+      keys[idx] = key
+      ips[key] = ip.address
     end
   end
-  return hostkeys
+  ipcache[parentMAC] = ips
+  return keys
 end
 
 Device_Hosts_Host_i_IPv6Address_i_.get = {
-  IPAddress = function(mapping,param,key)
-    local devname,ip_intf = split_key(key)
-    local data = getDataForHost(devname)
-    return data.ipv6[ip_intf].address or ""
+  IPAddress = function(_, _, key, parentMAC)
+    local ips = ipcache[parentMAC] or {}
+    return ips[key] or ""
   end,
 }
 

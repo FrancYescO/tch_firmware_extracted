@@ -1,5 +1,3 @@
-local table, pairs, unpack, string, tonumber, os = table, pairs, unpack, string, tonumber, os
-
 local sms = require("libat.sms")
 local sim = require("libat.sim")
 local voice = require("libat.voice")
@@ -45,8 +43,7 @@ local function get_device_by_port(port)
 			end
 		end
 	end
-
-	return nil
+	return nil, "No such device"
 end
 
 local function run_action(dev_idx, action, ...)
@@ -64,30 +61,30 @@ local function run_action(dev_idx, action, ...)
 
 	local ret
 	if mapping_function and (t == "override" or t == "runfirst") then
-		ret, errMsg = mapping_function(device.mapper, device, unpack(arg))
+		ret, errMsg = mapping_function(device.mapper, device, ...)
 		if t == "override" then
 			return ret, errMsg
 		end
 	end
 
 	if M.mappings[action] then
-		ret, errMsg = M.mappings[action](device, unpack(arg))
+		ret, errMsg = M.mappings[action](device, ...)
 		if t ~= "augment" or mapping_function == nil then
 			return ret, errMsg
 		end
 	end
 
 	if mapping_function then
-		return mapping_function(device.mapper, device, unpack(arg))
+		return mapping_function(device.mapper, device, ...)
 	end
 	return true
 end
 
-local function run_cacheable_action(dev_idx, action, max_age, info, ...)
+local function run_cacheable_action(dev_idx, cache_key, action, max_age, info, ...)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	local cached_result = device.cache[action]
+	local cached_result = device.cache[cache_key]
 	if cached_result and (not max_age or os.difftime(os.time(), cached_result.time) < max_age) and device:is_busy() then
 		runtime.log:debug("Retrieving result of " .. action .. " for device " .. dev_idx .. " from cache")
 		for key, value in pairs(cached_result.info) do
@@ -98,7 +95,7 @@ local function run_cacheable_action(dev_idx, action, max_age, info, ...)
 
 	local ret
 	ret, errMsg = run_action(dev_idx, action, info, ...)
-	device.cache[action] = {
+	device.cache[cache_key] = {
 		ret = ret,
 		errMsg = errMsg,
 		info = info,
@@ -170,9 +167,11 @@ function M.init_device(dev_idx)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	-- Always execute this, not overwritable by extension
-	local ret
-	ret, errMsg = init_device(device)
+	local ret = true
+	if device:get_mode() == "normal" then
+		-- Always execute this, not overwritable by extension
+		ret, errMsg = init_device(device)
+	end
 	if ret then
 		ret, errMsg = run_action(dev_idx, "init_device")
 		if ret then
@@ -183,15 +182,15 @@ function M.init_device(dev_idx)
 end
 
 local function destroy_device(device)
-	-- Disable CREG notifications
-	return device:send_command("AT+CREG=0")
+	-- Disable CREG and CGREG notifications
+	return device:send_command("AT+CREG=0") and device:send_command("AT+CGREG=0")
 end
 
-function M.destroy_device(dev_idx, force)
+function M.destroy_device(dev_idx, force) --luacheck: no unused args
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	runtime.log:info("Destroy device " .. dev_idx)
+	runtime.log:notice("Destroy device " .. dev_idx)
 
 	run_action(dev_idx, "destroy_device")
 
@@ -214,7 +213,7 @@ end
 
 function M.get_ip_info(dev_idx, session_id)
 	local info = {}
-	run_cacheable_action(dev_idx, "get_ip_info", nil, info, session_id)
+	run_cacheable_action(dev_idx, "get_ip_info" .. session_id, "get_ip_info", nil, info, session_id)
 	return info
 end
 
@@ -231,7 +230,7 @@ local function get_profile_info(device, info)
 				elseif pdp == "IPV6" then
 					pdptype = "ipv6"
 				end
-				table.insert(profiles, { id = id, apn = apn, pdptype = pdptype })
+				table.insert(profiles, { name = "Profile " .. id, id = id, apn = apn, pdptype = pdptype, authentication = "none" })
 			end
 		end
 	end
@@ -259,7 +258,7 @@ local function get_device_info(device, info)
 
 	if not device.buffer.device_info.imei then
 		ret = device:send_singleline_command("AT+CGSN", "")
-		if ret and helper.isnumeric(ret) then
+		if tonumber(ret) then
 			device.buffer.device_info.imei = ret
 		end
 	end
@@ -292,13 +291,14 @@ end
 
 function M.get_device_info(dev_idx)
 	local info = {}
-	run_cacheable_action(dev_idx, "get_device_info", nil, info)
+	run_cacheable_action(dev_idx, "get_device_info", "get_device_info", nil, info)
 	return info
 end
 
 local function get_device_capabilities(device, info)
 	info.sms_reading = false
 	info.sms_sending = false
+	info.max_carriers = 1
 	local ret = device:send_singleline_command('AT+CSMS=0', "+CSMS:")
 	if ret then
 		local mt, mo = string.match(ret, "+CSMS:%s?(%d+),%s?(%d+)")
@@ -309,7 +309,7 @@ local function get_device_capabilities(device, info)
 			info.sms_sending = true
 		end
 	end
-	info.reuse_profiles = false
+	info.reuse_profiles = true
 	info.manual_plmn_selection = true
 	info.arfcn_selection_support = ""
 	info.band_selection_support = ""
@@ -317,36 +317,31 @@ local function get_device_capabilities(device, info)
 	info.cs_voice_support = false
 	info.volte_support = false
 	info.max_data_sessions = #device.sessions
+	info.supported_auth_types = "none"
 	local types = session.get_supported_pdp_types(device)
 	local supported_pdp_types = {}
 	for k in pairs(types) do
 		table.insert(supported_pdp_types, k)
 	end
-	info.supported_pdp_types = table.concat(supported_pdp_types, " ")
+	info.supported_pdp_types = supported_pdp_types
 end
 
 function M.get_device_capabilities(dev_idx)
 	local info = {}
-	run_cacheable_action(dev_idx, "get_device_capabilities", nil, info)
+	run_cacheable_action(dev_idx, "get_device_capabilities", "get_device_capabilities", nil, info)
 	return info
 end
 
 local function get_radio_signal_info(device, info)
-	local ret = device:send_singleline_command('AT+CSQ', "+CSQ:")
+	local ret = device:send_singleline_command('AT+CESQ', "+CESQ:")
 	if ret then
-		local rssi, ber = string.match(ret, "+CSQ:%s?(%d+),%s?(%d+)")
+		local rssi, ber, rscp, ecno, rsrq, rsrp = string.match(ret, "%+CESQ:%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+
 		rssi = tonumber(rssi)
-		if rssi then
-			if rssi == 0 then
-				info.rssi = -113
-			elseif rssi == 1 then
-				info.rssi = -111
-			elseif rssi == 31 then
-				info.rssi = -51
-			elseif rssi ~= 99 then
-				info.rssi = (((56-(rssi-2))*-1)-53)
-			end
+		if rssi and 0 <= rssi and rssi <= 63 then
+			info.rssi = rssi - 111
 		end
+
 		ber = tonumber(ber)
 		if ber then
 			if ber == 0 then
@@ -367,6 +362,57 @@ local function get_radio_signal_info(device, info)
 				info.ber = 18.10
 			end
 		end
+
+		rscp = tonumber(rscp)
+		if rscp and 0 <= rscp and rscp <= 96 then
+			info.rscp = rscp - 121
+		end
+
+		ecno = tonumber(ecno)
+		if ecno and 0 <= ecno and ecno <= 49 then
+			info.ecno = ecno / 2 - 24.5
+		end
+
+		rsrq = tonumber(rsrq)
+		if rsrq and 0 <= rsrq and rsrq <= 34 then
+			info.rsrq = rsrq / 2 - 20
+		end
+
+		rsrp = tonumber(rsrp)
+		if rsrp and 0 <= rsrp and rsrp <= 97 then
+			info.rsrp = rsrp - 141
+		end
+	else
+		ret = device:send_singleline_command('AT+CSQ', "+CSQ:")
+		if ret then
+			local rssi, ber = string.match(ret, "+CSQ:%s?(%d+),%s?(%d+)")
+
+			rssi = tonumber(rssi)
+			if rssi and 0 <= rssi and rssi <= 31 then
+				info.rssi = 2 * rssi - 113
+			end
+
+			ber = tonumber(ber)
+			if ber then
+				if ber == 0 then
+					info.ber = 0.14
+				elseif ber == 1 then
+					info.ber = 0.28
+				elseif ber == 2 then
+					info.ber = 0.57
+				elseif ber == 3 then
+					info.ber = 1.13
+				elseif ber == 4 then
+					info.ber = 2.26
+				elseif ber == 5 then
+					info.ber = 4.53
+				elseif ber == 6 then
+					info.ber = 9.05
+				elseif ber == 7 then
+					info.ber = 18.10
+				end
+			end
+		end
 	end
 
 	info.radio_interface = network.get_radio_interface(device)
@@ -378,7 +424,7 @@ function M.get_radio_signal_info(dev_idx)
 	if device.state.powermode == "lowpower" then return nil, "Not available" end
 
 	local info = {}
-	run_cacheable_action(dev_idx, "get_radio_signal_info", nil, info)
+	run_cacheable_action(dev_idx, "get_radio_signal_info", "get_radio_signal_info", nil, info)
 	return info
 end
 
@@ -390,7 +436,9 @@ local function get_network_info(device, info)
 	else
 		info.tracking_area_code = area_code
 	end
+	info.roaming_state = network.get_roaming_state(device)
 	info.ps_state = network.get_ps_state(device)
+	info.cs_state = network.get_cs_state(device)
 	local plmn = network.get_plmn(device)
 	if plmn then
 		info.plmn_info = {
@@ -405,33 +453,43 @@ function M.get_network_info(dev_idx)
 	local info = {
 		nas_state = "not_registered"
 	}
-	run_cacheable_action(dev_idx, "get_network_info", nil, info)
+	run_cacheable_action(dev_idx, "get_network_info", "get_network_info", nil, info)
 	return info
 end
 
 function M.get_time_info(dev_idx)
 	local info = {}
-	run_cacheable_action(dev_idx, "get_time_info", nil, info)
+	run_cacheable_action(dev_idx, "get_time_info", "get_time_info", nil, info)
 	return info
 end
 
 local function get_session_info(device, info, session_id)
-	if device.sessions[session_id+1] and device.sessions[session_id+1].proto ~= "ppp" then
+	local cid = session_id+1
+	if device.sessions[cid] and device.sessions[cid].proto ~= "ppp" then
 		info.session_state = session.get_state(device, session_id)
 	end
+	local profiles = session.get_profiles(device)
+	for _, profile in pairs(profiles) do
+		if tonumber(profile.id) == cid then
+			info.apn = profile.apn
+			break
+		end
+	end
+	return session.get_session_info(device, info, session_id)
 end
 
 function M.get_session_info(dev_idx, session_id)
 	local info = {
 		session_state = "disconnected"
 	}
-	run_cacheable_action(dev_idx, "get_session_info", nil, info, session_id)
+	run_cacheable_action(dev_idx, "get_session_info" .. session_id, "get_session_info", nil, info, session_id)
 
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	if not info.proto and device.sessions[session_id+1] then
-		info.proto = device.sessions[session_id+1].proto
+	local cid = session_id+1
+	if not info.proto and device.sessions[cid] then
+		info.proto = device.sessions[cid].proto
 	end
 
 	if info.proto == "ppp" then
@@ -449,11 +507,14 @@ function M.get_session_info(dev_idx, session_id)
 end
 
 local function get_sim_info(device, info)
+	info.access_control_list = sim.get_access_control_list(device)
+
 	info.sim_state = sim.get_state(device)
 
 	if not device.buffer.sim_info.iccid then
 		device.buffer.sim_info.iccid = sim.get_iccid(device)
 	end
+
 	info.iccid = device.buffer.sim_info.iccid
 	if info.sim_state == "ready" then
 		if not device.buffer.sim_info.imsi then
@@ -477,11 +538,11 @@ end
 
 function M.get_sim_info(dev_idx)
 	local info = {}
-	run_cacheable_action(dev_idx, "get_sim_info", nil, info)
+	run_cacheable_action(dev_idx, "get_sim_info", "get_sim_info", nil, info)
 	return info
 end
 
-local function get_pin_info(device, info, t)
+local function get_pin_info(device, info)
 	local sim_state = sim.get_state(device)
 	if sim_state == "locked" then info.pin_state = "enabled_not_verified" end
 	if sim_state == "blocked" then info.pin_state = "blocked" end
@@ -493,11 +554,11 @@ local function get_pin_info(device, info, t)
 	end
 end
 
-function M.get_pin_info(dev_idx, t)
+function M.get_pin_info(dev_idx, pin_type)
 	local info = {
 		pin_state = "unknown"
 	}
-	run_cacheable_action(dev_idx, "get_pin_info", nil, info, t)
+	run_cacheable_action(dev_idx, "get_pin_info", "get_pin_info", nil, info, pin_type)
 
 	if tonumber(info.unlock_retries_left) == 0 and tonumber(info.unblock_retries_left) == 0 then
 		info.pin_state = "permanently_blocked"
@@ -544,11 +605,23 @@ function M.stop_data_session(dev_idx, session_id)
 end
 
 local function configure_device(device, config)
-	-- Enable network registration events
-	local ret = device:send_command("AT+CREG=2")
-	if not ret then
+	-- Enable CS network registration events
+	if not device:send_command("AT+CREG=2") then
 		-- Some handsets in tethered mode don't support CREG=2
 		device:send_command("AT+CREG=1")
+	end
+
+	-- Enable PS network registration events
+	if not device:send_command("AT+CGREG=2") then
+		-- Some handsets in tethered mode don't support CGREG=2
+		device:send_command("AT+CGREG=1")
+	end
+
+	-- Make sure the module will not auto attach when its radio is switched on. Only
+	-- do this if the radio is not switched on yet as it will otherwise deregister
+	-- the module from the network.
+	if device:send_singleline_command("AT+CFUN?", "+CFUN:") ~= "+CFUN: 1" then
+		device:send_command("AT+CGATT=0")
 	end
 
 	local cops_command = "AT+COPS=0,,"
@@ -577,6 +650,7 @@ function M.configure_device(dev_idx, config)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 	device.buffer.network_info = {}
+	device.buffer.voice_info = {messages_waiting = 0}
 	device.buffer.radio_signal_info = {}
 	local ret = run_action(dev_idx, "configure_device", config)
 	device:send_event("mobiled", { event = "device_configured", dev_idx = device.id })
@@ -685,7 +759,7 @@ function M.delete_sms(dev_idx, message_id)
 	return run_action(dev_idx, "delete_sms", message_id)
 end
 
-function M.set_sms_status(dev_idx, message_id, status)
+function M.set_sms_status(dev_idx, message_id, status) --luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -715,6 +789,7 @@ local function set_power_mode(device, mode)
 	if mode == "lowpower" or mode == "airplane" then
 		device.buffer.session_info = {}
 		device.buffer.network_info = {}
+		device.buffer.voice_info = {messages_waiting = 0}
 		device.buffer.radio_signal_info = {}
 		if mode == "lowpower" then
 			return device:send_command('AT+CFUN=0', 15000)
@@ -727,16 +802,22 @@ end
 function M.set_power_mode(dev_idx, mode)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
-	device.state.powermode = mode
 
-	return run_action(dev_idx, "set_power_mode", mode)
+	local result
+	result, errMsg = run_action(dev_idx, "set_power_mode", mode)
+	if result then
+		device.state.powermode = mode
+	end
+	return result, errMsg
+end
+
+local function periodic(device)
+	device:get_unsolicited_messages()
+	return true
 end
 
 function M.periodic(dev_idx)
-	local device, errMsg = get_device(dev_idx)
-	if not device then return nil, errMsg end
-	device:get_unsolicited_messages()
-	return true
+	return run_action(dev_idx, "periodic")
 end
 
 local function set_attach_params(device, profile)
@@ -745,7 +826,7 @@ local function set_attach_params(device, profile)
 		return nil, errMsg
 	end
 	local apn = profile.apn or ""
-	device:send_command(string.format('AT+CGDCONT=1,"%s","%s"', pdptype, apn))
+	return device:send_command(string.format('AT+CGDCONT=1,"%s","%s"', pdptype, apn))
 end
 
 function M.set_attach_params(dev_idx, profile)
@@ -757,6 +838,10 @@ local function string_starts(data, pattern)
 end
 
 local function execute_command(device, command)
+	if device:is_busy() then
+		return nil, "Device busy"
+	end
+
 	if string_starts(command, "AT") or string_starts(command, "at") then
 		local ret, errMsg, cmeError = device:send_multiline_command(command, "", 10000)
 		-- device:send_multiline_command will return nil when it fails to match an intermediate line
@@ -839,12 +924,20 @@ function M.call_info(dev_idx, call_id)
 	return run_action(dev_idx, "call_info", call_id)
 end
 
-function M.multi_call(dev_idx, call_id, action)
-	return run_action(dev_idx, "multi_call", call_id, action)
+function M.multi_call(dev_idx, call_id, action, second_call_id)
+	return run_action(dev_idx, "multi_call", call_id, action, second_call_id)
 end
 
 function M.supplementary_service(dev_idx, service, action, forwarding_type, forwarding_number)
 	return run_action(dev_idx, "supplementary_service", service, action, forwarding_type, forwarding_number)
+end
+
+function M.send_dtmf(dev_idx, tones, interval, duration)
+	return run_action(dev_idx, "send_dtmf", tones, interval, duration)
+end
+
+function M.convert_to_data_call(dev_idx, call_id, codec)
+	return run_action(dev_idx, "convert_to_data_call", call_id, codec)
 end
 
 function M.get_network_interface(dev_idx, session_id)
@@ -871,12 +964,12 @@ function M.network_attach(dev_idx)
 	return run_action(dev_idx, "network_attach")
 end
 
-local function network_detach(device, mode)
+local function network_detach(device)
 	return device:send_command('AT+CGATT=0', 150000)
 end
 
 function M.network_detach(dev_idx, mode)
-	return run_action(dev_idx, "network_detach")
+	return run_action(dev_idx, "network_detach", mode)
 end
 
 local function get_errors(device, errors)
@@ -887,6 +980,40 @@ function M.get_errors(dev_idx)
 	local errors = {}
 	run_action(dev_idx, "get_errors", errors)
 	return errors
+end
+
+local function flush_errors(device)
+	device.errors = {}
+	return true
+end
+
+function M.flush_errors(dev_idx)
+	return run_action(dev_idx, "flush_errors")
+end
+
+function M.add_data_session(dev_idx, session_config)
+	return run_action(dev_idx, "add_data_session", session_config)
+end
+
+local function get_voice_info(device, info)
+	info.messages_waiting = device.buffer.voice_info.messages_waiting
+end
+
+function M.get_voice_info(dev_idx)
+	local info = {}
+	run_action(dev_idx, "get_voice_info", info)
+	return info
+end
+
+
+function M.get_voice_network_capabilities(dev_idx)
+	local info = {}
+	run_action(dev_idx, "get_voice_network_capabilities", info)
+	return info
+end
+
+function M.set_emergency_numbers(dev_idx, numbers)
+	return run_action(dev_idx, "set_emergency_numbers", numbers)
 end
 
 local function handle_event(device, message)
@@ -929,9 +1056,15 @@ M.mappings = {
 	dial = voice.dial,
 	end_call = voice.end_call,
 	call_info = voice.call_info,
+	send_dtmf = voice.send_dtmf,
 	get_errors = get_errors,
+	flush_errors = flush_errors,
 	debug = debug,
-	handle_event = handle_event
+	handle_event = handle_event,
+	periodic = periodic,
+	get_ip_info = session.get_ip_info,
+	get_voice_info = get_voice_info,
+	get_voice_network_capabilities = voice.network_capabilities
 }
 
 return M

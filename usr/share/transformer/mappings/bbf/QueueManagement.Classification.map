@@ -670,6 +670,15 @@ local Multi_QoS_Classification_i_ = {
        default = "",
        description = "Description for the classification",
      },
+     X_BELGACOM_IPSet = {
+       access = "readWrite",
+       type = "string",
+       max = "256",
+       pathRef = true,
+       targetParent = "Device.X_BELGACOM_IPSet.{i}.",
+       description = "Refers to the path of the IPSet object",
+       default = "",
+     }
     }
   }
 }
@@ -683,7 +692,6 @@ local uciHelper = mapper("ucihelper")
 local nwCommon = mapper('nwcommon')
 local netmask2mask = nwCommon.netmask2mask
 local mask2netmask = nwCommon.mask2netmask
-local hex2Decimal = nwCommon.hex2Decimal
 local isMac = nwCommon.isMAC
 local lfs = require("lfs")
 local isConfigChanged = false
@@ -700,6 +708,8 @@ local wanconn = require("transformer.shared.wanconnection")
 local splitKey = mapper("nwcommon").split_key
 local ubus = mapper("ubus").connect()
 local qosHelper = require('transformer.shared.qoshelper')
+local list = require("transformer.shared.common.list")
+local ensureList = list.ensureList
 
 -- Ref: http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 local protocolMap = { tcp = "6", udp = "17" , udplite = "136", icmp = "1", esp = "50", ah = "51", sctp = "132", all= "-1" }
@@ -708,6 +718,7 @@ local classificationRules = {
   classify = true,
   reclassify = true,
   l2classify = true,
+  rule = true,
 }
 
 local paramMap = {
@@ -717,22 +728,6 @@ local paramMap = {
   DestMACMask = "macdst",
   VLANIDCheck = "vlanid",
 }
-
-local function convertStringToTable(str)
-  local tbl={}
-  -- uci entries of type "list" are interpretted as 'table' when they have multiple elements,
-  -- and interpretted as 'string' when they have a single element. So, handle 'table' types before processing.
-  if type(str) == 'table' then
-    return str
-  end
-  -- if the input string is a single element, then only one entry is added into the table
-  -- if it is a comma separated list, then all the comma separated entries are added into the table.
-  for item in string.gmatch(str or "", "([^,]+),?") do
-     tbl[#tbl + 1] = item
-  end
-  -- If the input is an empty string, then we return a table with one element containing ""
-  return #tbl > 0 and tbl or {""}
-end
 
 local function replaceTableValue(tbl, oldValue, newValue)
   for k,v in ipairs(tbl) do
@@ -766,7 +761,8 @@ local function addEntry(section, srcIf, dstIf, dscpVal, srcPort, dstPort, _key, 
     target = values.target,
     vlanid = values.vlanid,
     macsrc = values.macsrc,
-    macdst = values.macdst
+    macdst = values.macdst,
+    ipset = values.ipset
   }
 end
 
@@ -832,12 +828,11 @@ end
 
 Multi_QoS_Classification_i_.entries = function()
   local qosParams, srcInterfaces, dstInterfaces, srcPorts, dstPorts, dscpValue
-  local lastModifiedTime = lfs.attributes("/etc/config/qos").modification
+  local lastModifiedTime = lfs.attributes("/etc/config/qos", "modification")
   if lastModifiedTime == prevModifiedTime then
     return keys
-  else
-    keys = {}
   end
+  keys = {}
   prevModifiedTime = lastModifiedTime
   local keysModified = false
   qosBinding.sectionname = nil -- to ensure that previous call to set() doesnot affect the entries
@@ -851,11 +846,11 @@ Multi_QoS_Classification_i_.entries = function()
         keysModified = true
         s["_key"] = key
       end
-      srcInterfaces = convertStringToTable(s.srcif)
-      dstInterfaces = convertStringToTable(s.dstif)
-      dscpValue = convertStringToTable(s.dscp)
-      srcPorts = convertStringToTable(s.srcports)
-      dstPorts = convertStringToTable(s.dstports)
+      srcInterfaces = ensureList(s.srcif)
+      dstInterfaces = ensureList(s.dstif)
+      dscpValue = ensureList(s.dscp)
+      srcPorts = ensureList(s.srcports)
+      dstPorts = ensureList(s.dstports)
       for _,srcIf in ipairs(srcInterfaces) do
         for _,dstIf in ipairs(dstInterfaces) do
           for _,dscpVal in ipairs (dscpValue) do
@@ -1050,6 +1045,10 @@ Multi_QoS_Classification_i_.get = {
   X_000E50_RuleName = function(mapping, param, key)
     return getUciParam(keys[key].name, "description")
   end,
+  X_BELGACOM_IPSet = function(mapping, param, key)
+    local ipset = keys[key].ipset or ""
+    return resolve(mapping.objectType.parameters[param].targetParent, ipset) or ""
+  end,
 }
 
 -- A getall implementation is not done as it will not bring any improvement,
@@ -1076,7 +1075,8 @@ end
 
 Multi_QoS_Classification_i_.set = {
   Interface = function(mapping, param, value, key)
-    local srcInterfaces= convertStringToTable(getUciParam(keys[key].name, "srcif", {}))
+    local srcInterfaces = getUciParam(keys[key].name, "srcif", {})
+    srcInterfaces = ensureList(srcInterfaces)
     local srcInterface = keys[key].srcif or ""
     value = tokey(value, "Device.IP.Interface.{i}.")
     if value then
@@ -1085,7 +1085,8 @@ Multi_QoS_Classification_i_.set = {
     end
   end,
   ClassInterface = function(mapping, param, value, key)
-    local srcInterfaces= convertStringToTable(getUciParam(keys[key].name, "srcif", {}))
+    local srcInterfaces = getUciParam(keys[key].name, "srcif", {})
+    srcInterfaces = ensureList(srcInterfaces)
     local srcInterface = keys[key].srcif or ""
     local interface  = getInterfaceName(value)
     if interface then
@@ -1094,7 +1095,8 @@ Multi_QoS_Classification_i_.set = {
     end
   end,
   X_000E50_DestInterface = function(mapping, param, value, key)
-    local destInterfaces= convertStringToTable(getUciParam(keys[key].name, "dstif", {}))
+    local destInterfaces = getUciParam(keys[key].name, "dstif", {})
+    destInterfaces = ensureList(destInterfaces)
     local destinterface = keys[key].dstif or ""
     local interface
     if match(mapping.objectType.name, "^Device") then
@@ -1171,7 +1173,8 @@ Multi_QoS_Classification_i_.set = {
   end,
   DestPort = function(mapping, param, value, key)
     local destPort = keys[key].dstport or ""
-    local destPorts = convertStringToTable(getUciParam(keys[key].name, "dstports", ""))
+    local destPorts = getUciParam(keys[key].name, "dstports", {})
+    destPorts = ensureList(destPorts)
     local destPortRange = destPort:match(":(%d+)$") or ""
     if destPort ~= "" and destPortRange ~= "" then
       value = value .. ':' .. destPortRange
@@ -1182,7 +1185,8 @@ Multi_QoS_Classification_i_.set = {
   end,
   DestPortRangeMax = function(mapping, param, value, key)
     local destPort = keys[key].dstport or ""
-    local destPorts = convertStringToTable(getUciParam(keys[key].name, "dstports", ""))
+    local destPorts = getUciParam(keys[key].name, "dstports", {})
+    destPorts = ensureList(destPorts)
     local portNo = destPort:match("^(%d+)")
     if not portNo or portNo == "0" then
       value = value .. ':' .. value
@@ -1197,7 +1201,8 @@ Multi_QoS_Classification_i_.set = {
   end,
   SourcePort = function(mapping, param, value, key)
     local srcPort = keys[key].srcport or ""
-    local srcPorts = convertStringToTable(getUciParam(keys[key].name, "srcports", ""))
+    local srcPorts = getUciParam(keys[key].name, "srcports", {})
+    srcPorts = ensureList(srcPorts)
     local srcPortRange = srcPort:match(":(%d+)$") or ""
     if srcPort ~= "" and srcPortRange ~= "" then
       value = value .. ':' .. srcPortRange
@@ -1208,7 +1213,8 @@ Multi_QoS_Classification_i_.set = {
   end,
   SourcePortRangeMax = function(mapping, param, value, key)
     local srcPort = keys[key].srcport or ""
-    local srcPorts = convertStringToTable(getUciParam(keys[key].name, "srcports", ""))
+    local srcPorts = getUciParam(keys[key].name, "srcports", {})
+    srcPorts = ensureList(srcPorts)
     local portNo =srcPort:match("^(%d+)")
     if not portNo or portNo == "0" then
       value = value .. ':' .. value
@@ -1225,7 +1231,8 @@ Multi_QoS_Classification_i_.set = {
     if not value:match("^%-%d+") then
       value = qosHelper.convertToHexDscp(value, keys[key].dscp)
     end
-    local dscpList = convertStringToTable(getUciParam(keys[key].name, "dscp", {}))
+    local dscpList = getUciParam(keys[key].name, "dscp", {})
+    dscpList = ensureList(dscpList)
     local dscpVal =  keys[key].dscp or ""
     local dscpNewList = replaceTableValue(dscpList, dscpVal, value)
     setUciParam(keys[key].name, 'dscp', dscpNewList)
@@ -1271,6 +1278,13 @@ Multi_QoS_Classification_i_.set = {
   end,
   X_000E50_RuleName = function(mapping, param, value, key)
     setUciParam(keys[key].name, "description", value)
+  end,
+  X_BELGACOM_IPSet = function(mapping, param, value, key)
+    local ipset = tokey(value, mapping.objectType.parameters[param].targetParent)
+    if ipset then
+      return setUciParam(keys[key].name, 'ipset', ipset)
+    end
+    return nil, "Not a valid IPSet"
   end,
 }
 

@@ -44,7 +44,6 @@ local function ping(user)
   -- IGD timeout is in milliseconds, ping uses seconds
   local timeout = cursor:get(config, user, "timeout")
   local size = cursor:get(config, user, "size")
-
   -- check if all required parameters are present
   if not (host and count and timeout and size) then
     state = "Error_Other"
@@ -53,7 +52,6 @@ local function ping(user)
   count = tonumber(count)
   timeout = math.floor(tonumber(timeout) / 1000)
   size = tonumber(size)
-
   -- get logical interface and convert to physical
   local iface = cursor:get(config, user, "interface")
   iface, ipaddr_used = ipdiag_helper.get_physical_interface(iface, host)
@@ -69,13 +67,8 @@ local function ping(user)
 
   if timeout < 1 then timeout = 1 end
 
-  -- Webui has option for ping and ping6 so using a local variable to store iptype
-  -- ping represents IPv4 and ping6 represents IPv6
-  -- For other users ip type will always be ping i.e. IPv4
   local ipType = "ping"
-  if user == "webui" then
-    ipType = cursor:get(config, user, "iptype") == "IPv6" and "ping6" or "ping"
-  end
+  ipType = cursor:get(config, user, "iptype") == "IPv6" and "ping -6" or "ping -4"
 
   -- do ping and capture output
   local cmdline = format("%s %s -c %d -s %d -W %d %s 2>&1", ipType, iface_option, count, size, timeout, host)
@@ -103,9 +96,9 @@ local function ping(user)
   if match(output,"100%% packet loss") then
     state = "Complete"
   end
-  if match(output, "^ping: bad address") then
+  if match(output, "bad address") or match(output, "bad port") then
     state = "Error_CannotResolveHostName"
-  elseif match(output, "ping: sendto: Network is unreachable") then
+  elseif match(output, "sendto: Network is unreachable") or match(output, "sendto: Permission denied") then
     -- IGD specifications do not have Error_NoRouteToHost, hence we need to distinguish Device2 and IGD for Error_NoRouteToHost
     state = user == "igd" and "Error_Other" or "Error_NoRouteToHost"
   else

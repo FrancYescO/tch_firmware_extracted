@@ -3,6 +3,29 @@ local M = {}
 M.ubus = require('ubus')
 M.uci = require('uci')
 M.print=print
+local lfs = require("lfs")
+local open = io.open
+local ledPath = "/sys/class/leds/"
+
+---
+-- Get a LED maxinum brightness
+-- @function [parent=#ledhelper] getMaxBrightness
+-- @param #string name led name
+local function getMaxBrightness(name)
+    local maxBrightness = 255
+    if type(name) == 'function' then name=name() end
+    if name then 
+       local ledFile = ledPath .. name
+       if lfs.attributes(ledFile, "mode") == "directory" then
+           local fd = open(ledFile .. "/max_brightness", "r")
+           if fd then
+              maxBrightness = fd:read("*all")
+              fd:close()
+           end
+       end
+    end
+    return maxBrightness
+end
 
 ---
 -- returns the data structure required to initialize a timer led
@@ -15,11 +38,12 @@ function M.timerLed(name, delayOn, delayOff)
         error({ errcode = 9002, errmsg = "timerLed failed: missing or invalid name" })
     end
 
+    local maxB = getMaxBrightness(name)
     local led = {
         name = name,
         trigger = "timer",
         params = {
-            brightness = 255,
+            brightness = maxB,
             delay_on = delayOn or 500,
             delay_off = delayOff or 500
         }
@@ -27,19 +51,21 @@ function M.timerLed(name, delayOn, delayOff)
     return led
 end
 
-function M.bundleTimerLed(name, delayOn, delayOff, timerId)
+function M.bundleTimerLed(name, delayOn, delayOff, timerId, invert_timer)
     if(name == nil or name == '')  then
         error({ errcode = 9002, errmsg = "bundleTimerLed failed: missing or invalid name" })
     end
 
+    local maxB = getMaxBrightness(name)
     local led = {
         name = name,
         trigger = "bundletimer",
         params = {
             timer_id = timerId,
-            bundle_brightness = 255,
+            bundle_brightness = maxB,
             bundle_delay_on = delayOn or 500,
-            bundle_delay_off = delayOff or 500
+            bundle_delay_off = delayOff or 500,
+            invert = invert_timer or 0
         }
     }
     return led
@@ -55,8 +81,9 @@ function M.staticLed(name, state)
         error({ errcode = 9002, errmsg = "staticLed failed: missing or invalid name" })
     end
     local val
+    local maxB = getMaxBrightness(name)
     if type(state)=="boolean" then
-       val=state and 255 or 0
+       val=state and maxB or 0
     else
        val=state
     end
@@ -119,10 +146,12 @@ function M.netdevLedOWRT(name, device, mode, interv, div_fact)
         error({ errcode = 9002, errmsg = "netdevLedOWRT failed: missing or invalid name" })
     end
     if (interv and interv < 5) then interv=5 end
+    local maxB = getMaxBrightness(name)
     local led = {
         name =  name,
         trigger = "netdev",
         params = {
+            brightness = maxB,
             device_name = function()
                 return getL3Device(device)
             end,
@@ -150,10 +179,12 @@ function M.netdevLed(name, device, mode, interv, div_fact)
         error({ errcode = 9002, errmsg = "netdevLed failed: missing or invalid name" })
     end
     if (interv and interv < 5) then interv=5 end
+    local maxB = getMaxBrightness(name)
     local led = {
         name =  name,
         trigger = "netdev",
         params = {
+            brightness = maxB,
             device_name = device,
             mode = mode,
             interval = interv,
@@ -268,15 +299,7 @@ function M.is_MPTCP_enabled()
    local enabled = cursor:get('mproxy', 'globals', 'enable')
 
    cursor:close()
-   if not enabled then
-        -- Ensure that always a value is returned
-        return false
-   end
-   if enabled == '1' then
-      return true
-   else
-      return false
-   end
+   return enabled == '1'
 end
 
 ---
@@ -288,15 +311,31 @@ function M.is_LTE_Backup_enabled()
    local enabled = cursor:get('network', 'lte_backup', 'auto')
 
    cursor:close()
-   if not enabled then
-        -- Ensure that always a value is returned
-        return false
-   end
-   if enabled == '1' then
-      return true
-   else
-      return false
-   end
+   return enabled == '1'
+end
+
+---
+-- Returns true if TITAN (SingleIP) is enabled in UCI, false otherwise
+-- @function [parent=#ledhelper] is_TITAN_enabled
+-- @param no parameters
+function M.is_TITAN_enabled()
+   local cursor = M.uci.cursor()
+   local enabled = cursor:get('network', 'globals', 'mode')
+
+   cursor:close()
+   return enabled == 'TITAN'
+end
+
+---
+-- Returns true if ZTC provisioning occured and parameter was set in UCI, false otherwise
+-- @function [parent=#ledhelper] is_ZTC_provisioned
+-- @param no parameters
+function M.is_ZTC_provisioned()
+   local cursor = M.uci.cursor()
+   local enabled = cursor:get('env', 'var', 'ztc_transactionid')
+
+   cursor:close()
+   return enabled ~= nil
 end
 
 ---
@@ -308,15 +347,7 @@ function M.is_status_led_enabled()
    local enabled = cursor:get('ledfw', 'status_led', 'enable')
 
    cursor:close()
-   if not enabled then
-      -- Ensure that always a value is returned
-      return false
-   end
-   if enabled == '1' then
-      return true
-   else
-      return false
-   end
+   return enabled == '1'
 end
 
 ---
@@ -328,15 +359,7 @@ function M.is_WiFi_LED_on_if_NSC()
    local enabled = cursor:get('ledfw', 'wifi', 'nsc_on')
 
    cursor:close()
-   if not enabled then
-      -- Ensure that always a value is returned
-      return false
-   end
-   if enabled == '1' then
-      return true
-   else
-      return false
-   end
+   return enabled == '1'
 end
 
 ---
@@ -348,15 +371,7 @@ function M.is_show_remote_mgmt()
    local enabled = cursor:get('ledfw', 'remote_mgmt', 'in_progress')
 
    cursor:close()
-   if not enabled then
-      -- Ensure that always a value is returned
-      return false
-   end
-   if enabled == '1' then
-      return true
-   else
-      return false
-   end
+   return enabled == '1'
 end
 
 ---
@@ -390,6 +405,24 @@ function M.wansensing_l2type()
    else
         return l2type
    end
+end
+
+---
+-- Returns the value of sfp boot status (sfp_connecting or sfp_unplug)
+-- @function [parent=#ledhelper] get_sfp_boot_status
+-- @param no parameters
+function M.get_sfp_boot_status()
+    local fd, errmsg = open("/proc/sfp/sfp_status", "r")
+    if not fd then
+        return "sfp_unplug"
+    end
+    local sfp_status = fd:read("*l")
+    fd:close()
+    if sfp_status == "plugin" then
+        return "sfp_connecting"
+    else
+        return "sfp_unplug"
+    end
 end
 
 ---

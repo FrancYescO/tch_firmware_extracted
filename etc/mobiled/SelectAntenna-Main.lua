@@ -41,6 +41,7 @@ local function perform_measurement(runtime, device, main_antenna)
 	local log = runtime.log
 
 	local state_data = device.sm:get_state_data()
+
 	log:info("Using " .. state_data.current_antenna .. " antenna for measurement")
 
 	local info = device:get_radio_signal_info()
@@ -108,8 +109,8 @@ function M.check(runtime, event, dev_idx)
 		return "DeviceRemove"
 	end
 
-	local antenna_controls = mobiled.platform.get_linked_antenna_controls(device)
-	if #antenna_controls == 0 then
+	local antenna_control = mobiled.platform.get_linked_antenna_control(device)
+	if not antenna_control or not antenna_control.antenna then
 		log:info("No antenna selection for this device")
 		return "RegisterNetwork"
 	end
@@ -119,9 +120,8 @@ function M.check(runtime, event, dev_idx)
 	end
 
 	local main_antenna
-	for _, antenna in pairs(antenna_controls) do
+	for _, antenna in pairs(antenna_control.antenna) do
 		if antenna.name == "main" then
-			log:info("Using antenna " .. antenna.id .. " as main")
 			main_antenna = antenna
 		end
 	end
@@ -146,13 +146,13 @@ function M.check(runtime, event, dev_idx)
 	if config and config.platform then
 		if config.platform.antenna ~= "auto" then
 			device.main_antenna.auto_selected_antenna = nil
-			for _, antenna in pairs(antenna_controls) do
+			for _, antenna in pairs(antenna_control.antenna) do
 				log:info('Using "' .. config.platform.antenna .. '" antenna for ' .. antenna.name)
 				antenna.select_antenna(config.platform.antenna)
 			end
 			return "RegisterNetwork"
 		elseif device.main_antenna.auto_selected_antenna then
-			for _, antenna in pairs(antenna_controls) do
+			for _, antenna in pairs(antenna_control.antenna) do
 				log:info('Using automatically selected "' .. device.main_antenna.auto_selected_antenna .. '" antenna for ' .. antenna.name)
 				antenna.select_antenna(device.main_antenna.auto_selected_antenna)
 			end
@@ -161,8 +161,11 @@ function M.check(runtime, event, dev_idx)
 	end
 
 	if event.event == "timeout" then
-		log:info("Bringing device online")
-		device:set_power_mode("online")
+		-- In order to do antenna detection based on RSSI measurements, the radio needs to be turned on
+		local rf_control = mobiled.platform.get_linked_rf_control(device)
+		if rf_control and rf_control.enable then
+			rf_control.enable()
+		end
 
 		local state_data = device.sm:get_state_data()
 

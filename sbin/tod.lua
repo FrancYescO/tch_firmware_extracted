@@ -9,6 +9,7 @@ function loadconfig()
 
     cursor:foreach("tod", "tod", function(s) glb = s end)
     cursor:foreach("tod", "action", function(s) acttb[s[".name"]] = s end)
+    cursor:foreach("tod", "host", function(s) acttb[s[".name"]] = s end)
     cursor:unload("tod")
 
     return glb, acttb

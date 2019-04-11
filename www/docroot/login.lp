@@ -3,19 +3,56 @@
 -- Enable localization
 -- NG-58110
 -- NG-78957
--- GHG-3791  Implemented Custo changes based on new baseline 17.3-238
+-- GHG-3717 TIM Custo implemented on 18.1-90 generic file
 gettext.textdomain('webui-core')
 
 local triesbeforemsg = 3
 local content_helper = require("web.content_helper")
-local proxy = require("datamodel") -- Custo
+local proxy = require ("datamodel")
 local format = string.format
 local passwd_count_msg = format(T"You are trying to login with wrong password for %s times", '<span id="pwdCount"></span>')
 local timer_msg = format(T"Please wait %s seconds to enter new password", '<span id="timerSec"></span>')
+local json = require("dkjson")
 
 if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "getcsrf" then
   ngx.print(ngx.ctx.session:getCSRFtoken())
   ngx.exit(ngx.HTTP_OK)
+end
+
+if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "redirect" then
+  local ipaddr = ""
+  if ngx.req.get_uri_args().param == "system_reset" then
+    ipaddr = proxy.get("uci.ucidefaults.interface.@lan_reset.ipaddr")[1].value
+  else
+    ipaddr = proxy.get("uci.network.interface.@lan.ipaddr")[1].value
+  end
+  ngx.header.content_type = "application/json"
+  ngx.print(json.encode(ipaddr))
+  ngx.exit(ngx.HTTP_OK)
+end
+
+local lastaccess = {
+  user = "" ,
+  time = "",
+  clientIp = ""
+}
+
+local function writeState(lastaccess)
+  local f = io.open("/etc/lastaccess", "w")
+  if f then
+    for key, value in pairs(lastaccess) do
+      f:write(format("%s=%s\n", key, value))
+    end
+    f:close()
+  end
+end
+
+if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "lastaccess" then
+  ngx.print(ngx.ctx.session:getCSRFtoken())
+  lastaccess.user = ngx.ctx.session:getusername()
+  lastaccess.clientIp = ngx.var.remote_addr
+  lastaccess.time = os.date("%T",os.time())
+  writeState(lastaccess)
 end
 
 local cui = {
@@ -30,8 +67,8 @@ local current_year = (string.sub(year,1,4))
 local users = content_helper.getMatchedContent("uci.web.user.")
 local userNames = ""
 local legacySalts = ""
-local httpi = proxy.get("rpc.network.interface.@wan.up")[1].value        -- Custo
-local httpi_wwan = proxy.get("rpc.network.interface.@wwan.up")[1].value  -- Custo
+local httpi = proxy.get("rpc.network.interface.@wan.up")[1].value       -- Custo
+local httpi_wwan = proxy.get("rpc.network.interface.@wwan.up")[1].value -- Custo
 
 for _, v in ipairs(users) do
   if v.legacy_salt ~= "" then
@@ -49,7 +86,7 @@ end
     <meta name="CSRFtoken" content="');  ngx.print( ngx.ctx.session:getCSRFtoken() ); ngx.print('">\
     <link href="/css/gw.css" rel="stylesheet">\
     <link href="/css/responsive.css" rel="stylesheet">\
-	<link href="/css/TIM.css" rel="stylesheet">\
+    <link href="/css/TIM.css" rel="stylesheet">\
     <!--[if IE 7]><link rel="stylesheet" href="/css/font-awesome-ie7.css"><![endif]-->\
     <script src="/js/main-min.js" ></script>\
     <!--[if lt IE 9]> <script src="/js/media-min.js"></script> <![endif]-->\
@@ -70,20 +107,19 @@ end
 </head>\
 <body>\
   <div class="container">\
-    <div class="logo-technicolor"><a href="');  ngx.print( cui.nsplink ); ngx.print('" target="_blank"><img src="/img/TIM.png"></a></div>\
+    <div class="logo-technicolor"><img class="timlogo" src="/img/TIM.png"></div>\
     <div class="row">\
       <div class="offset4 span4">\
         <div class="login" id = "login">\
         <form class="form-horizontal">\
           <fieldset>\
-                <h2>');  ngx.print( T"Sign in" ); ngx.print('</h2>\
-            ')
-				if httpi=='0' and httpi_wwan=='0' then
-				ngx.print('<div id="httpi" class="alert alert-error ">\
-					<strong>') ngx.print(T"You don't have internet access at this time"); ngx.print('</strong>\
-					</div>')
-			end
-           ngx.print('<div id="erroruserpass" class="alert alert-error hide">\
+	    <h2>');  ngx.print( T"Sign in" ); ngx.print('</h2>\
+            ');  if httpi=='0' and httpi_wwan=='0' then   ngx.print('\
+              <div id="httpi" class="alert alert-error ">\
+              <strong>');  ngx.print(T"You don't have internet access at this time"); ngx.print('</strong>\
+              </div>\
+            ');  end   ngx.print('\
+            <div id="erroruserpass" class="alert alert-error hide">\
                <strong>');  ngx.print( T"Invalid Username or Password" ); ngx.print('</strong>\
             </div>\
             <div class="control-group">\
@@ -96,37 +132,10 @@ end
                 <label for="srp_password"><div class="label-icon"><i class="icon-lock icon-large"></i></div></label>\
                 <input class="span3" type="password" placeholder="');  ngx.print( T"Your password" ); ngx.print('" id="srp_password"><br><br>\
             </div>\
-            <!-- HIDE WARNING - NOT NOT USED IN DEFAULT CUSTO\
-            <div id="defaultpassword" class="alert alert-info hide">\
-                ');  ngx.print( T"If you haven't changed it, the default password can be found on the sticker under your gateway (it's called <strong>\"access code\"</strong>)" ); ngx.print('\
-            </div>\
-            -->\
             <div class="pull-right">\
                 <a href="/" class="btn btn-primary btn-large">');  ngx.print( T"Cancel" ); ngx.print('</a>\
                 &nbsp;\
                 <div id="sign-me-in" class="btn btn-primary btn-large">');  ngx.print( T"Sign in" ); ngx.print('</div>\
-            </div>\
-            <!--<div id="forgot-login-password">\
-                <a href="#">');  ngx.print(T"Forgot Login Password")  ngx.print('</a>\
-           </div>-->\
-          </fieldset>\
-        </form>\
-      </div>\
-      <div class="login hide" id ="forgot-login">\
-        <form class="form-horizontal">\
-          <fieldset>\
-            <h2>');  ngx.print(T"Reset Password")  ngx.print('</h2>\
-            <div id="erroruserpass1" class="alert alert-error hide">\
-              <strong>');  ngx.print(T"Invalid Password")  ngx.print('</strong>\
-            </div>\
-            <div class="control-group">\
-              <label for="srp_password1" class="alert-info">');  ngx.print(T'Enter the default <strong>"access code"</strong>. This code is located on the label underneath your gateway.')  ngx.print('</label>\
-              <label for="srp_password1"><div class="label-icon"><i class="icon-lock icon-large"></i></div></label>\
-              <input class="span3" type="password" placeholder="');  ngx.print(T"Your password")  ngx.print('" id="srp_password1"><br><br>\
-            </div>\
-            <div class="pull-right">\
-              <a href="/" class="btn btn-primary btn-large">');  ngx.print( T"Cancel" )  ngx.print('</a>&nbsp;\
-              <div id="verify-password" class="btn btn-primary btn-large">');  ngx.print( T"Verify" )  ngx.print('</div>\
             </div>\
           </fieldset>\
         </form>\
@@ -160,7 +169,6 @@ end
 $(document).ready(\
   function() {\
     var triesbeforemsg = ');  ngx.print( triesbeforemsg ); ngx.print(';\
-    var tries = 0;\
     var password = "";\
 \
     // Set the focus on the first input field\
@@ -187,6 +195,7 @@ $(document).ready(\
       var userNameArray = userNames.split(",")\
       var legacySaltArray = legacySalts.split(",")\
       var timesecond;\
+      var tries = 0;\
       for (var i = 0; i < userNameArray.length - 1; i ++)\
       {\
          if ( inputUsername == userNameArray[i] )\
@@ -207,11 +216,13 @@ $(document).ready(\
         // have to reload the page to get the actual page content now that\
         // we\'re logged in.\
         // Otherwise we explicitly go back to the main page.\
-        if (window.location.pathname.search(/\\/login\\.lp$/) == -1){\
-          var curl = window.location.href\
-          window.location.href = curl.substring(0,curl.indexOf("#"));\
-        }else\
-          window.location = "/";\
+        $.get("login.lp", {action:"lastaccess"}, function (data){\
+             if (window.location.pathname.search(/\\/login\\.lp$/) == -1){\
+               var curl = window.location.href\
+               window.location.href = curl.substring(0,curl.indexOf("#"));\
+             }else\
+               window.location = "/";\
+        });\
       }\
       srp.error_message = function(err) {\
       if(err == 403){\
@@ -227,7 +238,7 @@ $(document).ready(\
         $(".control-group").addClass("error");\
       }\
       timeSecond = err.waitTime;\
-      tries++;\
+      tries = err.wrongCount;\
       if (timeSecond > 0 ) {\
         $("#timerSec").text(timeSecond);\
         $("#pwdCount").text(tries);\
@@ -251,28 +262,6 @@ $(document).ready(\
       if (!$("#loginfailure").is(":visible")) {\
         srp.identify("/authenticate", $("#srp_username")[0].value, password);\
       }\
-    });\
-    $("#forgot-login-password").on("click", "a", function(){\
-      $("#login").hide();\
-      $("#forgot-login").show();\
-    });\
-    $("#verify-password").click(function(){\
-      var srp = new SRP();\
-      srp.success = function() {\
-        window.location = "/password-reset.lp";\
-        $("#login").hide();\
-        $("#forgot-login").hide();\
-      }\
-      srp.error_message = function(err) {\
-        $("#verify-password").text(\'');  ngx.print( T"Verify" ); ngx.print('\');\
-        $("#erroruserpass1").show();\
-        $(".control-group").addClass("error");\
-      }\
-      if (this.id == "verify-password")\
-     {\
-       password = $("#srp_password1").val();\
-     }\
-     srp.identify("/authenticate", "forgotpassword", password);\
     });\
   })\
 </script>\

@@ -22,6 +22,13 @@ start() {
     setrtprio bcmsw_rx 5
     setcpumask bcmsw_rx 1
 
+    setrtprio bcmxtm_rx 5
+    setcpumask bcmxtm_rx 1
+
+    # Broadcom spu driver thread
+    setrtprio spu_rx 5
+    setcpumask spu_rx 1
+
     ## WLAN ##
     # Thread prio
     # WFD < 4.16L03
@@ -59,6 +66,7 @@ start() {
        fi
     else
       #If wl0 and dhd1: put dhd1 on tp0 to line up with brcm ref where detection order is different
+      #If wl0 and wl1: also fix skbFreeTask to TP0 (to improve 11ac perf)
       #If arm: also bind wfd 
       if [ "$(process_exists wl0-kthrd)" == "1" ] && [ "$(process_exists dhd1_dpc)" == "1" ] ; then
         setcpumask wl0-kthrd 2
@@ -72,6 +80,8 @@ start() {
         setcpumask dhd0_dpc  1
         setcpumask wl1-kthrd 2
         setcpumask dhd1_dpc  2
+        setcpumask skbFreeTask   1 #Before 5.02L03
+        setcpumask skb_free_task 1 #From   5.02L03
         if [ "$cpu_type" == "armv7l" ] ; then
            setcpumask wfd0-thrd 1
            setcpumask wfd1-thrd 2

@@ -12,11 +12,9 @@ local getenv = os.getenv
 local tmpnam = os.tmpname
 local attributes, currentdir, link_attrib
 local package = package
-local io = io
-local append = table.insert
-local ipairs = ipairs
+local append, concat, remove = table.insert, table.concat, table.remove
 local utils = require 'pl.utils'
-local assert_arg,assert_string,raise = utils.assert_arg,utils.assert_string,utils.raise
+local assert_string,raise = utils.assert_string,utils.raise
 
 local attrib
 local path = {}
@@ -119,7 +117,7 @@ local function at(s,i)
     return sub(s,i,i)
 end
 
-path.is_windows = utils.dir_separator == '\\'
+path.is_windows = utils.is_windows
 
 local other_sep
 -- !constant sep is the directory separator for this platform.
@@ -277,36 +275,53 @@ function path.normcase(P)
     end
 end
 
-local np_gen1,np_gen2 = '([^SEP]+)SEP(%.%.SEP?)','SEP+%.?SEP'
-local np_pat1, np_pat2
-
 --- normalize a path name.
 --  A//B, A/./B and A/foo/../B all become A/B.
 -- @string P a file path
 function path.normpath(P)
     assert_string(1,P)
+    -- Split path into anchor and relative path.
+    local anchor = ''
     if path.is_windows then
         if P:match '^\\\\' then -- UNC
-            return '\\\\'..path.normpath(P:sub(3))
+            anchor = '\\\\'
+            P = P:sub(3)
+        elseif at(P, 1) == '/' or at(P, 1) == '\\' then
+            anchor = '\\'
+            P = P:sub(2)
+        elseif at(P, 2) == ':' then
+            anchor = P:sub(1, 2)
+            P = P:sub(3)
+            if at(P, 1) == '/' or at(P, 1) == '\\' then
+                anchor = anchor..'\\'
+                P = P:sub(2)
+            end
         end
         P = P:gsub('/','\\')
+    else
+        -- According to POSIX, in path start '//' and '/' are distinct,
+        -- but '///+' is equivalent to '/'.
+        if P:match '^//' and at(P, 3) ~= '/' then
+            anchor = '//'
+            P = P:sub(3)
+        elseif at(P, 1) == '/' then
+            anchor = '/'
+            P = P:match '^/*(.*)$'
+        end
     end
-    if not np_pat1 then
-        np_pat1 = np_gen1:gsub('SEP',sep)
-        np_pat2 = np_gen2:gsub('SEP',sep)
+    local parts = {}
+    for part in P:gmatch('[^'..sep..']+') do
+        if part == '..' then
+            if #parts ~= 0 and parts[#parts] ~= '..' then
+                remove(parts)
+            else
+                append(parts, part)
+            end
+        elseif part ~= '.' then
+            append(parts, part)
+        end
     end
-    local k
-    repeat -- /./ -> /
-        P,k = P:gsub(np_pat2,sep)
-    until k == 0
-    repeat -- A/../ -> (empty)
-        local oldP = P
-        P,k = P:gsub(np_pat1,function(D, up)
-            if D == '..' then return nil end
-            if D == '.' then return up end
-            return ''
-        end)
-    until k == 0 or oldP == P
+    P = anchor..concat(parts, sep)
     if P == '' then P = '.' end
     return P
 end
@@ -330,6 +345,9 @@ function path.relpath (P,start)
     start = normcase(start)
     local startl, Pl = split(start,sep), split(P,sep)
     local n = min(#startl,#Pl)
+    if path.is_windows and n > 0 and at(Pl[1],2) == ':' and Pl[1] ~= startl[1] then
+        return P
+    end
     local k = n+1 -- default value if this loop doesn't bail out!
     for i = 1,n do
         if startl[i] ~= Pl[i] then
@@ -368,7 +386,12 @@ end
 -- unlike os.tmpnam(), it always gives you a writeable path (uses TEMP environment variable on Windows)
 function path.tmpname ()
     local res = tmpnam()
-    if path.is_windows then res = getenv('TEMP')..res end
+    -- On Windows if Lua is compiled using MSVC14 os.tmpname
+    -- already returns an absolute path within TEMP env variable directory,
+    -- no need to prepend it.
+    if path.is_windows and not res:find(':') then
+        res = getenv('TEMP')..res
+    end
     return res
 end
 

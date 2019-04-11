@@ -1,6 +1,4 @@
 --pretranslated: do not change this file
-
---NG-94758 GUI: Mobile card and modal are not completely translated
  ngx.print('<style>\
 	.card-label {\
 		float: left;\
@@ -48,15 +46,23 @@ local modalPath = nil
 if session:hasAccess("/modals/lte-modal.lp") then
 	modalPath = "/modals/lte-modal.lp"
 elseif not session:isdefaultuser() then
-        return
+    return
 end
   ngx.print('\
 \
-<script language="javascript" type="text/javascript" src="js/knockout-min.js"></script>\
 <link href="/css/mobiled.css" rel="stylesheet">\
 <div class="span3" id="mobiletab">\
 	<div class="smallcard">\
-		');  ngx.print( ui_helper.createCardHeader(params.card_title, modalPath,nil,nil,nil,1) ); ngx.print('\
+		');  ngx.print( ui_helper.createCardHeader(params.card_title, modalPath) ); ngx.print('\
+		<div id="signal-strength-indicator-small">\
+			<div class="absolute">\
+				<div class="bar-small bar-small1"></div>\
+				<div class="bar-small bar-small2"></div>\
+				<div class="bar-small bar-small3"></div>\
+				<div class="bar-small bar-small4"></div>\
+				<div class="bar-small bar-small5"></div>\
+			</div>\
+		</div>\
 		<div class="content">\
 			');  ngx.print( ui_helper.createSimpleLight(light.status, light.desc) ); ngx.print('\
 			<p class="subinfos">\
@@ -91,6 +97,9 @@ end
 	$(document).ready(function () {\
 		var allowSimRedirect = ');  ngx.print( allowSimRedirect ); ngx.print(';\
 		var LteCard = function () {\
+                        var clearRefreshInterval = function () {\
+                        clearInterval(refreshInterval);\
+                        };\
 			var self = this;\
 			this.signalQuality = ko.observable("");\
 			this.radioType = ko.observable("");\
@@ -106,7 +115,7 @@ end
 				});\
 			};\
 			this.refresh = function () {\
-				$.post("/ajax/mobiletab.lua?auto_update=true", [tch.elementCSRFtoken()], function(data) {\
+				$.ajax({ type: "POST", url: "/ajax/mobiletab.lua?auto_update=true",dataType: "json", data: [tch.elementCSRFtoken()], success: function(data) {\
 					if(data.bars != undefined) {\
 						self.updateBars(data.bars);\
 					}\
@@ -134,13 +143,12 @@ end
 								$(this).attr(\'data-remote\', \'/modals/lte-modal.lp\');\
 							});\
 						}\
-					}\
-				}, "json");\
+			 		}\
+				}, error: clearRefreshInterval });\
 			};\
-			setInterval(self.refresh, 50000);\
+			var refreshInterval = setInterval(self.refresh, 20000);\
 			self.refresh();\
 		};\
-\
 		var lteCard = new LteCard();\
 		ko.applyBindings(lteCard, document.getElementById(\'mobiletab\'));\
 	});\

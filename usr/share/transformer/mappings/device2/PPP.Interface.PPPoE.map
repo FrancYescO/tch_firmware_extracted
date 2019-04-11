@@ -38,6 +38,8 @@ local commitApply = commitapply
 local open, match = io.open, string.match
 local networkBinding = { config = "network" }
 local isConfigChanged = false
+local nwCommon = mapper("nwcommon")
+local getUbusInterfaceStatus = nwCommon.get_ubus_interface_status
 
 Device_PPP_Interface_i_PPPoE_.entries = function(mapping, parentKey)
   model = nwmodel.load()
@@ -83,10 +85,24 @@ local function getPPPoESessionID(key)
   return "1"
 end
 
+local function getACName(key)
+  local status = getUbusInterfaceStatus(model:getInterface(key))
+  if status and status.data and status.data.pppinfo then
+    return status["data"]["pppinfo"]["access-concentrator-name"]
+  end
+end
+
 Device_PPP_Interface_i_PPPoE_.get = function(mapping,param,key)
   local value
   if param == "SessionID" then
     value = getPPPoESessionID(key)
+  elseif param == "ACName" then
+    local accessName = getUciParam(key, pppoeParamMap[param], "")
+    if accessName == "" then
+      value = getACName(key) or ""
+    else
+      value = accessName
+    end
   elseif pppoeParamMap[param] then
     value = getUciParam(key,pppoeParamMap[param],"")
   end
@@ -97,7 +113,7 @@ Device_PPP_Interface_i_PPPoE_.getall = function(mapping, key)
   local pppoeUciValues = getUciParam(key)
   local allValues = {
     SessionID = getPPPoESessionID(key),
-    ACName = pppoeUciValues.ac or "",
+    ACName = pppoeUciValues.ac or getACName(key) or "",
     ServiceName = pppoeUciValues.service or "",
   }
   return allValues

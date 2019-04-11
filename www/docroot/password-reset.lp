@@ -37,6 +37,7 @@ local current_year = (string.sub(year,1,4))
     <meta name="CSRFtoken" content="');  ngx.print( ngx.ctx.session:getCSRFtoken() ); ngx.print('">\
     <link href="/css/gw.css" rel="stylesheet">\
     <link href="/css/responsive.css" rel="stylesheet">\
+    <link href="/css/TIM.css" rel="stylesheet">\
     <!--[if IE 7]><link rel="stylesheet" href="/css/font-awesome-ie7.css"><![endif]-->\
     <script src="/js/main-min.js" ></script>\
     <!--[if lt IE 9]> <script src="/js/media-min.js"></script> <![endif]-->\
@@ -45,8 +46,8 @@ local current_year = (string.sub(year,1,4))
 </head>\
 <body>\
   <div class="container">\
-    <div class="logo-technicolor"><a href="');  ngx.print( cui.nsplink ); ngx.print('" target="_blank"><img src="/img/logo.gif"></a></div>\
-    <div class="row">\
+    <div class="logo-technicolor"><img class="timlogo" src="/img/TIM.png"></div>\
+     <div class="row">\
       <div class="offset4 span4">\
 	<div class="login">\
         <form class="form-horizontal" id = "password_reset" method = "post" action = "/password-reset.lp">\

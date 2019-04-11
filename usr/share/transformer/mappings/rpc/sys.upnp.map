@@ -39,6 +39,10 @@ local sys_upnp_redirect_i_ = {
         access = "readOnly",
         type = "int",
       },
+      remote_host = {
+        access = "readOnly",
+        type = "string",
+      },
       stop_time = {
         access = "readOnly",
         type = "int",
@@ -65,8 +69,11 @@ local get_from_uci = uciHelper.get_from_uci
 local network_binding = { config = "network", sectionname = "interface" }
 local upnp_binding = { config = "upnpd", sectionname="config", option="external_iface" }
 local upnp_interfaces = {}
-for value in gmatch(get_from_uci(upnp_binding), "%S+") do
-  upnp_interfaces[value] = value
+
+local function updateUpnpInterface()
+  for value in gmatch(get_from_uci(upnp_binding), "%S+") do
+    upnp_interfaces[value] = value
+  end
 end
 
 local function get_ipinterface(l3_interface)
@@ -87,8 +94,9 @@ sys_upnp_redirect_i_.entries = function(mapping)
   end
   lease_cache = {}
   local upnpkeys = {}
+  updateUpnpInterface()
   for line in fd:lines() do
-    local proto, interface, src_dport, dest_ip, dest_port, stop_time, descr = string.match(line, '([UDTCP]+):([^:]+):(%d+)[:%S]*:([%d%s%.]+):(%d+):(%d+):([^\r^\n]*)')
+    local proto, interface, src_dport, remote_host, dest_ip, dest_port, stop_time, descr = string.match(line, '([UDTCP]+):([^:]+):(%d+)[:%S]*:([%S+]+):([%d%s%.]+):(%d+):(%d+):([^\r^\n]*)')
     if proto and interface and dest_port and src_dport and stop_time and descr then
       local key = proto .. interface .. dest_port .. src_dport
       upnpkeys[#upnpkeys+1] = key
@@ -97,6 +105,7 @@ sys_upnp_redirect_i_.entries = function(mapping)
         interface = interface,
         dest_port = dest_port,
         dest_ip = dest_ip,
+        remote_host = (remote_host and remote_host ~= "(null)" and remote_host ~= "*") and remote_host or "0.0.0.0",
         src_dport = src_dport,
         stop_time = stop_time,
         description = (descr ~= "(null)") and descr or "",

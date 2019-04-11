@@ -1,7 +1,7 @@
 #!/usr/bin/env lua
 
-local dsl=require('transformer.shared.xdslctl')
-
+local luabcm=require('luabcm')
+local dsl=luabcm.getMinimalDSLStatistics(0)
 
 local function lrtr_to_number(lrtr)
   if lrtr == "LOS Detector" then
@@ -28,17 +28,14 @@ local function info()
   local value=dsl.infoValue
 
   print("xdslctl: ADSL driver and PHY status")
-  local status=value('status')
+  local status=dsl['status']
   print("Status: " .. status)
-  print("Last Retrain Reason:\t" .. lrtr_to_number(value('lrtr')))
-  print("Last initialization procedure status:\t" .. value('lips'))
+  print("Last Retrain Reason:\t" .. lrtr_to_number(dsl['LastRetrainReason']))
+  print("Last initialization procedure status:\t" .. dsl['LastInitializationProcedureStatus'])
 
   if ( status == "Showtime") then
-    local rates=value('maxrate');
-    print("Max:\tUpstream rate = " .. tostring(rates['us']) .. " Kbps, Downstream rate = " .. tostring(rates['ds']) .. " Kbps" )
-
-    rates=dsl.infoValue('currentrate');
-    print("Bearer:\t0, Upstream rate = " .. tostring(rates['us']) .. " Kbps, Downstream rate = " .. tostring(rates['ds']) .. " Kbps\n" )
+    print("Max:\tUpstream rate = " .. tostring(dsl['UpstreamMaxBitRate']) .. " Kbps, Downstream rate = " .. tostring(dsl['DownstreamMaxBitRate']) .. " Kbps" )
+    print("Bearer:\t0, Upstream rate = " .. tostring(dsl['UpstreamCurrRate']) .. " Kbps, Downstream rate = " .. tostring(dsl['DownstreamCurrRate']) .. " Kbps\n" )
   else
     print("")
   end
@@ -46,17 +43,17 @@ end
 
 
 local function uprate()
-  print(dsl.infoValue('currentrate')['us'])
+  print(dsl['UpstreamCurrRate'])
 end
 
 
 local function downrate()
-  print(dsl.infoValue('currentrate')['ds'])
+  print(dsl['DownstreamCurrRate'])
 end
 
 
 local function status()
-  print("Status: " .. dsl.infoValue('status'))
+  print("Status: " .. dsl['status'])
 end
 
 
@@ -64,8 +61,8 @@ local function updownrate()
 local us
 local ds
 
-  us = dsl.infoValue('currentrate')['us']
-  ds = dsl.infoValue('currentrate')['ds']
+  us = dsl['UpstreamCurrRate']
+  ds = dsl['DownstreamCurrRate']
 
   print(us .. " " .. ds)
   -- returns (just the values):

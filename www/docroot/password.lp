@@ -7,15 +7,22 @@ local triesbeforemsg = 3
 local content_helper = require("web.content_helper")
 local untaint = string.untaint
 local proxy = require("datamodel")
+local password_charachters = require("password_charachters")
+
+local spl_char = password_charachters.spl_char
+local std_upper_char = password_charachters.std_upper_char
+local std_lower_char = password_charachters.std_lower_char
 
 if ngx.req.get_method() == "POST" and ngx.req.get_post_args().action == "PasswordChanged" then
-   local result = content_helper.getMatchedContent("uci.web.user.", {name = ngx.ctx.session:getusername()})
-    if result and #result > 0 then
-      if proxy.set(result[1].path .. "password_reminder", "0") then
-        proxy.apply()
-      end
+  local result = content_helper.getMatchedContent("uci.web.user.", {name = ngx.ctx.session:getusername()})
+  if result and #result > 0 then
+    if proxy.set(result[1].path .. "password_reminder", "0") then
+      proxy.apply()
     end
-    ngx.exit(ngx.HTTP_OK)
+  end
+  ngx.ctx.session:logout()
+  ngx.redirect("/")
+  ngx.exit(ngx.HTTP_OK)
 end
 
 local cui = {
@@ -23,6 +30,7 @@ local cui = {
   nsplink = "uci.web.uiconfig.@uidefault.nsplink",
   timestamp = "uci.version.version.@version[0].timestamp",
 }
+
 content_helper.getExactContent(cui)
 local year = cui.timestamp
 local current_year = (string.sub(year,1,4))
@@ -83,7 +91,7 @@ end
 			.span4 {width: 300px;}\
 		}\
 		@media screen and (max-width: 979px) and (min-width: 768px){\
-		input.span3, textarea.span3, .uneditable-input.span3 \
+		input.span3, textarea.span3, .uneditable-input.span3\
 			{width: 206px;}\
 		}\
 		@media screen and (max-width: 979px) and (min-width: 768px){\
@@ -109,7 +117,7 @@ end
 </head>\
 <body>\
   <div class="container">\
-    <div class="logo-technicolor">'); ngx.print('<img src="/img/TIM.png"></div>\
+    <div class="logo-technicolor"><img src="/img/TIM.png"></div>\
     <div class="row">\
       <div class="offset4 span4">\
         <div class="login">\
@@ -132,20 +140,15 @@ end
                <strong>');  ngx.print( T"Old password is incorrect"); ngx.print('</strong>\
             </div>\
 \
-            ');  
-			ngx.print(createPwdLabel(T"Your Username")); ngx.print('\
+			');  ngx.print(createPwdLabel(T"Your Username"));   ngx.print('\
 				<div class="control-group">\
 					<label for="srp_username"><div style="margin-right:14px" class="label-icon">\
 						<i class="icon-user icon-large"></i>\
-			');
-			ngx.print('\</div>\
-						</label>');
-			ngx.print(ngx.ctx.session:getusername());
-			
-			ngx.print('\
-			</div>');
-			
-			ngx.print( createPwdLabel(T"Your old password") ); ngx.print('\
+				</div>\
+				</label>\
+			');  ngx.print(ngx.ctx.session:getusername());   ngx.print('\
+	    </div>\
+            ');  ngx.print( createPwdLabel(T"Your old password") ); ngx.print('\
             <div class="control-group">\
                 <label for="srp_password"><div class="label-icon">\
                     <i class="icon-lock icon-large"></i>\
@@ -185,22 +188,26 @@ end
 function passwordCheck(password)\
 {\
 \
+        var spl_char = ');  ngx.print(spl_char); ngx.print(';\
+        var std_lower_char = ');  ngx.print(std_lower_char); ngx.print(';\
+        var std_upper_char = ');  ngx.print(std_upper_char); ngx.print(';\
+\
 	var level = 0;\
 \
-	//if password bigger than 6 give 1 point\
-	if (password.length >= 6) level++;\
-\
 	//if password has both lower and uppercase characters give 1 point\
-	if ( ( password.match(/[a-z]/) ) && ( password.match(/[A-Z]/) ) ) level++;\
+	if ( ( password.match(std_lower_char) ) && ( password.match(std_upper_char) ) ) level++;\
 \
 	//if password has at least one number give 1 point\
 	if (password.match(/\\d+/)) level++;\
 \
 	//if password has at least one special caracther give 1 point\
-	if ( password.match(/[!,@,#,$,%,^,&,*,?,_,~,-,(,)]/) )	level++;\
+	if ( password.match(spl_char) )	level++;\
 \
-	//if password bigger than 8 give another 1 point\
-	if (password.length >= 8) level++;\
+	//if password length is greater than or equal to 12 give 1 point\
+	if ( password.length >= 12 ) level++;\
+\
+	//if password length is greater than 12 and passwordCheck level is equal to 4 give 1 point\
+	if (( password.length > 12 ) && (level == 4)) level++;\
 \
 	 $(\'#Password_Strength\').removeClass().addClass("pstrength" + level).addClass("span3");\
          return level;\
@@ -242,18 +249,18 @@ $(document).ready(\
 \
       var password1 = $("#srp_password_new_1")[0].value;\
       var password2 = $("#srp_password_new_2")[0].value;\
-      if(password1.length < 12 || passwordCheck(password1) < 5)\
-         {\
-            if(password1.length == 0)\
-            {\
-              $("#erroruserpass_3").show();\
-              $(".control-group").addClass("error");\
-              return false;\
-            }\
-            $("#erroruserpass_2").show();\
-            $(".control-group").addClass("error");\
-            return false;\
-         }\
+      if(passwordCheck(password1) < 4)\
+      {\
+        if(password1.length == 0)\
+	{\
+	  $("#erroruserpass_3").show();\
+	  $(".control-group").addClass("error");\
+	  return false;\
+	}\
+        $("#erroruserpass_2").show();\
+        $(".control-group").addClass("error");\
+        return false;\
+      }\
       $(this).text(\'');  ngx.print( T"Updating" ); ngx.print('\');\
       var username = \'');  ngx.print( ngx.ctx.session:getusername() ); ngx.print('\';\
       var password = $("#srp_password")[0].value;\
@@ -283,6 +290,7 @@ $(document).ready(\
       //End for legacy migration: GUI username/password [NG-48489]\
       var srp = new SRP();\
       srp.success = function() {\
+        $("#change-my-pass").text(\'');  ngx.print( T"Updating" ); ngx.print('\');\
         srp.generateSaltAndVerifier("/password", username, $("#srp_password_new_1")[0].value)\
         //Start for legacy migration: GUI username/password [NG-48489]\
         if(index >= 0)\

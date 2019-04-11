@@ -132,7 +132,7 @@ local xtmctl = require("transformer.shared.xtmctl")
 local get_ubus_interface_status = common.get_ubus_interface_status
 local getIntfStats = common.getIntfStats
 local split_key = common.split_key
-local xdslctl = require("transformer.shared.xdslctl")
+local dsl_supported, xdslctl = pcall(require,"transformer.shared.xdslctl")
 local conn = mapper("ubus").connect()
 local empty_mt = { __index = function() return "" end }
 local transactions = {}
@@ -271,7 +271,7 @@ WANDSLLinkConfig.get = {
   end,
   ModulationType = function(mapping, param, parentkey, grandparentkey)
     local gdevtype = split_key(grandparentkey)
-    if gdevtype == "DSL" then
+    if gdevtype == "DSL" and dsl_supported then
       return convertMode(xdslctl.infoValue("mode"))
     end
     return ""
@@ -326,7 +326,7 @@ WANDSLLinkConfig.get = {
   ATMPeakCellRate = function (mapping,param,key)
     local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
     if devtype == "ATM" then
-      local val = getTdItem(devname, "pcr")
+      local val = getTdItem(devname, "peak_cell_rate")
       if val and val ~= "" then
         return val
       end
@@ -336,7 +336,7 @@ WANDSLLinkConfig.get = {
   ATMMaximumBurstSize = function (mapping,param,key)
     local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
     if devtype == "ATM" then
-      local val = getTdItem(devname, "mbs")
+      local val = getTdItem(devname, "max_burst_size")
       if val and val ~= "" then
         return val
       end
@@ -346,7 +346,7 @@ WANDSLLinkConfig.get = {
   ATMSustainableCellRate = function (mapping,param,key)
     local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
     if devtype == "ATM" then
-    local val = getTdItem(devname, "scr")
+    local val = getTdItem(devname, "sustained_cell_rate")
       if val and val ~= "" then
         return val
       end
@@ -512,21 +512,21 @@ WANDSLLinkConfig.set = {
     if devtype ~= "ATM" or value == ""  then
       return nil, "Unsupported value"
     end
-    setUciParameterOfTd(devname, "pcr", value)
+    setUciParameterOfTd(devname, "peak_cell_rate", value)
   end,
   ATMMaximumBurstSize = function(mapping, param, value, key)
     local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
     if devtype ~= "ATM" or value == ""  then
       return nil, "Unsupported value"
     end
-    setUciParameterOfTd(devname, "mbs", value)
+    setUciParameterOfTd(devname, "max_burst_size", value)
   end,
   ATMSustainableCellRate = function(mapping, param, value, key)
     local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
     if devtype ~= "ATM" or value == ""  then
       return nil, "Unsupported value"
     end
-    setUciParameterOfTd(devname, "scr", value)
+    setUciParameterOfTd(devname, "sustained_cell_rate", value)
   end,
 }
 

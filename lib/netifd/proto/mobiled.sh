@@ -11,7 +11,7 @@ proto_mobiled_init_config() {
 	no_device=1
 	available=1
 	proto_config_add_int "session_id" "enabled" "optional"
-	proto_config_add_string "dev_desc" "profile" "bridge"
+	proto_config_add_string "dev_desc" "profile" "bridge" "name"
 }
 
 check_and_remove() {
@@ -24,8 +24,8 @@ check_and_remove() {
 proto_mobiled_setup() {
 	local interface="$1"
 
-	local dev_desc session_id profile enabled optional bridge
-	json_get_vars dev_desc session_id profile enabled optional bridge
+	local dev_desc session_id profile enabled optional bridge name
+	json_get_vars dev_desc session_id profile enabled optional bridge name
 
 	if [ -z "$session_id" ]; then
 		proto_notify_error "$interface" "No assigned session ID"
@@ -56,7 +56,11 @@ proto_mobiled_setup() {
 		bridge_option="-b $bridge"
 	fi
 
-	proto_run_command "$interface" /lib/netifd/mobiled.lua ${dev_desc_option} -s "$session_id" -p "$profile" -i "$interface" ${optional_option} ${bridge_option}
+	if [ -n "$name" ]; then
+		name_option="-n $name"
+	fi
+
+	proto_run_command "$interface" /lib/netifd/mobiled.lua ${dev_desc_option} -s "$session_id" -p "$profile" -i "$interface" ${optional_option} ${bridge_option} ${name_option}
 }
 
 proto_mobiled_teardown() {

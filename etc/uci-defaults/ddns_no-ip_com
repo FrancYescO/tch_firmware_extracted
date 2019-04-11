@@ -3,55 +3,6 @@ g_pslfile=/usr/share/public_suffix_list.dat.gz
 [ -f "$g_pslfile" ] || g_pslfile="$(dirname $0)/public_suffix_list.dat.gz"
 g_pslerr=0
 g_cfgfile="ddns"
-mod_cloudflare_v1_domain() {
-[ -f "$g_pslfile" ] || return 1
-[ $# -ne 1 -o -z "$1" ] && \
-{ printf "%s\\n" "mod_cloudflare_v1_domain() - Invalid number of parameters" >&2; return 1; }
-local mcd_fqdn=$1
-local mcd_fsub=""
-local mcd_fdom=""
-local mcd_ctld=""
-local mcd_ftld=""
-if [ $( printf "%s" "$mcd_fqdn" | grep -cF "@" 2>/dev/null ) -gt 0 ]; then
-printf "%s" "$mcd_fqdn"
-return 0
-fi
-set -- $(printf %s "$mcd_fqdn" | tr [A-Z] [a-z] | tr "." " " \
-| awk '{do printf "%s"(NF>1?OFS:ORS),$NF;while (--NF)}' )
-while [ -n "${1:-}" ] ; do
-if [ -z "$mcd_ctld" ]; then
-mcd_ctld="$1"
-shift
-else
-mcd_ctld="$1.$mcd_ctld"
-shift
-fi
-zcat $g_pslfile | grep -E "^$mcd_ctld$" >/dev/null 2>&1 && {
-mcd_ftld="$mcd_ctld"
-mcd_fdom="${1:-}"
-continue
-}
-zcat $g_pslfile | grep -E "^\*.$mcd_ctld$" >/dev/null 2>&1 && {
-[ -z "${1:-}" ] && break
-if zcat $g_pslfile | grep -E "^!$1.$mcd_ctld$" >/dev/null 2>&1 ; then
-mcd_ftld="$mcd_ctld"
-else
-mcd_ftld="$1.$mcd_ctld"
-shift
-fi
-mcd_fdom="$1"; shift
-}
-[ -n "$mcd_ftld" ] && break
-done
-while [ -n "${1:-}" ]; do
-mcd_fsub="${1}${mcd_fsub:+.$mcd_fsub}"
-shift
-done
-[ -z "$mcd_ftld" ] && { printf "%s\\n" "mod_cloudflare_v1_domain() - no TLD not found in '$mcd_fqdn'" >&1; return 1; }
-[ -z "$mcd_fdom" ] && { printf "%s\\n" "mod_cloudflare_v1_domain() - no registrable Domain not found in '$mcd_fqdn'" >&1; return 1; }
-printf "%s" "${mcd_fsub:+${mcd_fsub}@}${mcd_fdom}.${mcd_ftld}"
-return 0
-}
 timer2dhms() {
 local t=0
 case $2 in
@@ -105,32 +56,12 @@ freedns\.afraid\.org|afraid\.org)
 $uc_uci set $g_cfgfile.$uc_name.$uc_var="afraid.org-keyauth";;
 Bind-nsupdate)
 $uc_uci set $g_cfgfile.$uc_name.$uc_var="bind-nsupdate";;
-CloudFlare|cloudflare\.com|cloudflare\.com-v1)
-$uc_uci get $g_cfgfile.$uc_name.lookup_host >/dev/null 2>&1 || {
-ucv_domain=$($uc_uci get $g_cfgfile.$uc_name.domain 2>/dev/null)
-$uc_uci set $g_cfgfile.$uc_name.lookup_host="$ucv_domain"
-}
-if [ -f "$g_pslfile" ]; then
-ucv_domain=$($uc_uci get $g_cfgfile.$uc_name.domain 2>/dev/null)
-ucv_object=$($uc_uci get $g_cfgfile.$uc_name.upd_object 2>/dev/null)
-if [ -n "$ucv_domain" ]; then
-ucv_new=$(mod_cloudflare_v1_domain "$ucv_domain") || g_pslerr=1
-[ $g_pslerr -eq 0 ] && \
-$uc_uci set $g_cfgfile.$uc_name.domain="$ucv_new"
-fi
-if [ -n "$ucv_object" ]; then
-ucv_new=$(mod_cloudflare_v1_domain "$ucv_object") || g_pslerr=1
-[ $g_pslerr -eq 0 ] && \
-$uc_uci set $g_cfgfile.$uc_name.upd_object="$ucv_new"
-fi
-fi
-unset ucv_domain ucv_object ucv_new
-$uc_uci set $g_cfgfile.$uc_name.$uc_var="cloudflare.com-v1"
-;;
 dyndns\.org|dyndns\.com)
 $uc_uci set $g_cfgfile.$uc_name.$uc_var="dyn.com";;
 free\.editdns\.net)
 $uc_uci set $g_cfgfile.$uc_name.$uc_var="editdns.net";;
+FreeDNS\.42\.pl)
+$uc_uci set $g_cfgfile.$uc_name.$uc_var="freedns.42.pl";;
 domains\.google\.com)
 $uc_uci set $g_cfgfile.$uc_name.$uc_var="google.com";;
 loopia\.com)
@@ -151,14 +82,6 @@ $uc_uci set $g_cfgfile.$uc_name.lookup_host="$uc_val"
 if [ -f "$g_pslfile" ]; then
 uco_provider=$($uc_uci get $g_cfgfile.$uc_name.upd_provider 2>/dev/null) || \
 uco_provider=$($uc_uci get $g_cfgfile.$uc_name.service_name 2>/dev/null)
-if [ "$uco_provider" = "CloudFlare" \
--o "$uco_provider" = "cloudflare.com" \
--o "$uco_provider" = "cloudflare.com-v1" ]; then
-ucv_new=$(mod_cloudflare_v1_domain "$uc_val") || g_pslerr=1
-[ $g_pslerr -eq 0 ] && \
-$uc_uci set $g_cfgfile.$uc_name.$uc_var="$ucv_new"
-unset ucv_new
-fi
 unset uco_provider
 fi
 ;;

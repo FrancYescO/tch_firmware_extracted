@@ -281,19 +281,21 @@ end
 -- [string] the bridge or an empty string if not found
 local function get_bridge_from_if(interface)
   local syspath = "/sys/class/net/" .. interface .. "/brport/bridge/uevent"
-  local f = popen ("cat " .. syspath .. " | awk -F '=' '/INTERFACE=/ {print $2}'")
+  local f = open (syspath)
 
   if f == nil then
     return ""
   end
 
-  local out = f:read("*l")
-  if ( out == nil ) then
-    f:close()
-    return ""
+  local line = f:read()
+  local bridge
+  while not bridge and line do
+    bridge = line:match("INTERFACE=(.+)")
+    line = f:read()
   end
+  f:close()
 
-  return out
+  return bridge
 end
 
 -- Determines whether a certain MAC address belongs to a wireless device
@@ -331,6 +333,25 @@ local function is_wireless(interface, macaddress)
   return nil
 end
 
+-- Probe all connected and stalled IP addresses of a device
+--
+-- Parameters:
+-- - device: [table] the device entry
+local function probe_device_addresses(device)
+  local mac = device["mac-address"]
+  local l3interface = device["l3interface"]
+  for _, mode in ipairs(ip_modes) do
+    for _, ip in pairs(device[mode]) do
+      if ip.state == "connected" or ip.state == "stale" then
+	ubus_conn:call("network.neigh", "probe", {
+			    ["interface"]=l3interface,
+			    ["mac-address"]=mac,
+			    [mode.."-address"]=ip.address})
+      end
+    end
+  end
+end
+
 -- Populates the IPv4/IPv6 information for a certain device/IP address pair
 --
 -- Parameters:
@@ -338,14 +359,15 @@ end
 -- - mac: [string] the MAC address of the device
 -- - address: [string] the IPv4 or IPv6 address
 -- - mode: [string] either ipv4 or ipv6
--- - action: [string] either add or delete
+-- - action: [string] add, stale or delete
 -- - conflictingmac: [string] the MAC address of the device conflicting with this address
 -- - dhcp: [table] containing DHCP information, nil if static config
 -- Returs:
 -- - [boolean] true if device state has changed
 local function update_ip_state(l3interface, mac, address, mode, action, conflictingmac, dhcp)
   local changed = false
-  local iplist = (alldevices[mac])[mode];
+  local device = alldevices[mac]
+  local iplist = device[mode];
   if (iplist[address]==nil) then
     iplist[address]={ address=address, state="disconnected" }
     changed = true
@@ -414,13 +436,17 @@ local function update_ip_state(l3interface, mac, address, mode, action, conflict
 	changed = true
       end
     end
-  else
+  elseif action == "delete" then
     if dhcp then
       if ipentry.dhcp and ipentry.dhcp.state == "connected" then
 	ipentry.dhcp.state = "disconnected"
 	changed = true
 
-	if ipentry.state ~= "disconnected" then
+	if mode == "ipv4" then
+	  -- This is a good indication that the device went offline
+	  -- Probe all its connected & stalled addresses
+	  probe_device_addresses(device)
+	elseif ipentry.state ~= "disconnected" then
 	  ubus_conn:call("network.neigh", "probe", {
 			      ["interface"]=l3interface,
 			      ["mac-address"]=mac,
@@ -431,6 +457,9 @@ local function update_ip_state(l3interface, mac, address, mode, action, conflict
       ipentry.state = "disconnected"
       changed = true
     end
+  elseif action == "stale" and ipentry.state ~= action then
+    ipentry.state = "stale"
+    changed = true
   end
 
   if not dhcp and ipentry["conflicts-with"] ~= conflictingmac then
@@ -439,6 +468,68 @@ local function update_ip_state(l3interface, mac, address, mode, action, conflict
   end
 
   return changed
+end
+
+-- Returns true if ip state is connected
+local function ip_state_connected(ipentry)
+  return ipentry.state ~= "disconnected"
+end
+
+-- Returns true if ip entry is static and its state is disconnected static
+local function ip_static_state_disconnected(ipentry)
+  return ipentry.configuration == "static" and ipentry.state ~= "connected"
+end
+
+-- Probe all bridge devices connected through a certain L2 interface
+--
+-- Parameters:
+-- - bridge: L3 interface
+-- - interface: L2 interface
+-- - ip_modes: [table] address types to be probed (e.g. { "ipv4", "ipv6" })
+-- - ipentry_selector: function that receives an ip entry and returns true if entry needs to be probed
+local function probe_selected_bridge_devices(bridge, interface, ip_modes, ipentry_selector)
+  for mac, _ in pairs(alldevices) do
+    device = alldevices[mac]
+    if (device["l2interface"] == interface) then
+      -- Device's l2interface needs update, mark it
+      devices_linkdown[mac] = bridge
+      for _, mode in ipairs(ip_modes) do
+	for _, ip in pairs(device[mode]) do
+	  if ipentry_selector(ip) then
+	    log:info("Probing device " .. mac .. " IP address " .. ip.address .. " on interface " .. bridge);
+	    ubus_conn:call("network.neigh", "probe", {
+				["interface"]=bridge,
+				["mac-address"]=mac,
+				[mode.."-address"]=ip.address})
+	  end
+	end
+      end
+    end
+  end
+end
+
+-- Probe all devices connected through a certain L3 interface
+--
+-- Parameters:
+-- - interface: L3 interface
+-- - ipentry_selector: function that receives an ip entry and returns true if entry needs to be probed
+local function probe_selected_interface_devices(interface, ip_modes, ipentry_selector)
+  for mac, _ in pairs(alldevices) do
+    device = alldevices[mac]
+    if (device['l3interface'] == interface) then
+      for _, mode in ipairs(ip_modes) do
+	for _, ip in pairs(device[mode]) do
+	  if ipentry_selector(ip) then
+	    log:info("Probing device " .. mac .. " IP address " .. ip.address .. " on interface " .. interface);
+	    ubus_conn:call("network.neigh", "probe", {
+				["interface"]=interface,
+				["mac-address"]=mac,
+				[mode.."-address"]=ip.address})
+	  end
+	end
+      end
+    end
+  end
 end
 
 -- Transforms a device data structure to a ubus message; currently only the lists of IP addresses
@@ -680,14 +771,14 @@ local function set_device_state(device, state)
     device.disconnected_time = now
     interface_stats.disconnected_devices = interface_stats.disconnected_devices + 1
 
+    -- Probe all connected & stalled IPs of the disconnecting device
+    probe_device_addresses(device)
+
     -- Start delete timer if necessary
-    local remaining = delete_timer:remaining()
-    if type(remaining) ~= "number" then
-      remaining = -1
-    end
+    local remaining = math.floor(delete_timer:remaining() / 1000)
     if remaining < 0 or remaining > MIN_DELETE_TIMER_VALUE * 1000 then
       local delete_delay = get_interface_delete_delay(device.l3interface)
-      if delete_delay >= 0 then
+      if delete_delay >= 0 and (remaining < 0 or delete_delay < remaining) then
 	if delete_delay > 0 and delete_delay < MIN_DELETE_TIMER_VALUE then
 	  delete_delay = MIN_DELETE_TIMER_VALUE
 	end
@@ -706,7 +797,7 @@ local function handle_device_update(msg)
   if (type(msg)~="table" or
     type(msg['mac-address'])~="string" or
     (not match(msg['mac-address'], "%x%x:%x%x:%x%x:%x%x:%x%x:%x%x")) or
-    (msg['action']~='add' and msg['action']~='delete') or
+    (msg['action']~='add' and msg['action']~='delete' and msg['action']~='stale') or
     type(msg['interface'])~="string" or
     (not (((type(msg['ipv4-address'])=="table") and type(msg['ipv4-address'].address)=="string" and match(msg['ipv4-address'].address, "%d+\.%d+\.%d+\.%d+"))
      or ((type(msg['ipv6-address'])=="table") and type(msg['ipv6-address'].address)=="string" and match(msg['ipv6-address'].address, "[%x:]+")) ))
@@ -818,7 +909,7 @@ local function handle_device_update(msg)
     -- Device is connected if at least 1 IP address is connected
     for _, mode in ipairs(ip_modes) do
       for _, j in pairs(device[mode]) do
-	if (j.state=='connected') then
+	if j.state == "connected" or j.state == "stale" then
 	  state = "connected"
 	  break
 	end
@@ -1136,7 +1227,8 @@ local function handle_wireless_station_update(msg)
   if msg["state"] == "Disconnected" and device.wireless then
     if device.wireless.accesspoint == msg["ap_name"] then
       if device.state == "connected" then
-        device.state = "disconnected"
+        set_device_state(device, "disconnected")
+        -- Publish our enriched device object over UBUS
         ubus_conn:send('hostmanager.devicechanged', transform_device_to_ubus_message(device))
       end
     else
@@ -1417,9 +1509,7 @@ end
 -- Parameters:
 -- - msg: [table] the UBUS message
 local function handle_device_link(msg)
-  local device
-  local interface
-  local action
+  local interface, action, bridge
 
   -- Reject bad events
   if (type(msg)~="table" or
@@ -1431,36 +1521,27 @@ local function handle_device_link(msg)
 
   interface = msg['interface']
   action = msg['action']
+  bridge = get_bridge_from_if(interface)
 
   if action ~= "down" then
-    -- Bridge may need a few seconds to learn the mac, such as 3 seconds
-    -- After that, do update_l2interface()
-    devices_linkdown_timer:set(3000)
-    return
-  end
+    local ipv4_mode = { "ipv4" }
+    if bridge == "" then
+      -- Probe all devices disconnected from this L3 interface that have a static IPv4 address
+      probe_selected_interface_devices(interface, ipv4_mode, ip_static_state_disconnected)
+    else
+      -- Probe all devices disconnected from this L2 interface that have a static IPv4 address
+      probe_selected_bridge_devices(bridge, interface, ipv4_mode, ip_static_state_disconnected)
 
-  local bridge = get_bridge_from_if(interface)
-  if bridge == "" then
-    return
-  end
-
-  -- Probe all of the devices on this interface
-  for mac, _ in pairs(alldevices) do
-    device = alldevices[mac]
-    if (device['l2interface'] == interface) then
-      -- Device's l2interface needs update, mark it
-      devices_linkdown[mac] = bridge
-      for _, mode in ipairs(ip_modes) do
-	for _, ip in pairs(device[mode]) do
-	  if ip.state ~= "disconnected" then
-	    ubus_conn:call("network.neigh", "probe", {
-				["interface"]=bridge,
-				["mac-address"]=mac,
-				[mode.."-address"]=ip.address})
-	  end
-	end
-      end
+      -- Bridge may need a few seconds to learn the mac, such as 3 seconds
+      -- After that, do update_l2interface()
+      devices_linkdown_timer:set(3000)
     end
+    return
+  end
+
+  if bridge ~= "" then
+    -- Probe all devices connected on this L2 interface
+    probe_selected_bridge_devices(bridge, interface, ip_modes, ip_state_connected)
   end
 end
 

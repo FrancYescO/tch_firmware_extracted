@@ -15,14 +15,17 @@ function StateMachine:handle_event(event)
 	end
 	-- Entering a new state?
 	if newState ~= self.currentState then
-		local previousState = self.currentState
-		self.currentState = newState
+		local previousState = self.previousState
 		local oldStateData = self.stateData
+		self.previousState = self.currentState
+		self.currentState = newState
 		self.stateData = {}
 		local ret, errMsg = self.states[newState]:entry(self)
+		-- Revert to old state
 		if not ret then
 			if errMsg then self.runtime.log:error(errMsg) end
-			self.currentState = previousState
+			self.currentState = self.previousState
+			self.previousState = previousState
 			self.stateData = oldStateData
 		end
 	end
@@ -54,25 +57,26 @@ end
 local M = {}
 
 function M.create(stateConfig, initState, runtime, dev_idx, callback)
-	local self = {}
-	self.dev_idx = dev_idx
-	self.runtime = runtime
-	self.currentState = initState
-	self.states = {}
-	self.stateData = {}
-	for k, v in pairs(stateConfig) do
-		if v == nil or v.mains == nil then
-			self.runtime.log:error('Error in start, missing config parameter for ' .. k)
+	local self = {
+		dev_idx = dev_idx,
+		runtime = runtime,
+		currentState = initState,
+		cb = callback,
+		states = {},
+		stateData = {}
+	}
+
+	for name, config in pairs(stateConfig) do
+		if not config.mains then
+			self.runtime.log:error('Missing mains parameter for state "%s"', name)
 		end
-		self.states[k] = State.init(k, v, runtime)
+		self.states[name] = State.init(name, config, runtime)
 	end
 
 	self.timeout = function()
-		self.cb({ event = 'timeout', dev_idx = self.dev_idx })
+		self.cb('mobiled', { event = 'timeout', dev_idx = self.dev_idx })
 	end
-
 	self.timer = runtime.uloop.timer(self.timeout)
-	self.cb = callback
 
 	setmetatable(self, StateMachine)
 	return self

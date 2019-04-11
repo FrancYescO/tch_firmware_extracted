@@ -1,4 +1,5 @@
-local string, tonumber, table, pairs = string, tonumber, table, pairs
+local format, match, gmatch, gsub, tinsert, tconcat = string.format, string.match, string.gmatch, string.gsub, table.insert, table.concat
+
 local helper = require("mobiled.scripthelpers")
 local attty = require("libat.tty")
 
@@ -10,10 +11,10 @@ Mapper.__index = Mapper
 local M = {}
 
 function Mapper:set_attach_params(device, profile)
-	device:send_command(string.format('AT+CGDCONT=1,"IP","%s"', profile.apn or ""))
+	device:send_command(format('AT+CGDCONT=1,"IP","%s"', profile.apn or ""))
 end
 
-function Mapper:start_data_session(device, session_id, profile)
+function Mapper:start_data_session(device, session_id, profile) --luacheck: no unused args
 	device:send_command('AT+CGACT=0,' .. (session_id + 1), 2000)
 	helper.sleep(1)
 	device:send_command('AT+XDNS=' .. (session_id + 1) .. ',1')
@@ -27,9 +28,9 @@ end
 function Mapper:get_radio_signal_info(device, info)
 	local ret = device:send_singleline_command('AT+XCCINFO?', '+XCCINFO:', 100, 3)
 	if ret then
-		ret = string.gsub(ret, "+XCCINFO:%s*", "")
+		ret = gsub(ret, "+XCCINFO:%s*", "")
 		local i = 0
-		for val in string.gmatch(ret, '[^,]+') do
+		for val in gmatch(ret, '[^,]+') do
 			if i == 1 then
 				if not device.buffer.network_info.plmn_info then device.buffer.network_info.plmn_info = {} end
 				device.buffer.network_info.plmn_info.mcc = val
@@ -59,11 +60,11 @@ end
 function Mapper:get_pin_info(device, info)
 	local ret = device:send_singleline_command('AT+CPINR="SIM PIN"', '+CPINR:')
 	if ret then
-		info.unlock_retries_left = tonumber(string.match(ret, '(%d+),'))
+		info.unlock_retries_left = tonumber(match(ret, '(%d+),'))
 	end
 	ret = device:send_singleline_command('AT+CPINR="SIM PUK"', '+CPINR:')
 	if ret then
-		info.unblock_retries_left = tonumber(string.match(ret, '(%d+),'))
+		info.unblock_retries_left = tonumber(match(ret, '(%d+),'))
 	end
 end
 
@@ -76,28 +77,28 @@ function Mapper:get_device_capabilities(device, info)
 
 		local ret = device:send_singleline_command('AT+XACT=?', "+XACT:")
 		if ret then
-			ret = string.gsub(ret, "+XACT: %([0-9-]+%),%([0-9-]+%),%d,", "")
-			for val in string.gmatch(ret, "%d+") do
+			ret = gsub(ret, "+XACT: %([0-9-]+%),%([0-9-]+%),%d,", "")
+			for val in gmatch(ret, "%d+") do
 				val = tonumber(val)
 				if(val >= 410 and val <= 1900) then
-					table.insert(gsmBands, val)
+					tinsert(gsmBands, val)
 				elseif(val >= 1 and val <= 25) then
-					table.insert(umtsBands, val)
+					tinsert(umtsBands, val)
 				elseif(val >= 101 and val <= 142) then
-					table.insert(lteBands, (val-100))
+					tinsert(lteBands, (val-100))
 				end
 			end
 		end
 
-		table.insert(radio_interfaces, { radio_interface = "auto" })
+		tinsert(radio_interfaces, { radio_interface = "auto" })
 		if #gsmBands > 0 then
-			table.insert(radio_interfaces, { radio_interface = "gsm", supported_bands = gsmBands })
+			tinsert(radio_interfaces, { radio_interface = "gsm", supported_bands = gsmBands })
 		end
 		if #umtsBands > 0 then
-			table.insert(radio_interfaces, { radio_interface = "umts", supported_bands = umtsBands })
+			tinsert(radio_interfaces, { radio_interface = "umts", supported_bands = umtsBands })
 		end
 		if #lteBands > 0 then
-			table.insert(radio_interfaces, { radio_interface = "lte", supported_bands = lteBands })
+			tinsert(radio_interfaces, { radio_interface = "lte", supported_bands = lteBands })
 		end
 
 		device.buffer.device_capabilities.radio_interfaces = radio_interfaces
@@ -112,7 +113,7 @@ function Mapper:get_ip_info(device, info, session_id)
 	local ret = device:send_multiline_command("AT+CGDCONT?", "+CGDCONT:")
 	if ret then
 		for _, line in pairs(ret) do
-			local cid, ip = string.match(line, '+CGDCONT: (%d+),"[A-Z0-9]+",".-","([0-9.]+)"')
+			local cid, ip = match(line, '+CGDCONT: (%d+),"[A-Z0-9]+",".-","([0-9.]+)"')
 			if tonumber(cid) == (session_id+1) then
 				info.ipv4_addr = ip
 			end
@@ -121,7 +122,7 @@ function Mapper:get_ip_info(device, info, session_id)
 	ret = device:send_multiline_command('AT+XDNS?', "+XDNS:")
 	if ret then
 		for _, line in pairs(ret) do
-			local cid, dns1, dns2 = string.match(line, '+XDNS: (%d+), ?"([0-9.]+)", ?"([0-9.]+)"')
+			local cid, dns1, dns2 = match(line, '+XDNS: (%d+), ?"([0-9.]+)", ?"([0-9.]+)"')
 			if tonumber(cid) == (session_id + 1) then
 				info.ipv4_dns1 = dns1
 				info.ipv4_dns2 = dns2
@@ -160,20 +161,20 @@ function Mapper:configure_device(device, config)
 		if selected_radio.bands then
 			local bands = {}
 			for _, band in pairs(selected_radio.bands) do
-				table.insert(bands, band+100)
+				tinsert(bands, band+100)
 			end
-			bandstr = table.concat(bands, ",") 
+			bandstr = tconcat(bands, ",")
 		end
 	elseif selected_radio.type == "umts" then
 		if selected_radio.bands then
-			bandstr = table.concat(selected_radio.bands, ",") 
+			bandstr = tconcat(selected_radio.bands, ",")
 		end
 	end
 
 	if mode == 6 then
 		device:send_command('AT+XACT=6,2,1')
 	else
-		local command = string.format('AT+XACT=%d,%d,,%s', mode, mode, bandstr)
+		local command = format('AT+XACT=%d,%d,,%s', mode, mode, bandstr)
 		device:send_command(command)
 	end
 	return true
@@ -183,19 +184,19 @@ function Mapper:get_network_info(device, info)
 	local ret = device:send_singleline_command("AT+XLEC?", "+XLEC:", 200)
 	if ret then
 		local i = 0
-		for val in string.gmatch(ret, "%d+") do
+		for val in gmatch(ret, "%d+") do
 			val = tonumber(val)
 			if i == 1 then
 				if val == 0 or val == 1 then
 					device.runtime.log:info("Not using carrier aggregation")
 				else
 					device.runtime.log:info("Using carrier aggregation")
-					device.runtime.log:info(string.format("Connected to %d cell(s)", val))
+					device.runtime.log:info(format("Connected to %d cell(s)", val))
 				end
 			elseif i == 2 then
-				device.runtime.log:info(string.format("Primary cell using %.1fMHz", bw_table[val]))
+				device.runtime.log:info(format("Primary cell using %.1fMHz", bw_table[val]))
 			elseif i == 3 then
-				device.runtime.log:info(string.format("Secondary cell using %.1fMHz", bw_table[val]))
+				device.runtime.log:info(format("Secondary cell using %.1fMHz", bw_table[val]))
 			end
 			i = i + 1
 		end
@@ -222,12 +223,12 @@ function Mapper:init_device(device)
 		device:send_command('AT+GTUSBMODE=0')
 		device:send_command("AT+CFUN=15")
 	end
-	
+
 	return true
 end
 
 local function parse_xcesqi(device, data)
-	local rssi, ber, rscp, ecio, rsrq, rsrp, snr = string.match(data, "+XCESQI:%s*(%d+),(%d+),(%d+),(%d+),(%d+),(%d+),(%d+)")
+	local rssi, ber, rscp, ecio, rsrq, rsrp, snr = match(data, "+XCESQI:%s*(%d+),(%d+),(%d+),(%d+),(%d+),(%d+),(%d+)")
 
 	if not device.buffer.radio_signal_info.rssi then
 		rssi = tonumber(rssi)
@@ -317,9 +318,9 @@ local function parse_xcesqi(device, data)
 end
 
 local function parse_xmetric(device, data)
-	if string.match(data, "LTE S CELL") then
+	if match(data, "LTE S CELL") then
 		local i = 0
-		for val in string.gmatch(data, "[0-9-]+") do
+		for val in gmatch(data, "[0-9-]+") do
 			val = tonumber(val)
 			if i == 4 and val ~= 0 then device.buffer.network_info.cell_id = val
 			elseif i == 5 and val ~= 0xffff then device.buffer.network_info.tracking_area_code = val
@@ -333,7 +334,7 @@ local function parse_xmetric(device, data)
 	end
 end
 
-function Mapper:unsolicited(device, data, sms_data)
+function Mapper:unsolicited(device, data, sms_data) --luacheck: no unused args
 	if helper.startswith(data, "+XCESQI:") then
 		parse_xcesqi(device, data)
 		return true
@@ -354,7 +355,7 @@ function Mapper:set_power_mode(device, mode)
 	return device:send_command('AT+CFUN=1')
 end
 
-function M.create(runtime, device)
+function M.create(runtime, device) --luacheck: no unused args
 	local mapper = {
 		mappings = {
 			configure_device = "runfirst",
@@ -369,7 +370,7 @@ function M.create(runtime, device)
 
 	if modem_ports then
 		for _, port in pairs(modem_ports) do
-			table.insert(device.interfaces, { port = port, type = "modem" })
+			tinsert(device.interfaces, { port = port, type = "modem" })
 		end
 	end
 

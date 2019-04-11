@@ -1,5 +1,5 @@
 --pretranslated: do not change this file
-
+ 
 -- Localization
 gettext.textdomain('webui-core')
 
@@ -83,15 +83,15 @@ end
 ');  ngx.print(ui_helper.createHeader(T"NAT Helpers (ALG's)", false, false))   ngx.print('\
 <div class="modal-body update">\
   <form class="form-horizontal" method="post" action="modals/nat-alg-helper-modal.lp">\
-    ');
+    ');  
         ngx.print(ui_helper.createMessages(message_helper.popMessages()))
       ngx.print('\
     <fieldset>\
-      ');
+      ');  
         ngx.print(ui_helper.createTable(hlp_columns, hlp_data, hlp_options, hlp_attributes, hlp_helpmsg))
         ngx.print('\
     </fieldset>\
   </form>\
 </div>\
 ');  ngx.print( ui_helper.createFooter() ); ngx.print('\
-');
+'); 

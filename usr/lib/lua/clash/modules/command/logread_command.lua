@@ -26,9 +26,10 @@ local cmd_assist = require("helper.command")
 
 local cmd_name = "logread"
 local usage_msg = [[
-  Show messages in syslogd's circular buffer
+  Show messages in syslogd's circular buffer or log file
     -f        Output data as log grows
     -i        When filter is active, filter case-insensitive
+    -F        Output data in the file set in system config
     --filter (optional string) A Lua pattern filter;
               only lines that match the filter are printed.
 ]]

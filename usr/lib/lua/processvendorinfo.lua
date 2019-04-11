@@ -53,11 +53,27 @@ local function set_acs_url(acsurl)
     return true
   end
 
-  -- Get HTTPS enforcing: if set to 1, don't allow a HTTPS->HTTP transition
-  local https_enforce = uci_write_cursor:get(config,"cwmpd_config","enforce_https")
-  if https_enforce == "1" and cwmp_acsurl and cwmp_acsurl:match("^https://") and acsurl:match("^http://") then
-    l:error("Not allowed to transition from HTTPS to HTTP")
-    return false
+  -- get allowed acs urls if any
+  local allowed_acs_urls = uci_write_cursor:get(config,"cwmpd_config","allowed_dhcp_acs_url")
+
+  if allowed_acs_urls then
+    local allowed = false
+    for _, value in pairs(allowed_acs_urls) do
+      if value == acsurl then
+        allowed = true
+        break
+      end
+    end
+    if not allowed then
+      return
+    end
+  else
+    -- Get HTTPS enforcing: if set to 1, don't allow a HTTPS->HTTP transition
+    local https_enforce = uci_write_cursor:get(config,"cwmpd_config","enforce_https")
+    if https_enforce == "1" and cwmp_acsurl and cwmp_acsurl:match("^https://") and acsurl:match("^http://") then
+      l:error("Not allowed to transition from HTTPS to HTTP")
+      return false
+    end
   end
   -- write acs url
   ret = uci_write_cursor:set(config,"cwmpd_config","acs_url",acsurl)

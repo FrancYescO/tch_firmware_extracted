@@ -1,5 +1,3 @@
-local table, unpack, type = table, unpack, type
-
 local ubus = require("ubus")
 local dev = require("libwebapi.device")
 local helper = require("mobiled.scripthelpers")
@@ -46,21 +44,21 @@ local function run_action(dev_idx, action, ...)
 
 	local ret
 	if mapping_function and (t == "override" or t == "runfirst") then
-		ret, errMsg = mapping_function(device.mapper, device, unpack(arg))
+		ret, errMsg = mapping_function(device.mapper, device, ...)
 		if t == "override" then
 			return ret, errMsg
 		end
 	end
 
 	if M.mappings[action] then
-		ret, errMsg = M.mappings[action](device, unpack(arg))
+		ret, errMsg = M.mappings[action](device, ...)
 		if t ~= "augment" or mapping_function == nil then
 			return ret, errMsg
 		end
 	end
 
 	if mapping_function then
-		return mapping_function(device.mapper, device, unpack(arg))
+		return mapping_function(device.mapper, device, ...)
 	end
 	return true
 end
@@ -109,11 +107,23 @@ local function get_gateway_ip(dev_idx)
 				end
 			end
 		end
+		if data.inactive and type(data.inactive.route) == "table" then
+			for _, route in pairs(data.inactive.route) do
+				if type(route) == "table" then
+					if route.target and route.source then
+						return {
+							target = route.nexthop,
+							source = route.source:match("^([^/]*)")
+						}
+					end
+				end
+			end
+		end
 	end
 	return nil, "No gateway IP found"
 end
 
-function M.init_device(dev_idx, device_desc)
+function M.init_device(dev_idx, device_desc) -- luacheck: no unused args
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
@@ -152,11 +162,11 @@ function M.init_device(dev_idx, device_desc)
 	return ret, errMsg
 end
 
-function M.destroy_device(dev_idx, force)
+function M.destroy_device(dev_idx, force) -- luacheck: no unused args
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	runtime.log:info("Destroy device " .. dev_idx)
+	runtime.log:notice("Destroy device " .. dev_idx)
 
 	local conn = ubus.connect()
 	if conn then
@@ -175,7 +185,7 @@ end
 function M.get_ip_info(dev_idx, session_id)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
-	
+
 	local info = {}
 	run_action(dev_idx, "get_ip_info", info, session_id)
 	helper.merge_tables(info, device.buffer.ip_info)
@@ -186,6 +196,7 @@ local function get_device_info(device, info)
 	info.initialized = device.state.initialized
 	info.vid = device.vid
 	info.pid = device.pid
+	info.max_carriers = 1
 	helper.merge_tables(info, device.buffer.device_info)
 end
 
@@ -319,7 +330,7 @@ function M.network_scan(dev_idx, start)
 	return run_action(dev_idx, "network_scan", start) or {}
 end
 
-local function send_sms(device, number, message)
+local function send_sms(device, number, message) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -327,7 +338,7 @@ function M.send_sms(dev_idx, number, message)
 	return run_action(dev_idx, "send_sms", number, message)
 end
 
-local function delete_sms(device, message_id)
+local function delete_sms(device, message_id) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -335,7 +346,7 @@ function M.delete_sms(dev_idx, message_id)
 	return run_action(dev_idx, "delete_sms", message_id)
 end
 
-local function set_sms_status(device, message_id, status)
+local function set_sms_status(device, message_id, status) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -343,7 +354,7 @@ function M.set_sms_status(dev_idx, message_id, status)
 	return run_action(dev_idx, "set_sms_status", message_id, status)
 end
 
-local function get_sms_info(device)
+local function get_sms_info(device) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -351,7 +362,7 @@ function M.get_sms_info(dev_idx)
 	return run_action(dev_idx, "get_sms_info")
 end
 
-local function get_sms_messages(device)
+local function get_sms_messages(device) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
@@ -359,7 +370,7 @@ function M.get_sms_messages(dev_idx)
 	return run_action(dev_idx, "get_sms_messages")
 end
 
-function M.reconfigure_plugin(config)
+function M.reconfigure_plugin(config) -- luacheck: no unused args
 	return true
 end
 
@@ -384,15 +395,15 @@ function M.periodic(dev_idx)
 	return run_action(dev_idx, "periodic")
 end
 
-function M.set_attach_params(dev_idx, profile)
+function M.set_attach_params(dev_idx, profile) -- luacheck: no unused args
 	return true
 end
 
-function M.network_attach(dev_idx)
+function M.network_attach(dev_idx) -- luacheck: no unused args
 	return true
 end
 
-function M.network_detach(dev_idx)
+function M.network_detach(dev_idx) -- luacheck: no unused args
 	return true
 end
 
@@ -404,15 +415,15 @@ function M.debug(dev_idx)
 	return device.debug
 end
 
-function M.firmware_upgrade(dev_idx, path)
+function M.firmware_upgrade(dev_idx, path) -- luacheck: no unused args
 	return nil, "Not supported"
 end
 
-function M.get_firmware_upgrade_info(dev_idx)
+function M.get_firmware_upgrade_info(dev_idx) -- luacheck: no unused args
 	return { status = "not_running" }
 end
 
-function M.execute_command(dev_idx, command)
+function M.execute_command(dev_idx, command) -- luacheck: no unused args
 	return "OK"
 end
 

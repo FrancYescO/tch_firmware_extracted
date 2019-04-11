@@ -210,31 +210,6 @@ ramoverlay() {
 	pivot /tmp/root /rom
 }
 
-run_mount_checks() {
-	local mount_point="$1"
-	local checkdir=/lib/mount_root_checks
-	if [ ! -d "$checkdir" ]; then
-		return
-	fi
-	local loop_detect="${mount_point}/mount_check_reboot"
-	if [ -f "$loop_detect" ]; then
-		#reboot because of mount check failures
-		#do not check again, to prevent reboot loops
-		rm $loop_detect
-		return
-	fi
-	local reboot_needed="no"
-	for check in $(ls -lA $checkdir); do
-		if [ -x $checkdir/$check ]; then
-			$checkdir/$check "$mount_point" || reboot_needed="yes"
-		fi
-	done
-	if [ "$reboot_needed" = "yes" ]; then
-		touch $loop_detect
-		/sbin/reboot -f
-	fi
-}
-
 mount_root_tch() {
 	local upperdir
 	local mount_point="/tmp/overlay"
@@ -246,8 +221,6 @@ mount_root_tch() {
 			return
 		fi
 	fi
-
-	run_mount_checks ${mount_point}
 
 	echo "switching to overlay"
 	mount -o move /tmp/overlay /overlay 2>&-

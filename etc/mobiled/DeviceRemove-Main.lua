@@ -1,12 +1,11 @@
 local M = {}
 
-function M.check(runtime, event, dev_idx)
+function M.check(runtime, _, dev_idx)
 	local mobiled = runtime.mobiled
-	local log = runtime.log
 
 	local device, errMsg = mobiled.get_device(dev_idx)
 	if not device then
-		if errMsg then log:error(errMsg) end
+		if errMsg then runtime.log:error(errMsg) end
 		return "WaitingForDevice"
 	end
 	mobiled.remove_device(device)

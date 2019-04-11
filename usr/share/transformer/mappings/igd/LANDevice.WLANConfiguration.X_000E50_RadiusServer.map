@@ -72,38 +72,15 @@ local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_000E50_RadiusServe
   }
 }
 
---local logger = require("transformer.logger")
---local log = logger.new("wifi-radius-debug",6)
-
 local uci_helper = mapper("ucihelper")
-local table, tostring, tonumber, error, open, execute, popen = table, tostring, tonumber, error, io.open, os.execute, io.popen
-local ipairs, pairs = ipairs, pairs
-local print = print
+local network = require("transformer.shared.common.network")
+local tonumber = tonumber
 
 local binding = {config = "wireless"}
 
-local function getAPForIface(parentkey)
-    local iface = string.gsub(parentkey, "_remote", "")
-    local ap
-    -- iterate over the access points and take the first one that has the corresponding interface as its iface.
-    -- assumes there is only one of those
-    local binding = {config="wireless",sectionname="wifi-ap"}
-    uci_helper.foreach_on_uci(binding, function(s)
-    if(s["iface"] == iface) then
-            ap = s[".name"]
-            return false
-        end
-    end)
-    if ap == nil then
-        error("Cannot retrieve AP for iface " .. iface)
-        return
-    end
-    return ap
-end
-
 local function getAcctkey(Authkey)
   if Authkey then
-      local ap, type, num = string.match(Authkey, "(ap%d+)(.*)(%d+)")
+      local ap, _, num = string.match(Authkey, "(ap%d+)(.*)(%d+)")
       local acctkey = ap.."_acct"..num
       return acctkey
   else
@@ -113,7 +90,7 @@ end
 
 local function isValidIPAddress(value)
   if string.match(value, "^[0-2]?%d%d?%.[0-2]?%d%d?%.[0-2]?%d%d?%.[0-2]?%d%d?$") ~= nil then
-      local dummy1, dummy2, v1, v2, v3, v4 = string.find(value, "^([0-2]?%d%d?)%.([0-2]?%d%d?)%.([0-2]?%d%d?)%.([0-2]?%d%d?)$")
+      local _, _, v1, v2, v3, v4 = string.find(value, "^([0-2]?%d%d?)%.([0-2]?%d%d?)%.([0-2]?%d%d?)%.([0-2]?%d%d?)$")
           if tonumber(v1) < 256 and tonumber(v2) < 256 and tonumber(v3) < 256 and tonumber(v4) < 256 then
                 return true
           end
@@ -122,12 +99,12 @@ local function isValidIPAddress(value)
 end
 
 local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_000E50_RadiusServer_i_entries = function(mapping, parentkey)
-    --log:debug("in entryparentkey:"..parentkey)
     local entries = {}
-    local ap = getAPForIface(parentkey)
-    local binding = {config="wireless",sectionname="wifi-radius-server"}
+    local iface = string.gsub(parentkey, "_remote", "")
+    local ap = network.getAPForIface(iface)
+    binding = {config="wireless",sectionname="wifi-radius-server"}
     uci_helper.foreach_on_uci(binding, function(s)
-        if string.find(s[".name"], ap.."_auth") then
+        if ap ~= "" and string.find(s[".name"], ap.."_auth") then
           entries[#entries+1]=s[".name"]
         end
     end)
@@ -150,13 +127,13 @@ local function InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_000E50_Ra
         AuthenticationIP = Auth_cfg["ip"] or "",
         AuthenticationPort = Auth_cfg["port"] or "",
         AuthenticationKey = Auth_cfg["secret"] or "",
-        AuthenticationFQDN = Auth_cfg["fdqn"] or "",
+        AuthenticationFQDN = Auth_cfg["fqdn"] or "",
         AccountingState = Acct_cfg["state"] or "0",
         AccountingIP = Acct_cfg["ip"] or "",
         AccountingPort = Acct_cfg["port"] or "",
         AccountingKey = Acct_cfg["secret"] or "",
-        AccountingFQDN = Acct_cfg["fdqn"] or "",
-        AccountingDHCP = Acct_cfg["dhcp_acct"] or "",
+        AccountingFQDN = Acct_cfg["fqdn"] or "",
+        AccountingDHCP = Acct_cfg["dhcp_acct"] or "0",
     }
 
 end
@@ -216,6 +193,7 @@ local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_000E50_RadiusServe
     AccountingDHCP  = function(mapping, param, childkey)
         binding.sectionname = getAcctkey(childkey)
         binding.option = "dhcp_acct"
+        binding.default = "0"
         return uci_helper.get_from_uci(binding)
     end,
 }

@@ -127,6 +127,26 @@ local Multi_Stats_parameters_ = {
     activeNotify = "canDeny",
     type = "unsignedInt",
   },
+  ReceiveBlocks = {
+    access = "readOnly",
+    activeNotify = "canDeny",
+    type = "unsignedInt",
+  },
+  TransmitBlocks = {
+    access = "readOnly",
+    activeNotify = "canDeny",
+    type = "unsignedInt",
+  },
+  CellDelin = {
+    access = "readOnly",
+    activeNotify = "canDeny",
+    type = "unsignedInt",
+  },
+  InitErrors = {
+    access = "readOnly",
+    activeNotify = "canDeny",
+    type = "unsignedInt",
+  },
   X_FASTWEB_UnavailableSeconds = {
     access = "readOnly",
     activeNotify = "canDeny",
@@ -233,7 +253,7 @@ local Multi_Stats_LastShowtime_ = {
 -- Local definitions
 ----------------------------------------------------------
 
-local xdslctl = require("transformer.shared.xdslctl")
+local _, xdslctl = pcall(require,"transformer.shared.xdslctl")
 local wandevice = require 'transformer.shared.models.igd.wandevice'
 local getDevtypeAndName = wandevice.getDevtypeAndName
 
@@ -275,6 +295,10 @@ local igdDSLParams = {
   "ATUCErroredSecs",
   "LossOfFraming",
   "LInit",
+  "ReceiveBlocks",
+  "TransmitBlocks",
+  "CellDelin",
+  "InitErrors",
 }
 
 --parameters needed for Device.DSL.Line. file
@@ -328,7 +352,7 @@ local function get_instance(instance, mapping, param, key)
       return lofCheck ~= "nil" and lofCheck or "0"
   elseif param == "LInit" then
       local status = tonumber(xdslctl.infoValue("linit", nil, nil, key,mapping) or "0")
-      if status == 0 or status > 6 then
+      if status == nil or status > 6 then
         return "0"
       end
       return "1"
@@ -336,6 +360,14 @@ local function get_instance(instance, mapping, param, key)
       return xdslctl_stats(key, instance, "es", "us",mapping)
   elseif param == "ATUCSeverelyErroredSecs" then
       return xdslctl_stats(key, instance, "ses", "us",mapping)
+  elseif param == "ReceiveBlocks" then
+      return "0"
+  elseif param == "TransmitBlocks" then
+      return "0"
+  elseif param == "CellDelin" then
+      return "0"
+  elseif param == "InitErrors" then
+      return "0"
   elseif param == "X_FASTWEB_UnavailableSeconds" then
       local uas = xdslctl_stats(key, instance, "uas", "ds", mapping)
       return uas ~= "nil" and uas or "0"
@@ -404,6 +436,10 @@ local function getall_instance(instance, mapping, key)
     LossOfFraming = "4294967295",
     ATUCErroredSecs = "4294967295",
     ATUCSeverelyErroredSecs = "4294967295",
+    ReceiveBlocks = "4294967295",
+    TransmitBlocks = "4294967295",
+    CellDelin = "4294967295",
+    InitErrors = "4294967295",
     X_FASTWEB_UnavailableSeconds = "4294967295",
     X_000E50_UnavailableSeconds = "4294967295",
     X_FASTWEB_Linit = "4294967295",
@@ -431,6 +467,10 @@ local function getall_instance(instance, mapping, key)
   allValues.LinkRetrain = allstats[instance].retr ~= "nil" and allstats[instance].retr or "0"
   allValues.InitTimeouts = allstats[instance].retr ~= "nil" and allstats[instance].retr or "0"
   allValues.LossOfFraming = allstats[instance].lof.ds ~= "nil" and allstats[instance].lof.ds or "0"
+  allValues.ReceiveBlocks = "0"
+  allValues.TransmitBlocks = "0"
+  allValues.CellDelin = "0"
+  allValues.InitErrors = "0"
   allValues.ATUCErroredSecs = allstats[instance].es.us
   allValues.ATUCSeverelyErroredSecs = allstats[instance].ses.us
   allValues.X_FASTWEB_UnavailableSeconds = allstats[instance].uas.ds ~= "nil" and allstats[instance].uas.ds or "0"

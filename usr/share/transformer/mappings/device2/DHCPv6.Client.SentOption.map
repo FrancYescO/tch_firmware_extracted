@@ -45,6 +45,7 @@ local mapper = mapper
 local uciHelper = mapper("ucihelper")
 local networkBinding = { config = "network" }
 local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
 local commitapply = commitapply
 local configChanged
 
@@ -55,10 +56,10 @@ local optionToTag = {
   userclass = "15",
 }
 
-Device_DHCPv6_Client_i_SentOption_i_.entries = function()
+Device_DHCPv6_Client_i_SentOption_i_.entries = function(mapping, parentKey)
   local entries = {}
   for sentOption in pairs(optionToTag) do
-    entries[#entries + 1] = sentOption
+    entries[#entries + 1] = parentKey .. "|" ..sentOption
   end
   return entries
 end
@@ -78,10 +79,12 @@ end
 Device_DHCPv6_Client_i_SentOption_i_.get = {
   Enable = "1",
   Tag = function(mapping, param, key)
-    return optionToTag[key]
+    local _, tagName = splitKey(key)
+    return optionToTag[tagName]
   end,
   Value = function(mapping, param, key, parentKey)
-    local result = getUciParam(parentKey, key)
+    local _, tagName = splitKey(key)
+    local result = getUciParam(parentKey, tagName)
     return nwCommon.string2Hex(result)
   end,
 }
@@ -89,7 +92,8 @@ Device_DHCPv6_Client_i_SentOption_i_.get = {
 Device_DHCPv6_Client_i_SentOption_i_.set = {
   Value = function(mapping, param, value, key, parentKey)
     value = nwCommon.hex2String(value)
-    setUciParam(parentKey, key, value)
+    local _, tagName = splitKey(key)
+    setUciParam(parentKey, tagName, value)
     configChanged = true
   end
 }

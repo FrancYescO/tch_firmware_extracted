@@ -13,9 +13,6 @@ add_cwmpd_fw_rule() {
   LOAD_STATE=1
 
   config_get state cwmpd_config state 0
-  [ $state -eq 0 ] && {
-    uci_revert_state system.cwmpd
-  }
   config_get interface cwmpd_config interface "wan"
   zone=$(fw3 -q network "$interface")
   config_get port cwmpd_config connectionrequest_port "51007"

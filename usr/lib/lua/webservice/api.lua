@@ -36,7 +36,7 @@ local function error_response(errorcode, errormessage)
   return nil, { errorcode = errorcode, errormessage = errormessage }
 end
 
-local function get_data()
+local function read_request_data()
   ngx.req.read_body()
   local data = ngx.req.get_body_data()
   if not data then
@@ -49,6 +49,24 @@ end
 local function unknown(_, req)
   ngx.log(ngx.WARN, "unknown command: ", req.command)
   return error_response(fault.INVALID_ARGUMENTS, "unknown command")
+end
+
+local function remove_blacklisted_parameters(role, params)
+  if role:is_blacklist() then
+    -- iterate backwards to allow safe removal
+    for i=#params, 1, -1 do
+      -- the params are either coming from a get request that has param
+      -- set to the parameter name,
+      -- or from a getParameterNames request that has name set as the
+      -- path name for the next level.
+      -- the two are mutually exclusive and we have to handle both.
+      local nextLevel = params[i].param or params[i].name
+      local path = params[i].path .. nextLevel
+      if not role:authorize_path(path) then
+        remove(params, i)
+      end
+    end
+  end
 end
 
 local function get(role, req)
@@ -65,15 +83,7 @@ local function get(role, req)
   if not data then
     return error_response(errcode, errmsg)
   end
-  if role:is_blacklist() then
-    -- iterate backwards to allow safe removal
-    for i=#data, 1, -1 do
-      local path = data[i].path .. data[i].param
-      if not role:authorize_path(path) then
-        remove(data, i)
-      end
-    end
-  end
+  remove_blacklisted_parameters(role, data)
   local response = {}
   for _, param in ipairs(data) do
     local path = param.path
@@ -120,15 +130,27 @@ local function set(role, req)
   return true
 end
 
-local function apply(_, req)
-  if req.data ~= true then
-    return error_response(fault.INVALID_ARGUMENTS, "invalid data")
-  end
+local function do_apply()
   local data, errmsg, errcode = dm.apply()
   if not data then
     return error_response(errcode, errmsg)
   end
   return true
+end
+
+local function apply(_, req)
+  if req.data ~= true then
+    return error_response(fault.INVALID_ARGUMENTS, "invalid data")
+  end
+  return do_apply()
+end
+
+local function setAndApply(role, req)
+  local set_ok, err =  set(role, req)
+  if not set_ok then
+    return nil, err
+  end
+  return do_apply()
 end
 
 local function getNextLevel(role, req)
@@ -141,15 +163,7 @@ local function getNextLevel(role, req)
   if not data then
     return error_response(errcode, errmsg)
   end
-  if role:is_blacklist() then
-    -- iterate backwards to allow safe removal
-    for i=#data, 1, -1 do
-      local path = data[i].path .. data[i].name
-      if not role:authorize_path(path) then
-        remove(data, i)
-      end
-    end
-  end
+  remove_blacklisted_parameters(role, data)
   -- remove empty 'name' fields
   for _, entry in ipairs(data) do
     if entry.name == "" then
@@ -192,6 +206,7 @@ local commands = {
   get = get,
   set = set,
   apply = apply,
+  setAndApply = setAndApply,
   getNextLevel = getNextLevel,
   add = add,
   delete = delete,
@@ -201,45 +216,101 @@ local commands = {
 }
 setmetatable(commands, commands)
 
+local compoundCommands = {
+  setAndApply = {"set", "apply"}
+}
+
+local function receive_request()
+  local request
+  local raw_data, err = read_request_data()
+  if raw_data then
+    -- decode the JSON request
+    local _
+    request, _, err = json.decode(raw_data, 1, nil, nil)
+    if not request then
+      ngx.log(ngx.ERR, "could not parse request as JSON: ", err)
+      _, err = error_response(fault.INVALID_ARGUMENTS, err)
+    end
+  end
+  return request, err
+end
+
+local function send_response(command, response, err)
+  local response_json
+  if not response then
+    response_json = { command = command, error = err }
+  else
+    response_json = { command = command, response = response }
+  end
+  local output_buffer = {}
+  -- TODO: remove the indent = true
+  json.encode(response_json, { indent = true, buffer = output_buffer })
+  ngx.print(output_buffer)
+end
+
+local function authorize_command(role, command)
+  if role:authorize_command(command) then
+    return true
+  end
+  local compound = compoundCommands[command]
+  if not compound then
+    return false
+  end
+  for _, cmd in ipairs(compound) do
+    if not role:authorize_command(cmd) then
+      return false
+    end
+  end
+  return true
+end
+
+local function command_handler(role, command)
+  local handler = commands[command]
+  if not authorize_command(role, command) then
+    -- this command is not allowed; pretend we don't know it
+    handler = unknown
+  end
+  return handler
+end
+
+local function process_request(role, request, token)
+  local command = request.command
+  local handler = command_handler(role, command)
+  local response, err = handler(role, request, token)
+  
+  return command, response, err
+end
+
 local M = {}
 
 ---
 -- Process the request under the authorization of the given role.
 -- @tparam Role role The role object to use for authorization checks. Must not be `nil`.
-function M.process(role)
+-- @tparam string token The token for the request. May be `nil`. This is passed verbatim to
+--   the handler function.
+function M.process(role, token)
   ngx.header.content_type = "application/json"
-  -- first read the data
-  local data, err = get_data()
-  if data then
-    -- decode the JSON request
-    local _
-    data, _, err = json.decode(data, 1, nil, nil)
-    if not data then
-      ngx.log(ngx.ERR, "could not parse request as JSON: ", err)
-      _, err = error_response(fault.INVALID_ARGUMENTS, err)
-    end
+  local command, response
+  
+  local request, err = receive_request()
+  if request then
+    command, response, err = process_request(role, request, token)
   end
-  local command
-  if data then
-    -- process the request
-    command = data.command
-    local handler = commands[command]
-    if not role:authorize_command(command) then
-      -- this command is not allowed; pretend we don't know it
-      handler = unknown
-    end
-    data, err = handler(role, data)
+  
+  send_response(command, response, err)
+end
+
+--- Add a new command to the webservice
+-- @string command the command name
+-- @tparam [function] the handler function.
+-- @returns true if command successfully added
+-- @error an error message (eg for a duplicate name)
+function M.add_command(command, handler)
+  if commands[command] == unknown then
+    commands[command] = handler
+    return true
   end
-  -- encode the response
-  if not data then
-    data = { command = command, error = err }
-  else
-    data = { command = command, response = data }
-  end
-  local output_buffer = {}
-  -- TODO: remove the indent = true
-  json.encode(data, { indent = true, buffer = output_buffer })
-  ngx.print(output_buffer)
+  return nil, "duplicate command"
 end
 
 return M

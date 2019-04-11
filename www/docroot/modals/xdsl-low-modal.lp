@@ -3,27 +3,18 @@
 -- Enable localization
 gettext.textdomain('webui-core')
 
-local lp = require("web.lp")
 local proxy = require("datamodel")
 local ui_helper = require("web.ui_helper")
 local message_helper = require("web.uimessage_helper")
 local content_helper = require("web.content_helper")
-local format,sub,match,untaint = string.format, string.sub, string.match, string.untaint
+local ngx, pairs, string, table = ngx, pairs, string, table
+local format, match, untaint = string.format, string.match, string.untaint
 
 local all_modes = {"adsl2", "adsl2annexl", "adsl2annexm", "adsl2plus", "gdmt", "glite", "t1413", "vdsl2" }
 
 table.sort(all_modes, function(a,b)
          return a<b
       end)
-
-function split(x, sep)
-        local sep, fields = sep or ":", {}
-        local pattern = format("([^%s]+)", sep)
-        x:gsub(pattern, function(c) fields[#fields+1] = c end)
-        return fields
-end
-
-local modes_content = content_helper.getMatchedContent ("uci.xdsl.xdsl.@dsl0.multimode.")
 
 if ngx.var.request_method == "POST" then
     local vars = ngx.req.get_post_args()
@@ -47,6 +38,7 @@ if ngx.var.request_method == "POST" then
              end
           end
       end
+      local modes_content = content_helper.getMatchedContent ("uci.xdsl.xdsl.@dsl0.multimode.")
       for _,v in pairs(modes_content) do
          local found = 0
           for k,w in pairs(mode2prog) do
@@ -60,12 +52,12 @@ if ngx.var.request_method == "POST" then
              mode2prog[format("%s",v.path)].prog = 0
           end
       end
+      proxy.del("uci.xdsl.xdsl.@dsl0.multimode.")
       for k,v in pairs(mode2prog) do
-         if v.prog == 1 and v.found == 0 then
+         proxy.get("uci.xdsl.xdsl.@dsl0.multimode.")
+         if v.prog == 1 and v.found then
                local addvalue = proxy.add("uci.xdsl.xdsl.@dsl0.multimode.")
                proxy.set("uci.xdsl.xdsl.@dsl0.multimode.@" .. addvalue .. ".value",k)
-         elseif v.prog == 0 and v.found then
-               local clean = proxy.del(v.found)
          end
       end
       proxy.apply()
@@ -102,6 +94,7 @@ local light_map = {
     ["1"] = "green",
 }
 
+local modes_content = content_helper.getMatchedContent ("uci.xdsl.xdsl.@dsl0.multimode.")
 table.sort(modes_content, function(a,b)
          return match(a.path, "@(%d)")< match(b.path, "@(%d)")
       end)

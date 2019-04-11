@@ -14,6 +14,8 @@ MWAN_MARK_SHIFT=28
 MWAN_NF_MASK=0xf0000000
 MWAN_CT_MASK=$MWAN_NF_MASK
 
+MWAN_CFG='/var/etc/preload-mwan.cfg'
+
 mwan_check_icmp_type6() {
 	local _var="$1"
 	local _type="$2"
@@ -373,6 +375,47 @@ mwan_update_rules() {
 	mwan_iptables_mangle rename "ipv4" "new_mwan_rules" { "mwan_rules" }
 }
 
+mwan_update_queue() {
+	local event=$1
+	local comment="mwan_load_balancer"
+	local action="ifdown"
+	local lan_intf
+	local device
+	local enabled
+	local queue
+
+	config_get lan_intf "global" lan_intf "lan"
+	config_get_bool enabled "global" enabled 0
+
+	# Will not create queue if there's no configuration section for load balancer
+	[ "$enabled" = 1 ] || return
+
+	[ "$event" = true -a "$lan_intf" != "$INTERFACE" ] && return
+	if [ "$event" = true ] ; then
+		device=$DEVICE
+		action=$ACTION
+	elif network_is_up $lan_intf ; then
+		network_get_device device $lan_intf
+		action="ifup"
+	fi
+
+	queue=`mwan_iptables_mangle list "ipv4" "mwan_pre" | grep "$comment"`
+	queue=`echo ${queue##* }`
+	if [ -n "$queue" ] ; then
+		mwan_iptables_mangle del "ipv4" "mwan_pre" "NFQUEUE" \
+				{ "-i $device -m state --state NEW -m mark --mark 0x0/0xf0000000 \
+				--queue-num $queue -m comment --comment $comment" }
+	fi
+
+	if [ "$action" = "ifup" ] ; then
+		config_get queue "global" queue 0
+		mwan_iptables_mangle add "ipv4" "mwan_pre" "NFQUEUE" \
+				{ "-i $device -m state --state NEW -m mark --mark 0x0/0xf0000000 \
+				--queue-num $queue -m comment --comment $comment" }
+		logger -t mwan "mwan_load_balancer_add queue : $queue"
+	fi
+}
+
 mwan_setup_basic_iptables_rules() {
 	if ! mwan_iptables_mangle list "ipv4" "mwan_rules_hook" &> /dev/null; then
 		mwan_iptables_mangle add "ipv4" "mwan_rules_hook"
@@ -402,7 +445,7 @@ mwan_setup_basic_iptables_rules() {
 		mwan_iptables_mangle add "ipv4" "mwan_pre" "mwan_default_hook" \
 				{ "-m mark --mark 0x0/$MWAN_NF_MASK" }
 		mwan_iptables_mangle add "ipv4" "mwan_pre" "mwan_rules_hook" \
-				{ "-m mark --mark 0x0/$MWAN_NF_MASK" }
+				{ "-m conntrack --ctdir ORIGINAL -m mark --mark 0x0/$MWAN_NF_MASK" }
 	fi
 
 	if ! mwan_iptables_mangle list "ipv4" "mwan_post" | grep "CONNMARK save mask"; then
@@ -428,7 +471,7 @@ mwan_setup_basic_iptables_rules() {
 		mwan_iptables_mangle add "ipv4" "mwan_output" "mwan_default_hook" \
 				{ "-m mark --mark 0x0/$MWAN_NF_MASK" }
 		mwan_iptables_mangle add "ipv4" "mwan_output" "mwan_rules_hook" \
-				{ "-m mark  --mark 0x0/$MWAN_NF_MASK" }
+				{ "-m conntrack --ctdir ORIGINAL -m mark  --mark 0x0/$MWAN_NF_MASK" }
 	fi
 
 	if ! mwan_iptables_mangle list "ipv4" "INPUT" | grep mwan_post &> /dev/null; then
@@ -513,11 +556,14 @@ mwan_parse_host() {
 	local policy
 	config_get policy $1 policy
 
-	local path
-	config_get path $1 path
+	local list_path
+	config_get list_path $1 path
 
 	local arg
 	config_get arg $1 arg
+
+	local list_appid
+	config_get list_appid $1 appid
 
 	local interface
 	config_get interface $policy interface
@@ -527,8 +573,12 @@ mwan_parse_host() {
 		local nfmark=$(uci_get_state mwan "$policy" nfmark)
 		[ -n "$nfmark" ] || exit 0
 
-		for p in $path; do
-			echo "$p $nfmark $arg" >>/var/etc/mwan.config.$$
+		for path in ${list_path}; do
+			echo "${nfmark}/${MWAN_NF_MASK} '${path}' '${arg}'" >> ${MWAN_CFG}.$$
+		done
+
+		for appid in ${list_appid}; do
+			echo "${nfmark}/${MWAN_NF_MASK} APPID=0x$(printf %04x ${appid})" >> ${MWAN_CFG}.$$
 		done
 	}
 }
@@ -575,9 +625,10 @@ mwan_handle_ifaction() {
 	mwan_setup_basic_iptables_rules
 	config_foreach mwan_update_ip_rules policy
 	mwan_update_rules
-	touch /var/etc/mwan.config.$$
+	mwan_update_queue true
+	> ${MWAN_CFG}.$$
 	config_foreach mwan_parse_host host
-	mv -f /var/etc/mwan.config.$$ /var/etc/mwan.config 2>/dev/null
+	mv -f ${MWAN_CFG}.$$ ${MWAN_CFG} 2>/dev/null
 }
 
 mwan_policy_cb() {
@@ -599,12 +650,13 @@ mwan_boot() {
 
 	mkdir -p /var/etc
 
+	/sbin/uci -P /var/state set mwan.globals=globals
 	config_load mwan
 	mwan_set_state
 
-	touch /var/etc/mwan.config.$$
+	> ${MWAN_CFG}.$$
 	config_foreach mwan_parse_host host
-	mv -f /var/etc/mwan.config.$$ /var/etc/mwan.config 2>/dev/null
+	mv -f ${MWAN_CFG}.$$ ${MWAN_CFG} 2>/dev/null
 }
 
 mwan_start() {
@@ -613,6 +665,7 @@ mwan_start() {
 	config_load mwan
 	mwan_set_state
 	config_foreach mwan_policy_cb policy
+	mwan_update_queue false
 }
 
 mwan_stop() {
@@ -621,7 +674,7 @@ mwan_stop() {
 	mwan_flush_iptables
 	mwan_flush_ip_rules
 
-	rm -f /var/etc/mwan.config
+	rm -f ${MWAN_CFG}
 }
 
 mwan_ifupdown() {

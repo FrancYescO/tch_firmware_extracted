@@ -149,6 +149,36 @@ local function getValidateWholeNumber(value)
 end
 
 ---
+-- @function [parent=#post_helper] validateStringIsLeaseTime
+-- @param value
+-- @return #boolean, #string
+function M.validateStringIsLeaseTime(value)
+    if not value then
+        return nil, T"Invalid value."
+    end
+    local leasetime_pattern = "^(%d+)([wdhms])$"
+    local leaseTime = setmetatable({
+        s = 2147483647,
+        m = 35791394,
+        h = 596523,
+        d = 24855,
+        w = 3551,
+    }, untaint_mt)
+    local number, precision = value:match(leasetime_pattern)
+    number = number and tonumber(number)
+    if not number or number < 1 then
+        return nil, T"Invalid value; enter a number greater than 0, followed by 's' for seconds or 'm' for minutes or 'h' for hours or 'd' for days or 'w' for weeks. No spaces."
+    end
+    if (((precision == "s") and (number < 120)) or
+        ((precision == "m") and (number < 2))) then
+        return nil, T"The minimum leasetime must be 120 seconds or 2 minutes."
+    elseif leaseTime[precision] and number > leaseTime[precision] then
+        return nil, T"The Maximum leasetime must be 3551 weeks or 24855 days or 596523 hours or 35791394 minutes or 2147483647 seconds."
+    end
+    return true
+end
+
+---
 -- @function [parent=#post_helper] validateRegExpire
 -- @param value
 -- @param min

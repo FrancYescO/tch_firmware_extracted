@@ -47,7 +47,7 @@ local function makeIpList(srcList)
 
     retList = {}
     for _, entry in pairs(srcList) do
-        if entry.state == "connected" then
+        if entry.state == "connected" or entry.state == "stale" then
             table.insert(retList, entry.address)
         end
     end

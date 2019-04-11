@@ -9,6 +9,7 @@ http_mark=""
 mark_match_str=""
 accept_rule=""
 mask_value=""
+mac_filter="/usr/share/transformer/scripts/mac_filter.sh"
 
 setup_routing()
 {
@@ -83,6 +84,8 @@ create_tod_rule_mac()
     config_get start_time $host start_time
     config_get stop_time $host stop_time
 
+    id=${id//-/:}
+
     if [ -z "${enabled}" ] || [ "${enabled}" = "0" ]; then
         echo "Rule is disabled"
         return
@@ -143,7 +146,7 @@ load_action() {
 
     # use skipped_mark from weburl
     local skipped_mark="$(uci -q get parental.general.skipped_mark)"
-    [ -z "$skipped_mark" ] && skipped_mark="1000000"
+    [ -z "$skipped_mark" ] && skipped_mark="0x1000000"
 
     local parental_enabled="$(uci -q get parental.general.enable)"
     local tod_enabled="$(uci -q get tod.global.tod_enabled)"
@@ -151,11 +154,15 @@ load_action() {
     [ -z "$parental_enabled" ] && parental_enabled="1"
     [ -z "$tod_enabled" ] && tod_enabled="1"
 
-    http_mark="0x${skipped_mark}/0x${skipped_mark}"
+    http_mark="${skipped_mark}/${skipped_mark}"
     mark_match_str="-m connmark ! --mark "$http_mark
     [ "$tod_enabled" = "1" -a "$parental_enabled" = "0" ] && accept_rule="1"
 }
 
+if [ -x "$mac_filter" ]; then
+	$mac_filter
+	exit 0
+fi
 
 load_action
 setup_routing

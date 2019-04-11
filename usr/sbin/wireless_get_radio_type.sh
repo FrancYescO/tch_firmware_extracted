@@ -13,6 +13,11 @@ if [ -e "/proc/athversion" ]; then
   RADIO_TYPE=atheros
 fi
 
+#Detect intel (for now assume all intel in that case)
+if [ -d "/opt/lantiq" ]; then
+  RADIO_TYPE=intel
+fi
+
 #Detect Quantenna
 #QSR10G: assuming both 2.4G and 5G
 if [ -d "/sys/module/qsr10g_pcie" ]; then
@@ -23,7 +28,7 @@ if [ "$RADIO" = "radio_5G" ] && [ -e "/qtn/qtn-linux.lzma" ]; then
   RADIO_TYPE=quantenna
 fi
 
-#NL80211 (qcacld and lantiq)
+#NL80211 (qcacld)
 DUMMY=`iw dev 2> /dev/null`
 if [ "$?" == "0" ]; then
   FIRST_IFACE=`iw dev | grep Interface | cut -d ' '  -f 2 | head -n 1`
@@ -33,19 +38,11 @@ if [ "$?" == "0" ]; then
   if [ "$?" == "0" ] ; then
     RADIO_TYPE=qcacld
   fi
- 
-  #Lantiq
-  if [ "$RADIO" = "radio_2G" ] && [ -e "/proc/net/mtlk/wl0" ]; then
-    RADIO_TYPE=lantiq
-  fi 
-  if [ "$RADIO" = "radio_5G" ] && [ -e "/proc/net/mtlk/wl1" ]; then
-    RADIO_TYPE=lantiq
-  fi 
-  
 fi
 
 #For a USB wireless dongle
 if [ -d "/sys/module/ath9k_htc" ]; then
   RADIO_TYPE=qcacld
 fi
+
 echo "$RADIO_TYPE"

@@ -1,7 +1,5 @@
 -- Automatically generated from Device:2.10
 -- using generator version 2.3
---NG-49015        hidden = "true", reverted in NG-79929 to support unhide_pattern
---NG-80965
 local Device_WiFi_AccessPoint_i_Security_ = {
   objectType = {
     name = "Device.WiFi.AccessPoint.{i}.Security.",
@@ -53,16 +51,15 @@ local Device_WiFi_AccessPoint_i_Security_ = {
         min = "5",
         max = "26",
       },
+--]]
       PreSharedKey = {
         access = "readWrite",
---NG-49015        hidden = "true", reverted in NG-79929 to support unhide_pattern         
-		hidden = "true",
+        hidden = "true",
         type = "hexBinary",
         max = "32",
       },
       KeyPassphrase = {
         access = "readWrite",
---NG-49015        hidden = "true", reverted in NG-79929 to support unhide_pattern 																				 
         hidden = "true",
         type = "string",
         min = "8",
@@ -107,6 +104,11 @@ local Device_WiFi_AccessPoint_i_Security_ = {
         hidden = "true",
         type = "string",
       },
+      X_TELUS_DefaultKeyPassphrase = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Indicates whether the WiFi radio is set to the factory default passphrase, 1 indicates passphrase is set to default value",
+      },
     }
   }
 }
@@ -127,6 +129,7 @@ local network = require("transformer.shared.common.network")
 local isBaseIface = bandSteerHelper.isBaseIface
 local isBandSteerEnabled = bandSteerHelper.isBandSteerEnabledByAp
 local getBandSteerPeerIface = bandSteerHelper.getBandSteerPeerIface
+local envBinding = {config = "env"}
 
 local configChanged = false
 
@@ -167,14 +170,31 @@ local enterpriseMap = {
   ["SecondaryRadiusSecret"] = "1",
 }
 
-local function getModesSupported(secModes)
-  local modes = {}
-  for i in gmatch(secModes, "%S+") do
-    if i ~= "wep" then  -- "wep" mode is not supported, so skipping if it is populated from UCI
-      modes[#modes + 1] = supportedModesMap[i]
-    end
+local function getEnvUciValue(sectionName, paramName)
+  envBinding.sectionname = sectionName
+  envBinding.option = paramName
+  return getFromUci(envBinding)
+end
+
+local function getSupportedModesFromUbus(key)
+  local data = conn:call("wireless.accesspoint.security", "get", { name = key }) or {}
+  return data[key] and data[key].supported_modes or ""
+end
+
+local function getModesSupported(supportedModes, key)
+  if not supportedModes then
+    supportedModes = getSupportedModesFromUbus(key)
   end
-  return concat(modes, ",")
+  if supportedModes ~= "" then
+    local modes = {}
+    for mode in gmatch(supportedModes, "%S+") do
+      if mode ~= "wep" then  -- "wep" mode is not supported, so skipping if it is populated from UCI
+        modes[#modes + 1] = supportedModesMap[mode]
+      end
+    end
+    return concat(modes, ",")
+  end
+  return ""
 end
 
 local function getDNS(fqdn)
@@ -213,6 +233,21 @@ local function getEnterpriseValues(key, param, server)
     value = getUciValue(sectionName, "secret")
   end
   return value
+end
+
+local function defaultPassphrase(key)
+  local wpaPskKey = getUciValue(key, "wpa_psk_key")
+  local defaultKey
+  if key == "ap0" or key == "ap2" or key == "ap5" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s0")
+  elseif key == "ap1" or key == "ap3" or key == "ap6" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s1")
+  elseif key == "ap4" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s3")
+  elseif key == "ap7" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s2")
+  end
+  return (defaultKey == wpaPskKey) and "1" or "0"
 end
 
 local function setUciParam(sectionName, paramName, value)
@@ -257,7 +292,7 @@ Device_WiFi_AccessPoint_i_Security_.get = function(mapping, param, key)
   if param == "Reset" then
     return "0"
   elseif param == "ModesSupported" then
-    return uciSecurityValues["supported_security_modes"] and getModesSupported(uciSecurityValues["supported_security_modes"]) or ""
+    return getModesSupported(uciSecurityValues["supported_security_modes"], key)
   elseif param == "ModeEnabled" then
     return (modeName and modeName or "")
   elseif param == "RekeyingInterval" then
@@ -266,6 +301,8 @@ Device_WiFi_AccessPoint_i_Security_.get = function(mapping, param, key)
     return uciSecurityValues[accessSecurityMap[param]] or ""
   elseif enterpriseMap[param] then
     return (isEnterpriseMode and getEnterpriseValues(key, param, enterpriseMap[param]) or "" )
+  elseif param == "X_TELUS_DefaultKeyPassphrase" then
+    return defaultPassphrase(key)
   end
 end
 
@@ -302,7 +339,7 @@ Device_WiFi_AccessPoint_i_Security_.getall = function(mapping, key)
     WEPKey = uciSecurityValues["wep_key"] or "",  -- "wep" mode is not supported. To be uncommented if "wep" mode support is requested.
     PreSharedKey = uciSecurityValues["wpa_psk_key"] or "",
     KeyPassphrase = uciSecurityValues["wpa_psk_key"] or "",
-    ModesSupported = uciSecurityValues["supported_security_modes"] and getModesSupported(uciSecurityValues["supported_security_modes"]) or "",
+    ModesSupported = getModesSupported(uciSecurityValues["supported_security_modes"], key),
     RadiusServerIPAddr = isEnterpriseMode and ipAddrPrim or "",
     RekeyingInterval = rekeyingInterval,
     RadiusServerPort = isEnterpriseMode and primValues["port"] or "1812",
@@ -392,22 +429,40 @@ end
 
 local function setSecurityOption(ap, option, value)
   if value then
-      if isBandSteerEnabled(ap) then
-        local apdata = network.getAccessPointInfo(ap)
-        if not next(apdata) then
-          return nil, "The ap data is invalid."
-        end
-        local iface = apdata.ssid
-        local peeriface = getBandSteerPeerIface(iface)
-        local bspeerap = bandSteerHelper.getBsAp(peeriface)
-        setUciParam(ap, "bandsteer_id", "off")
-        if bspeerap then
+    if isBandSteerEnabled(ap) then
+       local apdata = network.getAccessPointInfo(ap)
+       if not next(apdata) then
+         return nil, "The ap data is invalid."
+       end
+       local iface = apdata.ssid
+       local peeriface = getBandSteerPeerIface(iface)
+       local bspeerap = bandSteerHelper.getBsAp(peeriface)
+       setUciParam(ap, "bandsteer_id", "off")
+       if bspeerap then
           setUciParam(bspeerap, "bandsteer_id", "off")
-        end
-      end
+       end
+    end
       setUciParam(ap, option, value)
   else
     return "Unsupported  value"
+  end
+end
+
+local function setModeEnabled(value, key)
+  local supportedModes = getUciValue(key, "supported_security_modes")
+  if supportedModes == "" then
+    supportedModes = getSupportedModesFromUbus(key)
+  end
+  local modeAsPerUci = accessSecurityUciMap[value]
+  if supportedModes == "" then
+    return setSecurityOption(key, "security_mode", modeAsPerUci)
+  else
+    for mode in gmatch(supportedModes, "([^%s]+)") do
+      if mode == modeAsPerUci then
+        return setSecurityOption(key, "security_mode", modeAsPerUci)
+      end
+    end
+    return nil, value.." Mode is currently not supported"
   end
 end
 
@@ -418,8 +473,7 @@ Device_WiFi_AccessPoint_i_Security_.set = {
     end
   end,
   ModeEnabled = function(_, _, value, key)
-    local ucival = accessSecurityUciMap[value]
-    return setSecurityOption(key, "security_mode", ucival)
+    return setModeEnabled(value, key)
   end,
   PreSharedKey = function(_, _, value, key)
     return setSecurityOption(key, "wpa_psk_key", value)

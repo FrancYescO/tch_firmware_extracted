@@ -41,10 +41,11 @@ local Device_Services_X_TESSARES_MPTCP_ = {
 }
 
 local uciHelper = mapper("ucihelper")
-local mproxyBinding = { config = "mproxy", sectionname = "globals" }
+local moffBinding = { config = "moff", sectionname = "config" }
 local isConfigChanged = false
 local lfs = require("lfs")
 local commitApply, string = commitapply, string
+local conn = mapper("ubus").connect()
 
 local paramMap = {
   ["Enable"]  = "enable",
@@ -52,10 +53,15 @@ local paramMap = {
   ["AdvMSS"]  = "advmss",
 }
 
+local modeInterfaceMap = {
+  ["dsl_lte"] = "mpt_lte",
+  ["dsl_dsl"] = "mpt_amod",
+}
+
 local function getUciValue(param, default)
-  mproxyBinding.option = paramMap[param]
-  mproxyBinding.default = default
-  return uciHelper.get_from_uci(mproxyBinding)
+  moffBinding.option = paramMap[param]
+  moffBinding.default = default
+  return uciHelper.get_from_uci(moffBinding)
 end
 
 Device_Services_X_TESSARES_MPTCP_.get = {
@@ -64,7 +70,9 @@ Device_Services_X_TESSARES_MPTCP_.get = {
   end,
 
   Status = function(mapping, param)
-    return lfs.attributes("/var/run/mproxy.pid", "mode") == "file" and "Enabled" or "Disabled"
+    local mode = getUciValue("Profile", "dsl_lte")
+    local interface = modeInterfaceMap[mode] and conn:call("network.interface." ..modeInterfaceMap[mode], "status", {})
+    return interface and interface.up and "Enabled" or "Disabled"
   end,
 
   Profile = function(mapping, param)
@@ -77,8 +85,8 @@ Device_Services_X_TESSARES_MPTCP_.get = {
 }
 
 local function setUciValue(option, value)
-  mproxyBinding.option = option
-  uciHelper.set_on_uci(mproxyBinding, value, commitApply)
+  moffBinding.option = option
+  uciHelper.set_on_uci(moffBinding, value, commitApply)
   isConfigChanged = true
 end
 
@@ -103,14 +111,14 @@ Device_Services_X_TESSARES_MPTCP_.set = {
 
 Device_Services_X_TESSARES_MPTCP_.commit = function()
   if isConfigChanged then
-    uciHelper.commit(mproxyBinding)
+    uciHelper.commit(moffBinding)
     isConfigChanged = false
   end
 end
 
 Device_Services_X_TESSARES_MPTCP_.revert = function()
   if isConfigChanged then
-    uciHelper.revert(mproxyBinding)
+    uciHelper.revert(moffBinding)
     isConfigChanged = false
   end
 end
@@ -125,8 +133,8 @@ end
 
 Device_Services_X_TESSARES_MPTCP_.add_watchers = function(mapping, param, key)
   local uciEventSource = eventsource("uci")
-  uciEventSource.watch(mapping, { set = setUciEventEnable }, "mproxy", "globals", nil, "enable")
-  uciEventSource.watch(mapping, { set = setUciEventProfile }, "mproxy", "globals", nil, "profile")
+  uciEventSource.watch(mapping, { set = setUciEventEnable }, "moff", "config", nil, "enable")
+  uciEventSource.watch(mapping, { set = setUciEventProfile }, "moff", "config", nil, "profile")
 end
 
 register(Device_Services_X_TESSARES_MPTCP_)

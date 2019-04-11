@@ -72,7 +72,7 @@ local Device_GRE_Tunnel_i_ = {
         max = "256",
       },
       -- InterfaceNumberOfEntries
-      -- automatically created when Device.GRE.Tunnel.{i}.Interface.{i}. is loaded
+      -- automatically created when #ROOT.Tunnel.{i}.Interface.{i}. is loaded
     }
   }
 }
@@ -80,20 +80,18 @@ local Device_GRE_Tunnel_i_ = {
 local nwmodel = require 'transformer.shared.models.device2.network'
 local model
 
-local posix = require 'tch.posix'
-local AF_INET = posix.AF_INET
-local AF_INET6 = posix.AF_INET6
+local inet = require 'tch.inet'
 
-
-local pairs = pairs
+local mapper, ipairs, pairs = mapper, ipairs, pairs
 local open = io.open
 local ubus = mapper("ubus").connect()
 local uciHelper = mapper("ucihelper")
 local network = { config = "network" }
+local greBinding = { config = "gre_hotspotd" }
+local transactions = {}
 
-local getUciValue, setUciValue, getSection, commit, revert
+local getUciValue, setUciValue, getSection
 do
-  local configChanged = false
 
   function getUciValue(name, option, default, section_data)
     if section_data then
@@ -110,26 +108,12 @@ do
     network.sectionname = name
     network.option = option
     uciHelper.set_on_uci(network, value, commitapply)
-    configChanged = true
+    transactions[network.config] = true
   end
 
   function getSection(name)
     network.sectionname = name
     return uciHelper.getall_from_uci(network) or {}
-  end
-
-  function commit()
-    if configChanged then
-      uciHelper.commit(network)
-    end
-    configChanged = false
-  end
-
-  function revert()
-    if configChanged then
-      uciHelper.revert(network)
-    end
-    configChanged = false
   end
 end
 
@@ -139,20 +123,20 @@ Device_GRE_Tunnel_i_.entries = function()
 end
 
 local protocol_to_addressType = {
-  gre = AF_INET,
-  gretap = AF_INET,
-  grev6 = AF_INET6,
-  grev6tap = AF_INET6
+  gre = "IPv4",
+  gretap = "IPv4",
+  grev6 = "IPv6",
+  grev6tap = "IPv6"
 }
 
 local function getAddrType(key, uci_data)
   local proto = getUciValue(model:getUciKey(key), "proto", "gre", uci_data)
-  return protocol_to_addressType[proto] or AF_INET
+  return protocol_to_addressType[proto] or "IPv4"
 end
 
 local function getPeerField(key, uci_values)
   local addrType = getAddrType(key, uci_values)
-  return addrType == AF_INET6 and "peer6addr"or "peeraddr"
+  return addrType == "IPv6" and "peer6addr"or "peeraddr"
 end
 
 local function getRemoteEndpoint(key, uci_values)
@@ -182,8 +166,7 @@ local getter = {
     return "3"
   end,
   DeliveryHeaderProtocol = function(key, uci_values)
-    local addressType = getAddrType(key, uci_values)
-    return addressType == AF_INET and "IPv4" or "IPv6"
+    return getAddrType(key, uci_values)
   end,
   DefaultDSCPMark = function()
     return "0"
@@ -191,6 +174,18 @@ local getter = {
   ConnectedRemoteEndpoint = function(key, uci_values)
     return getRemoteEndpoint(key, uci_values)
   end,
+  X_0876FF_DHCPAgentCircuitIDFormat = function()
+    greBinding.sectionname = "hotspot"
+    greBinding.option = "circuitid"
+    greBinding.default = "0"
+    return uciHelper.get_from_uci(greBinding)
+  end,
+  X_0876FF_DHCPAgentRemoteIDFormat = function()
+    greBinding.sectionname = "hotspot"
+    greBinding.option = "remoteid"
+    greBinding.default = "0"
+    return uciHelper.get_from_uci(greBinding)
+  end
 }
 
 Device_GRE_Tunnel_i_.get = function(mapping, param, key)
@@ -207,31 +202,14 @@ Device_GRE_Tunnel_i_.getall = function(mapping, key)
   return all
 end
 
-local function normalize_ip(family, ip_str)
-  local ip, err = posix.inet_pton(family, ip_str)
-  if not ip then
-    return nil, err
-  end
-  return posix.inet_ntop(family, ip)
-end
-
-local function ipIsUnassigned(family, ip)
-  if family == AF_INET then
-    return ip=="0.0.0.0"
-  elseif family == AF_INET6 then
-    return ip=="::"
-  end
-  return false
-end
-
 local function makeIPlist(family, value)
   local addresses = {}
   for ip_str in value:gmatch("([^,]+)") do
-    local ip, err = normalize_ip(family, ip_str)
+    local ip, err = inet.normalizeIP(ip_str, family)
     if not ip then
       return nil, err
     end
-    if not ipIsUnassigned(family, ip) then
+    if not inet.ipIsZero(ip, family) then
       addresses[#addresses + 1] = ip
     end
   end
@@ -239,8 +217,8 @@ local function makeIPlist(family, value)
 end
 
 local function setPeer(key, family, new_peer)
-  local peer = family==AF_INET and new_peer or ""
-  local peer6 = family==AF_INET6 and new_peer or ""
+  local peer = family=="IPv4" and new_peer or ""
+  local peer6 = family=="IPv6" and new_peer or ""
   local uci_key = model:getUciKey(key)
   setUciValue(uci_key, "peeraddr", peer)
   setUciValue(uci_key, "peer6addr", peer6)
@@ -274,18 +252,42 @@ Device_GRE_Tunnel_i_.set = {
   end,
   DeliveryHeaderProtocol = function(_, _, value, key)
     local current = getAddrType(key)
-    local requested = (value=="IPv4") and AF_INET or AF_INET6
+    local requested = (value=="IPv4") and "IPv4" or "IPv6"
     if requested ~= current then
       setPeer(key, current, "")
       local tap = getUciValue(model:getUciKey(key), "proto", "gre"):match("tap$") and "tap" or ""
-      local proto = (requested==AF_INET) and ("gre"..tap) or ("grev6"..tap)
+      local proto = (requested=="IPv4") and ("gre"..tap) or ("grev6"..tap)
       setUciValue(model:getUciKey(key), "proto", proto)
       setGREInterface(key)
     end
   end,
+  X_0876FF_DHCPAgentCircuitIDFormat = function(mapping, param, value, key)
+    greBinding.sectionname = "hotspot"
+    greBinding.option = "circuitid"
+    uciHelper.set_on_uci(greBinding, value, commitapply)
+    transactions[greBinding.config] = true
+  end,
+  X_0876FF_DHCPAgentRemoteIDFormat = function(mapping, param, value, key)
+    greBinding.sectionname = "hotspot"
+    greBinding.option = "remoteid"
+    uciHelper.set_on_uci(greBinding, value, commitapply)
+    transactions[greBinding.config] = true
+  end,
 }
 
-Device_GRE_Tunnel_i_.commit = commit
-Device_GRE_Tunnel_i_.revert = revert
+Device_GRE_Tunnel_i_.commit = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_GRE_Tunnel_i_.revert = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
 
 register(Device_GRE_Tunnel_i_)
+

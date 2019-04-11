@@ -73,7 +73,7 @@ update_rip_partition() {
 	local cmd
 	if [ "$RIPTYPE" = "MTD" ]; then
 		cmd="mtd write $img $RIPDEV"
-	elif [ "$RIPTYPE" = "UBI"; then
+	elif [ "$RIPTYPE" = "UBI" ]; then
 		cmd="ubiupdatevol $RIPDEV $img"
 	else
 		echo "error: do not know how to write the eRIP"
@@ -150,41 +150,13 @@ ripclean() {
 }
 
 rip_delete_entries() {
-	local E=0
-	local D=""
 	for entry in $* ; do
-		D="$D -d $entry"
-	done
-	
-	if [ -z "$RIPDEV" ]; then
-		echo "error no eRIP partition found"
-		return 1
-	fi
-	
-	local tmpripdir=$(mktemp -p /tmp -d)
-	local tmprip=$tmpripdir/rip
-	local cmd="ripclean -s $RIPSIZE $D $RIPDEV $tmprip"
-	rip_debug $cmd
-	if [ "$SILENT" = "1" ]; then
-		$cmd >/dev/null
-	else
-		$cmd
-	fi
-	
-	local modules
-	if [ -f $tmprip ]; then
-		unload_ripdrv
+		echo $entry > /proc/rip/clean
 		if [ $? -ne 0 ]; then
-			echo "error: failed to unload the rip driver"
-			E=1
-		else
-			writerip $tmprip $(gethash $tmprip) || E=$?
-			reload_ripdrv
+			echo "error: failed to clean $entry"
+			return 1
 		fi
-	else
-		echo "rip not changed"
-	fi
-	rm -rf $tmpripdir
-	
-	return $E 
+	done
+
+	return 0
 }

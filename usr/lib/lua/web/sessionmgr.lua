@@ -379,9 +379,22 @@ local function clearWrongPasswordInfo(username)
   wrongPassInfo[username] = nil
 end
 
-local function getWaitTime(username)
+local algorithms = {
+  linear = function(count, lockTime, clockTime, backOffRepeat)
+    return math.floor(count/backOffRepeat) * 10 + lockTime - clockTime
+  end,
+  exponential = function(count, lockTime, clockTime)
+    return (2^(count) + lockTime) - clockTime
+  end,
+}
+
+local function backOffAlgorithm(backOffMethod)
+  return algorithms[backOffMethod] or algorithms.exponential
+end
+
+local function getWaitTime(username, mgr)
   local info = getWrongPasswordInfo(username)
-  return (2^(info.count) + info.lockTime) - clock_gettime(CLOCK_MONOTONIC)
+  return backOffAlgorithm(mgr.backOffMethod)(info.count, info.lockTime, clock_gettime(CLOCK_MONOTONIC), mgr.backOffRepeat)
 end
 
 -- Handle scenario where user refreshes browser, when wait popup
@@ -396,7 +409,7 @@ local function checkBruteForceWaitingTimeForUser(mgr, username)
       if mgr.relaxfirstattempt == "1" and info.count == 1 then
         return
       end
-      local waitTime = getWaitTime(username)
+      local waitTime = getWaitTime(username, mgr)
       if waitTime > 0 then
         printf('{ "error": { "msg":"%s","waitTime":"%d","wrongCount":"%s" }}', "failed", waitTime, info.count)
         return true
@@ -422,7 +435,7 @@ local function preventBruteForce(mgr, username, errMsg)
       if mgr.relaxfirstattempt == "1" and count == 1 then
         return
       end
-      local waitTime = getWaitTime(username)
+      local waitTime = getWaitTime(username, mgr)
       printf('{ "error": { "msg":"%s","waitTime":"%s","wrongCount":"%s" }}', errMsg or "failed", waitTime, count)
       return true
     end
@@ -477,7 +490,7 @@ function SessionMgr:handleAuth()
       -- TODO: shouldn't reveal that the username is unknown; instead
       --       we should generate a fake salt and B and in the second
       --       step simply report that authentication failed
-      ngx.log(ngx.ERR, "Invalid login credentials")
+      ngx.log(ngx.ERR, string.format("Failed logon attempt for user %s", post_args.I))
       ngx.print('{ "error":"failed" }')
     else
       if not checkBruteForceWaitingTimeForUser(self, I) then
@@ -515,7 +528,7 @@ function SessionMgr:handleAuth()
       printf('{ "M":"%s" }', M2)
     else
       if not preventBruteForce(self, verifier:username(), errmsg) then
-        ngx.log(ngx.ERR, "Invalid login credentials")
+        ngx.log(ngx.ERR, "Failed logon attempt for user " .. verifier:username())
         printf('{ "error":"%s" }', errmsg or "failed")
       end
     end

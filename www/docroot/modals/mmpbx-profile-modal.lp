@@ -8,9 +8,11 @@ local proxy = require ("datamodel")
 local content_helper = require ("web.content_helper")
 local ui_helper = require("web.ui_helper")
 local post_helper = require("web.post_helper")
--- added because present in 7221 baseline
 local message_helper = require("web.uimessage_helper")
 local table, ipairs = table, ipairs
+local posix = require("tch.posix")
+local getClockTime = posix.clock_gettime
+local CLOCK_MONOTONIC = posix.CLOCK_MONOTONIC
 
 local sipnet_options={}
 for i,v in ipairs(proxy.getPN("uci.mmpbxrvsipnet.network.", true)) do
@@ -243,6 +245,78 @@ for _,v in pairs(sip_data) do
     v[scns["call"]] = callstate
 end
 
+local function validateDigitMapString(dmstring)
+    if not dmstring or dmstring == "" then
+        return true
+    end
+    if #dmstring > 256 then
+        return  nil, T"Invalid digitmap string"
+    end
+    local endPattern = ""
+    local match = string.match
+    local sub = string.sub
+    local patternCount = 1
+    local patternIndex = 1
+    local index = 1
+    local character = ""
+    local endChar = ""
+    local patternTable = {
+       ['('] = ")",
+       ['['] = "]",
+       ['{'] = "}",
+    }
+    local ignorepatternTable = {
+       [')'] = true,
+       [']'] = true,
+       ['}'] = true,
+    }
+    while index <= #dmstring do
+        character = sub(dmstring, index, index)
+        if not match(character, '[-+|0-9TXx%[%]%.#%*(){}]') then
+            return  nil, T"Invalid digitmap string"
+        end
+        if ignorepatternTable[string.untaint(character)] then
+            patternCount = patternCount-1
+        end
+        if patternTable[string.untaint(character)] then
+            patternCount = patternCount+1
+            endPattern = patternTable[string.untaint(character)]
+            endChar = sub(dmstring, #dmstring, #dmstring)
+            patternIndex = index
+            local char = ""
+            while patternIndex and patternIndex <= #dmstring do
+                char = sub(dmstring, patternIndex, patternIndex)
+                if ignorepatternTable[string.untaint(char)] then
+                    break
+                end
+                if char == endPattern or patternIndex == #dmstring then
+                    endPatternIndex = patternIndex
+                    setString = string.sub(dmstring, index, endPatternIndex)
+                    local setIndex = 1
+                    local iserror = 0
+                    while setIndex and setIndex <= #setString do
+                        setChar = sub(setString, setIndex, setIndex)
+                        if setChar == endPattern or endChar == endPattern then
+                            iserror = 1
+                        end
+                        setIndex = setIndex + 1
+                    end
+                    if iserror == 0 then
+                        return nil, T"Invalid DigitMap String"
+                    end
+                    break
+                end
+                patternIndex = patternIndex + 1
+            end
+        end
+        index = index + 1
+    end
+    if patternCount ~= 1 then
+        return nil, T"Invalid DigitMap String"
+    end
+    return true
+end
+
 -- Below table will be used for display, if validation in POST operation will fail then we will update below table for retaining the changes in display.
 local sip_display_data = copyTable(sip_data)
 
@@ -255,7 +329,7 @@ if ngx.var.request_method == "POST" then
     local i = 1
 
     while post_args["isRowDeleted."..i] or post_args["isRowAdded."..i] do
-		if ((post_args["isRowDeleted."..i] == "0") or (post_args["isRowAdded."..i] == "1"))  then
+        if ((post_args["isRowDeleted."..i] == "0") or (post_args["isRowAdded."..i] == "1")) then
 	    sip_valid["enable."..i] = post_helper.validateBoolean
 	    sip_valid["uri."..i] = validateUri
 	    if ((post_args["enable."..i] == "1") or (post_args["username."..i] ~= "")) then
@@ -264,11 +338,11 @@ if ngx.var.request_method == "POST" then
 	    if ((post_args["enable."..i] == "1") or (post_args["password."..i] ~= "")) then
 		sip_valid["password."..i] = post_helper.getAndValidation(validatePassword,post_helper.getValidateStringLengthInRange(1,64))
 	    end
-	    if ((post_args["enable."..i] == "1") or (post_args["displayName."..i] ~= "")) then
-			if (post_args["displayName."..i] ~= "") then
-				sip_valid["displayName."..i] = validateNonspaceString
-			end
-	    end
+	      if ((post_args["enable."..i] == "1") or (post_args["displayName."..i] ~= "")) then
+		if (post_args["displayName."..i] ~= "") then
+		  sip_valid["displayName."..i] = validateNonspaceString
+		end
+	      end
 	end
 	i = i + 1
     end
@@ -321,6 +395,18 @@ if ngx.var.request_method == "POST" then
 	    proxy.apply()
 	    sip_data,allowedIndexes = content_helper.loadTableData(basepath, sip_columns, nil, sort_func)
 	    sip_display_data = copyTable(sip_data)
+
+            -- rpc.mmpbx.profile. returns empty during mmpbx restart is in progress, so introduce delay to hold the save progress pop-up
+            -- until gets valid data from datamodel and also introduce timeout (1 minute) to break this loop even valid data is not received
+            local postRequestTime = getClockTime(CLOCK_MONOTONIC)
+            ngx.sleep(4)
+            while (getClockTime(CLOCK_MONOTONIC) - postRequestTime) <= 60 do
+               res = proxy.get("rpc.mmpbx.profile.")
+               if (res and #res > 0) then
+                  break
+               end
+               ngx.sleep(2)
+            end
 	end
     else	-- Validation failed
 	i = 1
@@ -353,6 +439,25 @@ local sip_table = { "<div class=\"control-group\"> <table id = \"sipProfileTable
 for _,v in ipairs(sip_columns) do
     sip_table[#sip_table + 1] = string.format("<th>%s</th>", v.header)
 end
+
+local function creatTableText(name, data, attr, helpmsg, fnTocall)
+  local content = {}
+  local attributes = {input = { class="span1"}}
+  if helpmsg then
+      attributes.input = {
+         class = "tooltip-on error span1",
+         ["data-placement"] = "top",
+         ["data-original-title"] = helpmsg,
+      }
+      content[#content + 1] = [[<div class="control-group error">]]
+  else
+      content[#content + 1] = [[<div class="control-group">]]
+  end
+  content[#content + 1] = fnTocall(name, data or "", attributes)
+  content[#content + 1] = "</div>"
+  return content
+  end
+
 --Column for delete button
 sip_table[#sip_table + 1] = "<th></th>"
 
@@ -380,7 +485,7 @@ for i,v in ipairs(sip_display_data) do
     for j,w in ipairs(v) do
         sip_table[#sip_table + 1] = "<td>"
 	if sip_columns[j].type == "text" then
-	    sip_table[#sip_table + 1] = ui_helper.createSimpleInputText(sip_columns[j].name.."."..i, w, sip_columns[j].attr,helpmsg[sip_columns[j].name.."."..i])
+	      sip_table[#sip_table + 1] = ui_helper.createSimpleInputText(sip_columns[j].name.."."..i, w, sip_columns[j].attr,helpmsg[sip_columns[j].name.."."..i])
 	elseif sip_columns[j].type == "switch" then
 	    sip_table[#sip_table + 1] = ui_helper.createSimpleSwitch(sip_columns[j].name.."."..i, w, sip_columns[j].attr)
 	elseif sip_columns[j].type == "select" then
@@ -388,11 +493,9 @@ for i,v in ipairs(sip_display_data) do
 	elseif sip_columns[j].type == "label" then
 	    sip_table[#sip_table + 1] = w
         elseif sip_columns[j].type == "light" then
-	    if w and w ~= "" then	-- if the row is newly added one then dont display the Registered & Call Status fields
-	        sip_table[#sip_table + 1] = ui_helper.createSimpleLight(w, "", {})
-	    end
+	    sip_table[#sip_table + 1] = ui_helper.createSimpleLight(w, "", {})
         elseif sip_columns[j].type == "password" then
-            sip_table[#sip_table + 1] = ui_helper.createSimpleInputPassword(sip_columns[j].name.."."..i, w or "", sip_columns[j].attr,helpmsg[sip_columns[j].name.."."..i])
+		  sip_table[#sip_table + 1] = ui_helper.createSimpleInputPassword(sip_columns[j].name.."."..i, w or "", sip_columns[j].attr,helpmsg[sip_columns[j].name.."."..i])
 	end
 	sip_table[#sip_table + 1] = "</td>"
     end
@@ -434,7 +537,18 @@ local internal_options = {
     sorted = sort_func,
 }
 
+local digit_params = {
+    dig_enable = "rpc.mmpbx.DigitMapEnable",
+    dig_string = "rpc.mmpbx.DigitMap",
+}
+
+local digit_valid = {
+    dig_enable = post_helper.validateBoolean,
+    dig_string = validateDigitMapString,
+}
+
 local internal_data, internal_helpmsg = post_helper.handleTableQuery(internal_columns, internal_options)
+local digit_data, digit_helpmsg = post_helper.handleQuery(digit_params, digit_valid)
 
 for _,v in pairs(internal_data) do
     v[icns["enable"]] = (v[icns["enable"]] == "1" and "Enabled") or "Disabled"
@@ -463,6 +577,11 @@ end
     <fieldset id="mmpbx-profile-tab">
       <legend><%= T"Telephone Numbers" %></legend>
       <% ngx.print(sip_table) %>
+    </fieldset>
+    <fieldset id="digit_map">
+      <legend><%= T"Digit Map" %></legend>
+      <%= ui_helper.createSwitch(T"Digit Map Enable", "dig_enable", digit_data["dig_enable"], nil, digit_helpmsg["dig_enable"])%>
+      <%= ui_helper.createInputText(T"Digit Map String", "dig_string", digit_data["dig_string"], nil, digit_helpmsg["dig_string"])%>
     </fieldset>
     <fieldset>
       <legend><%= T"Internal Telephone Numbers" %></legend>
@@ -500,7 +619,9 @@ function addNewRow() {
 }
 
 $(document).ready(function() {
+    $("#dig_enable").val() == 0 ? $('#dig_string').hide() : $('#dig_string').show();
     $('.switch, input[type="text"], input[type="password"]').change(function(){
+        $("#dig_enable").val() == 0 ? $('#dig_string').hide() : $('#dig_string').show();
         $('#modal-no-change').fadeOut(300);
         $('#modal-changes').delay(350).fadeIn(300);
     });

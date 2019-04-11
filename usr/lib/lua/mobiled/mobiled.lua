@@ -3,18 +3,20 @@
 --! @brief The mobiled module containing glue logic for the entire Mobiled
 ---------------------------------
 
-local require, tostring = require, tostring
-local table, pairs, ipairs = table, pairs, ipairs
-
 local mobiled_statemachine = require('mobiled.statemachine')
 local mobiled_plugin = require('mobiled.plugin')
 local mobiled_device = require('mobiled.device')
+local helper = require("mobiled.scripthelpers")
 local mobiled_ubus = require('mobiled.ubus')
 local version = require('mobiled.version')
 local errors = require('mobiled.error')
-local signal = require("signal").signal
+local sms = require('mobiled.sms')
 
-local M = {}
+local M = {
+	stats = {
+		interfaces = {}
+	}
+}
 
 local runtime
 local plugins = {}
@@ -42,24 +44,32 @@ function M.cleanup()
 	runtime.uloop.cancel()
 end
 
-function M.reloadconfig()
+function M.reloadconfig(force)
 	runtime.log:info("Reloading config")
-	runtime.config.reloadconfig(stateMachines, plugins)
+	runtime.config.reloadconfig(stateMachines, plugins, force)
 end
 
 function M.init(rt)
 	runtime = rt
 
-	M.platform = require('mobiled.platform')
-	M.platform.init(runtime)
-	local ret, errMsg = mobiled_ubus.init(runtime)
+	local c = M.get_config()
+	local ret, errMsg = sms.init(rt, { db_path = c.sms_database_path, max_messages = c.sms_max_messages })
 	if not ret then
 		return nil, errMsg
 	end
 
-	signal("SIGTERM", function() M.cleanup() end)
-	signal("SIGINT", function() M.cleanup() end)
-	signal("SIGHUP", function() M.reloadconfig(); return true end)
+	M.platform = require('mobiled.platform')
+	M.platform.init(runtime)
+	ret, errMsg = mobiled_ubus.init(runtime)
+	if not ret then
+		return nil, errMsg
+	end
+
+	local status, m = pcall(require, "mobiled.plugins.apn-autoconf")
+	M.apn_autoconf = status and m or nil
+
+	M.started_uptime = helper.uptime()
+
 	return true
 end
 
@@ -127,17 +137,11 @@ function M.add_device(params)
 		Populate the data session list extracted from the UCI network config
 		at creation of the device. This session info is needed to correctly configure
 		the attach context.
-		Additional data sessions can be created by Netifd sending the session_activate event.
+		Additional data sessions can be created or existing sessions can be updated by Netifd sending the session_activate event.
 	]]
 	for _, session_config in pairs(runtime.config.get_session_config(device)) do
-		-- Verify if the profile exists
-		local profile
-		profile, errMsg = M.get_profile(device, session_config.profile_id)
-		if profile then
-			device:add_data_session(session_config)
-		else
-			if errMsg then runtime.log:warning(errMsg) end
-		end
+		_, errMsg = M.add_data_session(device, session_config)
+		if errMsg then runtime.log:warning(errMsg) end
 	end
 
 	runtime.events.send_event("mobiled", { event = "device_added", dev_idx = sm.dev_idx, dev_desc = sm.device.desc })
@@ -150,8 +154,7 @@ function M.stop_device(device, force)
 	if not force then
 		M.stop_all_data_sessions(device)
 	end
-	local sessions = device:get_data_sessions() or {}
-	M.propagate_session_state(device, "disconnected", "ipv4v6", sessions)
+	M.propagate_session_state(device, "disconnected", "ipv4v6", device:get_data_sessions())
 	device:destroy(force)
 end
 
@@ -168,7 +171,7 @@ function M.remove_device(device)
 		end
 	end
 	device_index = 1
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		sm.dev_idx = device_index
 		device_index = device_index + 1
 	end
@@ -176,7 +179,7 @@ function M.remove_device(device)
 end
 
 function M.get_device(dev_idx)
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		if sm.device and (sm.dev_idx == dev_idx or not dev_idx) then
 			return sm.device
 		end
@@ -185,7 +188,7 @@ function M.get_device(dev_idx)
 end
 
 function M.get_device_by_imei(imei)
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		if sm.device and sm.device.info.imei == imei then
 			return sm.device
 		end
@@ -194,7 +197,7 @@ function M.get_device_by_imei(imei)
 end
 
 function M.get_device_by_desc(desc)
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		if sm.device and (sm.device.desc == desc or not desc) then
 			return sm.device
 		end
@@ -204,7 +207,7 @@ end
 
 function M.get_devices()
 	local devices = {}
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		if sm.device then
 			table.insert(devices, sm.device)
 		end
@@ -214,7 +217,7 @@ end
 
 function M.get_device_count()
 	local devices = 0
-	for _, sm in ipairs(stateMachines) do
+	for _, sm in pairs(stateMachines) do
 		if sm.device then
 			devices = devices + 1
 		end
@@ -231,7 +234,7 @@ function M.get_plugins()
 end
 
 function M.get_plugin(name)
-	for _, p in ipairs(plugins) do
+	for _, p in pairs(plugins) do
 		if p.name == name then
 			return p
 		end
@@ -257,12 +260,18 @@ function M.configure_attach_context(device, session, profile)
 			end
 		end
 		log:info("Configuring attach profile")
-		device:set_attach_params(profile)
+		if not device:set_attach_params(profile) then
+			return nil, "Failed to configure attach context"
+		end
 		session.changed = false
 	end
+	return true
 end
 
 function M.get_profile(device, profile_id)
+	if not profile_id then
+		return nil, "No profile specified"
+	end
 	-- Check if the profile we want to use is a reused device profile
 	local device_profile_id = tonumber(string.match(profile_id, "^device:(.*)$"))
 	if device_profile_id then
@@ -283,20 +292,30 @@ function M.get_profile(device, profile_id)
 	return runtime.config.get_profile(profile_id)
 end
 
-function M.activate_data_session(device, session_config)
-	local log, events = runtime.log, runtime.events
-
+function M.add_data_session(device, session_config)
 	-- Verify if the profile exists
 	local profile, errMsg = M.get_profile(device, session_config.profile_id)
 	if profile then
 		local session
-		session, errMsg = device:activate_data_session(session_config)
+		session, errMsg = device:add_data_session(session_config)
 		if session then
-			log:info("Activated data session " .. tostring(session.session_id) .. " using profile " .. tostring(session.profile_id))
-			events.send_event("mobiled", { event = "session_setup", session_id = session.session_id, dev_idx = device.sm.dev_idx })
+			session.allowed = M.apn_is_allowed(device, profile.apn)
+			return session
 		end
 	end
-	if errMsg then log:warning(errMsg) end
+	return nil, errMsg
+end
+
+function M.activate_data_session(device, session_config)
+	local log = runtime.log
+	local session, errMsg = M.add_data_session(device, session_config)
+	if session then
+		session.activated = true
+		log:info("Activated data session " .. tostring(session.session_id) .. " using profile " .. tostring(session.profile_id))
+		runtime.events.send_event("mobiled", { event = "session_setup", session_id = session.session_id, dev_idx = device.sm.dev_idx })
+	elseif errMsg then
+		log:warning(errMsg)
+	end
 end
 
 function M.deactivate_data_session(device, session_id)
@@ -309,24 +328,27 @@ function M.deactivate_data_session(device, session_id)
 	end
 end
 
-function M.start_data_session(device, session_id, profile, interface)
+function M.start_data_session(device, session_id, profile)
 	local session = device:get_data_session(session_id)
 	profile.bridge = session.bridge
 	M.propagate_session_state(device, "setup", "ipv4v6", { session })
-	return device:start_data_session(session_id, profile, interface)
+	local internal = false
+	if session then
+		internal = session.internal or false
+	end
+	return device:start_data_session(session_id, profile, internal)
 end
 
-function M.stop_data_session(device, session_id, interface)
+function M.stop_data_session(device, session_id)
+	local session = device:get_data_session(session_id)
 	-- We need this teardown event here in order to kill the PPP interface otherwise the state will never change to disconnected
-	M.propagate_session_state(device, "teardown", "ipv4v6", { device:get_data_session(session_id) })
-	return device:stop_data_session(session_id, interface)
+	M.propagate_session_state(device, "teardown", "ipv4v6", { session })
+	return device:stop_data_session(session_id)
 end
 
 function M.stop_all_data_sessions(device)
-	local sessions = device:get_data_sessions()
-	for _, session in pairs(sessions) do
-		M.propagate_session_state(device, "teardown", "ipv4v6", { session })
-		device:stop_data_session(session.session_id)
+	for _, session in pairs(device:get_data_sessions() or {}) do
+		M.stop_data_session(device, session.session_id)
 	end
 end
 
@@ -342,7 +364,7 @@ end
 function M.get_device_config(device)
 	local cfg, errMsg = runtime.config.get_device_config(device)
 	if cfg then
-		cfg.sim_hotswap = M.platform and M.platform.sim_hotswap_supported(device)
+		cfg.sim_hotswap = M.platform.sim_hotswap_supported(device)
 	end
 	return cfg, errMsg
 end
@@ -360,9 +382,11 @@ function M.validate_imsi(imsi)
 	return true
 end
 
-function M.validate_roaming(imsi, mcc, roaming)
+function M.validate_roaming(imsi, mcc, mnc, roaming)
 	if roaming == "national" then
-		return imsi:sub(1,3) == mcc
+		return imsi:sub(1, 3) == mcc
+	elseif roaming == "none" then
+		return helper.startswith(imsi, mcc .. mnc)
 	end
 	return true
 end
@@ -418,7 +442,9 @@ end
 function M.propagate_session_state(device, session_state, pdp_type, sessions)
 	if type(sessions) ~= "table" then return end
 	for _, session in pairs(sessions) do
-		runtime.events.send_event("mobiled", { dev_idx = device.sm.dev_idx, dev_desc = device.desc, event = "session_state_changed", session_state = session_state, session_id = session.session_id, pdp_type = pdp_type })
+		if not session.internal then
+			runtime.events.send_event("mobiled", { dev_idx = device.sm.dev_idx, dev_desc = device.desc, event = "session_state_changed", session_state = session_state, session_id = session.session_id, pdp_type = pdp_type })
+		end
 	end
 end
 
@@ -475,7 +501,7 @@ function M.get_display_state(dev_idx)
 		local device = M.get_device(dev_idx)
 		if device then
 			local sessions = device:get_data_sessions()
-			if sessions[0] and sessions[0].activated then
+			if sessions[0] and sessions[0].activated and sessions[0].allowed then
 				display_state = "connected"
 			else
 				display_state = "disconnected"
@@ -493,31 +519,94 @@ function M.add_error(device, severity, error_type, error_message)
 	errors.add_error(device, severity, error_type, error_message)
 end
 
-function M.handle_event(event)
-	if event.event == "device_disconnected" then
-		-- In case of USB devices, we get a hotplug event without device index
-		-- but with a device description. Let's figure out which device it is
-		if not event.dev_idx then
-			for _, sm in ipairs(stateMachines) do
-				if sm.device and sm.device.desc == event.dev_desc then
-					sm:handle_event(event)
-					return
-				end
-			end
-			runtime.log:error('Received event "%s" for unknown device', event.event)
-			return
+function M.get_sms_messages()
+	M.sync_sms_messages()
+	return sms.get_messages() or {}
+end
+
+function M.set_sms_status(id, status)
+	return sms.set_message_status(id, status)
+end
+
+function M.delete_sms(id)
+	return sms.delete_message(id)
+end
+
+function M.get_sms_info()
+	return sms.get_info()
+end
+
+-- Retrieves all messages from a device, stores them in the SMS database and deletes them on the device
+function M.sync_sms_messages()
+	for _, sm in ipairs(stateMachines) do
+		if sm.device then
+			sms.sync(sm.device)
 		end
+	end
+end
+
+local function handle_reject_cause(device, session, reject_cause)
+	if reject_cause == 50 or reject_cause == 51 then
+		local profile = M.get_profile(device, session.profile_id)
+		if reject_cause == 50 then
+			runtime.log:info("Changed PDP type to IPv4 for session %d", session.session_id)
+			profile.pdptype = 'ipv4'
+		elseif reject_cause == 51 then
+			runtime.log:info("Changed PDP type to IPv6 for session %d", session.session_id)
+			profile.pdptype = 'ipv6'
+		end
+	end
+	session.reject_cause = reject_cause
+end
+
+function M.handle_event(facility, event)
+	if facility == "mobiled.network" then
+		if event.interface and event.action then
+			if not M.stats.interfaces[event.interface] then
+				M.stats.interfaces[event.interface] = {}
+			end
+			M.stats.interfaces[event.interface][event.action] = (M.stats.interfaces[event.interface][event.action] or 0) + 1
+		end
+		return
+	end
+
+	if not event.event then
+		return
+	end
+
+	-- In case of USB devices, we get a hotplug event without device index
+	-- but with a device description. Let's figure out which device it is
+	if not event.dev_idx and (event.event == "device_connected" or event.event == "device_disconnected") then
+		for _, sm in ipairs(stateMachines) do
+			if (event.event == "device_disconnected" and sm.device and sm.device.desc == event.dev_desc) or
+			   (event.event == "device_connected" and not sm.device) then
+				sm:handle_event(event)
+				return
+			end
+		end
+		runtime.log:error('Received "%s" event for unknown device (%s)', event.event, tostring(event.dev_desc))
+		return
 	end
 
 	local dev_idx = event.dev_idx
 	if not dev_idx then
 		if event.event ~= "device_connected" and event.event ~= "device_disconnected" and event.event ~= "platform_config_changed" then
-			runtime.log:warning('Received event "%s" without device index', event.event)
+			runtime.log:warning('Received event "%s" without dev_idx', event.event)
 		end
 		dev_idx = 1
 	end
 
-	if event.event == "network_deregistered" or string.match(event.event, "session_") then
+	if string.match(event.event, "session_") or
+		event.event == "sim_removed" or
+		event.event == "sms_received" or
+		event.event == "network_deregistered" or
+		event.event == "emergency_numbers_updated" or
+		event.event == "radio_interface_changed" or
+		event.event == "cgi_changed" or
+		event.event == "ecgi_changed" or
+		event.event == "location_area_code_changed" or
+		event.event == "tracking_area_code_changed" then
+
 		local device = M.get_device(dev_idx)
 		if not device then
 			runtime.log:error('Received event "%s" for unknown device', event.event)
@@ -525,32 +614,57 @@ function M.handle_event(event)
 		end
 
 		if event.event == "network_deregistered" then
-			if event.reject_cause then
-				local severity = errors.reject_cause_severity(event.reject_cause)
+			device.stats.network.deregistered = device.stats.network.deregistered + 1
+			local cause = tonumber(event.reject_cause)
+			if cause then
+				local severity = errors.reject_cause_severity(cause)
 				if severity == "warning" or severity == "error" or severity == "fatal" then
-					errors.add_error(device, severity, "reject_cause", { reject_cause = event.reject_cause, pdp_type = event.pdp_type })
+					errors.add_error(device, severity, "reject_cause", { reject_cause = cause, pdp_type = event.pdp_type, session_id = 0 })
 				end
+				handle_reject_cause(device, device:get_data_session(0), cause)
 			end
 			M.propagate_session_state(device, "disconnected", "ipv4v6", device:get_data_sessions())
+		elseif event.event == "tracking_area_code_changed" then
+			device.stats.network.tracking_area_code_changed = device.stats.network.tracking_area_code_changed + 1
+		elseif event.event == "location_area_code_changed" then
+			device.stats.network.location_area_code_changed = device.stats.network.location_area_code_changed + 1
+		elseif event.event == "radio_interface_changed" then
+			device.stats.network.radio_interface_changed = device.stats.network.radio_interface_changed + 1
+		elseif event.event == "ecgi_changed" then
+			device.stats.network.ecgi_changed = device.stats.network.ecgi_changed + 1
+		elseif event.event == "cgi_changed" then
+			device.stats.network.cgi_changed = device.stats.network.cgi_changed + 1
 		elseif string.match(event.event, "session_") then
-			if event.event == "session_disconnected" then
-				if event.reject_cause then
-					local severity = errors.reject_cause_severity(event.reject_cause)
-					if severity == "warning" or severity == "error" or severity == "fatal" then
-						errors.add_error(device, severity, "reject_cause", { reject_cause = event.reject_cause, pdp_type = event.pdp_type })
+			local session = device:get_data_session(event.session_id)
+			if session then
+				if event.event == "session_disconnected" then
+					local cause = tonumber(event.reject_cause)
+					if cause then
+						local severity = errors.reject_cause_severity(cause)
+						if severity == "warning" or severity == "error" or severity == "fatal" then
+							errors.add_error(device, severity, "reject_cause", { reject_cause = cause, pdp_type = event.pdp_type, session_id = event.session_id })
+						end
+						handle_reject_cause(device, session, cause)
 					end
-				end
-				M.propagate_session_state(device, "disconnected", event.pdp_type or "ipv4v6", { device:get_data_session(event.session_id) })
-			elseif event.event == "session_activate" then
-				M.activate_data_session(device, event)
-			elseif event.event == "session_config_changed" then
-				local session = device:get_data_session(event.session_id)
-				if session then
+					session.stats.disconnected = session.stats.disconnected + 1
+					M.propagate_session_state(device, "disconnected", event.pdp_type or "ipv4v6", { session })
+				elseif event.event == "session_activate" then
+					M.activate_data_session(device, event)
+				elseif event.event == "session_config_changed" then
 					session.changed = true
+				elseif event.event == "session_deactivate" then
+					session.stats.deactivated = session.stats.deactivated + 1
+					M.deactivate_data_session(device, event.session_id)
 				end
-			elseif event.event == "session_deactivate" then
-				M.deactivate_data_session(device, event.session_id)
+			else
+				runtime.log:error('Received event "%s" for unknown data session', event.event)
 			end
+		elseif event.event == "sms_received" then
+			sms.sync(device)
+		elseif event.event == "emergency_numbers_updated" and event.numbers then
+			device:set_emergency_numbers(event.numbers)
+		elseif event.event == "sim_removed" then
+			device.stats.sim.removed = device.stats.sim.removed + 1
 		end
 	end
 
@@ -560,6 +674,24 @@ function M.handle_event(event)
 			break
 		end
 	end
+end
+
+function M.apn_is_allowed(device, apn)
+	if not apn then
+		return true
+	end
+	local sim_info = device:get_sim_info()
+	if not sim_info or not sim_info.access_control_list then
+		return true
+	end
+	if sim_info.access_control_list.apn then
+		for _ , acl_apn in pairs(sim_info.access_control_list.apn) do
+			if acl_apn == apn then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 return M

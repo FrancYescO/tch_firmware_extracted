@@ -1,5 +1,5 @@
 ----------------
---- Lua 5.1/5.2 compatibility
+--- Lua 5.1/5.2/5.3 compatibility.
 -- Ensures that `table.pack` and `package.searchpath` are available
 -- for Lua 5.1 and LuaJIT.
 -- The exported function `load` is Lua 5.2 compatible.
@@ -11,17 +11,37 @@ local compat = {}
 
 compat.lua51 = _VERSION == 'Lua 5.1'
 
+local isJit = (tostring(assert):match('builtin') ~= nil)
+if isJit then
+    -- 'goto' is a keyword when 52 compatibility is enabled in LuaJit
+    compat.jit52 = not loadstring("local goto = 1")
+end
+
+compat.dir_separator = _G.package.config:sub(1,1)
+compat.is_windows = compat.dir_separator == '\\'
+
 --- execute a shell command.
 -- This is a compatibility function that returns the same for Lua 5.1 and Lua 5.2
 -- @param cmd a shell command
 -- @return true if successful
 -- @return actual return code
 function compat.execute (cmd)
-    local res1,res2,res2 = os.execute(cmd)
-    if compat.lua51 then
-        return res1==0,res1
+    local res1,_,res3 = os.execute(cmd)
+    if compat.lua51 and not compat.jit52 then
+        if compat.is_windows then
+            res1 = res1 > 255 and res1 % 256 or res1
+            return res1==0,res1
+        else
+            res1 = res1 > 255 and res1 / 256 or res1
+            return res1==0,res1
+        end
     else
-        return not not res1,res2
+        if compat.is_windows then
+            res3 = res3 > 255 and res3 % 256 or res3
+            return res3==0,res3
+        else
+            return not not res1,res3
+        end
     end
 end
 
@@ -38,7 +58,7 @@ end
 -- With Lua 5.2, may return nil for a function with no global references!
 -- Based on code by [Sergey Rozhenko](http://lua-users.org/lists/lua-l/2010-06/msg00313.html)
 -- @param f a function or a call stack reference
--- @function compat.setfenv
+-- @function compat.getfenv
 
 ---------------
 -- Set environment of a function
@@ -47,7 +67,7 @@ end
 -- @function compat.setfenv
 
 if compat.lua51 then -- define Lua 5.2 style load()
-    if not tostring(assert):match 'builtin' then -- but LuaJIT's load _is_ compatible
+    if not isJit then -- but LuaJIT's load _is_ compatible
         local lua51_load = load
         function compat.load(str,src,mode,env)
             local chunk,err

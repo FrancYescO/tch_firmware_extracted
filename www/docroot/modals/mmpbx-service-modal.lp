@@ -16,12 +16,6 @@ local find, format, lower = string.find, string.format, string.lower
 local remove, concat = table.remove, table.concat
 local role = ngx.ctx.session:getrole()
 local html_escape = require("web.web").html_escape
-local session = ngx.ctx.session
-
-local tech = false
-if session:getrole() == "engineer" then
-	tech = true
-end
 
 local services_with_dest = {
   ["WARMLINE"] = true,
@@ -188,7 +182,7 @@ local function sorting_device_table(x,y)
     -- Device type service sorting logic.
     -- The devices types in voice are FXS, DECT & SIPDEV
     -- We need to display the devices in FXS, SIPDEV, DECT order.
-    -- For sorting we will take the first letter in the device names i.e. “f”, ”d” & “s” and sort them.
+    -- For sorting we will take the first letter in the device names i.e. "f", "d" & "s" and sort them.
     local cx = x["name"]:sub(1,1)
     local cy = y["name"]:sub(1,1)
 
@@ -647,15 +641,17 @@ local function addAddServiceInTable(serviceData, serviceName)
 
         if tonumber(w["timeout"]) then
             html[#html + 1] = "<td>"
-				if tech then
-				html[#html + 1] =  ui_helper.createSimpleInputText("timeout_"..serviceName.."_" ..i, w["timeout"], nil, helpmsg["timeout_"..serviceName.."_" ..i])
-				else
-				html[#html + 1] =  format("<span class='span2 simple-desc'>%s</span>",w["timeout"])
-				end
-                html[#html + 1] = "</td>"
+	    if role == "engineer" then
+              html[#html + 1] =  ui_helper.createSimpleInputText("timeout_"..serviceName.."_" ..i, w["timeout"], nil, helpmsg["timeout_"..serviceName.."_" ..i])
+	    else
+	      html[#html + 1] =  format("<span class='span2 simple-desc'>%s</span>",w["timeout"])
+            end
+            html[#html + 1] = "</td>"
         end
+
         html[#html + 1] = "</tr>"
      end
+
      html[#html + 1] =  "</tbody>"
 end
 

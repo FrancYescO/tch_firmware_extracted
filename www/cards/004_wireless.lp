@@ -1,8 +1,6 @@
 --pretranslated: do not change this file
  
 -- Enable localization
--- NG-70798 [GUI] Guest SSID are not shown on Wireless Card
--- NG-92675 implement changes required from the customer
 gettext.textdomain('webui-core')
 
 local ipairs, ngx, string = ipairs, ngx, string
@@ -10,59 +8,15 @@ local format, match = string.format, string.match
 local proxy = require("datamodel")
 local ui_helper = require("web.ui_helper")
 local content_helper = require("web.content_helper")
-local frequency = {}
-function getFrequencyBand(v)
-  if frequency[v] then
-    return frequency[v]
-  end
-  local path = format("rpc.wireless.radio.@%s.supported_frequency_bands",v)
-  local radio = proxy.get(path)[1].value
-  frequency[v] = radio
-  return radio
-end
-local function displayOnCard(index)
-  return not index or match(index,"[l|w]an") or match(index, "^VLAN%d$")
-end
-
-local ssid_list = content_helper.convertResultToObject("uci.wireless.wifi-iface.",proxy.get("uci.wireless.wifi-iface."))
-local network_map = {}
-for _,v in ipairs(ssid_list) do
-  network_map[format("%s%s",v.paramindex, v.ssid)] = v.network
-end
-
-ssid_list = {}
- for _, v in ipairs(proxy.getPN("rpc.wireless.ssid.", true)) do
-  local path = v.path
-  local values = proxy.get(path .. "radio" , path .. "ssid", path .. "oper_state")
-  if values then
-    local index = format("@%s%s", match(path, "rpc.wireless.ssid.@([%w%_]+)."), values[2].value)
-    -- In cards it should display only the Main SSID and TG-234 SSID's Fix for NG-43454
-    --if displayOnCard(network_map[index]) then
-      local ap_display_name = proxy.get(path .. "ap_display_name")[1].value
-      local display_ssid
-      if ap_display_name ~= "" then
-        display_ssid = ap_display_name
-      elseif proxy.get(path .. "stb")[1].value == "1" then
-        display_ssid = "IPTV"
-      else
-        display_ssid = values[2].value
-      end
-      ssid_list[#ssid_list+1] = {
-      radio = getFrequencyBand(values[1].value),
-      ssid = display_ssid,
-      state = values[3].value,
-      }
-    --end
-  end
-end
---[[table.sort(ssid_list, function(a,b)
-  return a.radio < b.radio
-end)]]
+local wirelessSSID_helper = require("wirelessSSID_helper")
 local modalPath
 local session = ngx.ctx.session
 if session:hasAccess("/modals/wireless-modal.lp") then
   modalPath = "/modals/wireless-modal.lp"
+elseif not session:isdefaultuser() then
+  return
 end
+local ssid_list = wirelessSSID_helper.getSSID()
   ngx.print('\
 \
 <div class="span3">\
@@ -71,19 +25,41 @@ end
     <div class="content">\
 ');  
 
-for i,v in pairs(ssid_list) do
-  if i <= 4 then
-    local status = "light off"
-    if(v.state == "1") then
-      status = "light green"
-    end  ngx.print('\
-  <div class="');  ngx.print(status); ngx.print('"></div>\
-    <p class="wifi-card"><strong>');  ngx.print(v.ssid); ngx.print('</strong>(');  ngx.print(v.radio); ngx.print(')</p>\
+for i,v in ipairs(ssid_list) do
+  if i <= 4  then 
+  local status_led = v.state == "1" and "light green" or" light off"   ngx.print('\
+  <div class ="');  ngx.print(status_led); ngx.print('"></div>\
+   <p id = \'wificard_');  ngx.print(i); ngx.print('\' class="wifi-card"><strong>');  ngx.print(v.ssid); ngx.print('</strong>(');  ngx.print(v.radio); ngx.print(')</p>\
   ');  else  ngx.print('\
-    <p class="wifi-card"><strong style="margin-left:26px;font-size:30px;">...</strong></p>\
+    <p id = \'wificard_');  ngx.print(i); ngx.print('\' class="wifi-card"><strong style="margin-left:26px;font-size:30px;">...</strong></p>\
   ');  end
 end  ngx.print('\
     </div>\
   </div>\
 </div>\
+<script>\
+  $(document).ready(function() {\
+    var self = this;\
+    self.render = function() {\
+      $.post("/ajax/wirelesscard.lua?auto_update=true", [tch.elementCSRFtoken()], function(data) {\
+        if (data != "") {\
+          if (data.length > 4) {\
+            $(".wifi-card strong").attr("style", "margin-left:26px;font-size:30px;").html("...");\
+            clearInterval(refreshTimer);\
+          }\
+          for (i = 0; i <=3 ; i++) {\
+            var status_light =  ((data[i].listatus == "light green" || data[i].listatus == "light off")) ? "<strong>"+data[i].ssid+"</strong>" : "<strong>Fetching 5GHz SSID </strong><br>Please wait";\
+            $("wificard_"+(i+1)).html("<div class=\'" + data[i].listatus + "\'></div><p class = \'wifi-card\'>"+status_light+"</p>");\
+              clearInterval(refreshTimer);\
+            }\
+          }\
+         else {\
+          clearInterval(refreshTimer);\
+        }\
+      }, "json");\
+    };\
+    var refreshTimer = setInterval(self.render, 7000);\
+    self.render();\
+  });\
+</script>\
 '); 

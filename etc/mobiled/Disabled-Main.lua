@@ -5,6 +5,7 @@ M.SenseEventSet = {
 	"device_config_changed",
 	"platform_config_changed",
 	"firmware_upgrade_start",
+	"sim_initialized",
 	"qualtest_start"
 }
 
@@ -27,6 +28,10 @@ function M.check(runtime, event, dev_idx)
 		return "FirmwareUpgrade"
 	elseif event.event == "qualtest_start" then
 		return "QualTest"
+	elseif event.event == "sim_initialized" then
+		runtime.log:notice("Enabling device due to SIM card initialization")
+		runtime.config.set_device_enable(device, 1)
+		return "DeviceConfigure"
 	end
 
 	return "Disabled"

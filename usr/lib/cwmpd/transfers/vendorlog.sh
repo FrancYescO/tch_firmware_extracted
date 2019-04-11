@@ -1,5 +1,6 @@
 #!/bin/sh
 
+. /usr/lib/cwmpd/transfers/common_functions.sh
 ERROR_FILE=$1
 
 LOCATION=/tmp/
@@ -76,10 +77,11 @@ if [ "$TRANSFER_ACTION" = "start" ]; then
     E="Generate vendor log file failed"
   else
     local user_passwd=$(get_usr_passwd "$TRANSFER_USERNAME" "$TRANSFER_PASSWORD")
+    local client_auth_arguments=$(get_client_auth_arguments)
     if [ -n "$user_passwd" ]; then
-        curl --fail --silent --anyauth -T "$FILE" -u "$user_passwd" "$TRANSFER_URL"
+        curl --fail --silent --anyauth -T "$FILE" -u "$user_passwd" "$TRANSFER_URL" $client_auth_arguments
     else
-        curl --fail --silent --anyauth -T "$FILE" "$TRANSFER_URL"
+        curl --fail --silent --anyauth -T "$FILE" "$TRANSFER_URL" $client_auth_arguments
     fi
 
     if [ $? -eq 0 ]; then

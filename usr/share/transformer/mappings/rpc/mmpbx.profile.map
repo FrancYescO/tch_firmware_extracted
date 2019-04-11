@@ -1,7 +1,9 @@
 local format, gmatch = string.format, string.gmatch
 local concat = table.concat
 local conn = mapper("ubus").connect()
-
+local crypto = require("tch.simplecrypto")
+local  match =  string.match
+local uci_helper = mapper("ucihelper")
 local mmpbx_profile = {
     objectType = {
         name = "rpc.mmpbx.profile.@.",
@@ -47,10 +49,13 @@ local mmpbx_profile = {
 
 local function entriesProfile ()
     local profiles, entries = {}, {}
-    profiles = conn:call("mmpbx.profile", "get", {} )
-    if profiles then
-        for name, _ in pairs (profiles) do
-            entries[#entries+1] = name
+    local state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
+    if state ~= "STOPPING" then
+        profiles = conn:call("mmpbx.profile", "get", {} )
+        if profiles then
+            for name, _ in pairs (profiles) do
+                entries[#entries+1] = name
+            end
         end
     end
     return entries
@@ -187,7 +192,6 @@ local mmpbx_updateprofile = {
     }
 }
 
-local uci_helper = mapper("ucihelper")
 local sipnet_binding = { config="mmpbxrvsipnet" }
 local mmpbx_binding = { config="mmpbx" }
 local binding = {}
@@ -207,6 +211,10 @@ local revert = {
     ["1"] = "0",
     ["0"] = "1",
 }
+
+local function isEncrypted(data)
+    return #data >=72 and match(data,"^$%d%d$%d%d%$")
+end
 
 mmpbx_sipprofile.entries =  function()
     local entries = {}
@@ -228,7 +236,20 @@ end
 
 mmpbx_sipprofile.getall = function(mapping, key)
     sipnet_binding.sectionname = key
-    return uci_helper.getall_from_uci(sipnet_binding)
+    local allValues =  uci_helper.getall_from_uci(sipnet_binding)
+    if allValues["password"] then
+        local value = allValues["password"]
+        if isEncrypted(value) then
+            local errMsg
+            value, errMsg = crypto.decrypt(value)
+            if not value then
+                return nil, errMsg
+            else
+                allValues["password"] = value
+            end
+        end
+    end
+    return allValues
 end
 
 local order = {
@@ -263,7 +284,18 @@ end
 mmpbx_updateprofile.get = function(mapping, param, key)
     sipnet_binding.sectionname = key
     sipnet_binding.option = param
-    return uci_helper.get_from_uci(sipnet_binding)
+    local value
+    value = uci_helper.get_from_uci(sipnet_binding)
+    if param == "password" then
+        if isEncrypted(value) then
+            local errMsg
+            value, errMsg = crypto.decrypt(value)
+            if not value then
+                return nil, errMsg
+            end
+        end
+    end
+    return value
 end
 
 mmpbx_updateprofile.set = function(mapping, param, value, key)
@@ -293,6 +325,19 @@ mmpbx_sipprofile.get = function(mapping, param, key)
             end
         end)
         return concat(pattern,",")
+    elseif param == "password" then
+        local value
+        sipnet_binding.sectionname = key
+        sipnet_binding.option = param
+        value = uci_helper.get_from_uci(sipnet_binding)
+        if isEncrypted(value) then
+            local errMsg
+            value, errMsg = crypto.decrypt(value)
+            if not value then
+                return nil, errMsg
+            end
+        end
+        return value
     else
         sipnet_binding.sectionname = key
         sipnet_binding.option = param
@@ -361,6 +406,15 @@ mmpbx_sipprofile.set = function(mapping, param, value, key)
     else
         sipnet_binding.sectionname = key
         sipnet_binding.option = param
+        if param == "password" then
+            local errMsg
+            if not isEncrypted(value) then
+                value, errMsg = crypto.encrypt_keysel(value, crypto.AES_256_CBC, crypto.RIP_RANDOM_A)
+                if not value then
+                    return "", errMsg
+                end
+            end
+        end
         uci_helper.set_on_uci(sipnet_binding, value, commitapply)
         transactions[sipnet_binding.config] = true
         --The f_port_enabled can be nil or true, when the set_f_port can be accessed

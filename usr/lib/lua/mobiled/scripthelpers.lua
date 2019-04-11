@@ -3,7 +3,9 @@
 --! @brief The scripthelpers module containing functions reused throughout Mobiled, mappings and webui
 ---------------------------------
 
+local lfs = require("lfs")
 local bit = require("bit")
+local socket = require("socket")
 
 local M = {}
 
@@ -94,7 +96,7 @@ function M.floats_to_string(data)
 end
 
 function M.getUbusData(conn, facility, func, params)
-	local data = conn:call(facility, func, params) or {}
+	local data = conn:call(facility, func, params or {}) or {}
 	local result = M.sanitize(data)
 	setmetatable(result, empty_mt)
 	return result
@@ -153,8 +155,8 @@ function M.tablelength(tbl)
 	return count
 end
 
-function M.sleep(n)
-	os.execute("sleep " .. tonumber(n))
+function M.sleep(sec)
+	socket.sleep(tonumber(sec))
 end
 
 function M.split(data, delimiter)
@@ -182,6 +184,16 @@ function M.read_file(name)
 		f:close()
 	end
 	return content
+end
+
+function M.write_file(name, contents)
+	local f = io.open(name, "w")
+	if not f then
+		return nil, "Failed to open file"
+	end
+	f:write(contents)
+	f:close()
+	return true
 end
 
 function M.capture_cmd(cmd)
@@ -254,15 +266,6 @@ function M.table_eq(table1, table2)
 		return true
 	end
 	return recurse(table1, table2)
-end
-
-function M.isnumeric(data)
-	if type(data) ~= "string" then return nil end
-	for i = 1, #data do
-		local c = data:sub(i,i)
-		if not tonumber(c) then return nil end
-	end
-	return true
 end
 
 function M.swap(data)
@@ -383,6 +386,29 @@ function M.decode_base64(base64)
 		end
 	end
 	return result
+end
+
+function M.isDir(name)
+	if type(name)~="string" then return false end
+	local cd = lfs.currentdir()
+	local is = lfs.chdir(name) and true or false
+	lfs.chdir(cd)
+	return is
+end
+
+function M.deepcopy(orig)
+	local orig_type = type(orig)
+	local copy
+	if orig_type == 'table' then
+		copy = {}
+		for orig_key, orig_value in next, orig, nil do
+			copy[M.deepcopy(orig_key)] = M.deepcopy(orig_value)
+		end
+		setmetatable(copy, M.deepcopy(getmetatable(orig)))
+	else -- number, string, boolean, etc
+		copy = orig
+	end
+	return copy
 end
 
 return M

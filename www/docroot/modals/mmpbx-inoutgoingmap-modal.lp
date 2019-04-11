@@ -114,19 +114,16 @@ local function sort_func(a, b)
     return tonumber(a_num) < tonumber(b_num)
 end
 
-
 local function inoutcoming_map_filter(input)
-	local mmpbx_profile = proxy.get("rpc.mmpbx.sip_profile.")
-	local mmpbx_profile_data = content_helper.convertResultToObject("rpc.mmpbx.sip_profile.",mmpbx_profile)
-	
-	local number = input.PhoneNumber
-	for i,v in pairs(mmpbx_profile_data) do
-		if v.uri == number and v.enabled == "1" then
-			return true
-		end
-	end
-	
+  local mmpbx_profile = proxy.get("rpc.mmpbx.sip_profile.")
+  local mmpbx_profile_data = content_helper.convertResultToObject("rpc.mmpbx.sip_profile.",mmpbx_profile)
+  for _,v in pairs(mmpbx_profile_data) do
+    if v.uri == input.PhoneNumber and v.enabled == "1" then
+      return true
+    end
+  end
 end
+
 --Getting the current available incoming maps
 local incoming_map_basepath = "rpc.mmpbx.sip_incomingmap.@."
 local incoming_map_data, incoming_map_allowed_indexes = content_helper.loadTableData(incoming_map_basepath, incoming_outgoing_map_columns, inoutcoming_map_filter, sort_func)
@@ -198,8 +195,8 @@ if ngx.req.get_method() == "POST" then
 	        else
 	            message_helper.pushMessage(T"Changes saved successfully", "success")
 	        end
-	        incoming_map_data, incoming_map_allowed_indexes = content_helper.loadTableData(incoming_map_basepath, incoming_outgoing_map_columns, inoutcoming_map_filter, sort_func)		--Getting updated incoming maps
-	        outgoing_map_data, outgoing_map_allowed_indexes = content_helper.loadTableData(outgoing_map_basepath, incoming_outgoing_map_columns, inoutcoming_map_filter, sort_func)	--Getting updated outgoing maps
+	            incoming_map_data, incoming_map_allowed_indexes = content_helper.loadTableData(incoming_map_basepath, incoming_outgoing_map_columns, inoutcoming_map_filter, sort_func)		--Getting updated incoming maps
+	            outgoing_map_data, outgoing_map_allowed_indexes = content_helper.loadTableData(outgoing_map_basepath, incoming_outgoing_map_columns, inoutcoming_map_filter, sort_func)	--Getting updated outgoing maps
 	    else
 	        if type(msg) == "table" then
 	            ngx.log(ngx.ERR, "set failed: " .. msg[1].errmsg)

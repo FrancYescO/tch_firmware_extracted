@@ -6,6 +6,10 @@ local format, match, gsub = string.format, string.match, string.gsub
 
 local uci = require("uci")
 local uci_cursor
+local uciHelper = require("transformer.mapper.ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local sysBinding = { config = "system", sectionname = "config" }
 
 local export_version = "1.00"
 local export_list = "/etc/config.export"
@@ -41,6 +45,7 @@ local function export_set_error(export_mapdata, info)
 end
 
 local crypto = require("lcrypto")
+local digest = require("tch.crypto.digest")
 
 local cipher_scheme = "AES-256-CBC"
 local signature_scheme = "HMAC-SHA1"
@@ -106,12 +111,30 @@ local function get_import_commonkey()
   return impcommonkey
 end
 
+local user_pwd = ""
+
+function M.set_user_password(password)
+  user_pwd = password
+end
+
+local function get_hash_key()
+  local key = get_rip_random(rip_random_D)
+  if not key or #key < 32 then
+    throw_error()
+  end
+  key = key:sub(1, 32)
+  local result = digest.hmac(digest.SHA256, key, user_pwd)
+  return result
+end
+
 local function get_cipher_key(common_key)
   local random_key
   if common_key == "GW" then
     random_key = get_rip_random(rip_random_B)
   elseif common_key == "GW_KEYD" then
     random_key = get_rip_random(rip_random_D)
+  elseif common_key == "USER_KEYD" then
+    random_key = get_hash_key()
   else
     throw_error()
   end
@@ -125,7 +148,7 @@ local function get_signature_key(common_key)
     random_key = get_rip_random(rip_random_B)
     if not random_key or #random_key < 64 then throw_error() end
     return random_key:sub(1,64)
-  elseif common_key == "GW_KEYD" then
+  elseif common_key == "GW_KEYD" or common_key == "USER_KEYD" then
     random_key = get_rip_random(rip_random_D)
     if not random_key or #random_key < 64 then throw_error() end
     return random_key:sub(33,96)
@@ -384,7 +407,7 @@ local function export_collect_configdata(export_data, list)
     if list.pkg[package] or list.all then
       -- check if the config file truly has data; ignore if not
       local all = uci_cursor:get_all(package)
-      if next(all) then
+      if all and next(all) then
         export_package(data, package, list.pkg[package] or { value = true, sn = {} })
       end
     end
@@ -946,6 +969,15 @@ local function import_execute(import_mapdata)
     end
   end
 
+  sysBinding.option = "exportSaveDate"
+  local saveDate = getFromUci(sysBinding)
+  sysBinding.option = "savedate"
+  setOnUci(sysBinding, saveDate)
+  sysBinding.option = "exportSaveTime"
+  local saveTime = getFromUci(sysBinding)
+  sysBinding.option = "savetime"
+  setOnUci(sysBinding, saveTime)
+
   import_mapdata.state = "Complete"
   import_mapdata.info = "import succesfully completed"
 end
@@ -958,7 +990,7 @@ end
 
 function M.import_init(location)
   local import_mapdata = {}
-  M.import_reset()
+  M.import_reset(import_mapdata)
   if location then
     import_mapdata.location = location
   else

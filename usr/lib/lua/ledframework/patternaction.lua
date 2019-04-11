@@ -12,13 +12,8 @@ local ledcfg='ledfw'
 lcur:load(ledcfg)
 local syslog_trace, err = lcur:get(ledcfg,'syslog','trace')
 lcur:close()
-if syslog_trace == nil then
-    syslog_trace = true
-elseif syslog_trace == '0' then
-    syslog_trace = false
-else
-    syslog_trace = true
-end
+
+syslog_trace = syslog_trace ~= '0'
 
 if not syslog_trace then
     syslog=function() end
@@ -30,8 +25,26 @@ openlog("ledfw", posix.LOG_PID, posix.LOG_DAEMON)
 -- @return true or false when the state is active or not
 function Pattern:isActive()
     if self.state == nil or self.state == self.inactivestate then
+        syslog(posix.LOG_DEBUG,'LED pattern isActive : false, self.state \''..(self.state or 'nil')..'\'')
         return false
     else
+        syslog(posix.LOG_DEBUG,'LED pattern isActive : true, self.state \''..(self.state or 'nil')..'\'')
+        return true
+    end
+end
+
+--- setInactive
+-- force current pattern state to inactive (when a new pattern is activated when another one was still active,
+-- to avoid that more then 1 patterns are active simultaneously
+-- @return false when the state is not active
+function Pattern:setInactive()
+
+    if self.state == nil or self.state == self.inactivestate then
+        syslog(posix.LOG_DEBUG,'LED pattern set to inactive failed (already inactive), self.state \''..(self.state or 'nil')..'\'')
+        return false
+    else
+        self.state = self.inactivestate
+        syslog(posix.LOG_DEBUG,'LED pattern set to inactive, self.state \''..(self.state or 'nil')..'\'')
         return true
     end
 end
@@ -41,14 +54,21 @@ end
 -- @return true or false whether should be activated or not
 function Pattern:activate(newstate)
     local currentState = self.state
-    if newstate == nil or currentState == nil or currentState == newstate then
+
+    if newstate == nil or currentState == nil then
+        syslog(posix.LOG_DEBUG,'LED pattern not activated with newstate \''..(newstate or 'nil')..'\', currentState \''..(currentState or 'nil')..'\'')
        return false
     end
     if self.inactivestate == newstate or self.transitionMap[newstate] == nil then
+        syslog(posix.LOG_DEBUG,'LED pattern not activated with newstate \''..(newstate or 'nil')..'\', self.inactivestate \''..(self.inactivestate or 'nil')..'\'')
        return false
     end
-
-    self.state = newstate
+    if currentState == newstate then
+        syslog(posix.LOG_DEBUG,'LED pattern was already active')
+    else
+        self.state = newstate
+    end
+    syslog(posix.LOG_DEBUG,'LED pattern activated with newstate \''..(newstate or 'nil')..'\'')
     return true
 end
 
@@ -58,13 +78,16 @@ end
 function Pattern:deactivate(newstate)
     local currentState = self.state
     if newstate == nil or newstate ~= self.inactivestate then
+        syslog(posix.LOG_DEBUG,'LED pattern not deactivated with newstate \''..(newstate or 'nil')..'\', self.inactivestate \''..(self.inactivestate or 'nil')..'\'')
         return false
     end
     if currentState == nil or currentState == newstate then
+        syslog(posix.LOG_DEBUG,'LED pattern not deactivated with newstate \''..(newstate or 'nil')..'\', currentState \''..(currentState or 'nil')..'\'')
         return false
     end
 
     self.state = newstate
+    syslog(posix.LOG_DEBUG,'LED pattern deactivated with newstate \''..(newstate or 'nil')..'\'')
     return true
 end
 
@@ -91,29 +114,34 @@ end
 function Pattern:applyAction(newstate)
     local actions = self.actionMap[newstate]
     if actions == nil then
-        syslog(posix.LOG_WARNING,'no action defined for ' .. action)
+        syslog(posix.LOG_WARNING,'no pattern action defined for ' .. newstate)
         -- no action defined for this state, could be an intermediate state
         return true
     end
     -- let's apply the actions that go with this state (there can be multiple actions)
     for i=1,# actions do
         local action = actions[i]
+        local action_name = action.name
         if type(action.name)=="function" then
-           action.name=action.name()
+           action_name=action.name()
         end
-        syslog(posix.LOG_DEBUG,'applying action on ' .. action.name)
+        if (action_name) then
+            syslog(posix.LOG_DEBUG,'applying pattern action on ' .. action_name)
+        end
         -- minimum sanity check, have a name and action
-        if (action.name ~= nil) and ((action.trigger ~= nil) or (action.fctn ~= nil)) then
+        if (action_name ~= nil) and ((action.trigger ~= nil) or (action.fctn ~= nil)) then
             -- set the action to the value specified in config
-            if action.name == "runFunc" then
+            if action_name == "runFunc" then
                 --syslog(posix.LOG_DEBUG,'Executing function' )
                 if (action.fctn ~=nil and type(action.fctn)=="function") then
                     action.fctn(action.params)
                 end
             else
-                syslog(posix.LOG_DEBUG,'writing to ' .. self.basePath .. action.name .. ' with action ' .. action.trigger)
-                local f = io.open(self.basePath .. action.name .. "/trigger", 'w+')
+                syslog(posix.LOG_DEBUG,'writing to ' .. self.basePath .. action_name .. ', trigger: ' .. action.trigger)
+                local f = io.open(self.basePath .. action_name .. "/trigger", 'w+')
                 if f then
+                    f:write('none\n')
+                    f:flush()
                     f:write(action.trigger .. '\n')
                     f:close()
 
@@ -127,24 +155,24 @@ function Pattern:applyAction(newstate)
                             local val
                             if type(v) == "function" then
                                 val = v()
+                                if type(val)=="boolean" then val=val and 255 or 0 end
                             else
                                 val = v
                             end
-                            if val == nil then
-                                val = ''
-                            end
-                            syslog(posix.LOG_DEBUG,'setting ' .. i .. ' to ' .. val)
-                            f = io.open(self.basePath .. action.name .. "/" .. i, 'w+')
-                            if f then
-                                f:write(val .. '\n')
-                                f:close()
-                            else
-                                syslog(posix.LOG_ERROR,'Could not open ' .. self.basePath .. action.name .. '/' .. i)
+                            if val  then
+                               syslog(posix.LOG_DEBUG,'setting ' .. i .. ' to ' .. val)
+                               f = io.open(self.basePath .. action_name .. "/" .. i, 'w+')
+                               if f then
+                                   f:write(val)
+                                   f:close()
+                               else
+                                   syslog(posix.LOG_ERR,'Could not open ' .. self.basePath .. action_name .. '/' .. i)
+                               end
                             end
                         end
                     end
                 else
-                    syslog(posix.LOG_WARNING,'Could not open ' .. self.basePath .. action.name .. '/trigger')
+                    syslog(posix.LOG_WARNING,'Could not open ' .. self.basePath .. action_name .. '/trigger')
                 end
             end
         end

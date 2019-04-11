@@ -1,20 +1,19 @@
 --pretranslated: do not change this file
  
 -- Enable localization
---NG-102324 TI VBNT-S : Device card is NOT accessible via GUI
 gettext.textdomain('webui-core')
 
-local proxy = require("datamodel")								  
 local ui_helper = require("web.ui_helper")
 local message_helper = require("web.uimessage_helper")
 local post_helper = require("web.post_helper")
-local content_helper = require("web.content_helper")
 local string, ngx, os = string, ngx, os
 local tonumber = tonumber
 local format, match = string.format, string.match
 local gOrV = post_helper.getOrValidation
 local vSIDN = post_helper.validateStringIsDomainName
 local pattern = "^Unknown%-%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$"
+local proxy = require("datamodel")
+local content_helper = require("web.content_helper")
 
 local function validateUnknownHostname(value)
    return value:match(pattern)
@@ -122,6 +121,7 @@ local devices_columns = {
     readonly = true,
     attr = { input = { class="span1" } },
   },
+
 }
 
 local device_valid = {
@@ -135,25 +135,18 @@ local devices_options = {
     basepath = "rpc.hosts.host.",
 }
 
-local uciwire = proxy.get("uci.wireless.wifi-ap.")
-uciwire = content_helper.convertResultToObject("uci.wireless.wifi-ap.",uciwire)
-
 
 --Construct the device type based on value of L2Interface
 local devices_filter = function(data)
-	for i,v in ipairs(uciwire) do
-		if data["L2Interface"] == v.iface then
-			if v.display_connected_devices and v.display_connected_devices ~= "1" then
-				return false
-			end
-		end
-	end
   --Display only the IP Address of physically connected devices
   if data["State"] and data["State"] == "0" then
      data["IPAddress"] = ""
   end
 
-  if match(data["L2Interface"], "^wl0") then
+  --Display Interface Type to the user
+  if data["L2Interface"] == "" then
+    return false
+  elseif match(data["L2Interface"], "^wl0") then
     data["InterfaceType"] = "wireless - 2.4GHz"
   elseif match(data["L2Interface"], "^wl1") then
     data["InterfaceType"] = "wireless - 5GHz"
@@ -170,7 +163,7 @@ local devices_data, devices_helpmsg = post_helper.handleTableQuery(devices_colum
 
 for k, v in pairs (devices_data) do
    devices_data[k][1] = format("%s",v[1])
-   devices_data[k][5] = format("%s",v[5]:gsub("^%l", string.upper))
+   devices_data[k][5] = format("%s",v[5])
 
     if v[1] == "1" then
       if v[9] ~= "" and v[8] ~= "" then
@@ -207,6 +200,10 @@ if ngx.ctx.session:hasAccess("/modals/hostmap-modal.lp") then
             desc = T"Devices Map",
             target = "modals/hostmap-modal.lp",
         },
+        {
+            desc = T"IPv6 Devices List",
+            target = "modals/ipv6devices-modal.lp",
+        },
     }
     ngx.print(ui_helper.createModalTabs(tabs))
 end
@@ -222,6 +219,5 @@ end
     </fieldset>\
   </form>\
 </div>\
-\
-'); ngx.print( ui_helper.createFooter() ); ngx.print('\
+');  ngx.print( ui_helper.createFooter() ); ngx.print('\
 '); 

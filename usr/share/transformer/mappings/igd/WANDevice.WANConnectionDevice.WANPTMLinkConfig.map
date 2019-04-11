@@ -37,8 +37,8 @@ local getIntfStats = common.getIntfStats
 local uciHelper = mapper("ucihelper")
 local conn = mapper("ubus").connect()
 local xtmBinding = { config = "xtm"}
-local xtmctl = require("transformer.shared.xtmctl")
-local getXtmDeviceStatus = xtmctl.getXtmDeviceStatus
+local xtm_supported, xtmctl = pcall(require,"transformer.shared.xtmctl")
+local getXtmDeviceStatus = xtm_supported and xtmctl.getXtmDeviceStatus
 local devtype, devname
 local xtmconnection = require("transformer.shared.models.igd.xtmconnection")
 local device_key = xtmconnection.resolve_key
@@ -79,7 +79,7 @@ end
 InternetGatewayDevice_WANDevice_i_WANConnectionDevice_i_WANPTMLinkConfig_.get = {
   Enable = function()
     local ptmAddr = getPtmAddr(devname)
-    local status =  getXtmDeviceStatus(ptmAddr)
+    local status =  xtm_supported and getXtmDeviceStatus(ptmAddr)
     if status == "enabled" then
       return "1"
     end

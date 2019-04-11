@@ -310,17 +310,24 @@ basepath = "rpc.mmpbx.profilestatistics."
 local profileStatsTable = content_helper.convertResultToObject(basepath .. "@", proxy.get(basepath))
 
 for _,v in ipairs(profileStatsTable) do
-    if profile_index[v.profile] then
-        stats = profile_stats_data[profile_index[v.profile]]
-	    stats[scns["incoming_missed"]]   = tonumber(v.incomingCallsFailed)
-	    stats[scns["incoming_success"]]  = tonumber(v.incomingCallsConnected)
-	    stats[scns["outgoing_failed"]]       = tonumber(v.outgoingCallsFailed)
-	    stats[scns["outgoing_success"]]   = tonumber(v.outgoingCallsConnected)
+    local profile
+    local profileNumber = content_helper.convertResultToObject("rpc.mmpbx.sip_profile.", proxy.get("rpc.mmpbx.sip_profile."))
+    for _, k in pairs(profileNumber) do
+        if k.uri == v.profile then
+            profile = string.sub(k.paramindex, 2)
+        end
+    end
+    if profile_index[profile] then
+        stats = profile_stats_data[profile_index[profile]]
+	    stats[scns["incoming_missed"]] = tonumber(v.IncomingCallsFailed)
+	    stats[scns["incoming_success"]] = tonumber(v.IncomingCallsConnected)
+	    stats[scns["outgoing_failed"]] = tonumber(v.OutgoingCallsFailed)
+	    stats[scns["outgoing_success"]] = tonumber(v.OutgoingCallsConnected)
 
-	    total[scns["incoming_missed"]]   = total[scns["incoming_missed"]] + stats[scns["incoming_missed"]]
-	    total[scns["incoming_success"]]  = total[scns["incoming_success"]] + stats[scns["incoming_success"]]
-	    total[scns["outgoing_failed"]]       = total[scns["outgoing_failed"]] + stats[scns["outgoing_failed"]]
-	    total[scns["outgoing_success"]]   = total[scns["outgoing_success"]] + stats[scns["outgoing_success"]]
+	    total[scns["incoming_missed"]] = total[scns["incoming_missed"]] + stats[scns["incoming_missed"]]
+	    total[scns["incoming_success"]] = total[scns["incoming_success"]] + stats[scns["incoming_success"]]
+	    total[scns["outgoing_failed"]] = total[scns["outgoing_failed"]] + stats[scns["outgoing_failed"]]
+	    total[scns["outgoing_success"]] = total[scns["outgoing_success"]] + stats[scns["outgoing_success"]]
 	end
 end
 

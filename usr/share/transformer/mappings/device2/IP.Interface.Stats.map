@@ -88,7 +88,14 @@ local nwmodel = require "transformer.shared.models.device2.network"
 local nwCommon = mapper("nwcommon")
 local getIntfInfo = nwCommon.getIntfInfo
 local getIntfStats = nwCommon.getIntfStats
-local devicehelper = require("transformer.shared.devicehelper")
+local devicehelper = require("transformer.shared.device2.devicehelper")
+local conn = mapper("ubus").connect()
+
+local function getL3Device(key)
+  local model = nwmodel.load()
+  local intfData = conn:call("network.interface." .. key, "status", {}) or {}
+  return intfData.l3_device or devicehelper.getIntfName(model:getBaseKey(key), model) or ""
+end
 
 local ipStatsMap = {
   BytesSent = "tx_bytes",
@@ -113,8 +120,7 @@ local ipExtStatsMap = {
 
 -- get function to get the values of Device.IP.Interface.{i}.Stats. parameters
 Device_IP_Interface_i_Stats_.get = function(mapping, param, key)
-  local model = nwmodel.load()
-  local device = devicehelper.getIntfName(model:getBaseKey(key), model) or ""
+  local device = getL3Device(key)
   if ipStatsMap[param] then
     return getIntfInfo(device, ipStatsMap[param], "0")
   elseif ipExtStatsMap[param] then

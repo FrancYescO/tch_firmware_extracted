@@ -22,7 +22,7 @@ check_mode_parameter()
     fi
 }
 
-for iface in wl0 wl0_1 wl0_2 wl0_3 wl1 wl1_1 wl1_2 wl1_3
+for iface in wl0 wl0_1 wl0_2 wl0_3 wl1 wl1_1 wl1_2 wl1_3 wl2 wl2_1 wl2_2 wl2_3
 do
     check_mode_parameter $iface
 done

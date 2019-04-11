@@ -4,7 +4,6 @@ local open = io.open
 local pairs, ipairs, unpack, type, tonumber = pairs, ipairs, unpack, type, tonumber
 local concat, sort = table.concat, table.sort
 local string = string
-local find, gsub = string.find, string.gsub
 
 --- content_helper module
 --  @module content_helper
@@ -247,20 +246,24 @@ local function convertResultToObject(basepath, results, sorted)
     local indexstart, indexmatch, subobjmatch
     local data = {}
     local output = {}
+    local find, gsub = string.find, string.gsub
 
     indexstart = #basepath
     if not basepath:find("%.@%.$") then
         indexstart = indexstart + 1
     end
 
-    local basepathPattern = gsub(basepath, "-", "%%-")
+    basepath = gsub(basepath,"-", "%%-")
+    basepath = gsub(basepath,"%[", "%%[")
+    basepath = gsub(basepath,"%]", "%%]")
+
     if results then
         for _,v in ipairs(results) do
             -- Try to match the path with basepath.{index}.{subobj}
             -- subobj can be nil (if the parameter is just under basepath) but if it is not, then we concatenate it with the param name
             -- so subobjects will be defined using their full "subpath"
             indexmatch, subobjmatch = v.path:match("^([^%.]+)%.(.*)$", indexstart)
-            if indexmatch and find(v.path, basepathPattern) == 1 then
+            if indexmatch and find(v.path, basepath) == 1 then
                 if data[indexmatch] == nil then
                     -- Initializes 2 structures. One (data) is used to gather the data for a given "object"
                     -- The other (output) is used to create an array of those objects to be able to list data in order

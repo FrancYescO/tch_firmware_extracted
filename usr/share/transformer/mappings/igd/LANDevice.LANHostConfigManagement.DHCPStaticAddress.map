@@ -29,6 +29,7 @@ local InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_DHCPStaticAddres
 }
 
 local string = string
+local nwCommon = mapper("nwcommon")
 local commitapply = commitapply
 local uci_helper = mapper("ucihelper")
 local get_from_uci = uci_helper.get_from_uci
@@ -39,6 +40,7 @@ local generate_key_on_uci = uci_helper.generate_key_on_uci
 local key2sectionname = {}
 local pairs, tonumber = pairs, tonumber
 local dhcp_binding = { config = "dhcp", sectionname = "", option = "", default = "" }
+local dhcp = require("transformer.shared.dhcp")
 local configChanged = false
 
 -- here mac may be '11:22:33:44:55:66 aa:bb:cc:dd:ee:ff'
@@ -74,6 +76,25 @@ local function isIP(value)
         return true
     end
     return false
+end
+
+local function getMinMaxAddress(key)
+    local data = dhcp.parseDHCPData(key)
+    local ipStart = data and data.ipStart
+    local ipEnd = data and data.ipEnd
+    return ipStart, ipEnd
+end
+
+local function duplicateAddress(key, option, value)
+    local duplicate = false
+    dhcp_binding.sectionname = "host"
+    foreach_on_uci(dhcp_binding, function(s)
+        if s["_key"] and not key:match(s["_key"]) and s[option] == value then
+            duplicate = true
+            return false
+        end
+    end)
+    return duplicate
 end
 
 InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_DHCPStaticAddress_i_.entries = function(mapping, parentkey)
@@ -149,7 +170,11 @@ InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_DHCPStaticAddress_i_.s
     Chaddr = function(mapping, param, paramvalue, key, parentkey)
         local result = isMACs(paramvalue)
         if result then
-            set_on_rule(key, "mac", paramvalue)
+            if not duplicateAddress(key, "mac", paramvalue) then
+                set_on_rule(key, "mac", paramvalue)
+            else
+                return nil, "MAC address given is already allocated to another host"
+            end
         else
             return nil, "Invalid MAC address, it must be of the form 00:11:22:33:44:55"
         end
@@ -157,7 +182,17 @@ InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_DHCPStaticAddress_i_.s
     Yiaddr = function(mapping, param, paramvalue, key, parentkey)
         local result = isIP(paramvalue)
         if result then
-            set_on_rule(key, "ip", paramvalue)
+            local minAddress, maxAddress = getMinMaxAddress(parentkey)
+            local ip = nwCommon.ipv4ToNum(paramvalue)
+            if minAddress and maxAddress and ip >= minAddress and ip <= maxAddress then
+                if not duplicateAddress(key, "ip", paramvalue) then
+                    set_on_rule(key, "ip", paramvalue)
+                else
+                    return nil, "IPAddress given is already allocated to another host"
+                end
+            else
+                return nil, "IPAddress Should be in a valid DHCP pool range"
+            end
         else
             return nil, "Invalid IP address, it must be of the form 1.2.3.4"
         end

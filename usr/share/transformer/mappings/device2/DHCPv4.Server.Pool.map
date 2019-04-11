@@ -83,64 +83,10 @@ local Device_DHCPv4_Server_Pool_i_ = {
           },
         },
       },
-      VendorClassID = {
-        access = "readWrite",
-        type = "string",
-        max = "255",
-        default = "",
-      },
-      VendorClassIDExclude = {
-        access = "readWrite",
-        type = "boolean",
-        default = "false",
-      },
-      VendorClassIDMode = {
-        access = "readWrite",
-        type = "string",
-        enumeration = {
-          "Exact",
-          "Prefix",
-          "Suffix",
-          "Substring",
-        },
-        default = "Exact",
-      },
-      ClientID = {
-        access = "readWrite",
-        type = "hexBinary",
-        max = "255",
-        default = "",
-      },
-      ClientIDExclude = {
-        access = "readWrite",
-        type = "boolean",
-        default = "false",
-      },
-      UserClassID = {
-        access = "readWrite",
-        type = "hexBinary",
-        max = "255",
-        default = "",
-      },
-      UserClassIDExclude = {
-        access = "readWrite",
-        type = "boolean",
-        default = "false",
-      },
-      Chaddr = {
-        access = "readWrite",
-        type = "string",
-        default = "",
-      },
       ChaddrMask = {
         access = "readWrite",
         type = "string",
         default = "",
-      },
-      ChaddrExclude = {
-        access = "readWrite",
-        type = "boolean",
-        default = "false",
       },
 --]]
       ReservedAddresses = {
@@ -155,6 +101,71 @@ local Device_DHCPv4_Server_Pool_i_ = {
         list = true,
         maxItems = "4",
         type = "string",
+      },
+      ClientID = {
+        access = "readWrite",
+        type = "hexBinary",
+        max = "255",
+        default = "",
+      },
+      ClientIDExclude = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      UserClassID = {
+        access = "readWrite",
+        type = "string",
+        max = "255",
+        default = "",
+      },
+      UserClassIDExclude = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Chaddr = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ChaddrExclude = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      VendorClassID = {
+        access = "readWrite",
+        type = "string",
+        max = "255",
+        default = "",
+      },
+      VendorClassIDExclude = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      VendorClassIDMode = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Exact",
+          "Prefix",
+          "Suffix",
+          "Substring",
+        },
+        default = "Substring",
+      },
+      X_000E50_AddMAC = {
+        access = "readWrite",
+        type = "string",
+        description = "Add the MAC address of the requester to DNS queries",
+        enumeration = {
+          "0",
+          "1",
+          "text",
+          "base64",
+        },
       },
       -- StaticAddressNumberOfEntries
       -- automatically created when Device.DHCPv4.Server.Pool.{i}.StaticAddress.{i}. is loaded
@@ -190,9 +201,11 @@ local posix = require 'tch.posix'
 local inet_pton = posix.inet_pton
 local AF_INET = posix.AF_INET
 local ZEROADDR = inet_pton(AF_INET,"0.0.0.0")
+local dhcpBinding = { config = "dhcp"}
 
 local transactions = {}
 local networkIntfTable = {}
+local dhcp_transaction = {}
 
 local objectPath = Device_DHCPv4_Server_Pool_i_.objectType.name
 
@@ -207,6 +220,34 @@ Device_DHCPv4_Server_Pool_i_.entries = function()
     end
   end)
   return dmordering.sort(interfaces, objectPath)
+end
+
+local function getNetworkId(key)
+  local tag
+  dhcpBinding.sectionname = "dhcp"
+  forEachOnUci(dhcpBinding, function(s)
+    if s.interface == key then
+      tag = s.networkid and s.networkid:match("^tag:(.+)")
+      return false
+    end
+  end)
+  return tag or ""
+end
+
+local function getDhcpParam(key, sectionname, option)
+  local id
+  local curNetworkId = getNetworkId(key)
+  if curNetworkId then
+    curNetworkId = "set:" ..curNetworkId
+    dhcpBinding.sectionname = sectionname
+    forEachOnUci(dhcpBinding, function(s)
+      if s.networkid == curNetworkId then
+        id = s[option] or ""
+        return false
+      end
+    end)
+  end
+  return id
 end
 
 local function getUciParam(config, sectionName, option, default)
@@ -401,6 +442,93 @@ local function duplicateIP(addrList, ipaddr)
   return false
 end
 
+local function setClassID(key, section, opt, exclude, value)
+  local cur_networkid = "set:" ..getNetworkId(key)
+  dhcpBinding.sectionname = section
+  local classId = true
+  forEachOnUci(dhcpBinding, function(s)
+    if s.networkid == cur_networkid then
+      setOnUci({config = "dhcp", sectionname = s['.name'], option = opt }, value, commitApply)
+      classId = false
+      return false
+    end
+  end)
+  if classId then
+    local name = uciHelper.add_on_uci({config = "dhcp", sectionname = section, option = "", default = ""}, commitApply)
+    if name then
+      setOnUci({config = "dhcp", sectionname = name, option = opt}, value, commitApply)
+      setOnUci({config = "dhcp", sectionname = name, option = "networkid"}, cur_networkid, commitApply)
+      setOnUci({config = "dhcp", sectionname = name, option = exclude}, "0", commitApply)
+    end
+  end
+  transactions["dhcp"] = true
+  dhcp_transaction[key] = true
+end
+
+local function getExclude(key, section, option)
+  local exclude
+  local curNetworkId = getNetworkId(key)
+  if curNetworkId and curNetworkId ~= "" then
+    curNetworkId = "set:" ..curNetworkId
+    dhcpBinding.sectionname = section
+    forEachOnUci(dhcpBinding, function(s)
+      if s.networkid == curNetworkId then
+        exclude = s[option]
+        return false
+      end
+    end)
+  end
+  return exclude or "0"
+end
+
+local function setDhcpOption(section , option, value)
+  dhcpBinding.sectionname = section
+  dhcpBinding.option = option
+  setOnUci(dhcpBinding, value, commitApply)
+end
+
+local function setExclude(key, section, option, id, backup, value)
+  local curNetworkId = "set:" ..getNetworkId(key)
+  dhcpBinding.sectionname = section
+  forEachOnUci(dhcpBinding, function(s)
+    if s.networkid == curNetworkId then
+      if value == "1" then
+        if s[id] then
+          setDhcpOption(s['.name'], backup, s[id])
+          setDhcpOption(s['.name'], id, "")
+          setDhcpOption(s['.name'], option, value)
+        end
+      else
+        setDhcpOption(s['.name'], option, value)
+        if s[backup] then
+          setDhcpOption(s['.name'], id, s[backup])
+          setDhcpOption(s['.name'], backup, "")
+        end
+      end
+      return false
+    end
+  end)
+  transactions["dhcp"] = true
+  dhcp_transaction[key] = true
+end
+
+local function setDhcpBinding(key)
+  dhcpBinding.sectionname = "dhcp"
+  local isInstance = false
+  forEachOnUci(dhcpBinding, function(s)
+    if s.instance then
+      isInstance = true
+      return false
+    end
+  end)
+  if isInstance then
+    dhcpBinding.sectionname = "dnsmasq_" .. networkIntfTable[key]
+  else
+    dhcpBinding.sectionname = "dnsmasq"
+  end
+  dhcpBinding.option = "addmac"
+end
+
 Device_DHCPv4_Server_Pool_i_.get = {
   Enable = getEnable,
 
@@ -453,6 +581,45 @@ Device_DHCPv4_Server_Pool_i_.get = {
   end,
 
   ReservedAddresses = getReservedAddresses,
+
+  ClientID = function(mapping, param, key)
+     return getDhcpParam(key, "host_client_id", "clientid") or ""
+  end,
+
+  ClientIDExclude = function(mapping, param, key)
+    return getExclude(key, "host_client_id", "clientidExclude")
+  end,
+
+  UserClassID = function(mapping, param, key)
+    return getDhcpParam(key, "userclass", "userclass") or ""
+  end,
+
+  UserClassIDExclude = function(mapping, param, key)
+    return getExclude(key, "userclass", "userclassExclude")
+  end,
+
+  Chaddr = function(mapping, param, key)
+    return getDhcpParam(key, "mac", "mac") or ""
+  end,
+
+  ChaddrExclude = function(mapping, param, key)
+    return getExclude(key, "mac", "chaddrExclude")
+  end,
+
+  VendorClassID = function(mapping, param, key)
+    return getDhcpParam(key, "vendorclass", "vendorclass") or ""
+  end,
+
+  VendorClassIDExclude = function(mapping, param, key)
+    return getExclude(key, "vendorclass", "vendorclassExclude")
+  end,
+
+  VendorClassIDMode = "Substring",
+
+  X_000E50_AddMAC = function(mapping, param, key)
+     setDhcpBinding(key)
+     return getFromUci(dhcpBinding)
+  end,
 }
 
 Device_DHCPv4_Server_Pool_i_.getall = function(mapping, key)
@@ -473,6 +640,15 @@ Device_DHCPv4_Server_Pool_i_.getall = function(mapping, key)
     MaxAddress = getMaxAddress(mapping, nil, key) or "",
     LeaseTime = dhcp.convertTimeStringToSeconds(dhcpConfig["leasetime"]),
     ReservedAddresses = getReservedAddresses(mapping, nil, key),
+    ClientID = getDhcpParam(key, "host_client_id", "clientid"),
+    ClientIDExclude = getExclude(key, "host_client_id", "clientidExclude"),
+    UserClassID = getDhcpParam(key, "userclass", "userclass"),
+    UserClassIDExclude = getExclude(key, "userclass", "userclassExclude"),
+    Chaddr = getDhcpParam(key, "mac", "mac"),
+    ChaddrExclude = getExclude(key, "mac", "chaddrExclude"),
+    VendorClassID = getDhcpParam(key, "vendorclass", "vendorclass"),
+    VendorClassIDExclude = getExclude(key, "vendorclass", "vendorclassExclude"),
+    VendorClassIDMode = "Substring",
   }
 end
 
@@ -494,7 +670,7 @@ Device_DHCPv4_Server_Pool_i_.set = {
   end,
 
   MinAddress = function(mapping, param, value, key)
-    local res, err = network.setDHCPMinAddress(key, value, commitapply)
+    local res, err = network.setDHCPMinAddress(key, value, commitApply)
     if res then
       transactions["dhcp"] = true
       return true
@@ -503,7 +679,7 @@ Device_DHCPv4_Server_Pool_i_.set = {
   end,
 
   MaxAddress = function(mapping, param, value, key)
-    local res, err = network.setDHCPMaxAddress(key, value, commitapply)
+    local res, err = network.setDHCPMaxAddress(key, value, commitApply)
     if res then
       transactions["dhcp"] = true
       return true
@@ -582,6 +758,52 @@ Device_DHCPv4_Server_Pool_i_.set = {
         return nil, "Error setting reserved addresses! Reserved Addresses cannot exceed 32 addresses!"
       end
     end
+  end,
+
+  ClientID = function(mapping, param, value, key)
+     setClassID(key, "host_client_id", "clientid", "clientidExclude", value)
+  end,
+
+  ClientIDExclude = function(mapping, param, value, key)
+     setExclude(key, "host_client_id", "clientidExclude", "clientid", "clientidBackup", value)
+  end,
+
+  UserClassID = function(mapping, param, value, key)
+     setClassID(key, "userclass", "userclass", "userclassExclude", value)
+  end,
+
+  UserClassIDExclude = function(mapping, param, value, key)
+     setExclude(key, "userclass", "userclassExclude", "userclass", "userclassBackup", value)
+  end,
+
+  Chaddr = function(mapping, param, value, key)
+     setClassID(key, "mac", "mac", "chaddrExclude", value)
+  end,
+
+  ChaddrExclude = function(mapping, param, value, key)
+     setExclude(key, "mac", "chaddrExclude", "mac", "chaddrBackup", value)
+  end,
+
+  VendorClassID = function(mapping, param, value, key)
+     setClassID(key, "vendorclass", "vendorclass", "vendorclassExclude", value)
+  end,
+
+  VendorClassIDExclude = function(mapping, param, value, key)
+     setExclude(key, "vendorclass", "vendorclassExclude", "vendorclass", "vendorclassBackup", value)
+  end,
+
+  X_000E50_AddMAC = function(mapping, param, value, key)
+     setDhcpBinding(key)
+     if value == "1" or value == "0" or value == "text" or value == "base64" then
+       setOnUci(dhcpBinding, value, commitApply)
+     end
+     dhcpBinding.option = "cachesize"
+     if value == "1" or value == "text" or value == "base64"  then
+       setOnUci(dhcpBinding, "0", commitApply)
+     elseif value == "0" then
+       deleteOnUci(dhcpBinding, commitApply)
+     end
+     transactions[dhcpBinding.config] = true
   end,
 }
 

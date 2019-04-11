@@ -68,11 +68,10 @@ local mapper, ipairs, commitapply =  mapper, ipairs, commitapply
 local common = mapper('nwcommon')
 local match, open, pairs = string.match, io.open, pairs
 local ucihelper = mapper('ucihelper')
-local isAlias = common.is_alias
 local netPath = "/sys/class/net/"
+local network = require("transformer.shared.common.network")
 
 local get_uci_network
-local foreach_interface
 do
   local nw = {config="network"}
   get_uci_network = function(section, option, default)
@@ -81,51 +80,6 @@ do
     nw.default = default
     return ucihelper.get_from_uci(nw)
   end
-
-  foreach_interface = function(f)
-    nw.sectionname = "interface"
-    return ucihelper.foreach_on_uci(nw, f)
-  end
-end
-
-local function firstline(filename)
-  local result = ""
-
-  local fd = open(filename)
-  if fd then
-    result = fd:read("*l")
-    fd:close()
-  end
-
-  return result
-end
-
--- get a map of wan interfaces
-local function getWanInterfaces()
-  local intfs = {}
-  local wan = common.findLanWanInterfaces(true)
-  for _, ifname in ipairs(wan) do
-    intfs[ifname] = true
-  end
-  return intfs
-end
-
-local function getLanInterfaces()
-  local intfs = {}
-  local wan = getWanInterfaces()
-  foreach_interface(function(s)
-    local ifname = s['.name']
-    -- exclude loopback and alias interfaces
-    if ifname == 'loopback' or isAlias(ifname) then
-      return
-    end
-    -- exclude the wan interfaces
-    if wan[ifname] then
-      return
-    end
-    intfs[#intfs+1] = ifname
-  end)
-  return intfs
 end
 
 local function get_pppoerelay_for_interface(ifname)
@@ -161,8 +115,8 @@ local function LANDeviceEntries(mapping, parentkey)
   local interfaces = {}
   local entries = {}
   for _, interface in pairs(common.get_lower_layers(parentkey) or {}) do
-    -- Instances are interfaces starting with `eth` that are not relayed.
-    if match(interface, "eth[^%s]+") and not relays[interface] then
+    -- Instances are interfaces starting with `eth` that are not relayed and not of VLAN pattern like "eth6.101"
+    if match(interface, "eth%S+") and not match(interface, "eth%S+%.") and not relays[interface] then
       if not interfaces[interface] then
         interfaces[interface] = true
         entries[#entries+1] = interface
@@ -181,16 +135,16 @@ LANEthernetInterface.get = {
   Enable = function(mapping, param, key)
     -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
     -- if this is not reliable, then we can rely on operstate
-    local carrier = firstline(netPath .. key .. "/carrier")
-      if carrier == "1" or carrier == "0" then
-          return "1"
-      end
-      return "0"
+    local carrier = network.getFirstLine(netPath .. key .. "/carrier")
+    if carrier == "1" or carrier == "0" then
+      return "1"
+    end
+    return "0"
   end,
   Status = function(mapping, param, key)
     -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
     -- if this is not reliable, then we can rely on operstate
-    local carrier = firstline(netPath .. key .. "/carrier")
+    local carrier = network.getFirstLine(netPath .. key .. "/carrier")
     if carrier == "1" then
       return "Up"
     end
@@ -200,7 +154,7 @@ LANEthernetInterface.get = {
     return "Disabled"
   end,
   MACAddress = function(mapping, param, key)
-    return firstline(netPath .. key .. "/address") or ""
+    return network.getFirstLine(netPath .. key .. "/address") or ""
   end,
   MACAddressControlEnabled = "0",
   MaxBitRate = "Auto",

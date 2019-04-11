@@ -1,9 +1,10 @@
 --pretranslated: do not change this file
  
 -- Enable localization
--- NG-56123; NG-62887; NG-69530; NG-69531; NG-85826
+-- NG-56123; NG-62887; NG-48150; NG-69530; NG-85826
 --NG-103901 GUI gateway-modal has to modified in fact of generic changes
---GHG-3792_TI-Upstep 17.3-238: /www/docroot/modals/gateway-modal.lp (Custo introduced on new Generic File)
+-- GHG-3816 TI-Upstep 18.1-90: /www/docroot/modals/gateway-modal.lp
+-- NG-113388
 gettext.textdomain('webui-core')
 
 local lp = require("web.lp")
@@ -13,7 +14,7 @@ local ui_helper = require("web.ui_helper")
 local message_helper = require("web.uimessage_helper")
 local content_helper = require("web.content_helper")
 local post_helper = require("web.post_helper")
-local format,find,sub,match,untaint = string.format, string.find, string.sub,string.match, string.untaint  -- Custo match NG-85826
+local format,find,sub,untaint = string.format, string.find, string.sub, string.untaint
 local floor, ipairs = math.floor, ipairs
 local timezone = require("transformer.shared.timezone")
 local gVCS = post_helper.getValidateCheckboxSwitch()
@@ -21,13 +22,7 @@ local session = ngx.ctx.session
 local role = session:getrole()
 local gOV = post_helper.getOrValidation
 local gAV = post_helper.getAndValidation
-
---custo start NG-69530
-local tech = false
-if role == "engineer" then
-	tech = true
-end
---custo end NG-69530
+local process = require 'tch.process'
 
 local function wait_for_completion(base_path, return_json, filename)
   local state_path = base_path .. "state"
@@ -58,12 +53,12 @@ local function wait_for_completion(base_path, return_json, filename)
       base_path, content.state, content.info or ""))
     end
     if return_json then
-		if match(content.info, "Buildversion") then		-- custo NG-85826
-			ngx.print('{ "error":"buildversion" }')		-- custo NG-85826
-		else											-- custo NG-85826
-			ngx.print('{ "error":"10" }')				-- custo NG-85826
-		end												-- custo NG-85826
-      ngx.exit(ngx.OK)
+      if match(content.info, "Buildversion") then	-- custo NG-85826
+	ngx.print('{ "error":"buildversion" }')		-- custo NG-85826
+      else
+        ngx.print('{ "error":"10" }')
+        ngx.exit(ngx.OK)
+      end
     else
       ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
     end
@@ -224,7 +219,8 @@ local function upgradefw()
   lp.flush()
 
   local dl = untaint(content.fwupgrade_location) .. filename
-  os.execute(string.format("rm -f %s && mkfifo %s", dl, dl))
+  process.execute("mkfifo", {dl})
+  process.execute("rm", {"-f", dl})
 
   -- start actual upgrade through rpc
   -- sysupgrade will create the pipe
@@ -278,6 +274,17 @@ local function resetreboot(path, value)
   ngx.exit(ngx.HTTP_OK)
 end
 
+local function schedulerebootset(scheduledatetime)
+ proxy.set("rpc.system.scheduledreboot",scheduledatetime)
+ proxy.set("uci.system.scheduledreboot.enabled","1")
+ proxy.set("rpc.system.scheduledrebootreason","GUI")
+ ngx.header.content_type = "application/json"
+ ngx.print('{ "success":"true" }')
+ ngx.timer.at(0, function()
+    proxy.apply()
+ end)
+   ngx.exit(ngx.HTTP_OK)
+end
 local cui = {
   upgradefw = "uci.web.uiconfig.@uidefault.upgradefw",
 }
@@ -307,6 +314,9 @@ if ngx.req.get_method() == "POST" then
   if action == "system_reboot" then
     return resetreboot("rpc.system.reboot", "GUI")
   end
+  if action == "schedulerebootset" then
+    return schedulerebootset(ngx.req.get_post_args().paramvalue)
+  end
 elseif ngx.req.get_method() == "GET" then
   local action = ngx.req.get_uri_args().action
   local content = {
@@ -328,7 +338,7 @@ end
 local content = {
   acs_url = "uci.cwmpd.cwmpd_config.acs_url",
   vendor = "uci.env.var.company_name",
-  product_name = "uci.env.var.variant_friendly_name",		--custo, variant_friendly_name/TIM-name!!!
+  product_name = "uci.env.var.variant_friendly_name",         --custo, variant_friendly_name/TIM-name!!!
   software_name = "uci.version.version.@version[0].marketing_name",
   software_version = "uci.version.version.@version[0].marketing_version",
   firmware_version = "uci.env.var.friendly_sw_version_activebank",
@@ -338,10 +348,11 @@ local content = {
   hardware_version = "uci.env.var.hardware_version",
   serial_number = "uci.env.var.serial",
   mac_address = "uci.env.rip.eth_mac",
-  dsl_firmware = "sys.class.xdsl.@line0.FirmwareVersion",		--custo, value for datapump NG-56123
+  dsl_firmware = "sys.class.xdsl.@line0.FirmwareVersion",             --custo, value for datapump NG-56123
   fwversion_prefix = "uci.versioncusto.override.fwversion_prefix",
   fwversion_suffix = "uci.versioncusto.override.fwversion_suffix",
   fwversion_override = "uci.versioncusto.override.fwversion_override",
+  schedule_reboot_get = "uci.system.scheduledreboot.enabled",
 }
 
 content_helper.getExactContent(content)
@@ -382,40 +393,39 @@ local ntp_columns = {
   }
 }
 
--- Function to check the NTP server input and throws error if the entry/ip falls between IPv4 loopback range or it is a IPv4 subnet mask.
-local function checkNTP(ip)
-  if ip and inet.isValidIPv4(untaint(ip)) then
-    if post_helper.validateIPv4Netmask(ip) then
-      return nil,T"Cannot use IPv4 subnet mask."
-    end
-    local startLoopback = "127.0.0.0"
-    local endLoopback = "127.255.255.255"
-    if not (startLoopback <= ip and ip <= endLoopback) then
-      return true
-    else
-      return nil,T"Cannot use loopback IPv4 address range."
-    end
-  end
-end
-
 local function validateNTP(value, object, key)
 -- Adding localdevicemask in post to find the input is a network or broadcast IPv4 address in advancedIPValidation
-  object["localdevmask"] = proxy.get("uci.network.interface.@lan.netmask")[1].value
-  local ntp_servers = session:retrieve("ntp_data")
+  local content = {
+    localdevmask = "uci.network.interface.@lan.netmask",
+    ipaddr = "rpc.network.interface.@lan.ipaddr",
+    wan_ipaddr = "rpc.network.interface.@wan.ipaddr"
+  }
+  content_helper.getExactContent(content)
+  object.localdevmask = content.localdevmask
 
-  if post_helper.validateStringIsIP(value) then
-    local ipaddr = proxy.get("rpc.network.interface.@lan.ipaddr")[1].value
-    local wan_ipaddr = proxy.get("rpc.network.interface.@wan.ipaddr")[1].value
-    if ipaddr and ipaddr == value then
-       return nil, T"Cannot use the gateway IP address."
-    elseif wan_ipaddr and wan_ipaddr == value then
-       return nil, T"Cannot use the gateway WAN IP address."
+  local ok, errmsg, wholeNumber
+  wholeNumber = string.gsub(value,"%.","")
+  if post_helper.getValidateWholeNumber(wholeNumber) then
+    ok, errmsg = post_helper.validateStringIsIPv4(value)
+    if not ok then
+      return nil, errmsg
+    end
+    if post_helper.validateIPv4Netmask(value) then
+      return nil, T"Cannot use IPv4 subnet mask."
+    end
+    if content.ipaddr and content.ipaddr == value then
+      return nil, T"Cannot use the gateway IP address."
+    elseif content.wan_ipaddr and content.wan_ipaddr == value then
+      return nil, T"Cannot use the gateway WAN IP address."
     else
-       local IPValidation = gOV(gAV(checkNTP, post_helper.advancedIPValidation), post_helper.validateStringIsIPv6)
-       return IPValidation(value, object, key)
+      return gOV(gAV(post_helper.reservedIPValidation, post_helper.advancedIPValidation), post_helper.validateStringIsIPv6)(value, object, key)
     end
   else
-    return post_helper.validateStringIsDomainName(value)
+    if not post_helper.validateStringIsIPv6(value) then
+      return post_helper.validateStringIsDomainName(value)
+    else
+      return true
+    end
   end
 end
 
@@ -433,6 +443,7 @@ local ntp_options = {
 
 if(role ~= "engineer" and role ~= "ispuser") then
    ntp_options.canEdit = false
+   ntp_options.canAdd = true		--custo NG-69530
    ntp_options.canDelete = false
 end
 
@@ -554,6 +565,15 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
           class = "custom-handler"
         }
       }
+      local schedule_reboot = {
+        group = {
+          class = "wait-for-reboot"
+        },
+        button = {
+          id = "btn-schedule-reboot",
+          class = "custom-handler"
+        }
+      }
       local rebooting = {
         alert = {
           class = "alert hide",
@@ -591,6 +611,12 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
           class = "alert-error hide",
           id = "export-failed-msg"
         }
+      }
+      local schedule_fail = {
+        alert = {
+          class = "alert-error hide",
+          id = "schedule-failed-msg"
+         }
       }
       local import_config = {
         button = {
@@ -690,9 +716,9 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
       local html = {}
       html[#html + 1] = ui_helper.createLabel(T"Product Vendor", content["vendor"], basic)
       html[#html + 1] = ui_helper.createLabel(T"Product Name", content["product_name"], basic)
-      html[#html + 1] = ui_helper.createLabel(T"Software Version", content["firmware_version"], basic) 		--custo NG-56123
+      html[#html + 1] = ui_helper.createLabel(T"Software Version", content["firmware_version"], basic)	--custo NG-56123
       --html[#html + 1] = ui_helper.createLabel(T"Firmware Version", content["firmware_version"], basic)	--custo NG-56123
-	  html[#html + 1] = ui_helper.createLabel(T"Datapump Version", content["dsl_firmware"], basic)			--custo NG-56123
+      html[#html + 1] = ui_helper.createLabel(T"Datapump Version", content["dsl_firmware"], basic)	--custo NG-56123
       html[#html + 1] = ui_helper.createLabel(T"Firmware OID", content["firmware_oid"], basic)
       html[#html + 1] = ui_helper.createLabel(T"Bootloader Version", content["bootloader_version"], basic)
       html[#html + 1] = ui_helper.createLabel(T"Bootloader OID", content["bootloader_oid"], basic)
@@ -700,22 +726,22 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
       html[#html + 1] = ui_helper.createLabel(T"Serial Number", content["serial_number"], basic)
       html[#html + 1] = ui_helper.createLabel(T"MAC Address", content["mac_address"], basic)
       html[#html + 1] = ui_helper.createLabel(T"Uptime", post_helper.secondsToTime(content["uptime"]), basic)
-      html[#html + 1] = ui_helper.createLabel(T"System Time", content["system_time"], basic)
+      html[#html + 1] = ui_helper.createLabel(T"System Time", format('<label id = "system_time">%s</label>', content["system_time"]) , basic)
 --      html[#html + 1] = ui_helper.createInputSelect(T"Timezone", "system_timezone", timezones, system_data["system_timezone"], basic)
-	if tech then		  --custo NG-69530
-      html[#html + 1] = ui_helper.createCheckboxSwitch(T"Network Timezone", "system_network_timezone", system_data["system_network_timezone"], nw_enable_class)
-      local currentTZ_remote = getTimeZoneName(timezones, true)
-      local currentTZ_gui = getTimeZoneName(timezones, false)
-      html[#html + 1] = ui_helper.createLabel(T"Current Timezone", currentTZ_remote, default_tz_class)
-      html[#html + 1] = ui_helper.createInputSelect(T"Current Timezone", "system_timezone", timezones, currentTZ_gui, user_tz_class)
-	else --custo start
-	  local netTimez = "On"
+      if role == "engineer" then
+        html[#html + 1] = ui_helper.createCheckboxSwitch(T"Network Timezone", "system_network_timezone", system_data["system_network_timezone"], nw_enable_class)
+        local currentTZ_remote = getTimeZoneName(timezones, true)
+        local currentTZ_gui = getTimeZoneName(timezones, false)
+        html[#html + 1] = ui_helper.createLabel(T"Current Timezone", currentTZ_remote, default_tz_class)
+        html[#html + 1] = ui_helper.createInputSelect(T"Current Timezone", "system_timezone", timezones, currentTZ_gui, user_tz_class)
+      else
+	local netTimez = "On"
 	  if system_data["system_network_timezone"] == "0" then
-		netTimez = "Off"
-	  end		
+	    netTimez = "Off"
+	  end
 	  html[#html + 1] = ui_helper.createLabel(T"Network Timezone", netTimez)
-      html[#html + 1] = ui_helper.createLabel(T"Current Timezone", system_data["system_zonename"])
-	end                   --custo NG-69530
+        html[#html + 1] = ui_helper.createLabel(T"Current Timezone", system_data["system_zonename"])
+      end --custo end NG-69530
       -- NTP servers
       html[#html + 1] = format('<div class="control-group advanced hide"><label class="control-label">%s</label><div class="controls">', T"NTP servers")
       html[#html + 1] = ui_helper.createTable(ntp_columns, ntp_data, ntp_options, nil, ntp_helpmsg)
@@ -723,25 +749,36 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
 
       html[#html + 1] = ui_helper.createAlertBlock(T"Restarting, please wait...", rebooting)
       html[#html + 1] = ui_helper.createButton(T"Restart Device", T"Restart", "icon-refresh", wait_for_reboot)
+      if role == "engineer" then
+        html[#html + 1] = '<div class="control-group">'
+        html[#html + 1] = format('<label class="control-label">%s</label>', T"Schedule Reboot")
+        html[#html + 1] = '<div class="controls">'
+        html[#html + 1] = '<input type="date"  name="date_schedule" id="date_schedule" ><input type="time" value="00:00"  name="time_schedule" id="time_schedule">&nbsp;'
+        html[#html + 1] =  ui_helper.createSimpleButton(T"Schedule Reboot", "icon-time", schedule_reboot)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Schedule failed :  please select correct Time and date.", schedule_fail)
+        html[#html + 1] = '<label class="schedule_message_get hide">A Reboot has been Scheduled</label>'
+        html[#html + 1] = '</div></div>'
+      end
       html[#html + 1] = ui_helper.createAlertBlock(T"Resetting to factory defaults, please wait...", resetting)
       html[#html + 1] = ui_helper.createButton(T"Factory Defaults", T"Reset", "icon-bolt", wait_for_reset)
       if role ~= "ispuser" then
-          html[#html + 1] = ui_helper.createButton(T"Export Configuration", T"Export", "icon-download-alt", export_config)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Exporting configuration, please wait...", exporting_alert)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Exporting failed; please try again.", exporting_fail)
-          html[#html + 1] = '</form><form class="form-horizontal" id="form-import" method="post" action="modals/gateway-modal.lp?action=import_config" enctype="multipart/form-data">'
-          html[#html + 1] = '<div class="control-group">'
-          html[#html + 1] = format('<label class="control-label">%s</label>', T"Import Configuration")
-          html[#html + 1] = '<div class="controls">'
-          html[#html + 1] = '<input type="file" name="configfile" id="file-import">&nbsp;'
-          html[#html + 1] = ui_helper.createSimpleButton(T"Import", "icon-upload-alt", import_config)
-          html[#html + 1] = '</div></div>'
-          html[#html + 1] = ui_helper.createAlertBlock(T"No file selected.", importing_nofile)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Importing configuration, please wait...", importing_alert)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; please try again.", importing_fail)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: expected file with extension bin.  Please use correct file.", importing_wrong_ext_fail)
-          html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: file too large.  Please use correct.  Please use correct file..", importing_too_big_fail)
+        html[#html + 1] = ui_helper.createButton(T"Export Configuration", T"Export", "icon-download-alt", export_config)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Exporting configuration, please wait...", exporting_alert)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Exporting failed; please try again.", exporting_fail)
+        html[#html + 1] = '</form><form class="form-horizontal" id="form-import" method="post" action="modals/gateway-modal.lp?action=import_config" enctype="multipart/form-data">'
+        html[#html + 1] = '<div class="control-group">'
+        html[#html + 1] = format('<label class="control-label">%s</label>', T"Import Configuration")
+        html[#html + 1] = '<div class="controls">'
+        html[#html + 1] = '<input type="file" name="configfile" id="file-import">&nbsp;'
+        html[#html + 1] = ui_helper.createSimpleButton(T"Import", "icon-upload-alt", import_config)
+        html[#html + 1] = '</div></div>'
+        html[#html + 1] = ui_helper.createAlertBlock(T"No file selected.", importing_nofile)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Importing configuration, please wait...", importing_alert)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; please try again.", importing_fail)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: expected file with extension bin.  Please use correct file.", importing_wrong_ext_fail)
+        html[#html + 1] = ui_helper.createAlertBlock(T"Importing failed; Invalid file used: file too large.  Please use correct.  Please use correct file..", importing_too_big_fail)
       end
+
       if post_helper.isUpgradeAllowed(cui.upgradefw, role) then
         html[#html + 1] = '</form><form class="form-horizontal" id="form-upgradefw" method="post" action="modals/gateway-modal.lp?action=upgradefw" enctype="multipart/form-data">'
         html[#html + 1] = '<div class="control-group">'
@@ -767,29 +804,10 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
 </div>\
 <script>\
 (function() {\
+  var schedule_time = "";\
   var refreshTimeOut = 5000;\
   var refreshDelay = 3000;\
   var target = $(".modal form").attr("action");\
-\
-  function wait_for_webserver_running() {\
-    $.ajax({ url: "/", timeout: refreshTimeOut })\
-    .done(function(data) {\
-      window.location.href = "/";\
-    })\
-    .fail(function() {\
-      window.setTimeout(wait_for_webserver_running, refreshDelay);\
-    });\
-  }\
-\
-  function wait_for_webserver_down() {\
-    $.ajax({ url: target, timeout: refreshTimeOut })\
-    .done(function() {\
-      window.setTimeout(wait_for_webserver_down, refreshDelay);\
-    })\
-    .fail(function() {\
-      window.setTimeout(wait_for_webserver_running, refreshDelay);\
-    });\
-  }\
 \
   function resetreboot(msg, msg_dst, action) {\
     msg_dst.after(msg);\
@@ -798,7 +816,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     $.post(\
       target,\
       { action: action, CSRFtoken: $("meta[name=CSRFtoken]").attr("content") },\
-      wait_for_webserver_down,\
+      wait_for_webserver_down(action),\
       "json"\
     );\
     return false;\
@@ -814,6 +832,31 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
      });\
   });\
 \
+  $("#btn-schedule-reboot").click(function() {\
+   var _date = $("#date_schedule").val();\
+   var _time = $("#time_schedule").val();\
+   schedule_time = $("#date_schedule").val()+"T"+$("#time_schedule").val()+":00Z" ;\
+   var temp =  $("#system_time").text();\
+   var timeformat = temp.split(" ");\
+   temp = timeformat[0]+"T"+timeformat[1]+"Z";\
+   if((( _date && _time) != "") &&( temp < schedule_time))\
+     {\
+      $("#schedule-failed-msg").addClass("hide");\
+      $("#date_schedule").addClass("hide");\
+      $("#time_schedule").addClass("hide");\
+      $("#btn-schedule-reboot").addClass("hide");\
+      $(".schedule_message_get").removeClass("hide");\
+\
+       $.post(\
+          target,\
+          { action: "schedulerebootset", CSRFtoken: $("meta[name=CSRFtoken]").attr("content"),paramvalue :schedule_time },wait_for_webserver_down,"json");\
+     }\
+    else\
+     {\
+       $("#schedule-failed-msg").removeClass("hide");\
+     }\
+ });\
+\
   $("#btn-system-reset").click(function() {\
       var heading = "');  ngx.print('Factory Defaults'); ngx.print('";\
       var processMsg = "');  ngx.print(T'Resetting'); ngx.print('";\
@@ -824,6 +867,13 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
           return resetreboot($("#resetting-msg"), $(this), "system_reset");\
       });\
   });\
+\
+  if ("');  ngx.print(content["schedule_reboot_get"]); ngx.print('" == "1") {\
+    $("#date_schedule").addClass("hide");\
+    $("#time_schedule").addClass("hide");\
+    $("#btn-schedule-reboot").addClass("hide");\
+    $(".schedule_message_get").removeClass("hide");\
+  }\
 \
   $(document).on("click", "#cancel", function() {\
       tch.removeProgress();\
@@ -894,16 +944,16 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
           msg_dst.after(msg);\
           msg.removeClass("hide");\
           msg[0].scrollIntoView();\
-          wait_for_webserver_down();\
+          wait_for_webserver_down("import_config");\
         }\
-        else {\
-          $("#import-failed-msg").removeClass("hide");\
-		  // Custo start NG-85826 \
-		  if(response.error == "buildversion"){\
-		  $("#import-failed-msg").text("'); ngx.print(T'The Backup file you try to load has not been taken from the actual SW-Release, please use correct Backup File'); ngx.print('");\
-		  // Custo end  NG-85826\
-		  }\
-        }\
+	else {\
+	  $("#import-failed-msg").removeClass("hide");\
+	  // Custo start NG-85826\
+	  if(response.error == "buildversion"){\
+	    $("#import-failed-msg").text("');  ngx.print( T'The Backup file you try to load has not been taken from the actual SW-Release, please use correct Backup File' ); ngx.print('")\
+	  // Custo end  NG-85826\
+	  }\
+	}\
       }\
     });\
     return false;\

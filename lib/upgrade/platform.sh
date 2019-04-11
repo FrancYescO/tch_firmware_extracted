@@ -35,6 +35,29 @@ get_cache_filename() {
 	echo "/tmp/$(echo $1 | md5sum | cut -d' ' -f1)"
 }
 
+get_client_auth_arguments() {
+    local ssl_key_type
+    local ssl_engine
+    local ssl_key
+    if [ -n "$SSL_CLIENTCERT" ] && [ -n "$SSL_CLIENTKEY" ]; then
+       ssl_key_type="$(echo "$SSL_CLIENTKEY" | cut -f1 -d:)"
+       ssl_engine="$(echo "$SSL_CLIENTKEY" | cut -f2 -d:)"
+       ssl_key="$(echo "$SSL_CLIENTKEY" | cut -f3 -d:)"
+       if [ "$ssl_key_type" == "engine" ] && [ -n "$ssl_engine" ] &&  [ -n "$ssl_key" ]; then
+          local key_handler="$(cat "$ssl_key")"
+          # Using engine for client authentication.
+          echo "--cert $SSL_CLIENTCERT --engine $ssl_engine --key-type ENG --key $key_handler"
+       else
+	  # Using PEM file for client authentication
+          echo "--cert $SSL_CLIENTCERT --key $SSL_CLIENTKEY"
+       fi
+    fi
+}
+
+tcp_cat() {
+	echo "$1" | sed -n 's|^tcp://\(.\+\):\([^:]\+\)$|\1 \2|p' | xargs nc
+}
+
 get_image() { # <source> [ <command> ]
 	local from="$1"
 	local conc="$2"
@@ -45,12 +68,12 @@ get_image() { # <source> [ <command> ]
 	echo "get_image $1" >/dev/console
 
 	local filetype="none"
-
 	case "$from" in
 		ftp://*) cmd="wget -O- -q -T 300";;
 		http://*) cmd="curl -f --connect-timeout 900 -m 1800 -S -s --anyauth";;
-		https://*) cmd="curl -f --connect-timeout 900 -m 1800 -S -s --capath /etc/ssl/certs";;
+		https://*) cmd="curl -f --connect-timeout 900 -m 1800 -S -s --capath /etc/ssl/certs $(get_client_auth_arguments)";;
 		tftp://*) cmd="curl -f --connect-timeout 300 -m 1800 -S -s";;
+		tcp://*) cmd="tcp_cat";;
 		*)
 			cmd="cat"
 			filetype=$(get_filetype $from)

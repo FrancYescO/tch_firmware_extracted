@@ -126,15 +126,15 @@ start_service()
 			$cmd -t $TABLE_NAME -I PREROUTING -j $CHAIN_NAME ||
 			return
 		[ "$rpfilter"  = "0" ] || (
-			local unspec_address
-			[ "$cmd" = "iptables" ] && unspec_address="0.0.0.0" || unspec_address="::"
+			local other_params
+			[ "$cmd" = "iptables" ] && other_params="! -s 0.0.0.0" || other_params="! -s :: ! -d ff00::/8"
 			[ -n "$rpfilter_log_limit" ] &&
 			$cmd -t $TABLE_NAME -N $RPFILTER_DROP_CHAIN_NAME &&
 			$cmd -t $TABLE_NAME -A $RPFILTER_DROP_CHAIN_NAME -m limit --limit "$rpfilter_log_limit" -j LOG \
 				--log-prefix "dosprotect rpfilter drop " &&
 			$cmd -t $TABLE_NAME -A $RPFILTER_DROP_CHAIN_NAME -j DROP &&
-			$cmd -t $TABLE_NAME -A $CHAIN_NAME ! -s $unspec_address -m rpfilter --invert -j $RPFILTER_DROP_CHAIN_NAME ||
-			$cmd -t $TABLE_NAME -A $CHAIN_NAME ! -s $unspec_address -m rpfilter --invert -j DROP )
+			$cmd -t $TABLE_NAME -A $CHAIN_NAME $other_params -m rpfilter --invert -j $RPFILTER_DROP_CHAIN_NAME ||
+			$cmd -t $TABLE_NAME -A $CHAIN_NAME $other_params -m rpfilter --invert -j DROP )
 		[ "$block_tcpsyn_withdata"  = "0" ] ||
 			$cmd -t $TABLE_NAME -A $CHAIN_NAME -p tcp --tcp-flags SYN SYN -m length2 --layer5 ! --length 0 -j DROP
 	done

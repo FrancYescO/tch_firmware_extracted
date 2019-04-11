@@ -60,6 +60,7 @@ local InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_ = {
   }
 }
 
+local ubus = mapper("ubus").connect()
 local nwcommon = mapper("nwcommon")
 local getIntfInfo = nwcommon.getIntfInfo
 local ucihelper = mapper("ucihelper")
@@ -86,7 +87,12 @@ end
 
 InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.entries = function(mapping, parentKey)
   local devtype, devname = getDevtypeAndName(parentKey)
-  if devtype ~= "ETH" then
+  if devtype == "MOB" then
+    local data = ubus:call("network.interface." .. devname, "status", {})
+    if data and data.l3_device then
+      devname = data.l3_device
+    end
+  elseif devtype ~= "ETH" then
     return {}
   end
   setDevnameForKey(parentKey, devname)
@@ -100,15 +106,30 @@ local function create_new_trafficdesc_section(new_td_name)
   set_on_uci(binding,"trafficdesc",commitapply)
 end
 
-local function shaping_set(option_value)
-  binding.option = "mbr"
-  set_on_uci(binding,option_value.mbr,commitapply)
-  binding.option = "mbs"
-  set_on_uci(binding,option_value.mbs,commitapply)
+local function remove_trafficdesc_section(devname, td_name)
+    binding.sectionname = td_name
+    binding.option = nil
+    ucihelper.delete_on_uci(binding, commitapply)
+    binding.sectionname = devname
+    binding.option = "td"
+    set_on_uci(binding,"",commitapply)
+    transactions[binding.config] = true
+    return true
+end
+
+local function shaping_set(option_value, enable)
+  binding.option = "max_bit_rate"
+  set_on_uci(binding,option_value.max_bit_rate,commitapply)
+  binding.option = "max_burst_size"
+  set_on_uci(binding,option_value.max_burst_size,commitapply)
   binding.option = "rate"
   set_on_uci(binding,option_value.rate,commitapply)
   binding.option = "ratio"
   set_on_uci(binding,option_value.ratio,commitapply)
+  if enable then
+    binding.option = "enable"
+    set_on_uci(binding, "1", commitapply)
+  end
   transactions[binding.config] = true
   return true
 end
@@ -168,7 +189,7 @@ InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.get = {
     local trafficdesc = get_from_uci(binding)
     if trafficdesc ~= "" then
       binding.sectionname = trafficdesc
-      binding.option = "mbr"
+      binding.option = "max_bit_rate"
       binding.default = ""
       local value = get_from_uci(binding)
       if value ~= "" then
@@ -188,7 +209,7 @@ InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.get = {
     local trafficdesc = get_from_uci(binding)
     if trafficdesc ~= "" then
       binding.sectionname = trafficdesc
-      binding.option = "mbs"
+      binding.option = "max_burst_size"
       binding.default = ""
       local value = get_from_uci(binding)
       if value == "" then
@@ -233,36 +254,47 @@ InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.set = {
   ShapingRate = function(mapping, param, value, key)
     local devname = getDevnameForKey(key)
     value = tonumber(value)
+    local max_burst_size = "2000"
     if value then
       binding.sectionname = devname
       binding.option = "td"
       binding.default = ""
       local trafficdesc = get_from_uci(binding)
       local new_td_name = binding.option .. binding.sectionname
+      if trafficdesc ~= "" then
+        local ethBinding = { config = "ethernet", sectionname = trafficdesc, option = "max_burst_size", default = "2000" }
+        max_burst_size = get_from_uci(ethBinding)
+      end
       if trafficdesc == "" and value == -1 then
         return true
+      elseif value == 0 then
+        return nil,"Not supported"
       elseif trafficdesc == "" and (value > -1) and (value <= 100) then
         set_on_uci(binding,new_td_name,commitapply)
         create_new_trafficdesc_section(new_td_name)
-        local option_value = { mbr = value, mbs = "2000", rate = "", ratio = "enabled" }
-        return shaping_set(option_value)
+        local option_value = { max_bit_rate = value, max_burst_size = max_burst_size, rate = "", ratio = "enabled" }
+        return shaping_set(option_value, true)
       elseif trafficdesc == "" and (value > 100) then
+        if value < 1000 then
+          return nil, "Absolute value should be at least 1000 bps"
+        end
         set_on_uci(binding,new_td_name,commitapply)
         create_new_trafficdesc_section(new_td_name)
-        local option_value = { mbr = value/1000, mbs = "2000", rate = "enabled", ratio = "" }
-        return shaping_set(option_value)
+        local option_value = { max_bit_rate = value/1000, max_burst_size = max_burst_size, rate = "enabled", ratio = "" }
+        return shaping_set(option_value, true)
       elseif trafficdesc ~= "" and value == -1 then
-        binding.sectionname = trafficdesc
-        local option_value = { mbr = "", mbs = "", rate = "", ratio = "" }
-        return shaping_set(option_value)
+        return remove_trafficdesc_section(devname, trafficdesc)
       elseif trafficdesc ~= "" and (value > -1) and (value <= 100) then
         binding.sectionname = trafficdesc
-        local option_value = { mbr = value, mbs = "", rate = "", ratio = "" }
-        return shaping_set(option_value)
+        local option_value = { max_bit_rate = value, max_burst_size = max_burst_size, rate = "", ratio = "" }
+        return shaping_set(option_value, true)
       elseif trafficdesc ~= "" and (value > 100) then
+        if value < 1000 then
+          return nil, "Absolute value should be at least 1000 bps"
+        end
         binding.sectionname = trafficdesc
-        local option_value = { mbr = value/1000, mbs = "", rate = "enabled", ratio = "" }
-        return shaping_set(option_value)
+        local option_value = { max_bit_rate = value/1000, max_burst_size = max_burst_size, rate = "enabled", ratio = "" }
+        return shaping_set(option_value, true)
       end
     end
     return nil,"Not supported"
@@ -281,11 +313,11 @@ InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.set = {
       elseif trafficdesc == "" and (value > 0) then
         set_on_uci(binding,new_td_name,commitapply)
         create_new_trafficdesc_section(new_td_name)
-        local option_value = { mbr = "20000", mbs = value, rate = "", ratio = "" }
+        local option_value = { max_bit_rate = "20000", max_burst_size = value, rate = "", ratio = "" }
         return shaping_set(option_value)
       elseif trafficdesc ~= "" and (value >= 0) then
         binding.sectionname = trafficdesc
-        binding.option = "mbs"
+        binding.option = "max_burst_size"
         set_on_uci(binding,value,commitapply)
         transactions[binding.config] = true
         return true
@@ -309,9 +341,7 @@ InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.revert = function(
   transactions = {}
 end
 
-
 register(InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_)
-
 
 -- Automatically generated from InternetGatewayDevice:1.3
 -- using generator version 2.1

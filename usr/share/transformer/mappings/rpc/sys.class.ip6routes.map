@@ -26,6 +26,7 @@ local sys_class_ip6routes_ = {
 }
 
 local uciHelper = mapper("ucihelper")
+local process = require 'tch.process'
 
 -- The entry in "ip -6 route show" starting with the below words are not allowed
 local notAllowed = {
@@ -47,7 +48,8 @@ local networkBinding = { config = "network", sectionname = "interface" }
 local function getInterface(value)
   local intf = ""
   uciHelper.foreach_on_uci(networkBinding, function(s)
-    if value == s["ifname"] then
+    -- To retrieve only the IPv6 Interface name
+    if value == s["ifname"] and s.proto == "dhcpv6" then
       intf = s[".name"]
       return false
     end
@@ -62,33 +64,36 @@ end
 -- fe80::/64 dev br-hotspot0  proto kernel  metric 256
 sys_class_ip6routes_.entries = function()
   local entries = {}
-  local routes = io.popen("ip -6 route show")
-  for line in routes:lines() do
-    local start, routeInfo = line:match("^(%S+)%s+(.*)")
-    if not notAllowed[start] and not start:match("^fe80") and not start:match("^ff00") then
-      local route = {}
-      route.Destination = start
-      for paramName, value in routeInfo:gmatch("(%S+)%s+(%S+)") do
-        if map[paramName] then
-          local data = map[paramName]
-          route[data] = value
+  local routes = process.popen("ip", {"-6", "route", "show"})
+  if routes then
+    for line in routes:lines() do
+      local start, routeInfo = line:match("^(%S+)%s+(.*)")
+      if not notAllowed[start] and not start:match("^fe80") and not start:match("^ff00") then
+        local route = {}
+        route.Destination = start
+        for paramName, value in routeInfo:gmatch("(%S+)%s+(%S+)") do
+          if map[paramName] then
+            local data = map[paramName]
+            route[data] = value
+          end
         end
+        route.Iface = getInterface(route.Iface)
+        if not route.Gateway then
+          route.Gateway = "::"
+        end
+        if not route.From then
+          route.From = ""
+        end
+        if route.Destination == "default" then
+          route.Destination = "::/0"
+        end
+        local key = route.Destination .. "|" .. route.From .. "|" .. route.Iface .. "|" .. route.Metric
+        routeData[key] = route
+        entries[#entries + 1] = key
       end
-      route.Iface = getInterface(route.Iface)
-      if not route.Gateway then
-        route.Gateway = "::"
-      end
-      if not route.From then
-        route.From = ""
-      end
-      if route.Destination == "default" then
-        route.Destination = "::/0"
-      end
-      local key = route.Destination .. "|" .. route.From .. "|" .. route.Iface .. "|" .. route.Metric
-      routeData[key] = route
-      entries[#entries + 1] = key
     end
   end
+  routes:close()
   return entries
 end
 

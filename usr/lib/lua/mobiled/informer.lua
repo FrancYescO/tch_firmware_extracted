@@ -3,7 +3,6 @@
 --! @brief The informer module which is responsible for polling devices and sending LED events
 ---------------------------------
 
-local pairs = pairs
 local runtime, timeout, leds
 
 local M = {}
@@ -33,7 +32,7 @@ end
 local function lte_wifi_coexistence_update()
 	local devices = runtime.mobiled.get_devices()
 	for _, device in pairs(devices) do
-		local info = device:get_radio_signal_info()
+		local info = device:get_radio_signal_info(10)
 		if info and info.radio_interface == "lte"
 				and info.lte_band
 				and (device.info.wifi_coexistence.lte_band ~= info.lte_band or device.info.wifi_coexistence.dl_earfcn ~= info.dl_earfcn) then

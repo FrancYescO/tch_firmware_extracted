@@ -14,7 +14,7 @@ local interval = (tonumber(gwfd.get_uci_param("ngwfdd.interval.lte")) or 300) * 
 
 -- Absolute path to the output fifo file
 
-local fifo_file_path = arg[1]
+local fifo_file_path = assert(arg[1])
 
 local strip_params = {
 	"disable",

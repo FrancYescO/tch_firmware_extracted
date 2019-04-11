@@ -116,7 +116,6 @@ local Multi_QueueManagement_Queue_i_ = {
         },
         default = "SP",
       },
---[[ TODO
       ShapingRate = {
         access = "readWrite",
         type = "int",
@@ -132,7 +131,6 @@ local Multi_QueueManagement_Queue_i_ = {
         type = "unsignedInt",
         default = "0",
       },
---]]
       Enable = {
         access = "readOnly",
         type = "boolean",
@@ -209,13 +207,13 @@ local getAllFromUci = uciHelper.getall_from_uci
 local configChanged = false
 local findLanWanInterfaces = mapper("nwcommon").findLanWanInterfaces
 local wanconn = require("transformer.shared.wanconnection")
+local list = require("transformer.shared.common.list")
 local match = string.match
 local commitApply = commitapply
 local dmordering = require 'transformer.shared.models.dmordering'
-local wanSensingBinding = { config = "wansensing", sectionname = "global", option = "l2type" }
-local get_from_uci = uciHelper.get_from_uci
 
 local function setUciValue(sectionName, option, value)
+  qosBinding.sectiontype = option ~=  "policy" and "class"
   qosBinding.sectionname = sectionName
   qosBinding.option = option
   uciHelper.set_on_uci(qosBinding, value, commitApply)
@@ -241,29 +239,17 @@ local queueParamMap = {
   QueuePrecedence = "priority",
   TrafficClasses = "trafficid",
   SchedulerAlgorithm = "policy",
+  ShapingRate = "max_bit_rate",
+  ShapingBurstSize = "max_burst_size"
 }
 
 local lookUp = {
-  sp = "SP",
-  wrr = "WRR",
-  wfq = "WFQ",
+  sp     = "SP",
+  wrr    = "WRR",
+  wfq    = "WFQ",
+  sp_wrr = "WRR",
+  sp_wfq = "WFQ",
 }
-
-local function convertStringToTable(str)
-  local tbl={}
-  -- uci entries of type "list" are interpretted as 'table' when they have multiple elements,
-  -- and interpretted as 'string' when they have a single element. So, handle 'table' types before processing.
-  if type(str) == 'table' then
-    return str
-  end
-  -- if the input string is a single element, then only one entry is added into the table
-  -- if it is a comma separated list, then all the comma separated entries are added into the table.
-  for item in string.gmatch(str or "", "([^,]+),?") do
-     tbl[#tbl + 1] = item
-  end
-  -- If the input is an empty string, then we return a table with one element containing ""
-  return #tbl > 0 and tbl or {""}
-end
 
 Multi_QueueManagement_Queue_i_.entries = function(mapping)
   qosBinding.sectionname = "class"
@@ -275,10 +261,12 @@ Multi_QueueManagement_Queue_i_.entries = function(mapping)
 end
 
 local function getSchedulerAlgorithm(mapping, param, key)
+  local weight = getUciValue(key, "weight")
   qosBinding.sectionname = "classgroup"
+  qosBinding.option = nil
   local SchedulerAlgo
   forEachOnUci(qosBinding, function(s)
-    if match(s.classes,key) then
+    if weight ~= "" and s.classes and match(s.classes, key) then
       SchedulerAlgo = s.policy
       return false
     end
@@ -286,7 +274,8 @@ local function getSchedulerAlgorithm(mapping, param, key)
   return lookUp[SchedulerAlgo] and lookUp[SchedulerAlgo] or "SP"
 end
 
--- As Per spec - if the interface is WAN,it indicates this entry applies to all WAN interfaces or if the interface is LAN, which indicates this entry applies to all LAN
+-- As Per spec if the interface is WAN,it indicates this entry applies to all WAN interfaces or if the interface is LAN,
+-- which indicates this entry applies to all LAN
 -- The path for QueueInteface param is resolved based on the existing lower layer design.
 local function interfaceToPath(mapping, interface)
    local path = ""
@@ -370,10 +359,17 @@ Multi_QueueManagement_Queue_i_.get = {
     return key
   end,
   UsMaxBW = function(mapping, param, key)
-    return getUciValue(key, "pbr", "0")
+    return getUciValue(key, "max_bit_rate", "0")
   end,
   UsMinBW = function(mapping, param, key)
-    return getUciValue(key, "mbr", "0")
+    return getUciValue(key, "min_bit_rate", "0")
+  end,
+  ShapingRate = function(mapping, param, key)
+    local maxBitRate = getUciValue(key, queueParamMap[param], "0")
+    return maxBitRate ~= "0" and tostring(maxBitRate * 1000) or "-1"
+  end,
+  ShapingBurstSize = function(mapping, param, key)
+    return getUciValue(key, queueParamMap[param], "0")
   end
 }
 
@@ -387,12 +383,15 @@ Multi_QueueManagement_Queue_i_.getall = function(mapping,key)
     Weight = qosValues["weight"] and qosValues["weight"] or "0",
     QueuePrecedence = qosValues["priority"] and qosValues["priority"] or "0",
     Precedence = qosValues["priority"] ~= "0" and qosValues["priority"] or "1",
+    ShapingRate = qosValues["max_bit_rate"] and qosValues["max_bit_rate"] ~= "0" and
+                  tostring(qosValues["max_bit_rate"] * 1000) or "-1",
+    ShapingBurstSize = qosValues["max_burst_size"] and qosValues["max_burst_size"] or "0"
   }
 end
 
 Multi_QueueManagement_Queue_i_.set = {
   TrafficClasses = function(mapping, param, value, key)
-    local trafficTable = convertStringToTable(value)
+    local trafficTable = list.ensureList(value)
     setUciValue(key, queueParamMap[param], trafficTable)
   end,
   QueueWeight = function(mapping, param, value, key)
@@ -417,11 +416,22 @@ Multi_QueueManagement_Queue_i_.set = {
     end)
   end,
   UsMaxBW = function(mapping, param, value, key)
-    setBandwidth(key, "pbr", value)
+    setBandwidth(key, "max_bit_rate", value)
   end,
   UsMinBW = function(mapping, param, value, key)
-    setBandwidth(key, "mbr", value)
+    setBandwidth(key, "min_bit_rate", value)
   end,
+  ShapingRate = function(mapping, param, value, key)
+    if tonumber(value) > 0 and tonumber(value) <= 100 then
+      return nil, "ShapingRate cannot be <= 100 bits per second"
+    end
+    -- if ACS sets a value which is not a multiple of 1000, it will be rounded down to the closest multiple of 1000
+    local shapingRate = value ~= "-1" and value ~= "0" and math.floor(value / 1000) or "0"
+    setUciValue(key, queueParamMap[param], shapingRate)
+  end,
+  ShapingBurstSize = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end
 }
 
 Multi_QueueManagement_Queue_i_.commit = function()
@@ -452,7 +462,8 @@ local function getParamsFastweb()
 end
 
 local duplicator = mapper("multiroot").duplicate
-local duplicates = duplicator(Multi_QueueManagement_Queue_i_, "#ROOT", {"InternetGatewayDevice.QueueManagement.Queue", "Device.QoS.Queue", "Device.X_FASTWEB_QOS.Queue"})
+local duplicates = duplicator(Multi_QueueManagement_Queue_i_, "#ROOT",
+  {"InternetGatewayDevice.QueueManagement.Queue", "Device.QoS.Queue", "Device.X_FASTWEB_QOS.Queue"})
 for _, dupli in ipairs(duplicates) do
   if dupli.objectType.name:match('^InternetGatewayDevice.') then
     -- Remove device2-specific parameters from igd

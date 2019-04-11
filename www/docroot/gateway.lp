@@ -1,5 +1,5 @@
 --pretranslated: do not change this file
-
+ 
 -- Enable localization
 --NG-56120, NG-56248, NG-77544
 gettext.textdomain('webui-core')
@@ -11,11 +11,13 @@ local proxy = require("datamodel")
 local assistance = require("web.assistance")
 local assistant = assistance.getAssistant('remote')
 local message_helper = require("web.uimessage_helper")
-
 local cui = {
     nsplink = "uci.web.uiconfig.@uidefault.nsplink",
     advanced = "uci.web.uiconfig.@uidefault.alwaysadvanced",
     timestamp = "uci.version.version.@version[0].timestamp",
+    schedule_reboot_get = "uci.system.scheduledreboot.enabled",
+    system_time = "sys.time.CurrentLocalTime",
+    sytem_reboot_time = "rpc.system.scheduledreboot",
 }
 content_helper.getExactContent(cui)
 local year= cui.timestamp
@@ -40,6 +42,56 @@ if ngx.req.get_method() == "POST" then
     ngx.redirect("/");
   end
 end
+function string:split( inSplitPattern, outResults )
+  if not outResults then
+    outResults = { }
+  end
+  local theStart = 1
+  local theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+  while theSplitStart do
+    table.insert( outResults, string.sub( self, theStart, theSplitStart-1 ) )
+    theStart = theSplitEnd + 1
+    theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+  end
+    table.insert( outResults, string.sub( self, theStart ) )
+  return outResults
+end
+
+function subtract2Minutes(myString)
+  local time_get = myString:split(":")
+  if((time_get[2] == "00") or (time_get[2] == "01"))then
+    time_get[2] = 60+time_get[2]
+    if((time_get[1] == "00"))then
+      time_get[1]="23"
+    elseif(time_get[1] == "01")then
+      time_get[1] = "00"
+    else
+      time_get[1] = time_get[1]-01
+    end
+  end
+
+  time_get[2] = time_get[2]-02
+  time_get[1] = string.format("%02d", time_get[1])
+  time_get[2] = string.format("%02d", time_get[2])
+  if time_get[3] == nil then
+    time_split_get = time_get[1] ..":".. time_get[2]
+  else
+    time_split_get = time_get[1] ..":".. time_get[2]..":"..time_get[3]
+  end
+  return time_split_get
+end
+
+if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "scheduleReboot" then
+  local alertMsg = T"Gateway is going to reboot within 2 minutes, Save your changes"
+  local popupHeader = T"Reboot Schedule"
+  local systemSplitsec = cui["sytem_reboot_time"]:split("Z")[1]:split("T")[2]
+  local temp_time = cui["sytem_reboot_time"]:split("T")[1].."T"..subtract2Minutes(systemSplitsec).."Z"
+  local systemtime_get = proxy.get("sys.time.CurrentLocalTime")
+  systemtime_get = systemtime_get[1].value
+  ngx.header.content_type = "application/json"
+  ngx.print('{"systemTime":"'.. string.untaint(systemtime_get) ..'", "rebootTime":"'.. string.untaint(temp_time) ..'", "alertMsg":"'.. alertMsg ..'", "popupHeader":"'.. popupHeader ..'"}')
+  ngx.exit(ngx.OK)
+end
 message_helper.popMessages()
   ngx.print('\
 <!DOCTYPE HTML>\
@@ -63,6 +115,10 @@ message_helper.popMessages()
     ');  if web.isDemoBuild() then   ngx.print('\
     <div style="color: red; font-weight: bold; text-align: center; font-size:x-large; line-height:150%; background-color: yellow; border: 2px solid; border-color: red; border-radius: 4px;">Demo build, unofficial Technicolor SW, not suitable for deployment!</div>\
     ');  end   ngx.print('\
+   <!-- Schedule Reboot message-->\
+    ');  if cui.schedule_reboot_get == "1" then   ngx.print('\
+    <div style="color: red; font-weight: bold; text-align: center; font-size:x-large; line-height:150%; background-color: yellow; border: 2px solid; border-color: red; border-radius: 4px;">A Reboot has been scheduled on ');  ngx.print(cui.sytem_reboot_time); ngx.print('</div>\
+    ');  end  ngx.print('\
   <div class="feedback">\
 \
   </div>\
@@ -70,7 +126,7 @@ message_helper.popMessages()
     <div class="row">\
       <div class="header span12" id="logo_mobiletab">\
 	  <img class="timlogo" src="/img/TIM.png">\
-		');
+        ');  
 		local attri ={ select = {style ="width:auto; padding-top:7px; padding-bottom:7px; margin:auto; height: 36px"}}
         local html = {}
 
@@ -108,7 +164,7 @@ message_helper.popMessages()
       </div>\
     </div>\
     <div class="row">\
-      ');
+      ');  
         local lp = require("web.lp")
         local cards = require("cards")
         for _,v in pairs(cards.cards()) do
@@ -173,6 +229,7 @@ var waitMsg = \'');  ngx.print(T"Please wait..."); ngx.print('\';\
 var loginMsg =\'');  ngx.print(T"Login Expired. Reloading."); ngx.print('\';\
 var okButton = \'');  ngx.print(T"Ok"); ngx.print('\';\
 var cancelButton = \'');  ngx.print(T"Cancel"); ngx.print('\';\
+var poperrorMsg = \'');  ngx.print(T"Same site cannot be added for multiple times"); ngx.print('\';\
 function httpErrorMessage(err){\
     switch(err.status){\
         case 500:\
@@ -202,4 +259,4 @@ function httpErrorMessage(err){\
     },400);\
 }\
 </script>\
-');
+'); 

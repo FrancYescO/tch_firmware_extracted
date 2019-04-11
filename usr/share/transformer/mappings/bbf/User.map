@@ -86,6 +86,12 @@ local Multi_User_i_= {
         default = "0",
         description = "If set to non-zero(1), restores the User password to default one",
       },
+      X_BELGACOM_SetDefaultPassword = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "If set to true, restores the User password to default one",
+      },
     }
   }
 }
@@ -261,6 +267,34 @@ local function setPassword(user, password)
   return ret
 end
 
+local function setDefaultPassword(mapping, param, value, key)
+  if value ~= "0" then
+    local gakID = getFromUci(webBinding(key, "gak_id"))
+    if gakID and gakID ~= "" then
+      local data = io.popen("get_access_key " .. gakID)
+      if data then
+        local password = data:read()
+          data:close()
+          if password and #password > 0 then
+            local username = getUserName(key)
+            if username == "" then
+              return nil, "Cannot set password for user with empty username"
+            end
+
+            -- (1) Set GUI password; never returns errors
+            setGuiPw(key, username, password)
+
+            -- (2) Set CLI password; may return errors
+            local ret =  setCliPw(username, password)
+
+            return ret
+          end
+      end
+    end
+    return nil, "Error resetting password"
+  end
+end
+
 local function setRole(user, role)
   if role == "" then
     return nil, "Role must not be empty"
@@ -378,6 +412,7 @@ Multi_User_i_.get = {
     return getFromUci(webBinding("assistance", "timeout", "0"))
   end,
   X_0876FF_SetDefaultPassword = "0",
+  X_BELGACOM_SetDefaultPassword = "0",
   Language = function(mapping, param, key)
     local language = getFromUci(webBinding(key, "language"))
     return vodafoneLanguageMap[language] and vodafoneLanguageMap[language] or "en"
@@ -403,22 +438,8 @@ Multi_User_i_.set = {
   X_0876FF_RemoteAccessCapableTimeout = function(mapping, param, value, key)
     return setOnUci(webBinding("assistance", "timeout"), value)
   end,
-  X_0876FF_SetDefaultPassword = function(mapping, param, value, key)
-    if value ~= "0" then
-      local gakID = getFromUci(webBinding(key, "gak_id"))
-      if gakID ~= "" then
-        local data = io.popen("get_access_key " .. gakID)
-        if data then
-          local password = data:read()
-          data:close()
-          if password and #password > 0 then
-            return setPassword(key, password)
-          end
-        end
-      end
-      return nil, "Error resetting password"
-    end
-  end,
+  X_0876FF_SetDefaultPassword = setDefaultPassword,
+  X_BELGACOM_SetDefaultPassword = setDefaultPassword,
   Language = function(mapping, param, value, key)
     for language, option in pairs(vodafoneLanguageMap) do
       if option == value then
@@ -427,7 +448,7 @@ Multi_User_i_.set = {
       end
     end
     setOnUci(webBinding(key, "language"), value)
-    commitApply:newset("webuser_language") 
+    commitApply:newset("webuser_language")
   end
 }
 

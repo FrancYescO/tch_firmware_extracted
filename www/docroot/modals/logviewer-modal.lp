@@ -9,117 +9,100 @@ local message_helper = require("web.uimessage_helper")
 local logdownload_helper = require("logdownload_helper")
 local logviewer = require 'log.viewer'
 local format = string.format
-local session = ngx.ctx.session
+local proxy = require("datamodel")
+local role = ngx.ctx.session:getrole()
 
 if ngx.req.get_method() == "POST" then
-    -- now process non-file POSTs
-    local action = ngx.req.get_post_args().action
-    if action == "export_log" then
-        return logdownload_helper.export_log("logread")
-    end
+  -- now process non-file POSTs
+  local action = ngx.req.get_post_args().action
+  if action == "export_log" then
+    return logdownload_helper.export_log("logread")
+  end
 end
 
 local log_columns = {
-    {
-        header = T"Date",
-        name = "date",
-        param = "date",
-        type = "text",
-        attr = { input = {  class="span1" } },
-    },
-    {
-        header = T"Facility",
-        name = "facility",
-        param = "facility",
-        type = "text",
-        attr = { input = { class="span1" } },
-    },
-    {
-        header = T"Process",
-        name = "process",
-        param = "process",
-        type = "text",
-        attr = { select = { class="span1" } },
-    },
-    {
-        header = T"Message",
-        name = "message",
-        param = "message",
-        type = "text",
-        attr = { select = { class="span6" } },
-    },
+  {
+    header = T"Date",
+    name = "date",
+    param = "date",
+    type = "text",
+    attr = { input = {  class="span1" } },
+  },{
+      header = T"Facility",
+      name = "facility",
+      param = "facility",
+      type = "text",
+      attr = { input = { class="span1" } },
+  },{
+      header = T"Process",
+      name = "process",
+      param = "process",
+      type = "text",
+      attr = { select = { class="span1" } },
+  },{
+      header = T"Message",
+      name = "message",
+      param = "message",
+      type = "text",
+      attr = { select = { class="span6" } },
+  },
 }
 
 local log_options = {
-    tableid = "logviewer",
-    basepath = "sys.log.",
-    canAdd = false,
-    canEdit = false,
-    canDelete = false,
+  tableid = "logviewer",
+  basepath = "sys.log.",
+  canAdd = false,
+  canEdit = false,
+  canDelete = false,
 }
 
 local getargs = ngx.req.get_uri_args()
 local current_process = getargs["process"]
 if current_process == "" then
-    current_process = nil
+  current_process = nil
 end
 
 local logs, processes = logviewer.load(current_process, {"", T"Everything"})
 
+ngx.print(ui_helper.createHeader(T"Management", false, true, 5))
+
+local lp = require("web.lp")
+lp.setpath("/www/snippets/")
+lp.include("tabs-management.lp")
   ngx.print('\
-\
-');  ngx.print(ui_helper.createHeader(T"Management", false, true, 5))   ngx.print('\
 \
 <div class="modal-body update no-save">\
-\
-');  
-    local lp = require("web.lp")
-    lp.setpath("/www/snippets/")
-    lp.include("tabs-management.lp")
-  ngx.print('\
-\
-<form class="form-horizontal" method="post" action="');  ngx.print( ngx.var.request_uri ); ngx.print('">\
-');
-
-if session:getrole() == "engineer" then
-ngx.print('\
-<div class="span2">\
-    <ul class="nav nav-list">\
-    ');
-	local html = {}
-	local tab2 = {
-					{
-						desc = T"Log Viewer",
-						active = "active",
-						target = "modals/logviewer-modal.lp",
-					},
-					--[[{
-						desc = T"Routing Table",
-						target = "modals/log-routingtable-modal.lp",
-					},]]
-					{
-						desc = T"Connections",
-						target = "modals/log-connections-modal.lp",
-					},
-
-				}
-	html[#html + 1] = format('<li class="nav-header">%s</li>', T"Index")
-	for i,v in ipairs(tab2) do
-		if v.active == "active" then
-			html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "active", i, v.target, v.desc)
-		else
-			html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "", i, v.target, v.desc)
-		end
-	end
-	ngx.print(html)
-ngx.print('\
-    </ul>\
-</div>\
-<div class="span6">\
-'); 	
-end
-
-
+  <form class="form-horizontal" method="post" action="');  ngx.print( ngx.var.request_uri ); ngx.print('">\
+    ');  if role == "engineer" then   ngx.print('\
+    <div class="span2">\
+      <ul class="nav nav-list">\
+      ');  
+        local html = {}
+        local tab2 = {
+        {
+          desc = T"Log Viewer",
+          active = "active",
+            target = "modals/logviewer-modal.lp",
+        },{
+          desc = T"Connections",
+          target = "modals/log-connections-modal.lp",
+        },
+        }
+        html[#html + 1] = format('<li class="nav-header">%s</li>', T"Index")
+        for i,v in ipairs(tab2) do
+          if v.active == "active" then
+            html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "active", i, v.target, v.desc)
+          else
+            html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "", i, v.target, v.desc)
+          end
+        end
+        ngx.print(html)
+        ngx.print('\
+      </ul>\
+    </div>\
+    ');  end   ngx.print('\
+    <div>\
+    ');  
       local filterclass = {
         span = {
           style = "float:left;",
@@ -147,28 +130,20 @@ end
       ngx.print(ui_helper.createAlertBlock(T"Exporting log, please wait ...", exporting_alert))
       ngx.print(ui_helper.createAlertBlock(T"Exporting failed; please try again.", exporting_fail))
       ngx.print(ui_helper.createMessages(message_helper.popMessages()))
-  ngx.print('\
-\
-<fieldset>\
-\
-');  
-ngx.print(ui_helper.createTable(log_columns, logs, log_options, nil, nil))
-  ngx.print('\
-\
-</fieldset>\
-</form>\
-</div>\
-')
-if session:getrole() == "engineer" then
-	ngx.print('\
-	</div>\
-	')
-end
-ngx.print('<div class="modal-footer">\
-    <div id="modal-no-change">\
-        <div class="btn btn-primary btn-large" data-dismiss="modal">');  ngx.print( T"Close" ); ngx.print('</div>\
+      ngx.print('\
+      <fieldset>\
+        ');  ngx.print(ui_helper.createTable(log_columns, logs, log_options, nil, nil))   ngx.print('\
+      </fieldset>\
     </div>\
+  </form>\
 </div>\
+\
+<div class="modal-footer">\
+  <div id="modal-no-change">\
+    <div class="btn btn-primary btn-large" data-dismiss="modal">');  ngx.print( T"Close" ); ngx.print('</div>\
+  </div>\
+</div>\
+\
 <script type="text/javascript">\
     var target = $(".modal form").attr("action");\
 \

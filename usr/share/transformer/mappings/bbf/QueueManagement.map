@@ -133,8 +133,11 @@ local Multi_QoS_ = {
 
 local mapper, register, resolve = mapper, register, resolve
 local uciHelper = mapper("ucihelper")
+local list = require("transformer.shared.common.list")
 local qosBinding = { config = "qos" }
 local forEachOnUci = uciHelper.foreach_on_uci
+local pairs, string, tostring = pairs, string, tostring
+local ensureList = list.ensureList
 
 -- List of qos classification rules sections in UCI
 local classificationRules = {
@@ -142,17 +145,6 @@ local classificationRules = {
   reclassify = true,
   l2classify = true,
 }
-
-local function convertStringToTable(str)
-  local tbl={}
-  if type(str) == 'table' then
-    return str
-  end
-  for item in string.gmatch(str or "", "([^,]+),?") do
-    tbl[#tbl + 1] = item
-  end
-  return #tbl > 0 and tbl or {""}
-end
 
 -- finds the section name which contains traffic id "1" and has high priority
 local function findHighPrioritySec()
@@ -208,11 +200,11 @@ Multi_QoS_.get = {
     qosParams = uciHelper.getall_from_uci(qosBinding)
     for _,s in pairs(qosParams) do
       if classificationRules[s[".type"]] then
-        srcInterfaces = convertStringToTable(s.srcif)
-        dstInterfaces = convertStringToTable(s.dstif)
-        dscpValue = convertStringToTable(s.dscp)
-        srcPorts = convertStringToTable(s.srcports)
-        dstPorts = convertStringToTable(s.dstports)
+        srcInterfaces = ensureList(s.srcif)
+        dstInterfaces = ensureList(s.dstif)
+        dscpValue = ensureList(s.dscp)
+        srcPorts = ensureList(s.srcports)
+        dstPorts = ensureList(s.dstports)
         MaxClassificationEntry = MaxClassificationEntry + (#srcInterfaces * #dstInterfaces * #dscpValue * #srcPorts * #dstPorts)
       end
     end

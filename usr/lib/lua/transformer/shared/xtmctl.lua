@@ -1,6 +1,5 @@
 -- helper functions to wrap xtmctl utility from broadcom
-local popen = io.popen
-local execute = os.execute
+local process = require("tch.process")
 local match = string.match
 local tostring, commitApply = tostring, commitapply
 local uciHelper = require("transformer.mapper.ucihelper")
@@ -19,7 +18,7 @@ local M = {}
 -- aal_type - ATM Adaptation Layer (AAL) currently in use on the PVC
 
 function M.getXtmDeviceStatus(addr)
-  local pipe = popen("xtmctl operate conn --show " .. addr)
+  local pipe = process.popen("xtmctl", {"operate", "conn", "--show", addr})
   if not pipe then
     return ""
   end
@@ -42,7 +41,8 @@ end
 -- \param bActive (bool) if true enable else disable
 -- \returns true if disable works, otherwise return false
 function M.enableXtmDevice(addr, bActive)
-  if execute("xtmctl operate conn --state " .. addr .. " " .. (bActive and "enable" or "disable")) ~= 0 then
+  local Active = bActive and "enable" or "disable"
+  if process.execute("xtmctl", {"operate", "conn", "--state", addr, Active}) ~= 0 then
     log:error("enable/disable XTM Device failed")
     return false
   end

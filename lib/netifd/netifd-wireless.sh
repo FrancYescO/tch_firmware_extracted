@@ -211,10 +211,10 @@ wireless_vif_parse_encryption() {
 	# wpa2/tkip+aes     => WPA2 RADIUS, CCMP+TKIP
 
 	case "$encryption" in
-		wpa2*|*psk2*)
+		wpa2*|wpa3*|*psk2*|psk3*|sae*|owe*)
 			wpa=2
 		;;
-		*mixed*)
+		wpa*mixed*|*psk*mixed*)
 			wpa=3
 		;;
 		wpa*|*psk*)
@@ -228,6 +228,21 @@ wireless_vif_parse_encryption() {
 	wpa_pairwise="$wpa_cipher"
 
 	case "$encryption" in
+		owe*)
+			auth_type=owe
+		;;
+		wpa3-mixed*)
+			auth_type=eap-eap192
+		;;
+		wpa3*)
+			auth_type=eap192
+		;;
+		psk3-mixed*|sae-mixed*)
+			auth_type=psk-sae
+		;;
+		psk3*|sae*)
+			auth_type=sae
+		;;
 		*psk*)
 			auth_type=psk
 		;;
@@ -291,7 +306,7 @@ for_each_interface() {
 }
 
 _wdev_common_device_config() {
-	config_add_string channel hwmode htmode
+	config_add_string channel hwmode htmode noscan
 }
 
 _wdev_common_iface_config() {

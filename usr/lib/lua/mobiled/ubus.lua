@@ -3,7 +3,7 @@
 --! @brief The implementation of the UBUS handler functions
 ---------------------------------
 
-local require, table, pairs, string, collectgarbage = require, table, pairs, string, collectgarbage
+local tinsert = table.insert
 
 local leds
 local runtime = {}
@@ -38,17 +38,12 @@ local function mobiled_get_status(req, msg)
 	end
 
 	local data_session_requests = {}
-	local dataSessionList = device:get_data_sessions()
-	for _, session in pairs(dataSessionList) do
-		local s = {}
-		s.session_id = session.session_id
-		s.profile = session.profile_id
-		s.changed = session.changed
-		s.activated = session.activated
-		s.interface = session.interface
-		s.optional = session.optional
-		s.bridge = session.bridge
-		table.insert(data_session_requests, s)
+	for _, session in pairs(device:get_data_sessions()) do
+		local s = {
+			session_id = session.session_id,
+			activated = session.activated
+		}
+		tinsert(data_session_requests, s)
 	end
 
 	local response = {
@@ -57,12 +52,21 @@ local function mobiled_get_status(req, msg)
 		display_status = display_status,
 		version = mobiled.get_version(),
 		plugin = device:get_plugin_name(),
-		devices = mobiled.get_device_count()
+		devices = mobiled.get_device_count(),
+		uptime = helper.uptime() - mobiled.started_uptime
 	}
 	conn:reply(req, response)
 end
 
-local function mobiled_get_devices(req, msg)
+local function mobiled_reload(_, msg)
+	runtime.mobiled.reloadconfig(msg.force)
+end
+
+local function mobiled_stop()
+	runtime.uloop.cancel()
+end
+
+local function mobiled_get_devices(req)
 	local conn = runtime.ubus
 	local mobiled = runtime.mobiled
 
@@ -73,29 +77,57 @@ local function mobiled_get_devices(req, msg)
 	local devices = mobiled.get_devices()
 	for _, d in pairs(devices) do
 		local data = d:get_device_info() or {}
-		table.insert(response.devices, {dex_idx = d.sm.dev_idx, dev_desc = data.dev_desc, imei = data.imei })
+		tinsert(response.devices, {dex_idx = d.sm.dev_idx, dev_desc = data.dev_desc, imei = data.imei })
 	end
 	conn:reply(req, response)
 end
 
-local function get_session_info(device, s)
-	local sessionInfo = device:get_session_info(s.session_id)
+local function get_session_info(device, session)
+	local sessionInfo = device:get_session_info(session.session_id)
 	if not sessionInfo then
 		return {}
 	end
 
-	sessionInfo.session_id = s.session_id
-	sessionInfo.profile = s.profile_id
-	sessionInfo.changed = s.changed
-	sessionInfo.activated = s.activated
-	sessionInfo.interface = s.interface
-	sessionInfo.optional = s.optional
-	sessionInfo.bridge = s.bridge
+	local session_params = {
+		"session_id",
+		"optional",
+		"bridge",
+		"allowed",
+		"internal",
+		"autoconnect",
+		"activated",
+		"name"
+	}
+
+	if not session.internal then
+		tinsert(session_params, "changed")
+		tinsert(session_params, "interface")
+	end
+
+	for _, param in pairs(session_params) do
+		sessionInfo[param] = session[param]
+	end
+
+	sessionInfo.profile = session.profile_id
+
+	-- Workaround for 64 bit numbers in UBUS Lua wrapper
+	if sessionInfo.packet_counters then
+		if sessionInfo.packet_counters.tx_bytes then
+			sessionInfo.packet_counters.tx_bytes = tostring(sessionInfo.packet_counters.tx_bytes)
+		end
+		if sessionInfo.packet_counters.rx_bytes then
+			sessionInfo.packet_counters.rx_bytes = tostring(sessionInfo.packet_counters.rx_bytes)
+		end
+	end
+	if sessionInfo.duration then
+		sessionInfo.duration = tostring(sessionInfo.duration)
+	end
 
 	-- Check if a PDN retry timer is running
-	if s.pdn_retry_timer.timer then
-		sessionInfo.pdn_retry_timer_remaining = math.floor(s.pdn_retry_timer.timer:remaining()/1000)
-		sessionInfo.pdn_retry_timer_value = s.pdn_retry_timer.value
+	if session.pdn_retry_timer.timer then
+		sessionInfo.pdn_retry_timer_remaining = math.floor(session.pdn_retry_timer.timer:remaining()/1000)
+		sessionInfo.pdn_retry_timer_value = session.pdn_retry_timer.value
+		sessionInfo.reject_cause = session.reject_cause
 	end
 	return sessionInfo
 end
@@ -115,9 +147,8 @@ local function mobiled_get_session_info(req, msg)
 		end
 	else
 		local sessions = {}
-		local dataSessionList = device:get_data_sessions()
-		for _, session in pairs(dataSessionList) do
-			table.insert(sessions, get_session_info(device, session))
+		for _, session in pairs(device:get_data_sessions()) do
+			tinsert(sessions, get_session_info(device, session))
 		end
 		conn:reply(req, { sessions = sessions })
 	end
@@ -149,7 +180,14 @@ local function mobiled_get_network_info(req, msg)
 		return
 	end
 
-	local data = device:get_network_info() or {}
+	local data = device:get_network_info(msg.max_age) or {}
+
+	-- Check if the attach retry timer is running
+	if device.attach_retry_timer.timer then
+		data.attach_retry_timer_remaining = math.floor(device.attach_retry_timer.timer:remaining()/1000)
+		data.attach_retry_timer_value = device.attach_retry_timer.value
+	end
+
 	conn:reply(req, data)
 end
 
@@ -188,6 +226,14 @@ local function mobiled_network_scan(req, msg)
 	conn:reply(req, data)
 end
 
+local firmware_upgrade_start_statuses = {
+	not_running = true,
+	invalid_parameters = true,
+	timeout = true,
+	failed = true,
+	done = true
+}
+
 local function mobiled_firmware_upgrade(req, msg)
 	local conn = runtime.ubus
 	local events = runtime.events
@@ -200,11 +246,12 @@ local function mobiled_firmware_upgrade(req, msg)
 		return
 	end
 
-	if msg.path and device.info.firmware_upgrade.status == "not_running" then
+	if msg.path and firmware_upgrade_start_statuses[device.info.firmware_upgrade.status] then
 		device.info.firmware_upgrade.path = msg.path
 		events.send_event("mobiled", { event = "firmware_upgrade_start", dev_idx = dev_idx })
 		return
 	end
+
 	local data = device:get_firmware_upgrade_info() or {}
 	conn:reply(req, data)
 end
@@ -239,6 +286,18 @@ local function mobiled_get_device_info(req, msg)
 	conn:reply(req, data)
 end
 
+local function mobiled_get_device_stats(req, msg)
+	local conn = runtime.ubus
+	local mobiled = runtime.mobiled
+
+	local device = mobiled.get_device(msg.dev_idx)
+	if not device then
+		conn:reply(req, { error = error_messages.no_device })
+		return
+	end
+	conn:reply(req, device:get_device_stats() or {})
+end
+
 local function mobiled_get_device_capabilities(req, msg)
 	local conn = runtime.ubus
 	local mobiled = runtime.mobiled
@@ -249,32 +308,19 @@ local function mobiled_get_device_capabilities(req, msg)
 		return
 	end
 
-	local capabilities = {}
-	local device_capabilities = device:get_device_capabilities()
-	if device_capabilities then
-		capabilities.max_data_sessions = device_capabilities.max_data_sessions
-		capabilities.sms_reading = device_capabilities.sms_reading
-		capabilities.sms_sending = device_capabilities.sms_sending
-		capabilities.strongest_cell_selection = device_capabilities.strongest_cell_selection
-		capabilities.manual_plmn_selection = device_capabilities.manual_plmn_selection
-		capabilities.arfcn_selection_support = device_capabilities.arfcn_selection_support
-		capabilities.band_selection_support = device_capabilities.band_selection_support
-		capabilities.cs_voice_support = device_capabilities.cs_voice_support
-		capabilities.volte_support = device_capabilities.volte_support
-		capabilities.supported_pdp_types = device_capabilities.supported_pdp_types
-		if device_capabilities.radio_interfaces then
-			local supported_modes = {}
-			for _, radio in pairs(device_capabilities.radio_interfaces) do
-				table.insert(supported_modes, radio.radio_interface)
-				if radio.supported_bands then
-					capabilities["supported_bands_"..radio.radio_interface] = table.concat(radio.supported_bands, " ")
-				end
+	local device_capabilities = device:get_device_capabilities() or {}
+	if device_capabilities.radio_interfaces then
+		local supported_modes = {}
+		for _, radio in pairs(device_capabilities.radio_interfaces) do
+			tinsert(supported_modes, radio.radio_interface)
+			if radio.supported_bands then
+				device_capabilities["supported_bands_"..radio.radio_interface] = table.concat(radio.supported_bands, " ")
 			end
-			capabilities.supported_modes = table.concat(supported_modes, " ")
 		end
+		device_capabilities.supported_modes = table.concat(supported_modes, " ")
+		device_capabilities.radio_interfaces = nil
 	end
-
-	conn:reply(req, capabilities)
+	conn:reply(req, device_capabilities)
 end
 
 local function mobiled_get_device_radio_preferences(req, msg)
@@ -295,22 +341,29 @@ local function mobiled_get_device_radio_preferences(req, msg)
 			supported_modes[radio.radio_interface] = true
 		end
 		for _, radio_preference in ipairs(runtime.config.get_radio_preferences()) do
-			local all_radios_supported = true
-			for _, radio in pairs(radio_preference.radios) do
-				if not supported_modes[radio] then
-					all_radios_supported = false
-					break
+			if radio_preference.name and radio_preference.radios then
+				local is_supported = false
+				for _, radio in pairs(radio_preference.radios) do
+					-- Radios can be qualified with a '?' to indicate that the radio should be omitted
+					-- from the radio preference if it is not supported by the device and not that the
+					-- radio preference should omitted entirely if the radio is not supported.
+					local name, qualifier = radio:match("^(.-)(%??)$")
+					if supported_modes[name] then
+						is_supported = true
+					elseif qualifier ~= "?" then
+						is_supported = false
+						break
+					end
+				end
+				if is_supported then
+					tinsert(radio_preferences, {name = radio_preference.name, radios = table.concat(radio_preference.radios, " ")})
 				end
 			end
-			if all_radios_supported then
-				table.insert(radio_preferences, {name = radio_preference.name, radios = table.concat(radio_preference.radios, " ")})
-			end
 		end
-	end
-
-	if #radio_preferences == 0 and device_capabilities.radio_interfaces then
-		for _, radio in pairs(device_capabilities.radio_interfaces) do
-			table.insert(radio_preferences, {name = radio.radio_interface, radios = radio.radio_interface})
+		if #radio_preferences == 0 then
+			for _, radio in pairs(device_capabilities.radio_interfaces) do
+				tinsert(radio_preferences, {name = radio.radio_interface, radios = radio.radio_interface})
+			end
 		end
 	end
 
@@ -452,7 +505,7 @@ local function mobiled_disable_pin(req, msg)
 	return __mobiled_enable_pin(req, msg, false)
 end
 
-local function mobiled_clear_pin(req, msg)
+local function mobiled_clear_pin()
 	runtime.mobiled.clear_pin()
 end
 
@@ -497,7 +550,7 @@ local function mobiled_get_radio_signal_info(req, msg)
 		conn:reply(req, { error = error_messages.no_device })
 		return
 	end
-	local data = device:get_radio_signal_info() or {}
+	local data = device:get_radio_signal_info(msg.max_age) or {}
 	helper.floats_to_string(data)
 	conn:reply(req, data)
 end
@@ -514,38 +567,22 @@ local function mobiled_get_leds(req, msg)
 	conn:reply(req, leds.get_led_info(device))
 end
 
-local function mobiled_get_sms_info(req, msg)
+local function mobiled_get_sms_info(req)
 	local conn = runtime.ubus
-	local mobiled = runtime.mobiled
-
-	local device = mobiled.get_device(msg.dev_idx)
-	if not device then
-		conn:reply(req, { error = error_messages.no_device })
-		return
-	end
-
-	local ret, errMsg = device:get_sms_info(msg.dev_idx)
+	local ret, errMsg = runtime.mobiled.get_sms_info()
 	if not ret then
 		return conn:reply(req, { error = errMsg })
 	end
 	conn:reply(req, ret)
 end
 
-local function mobiled_get_sms_messages(req, msg)
+local function mobiled_get_sms_messages(req)
 	local conn = runtime.ubus
-	local mobiled = runtime.mobiled
-
-	local device = mobiled.get_device(msg.dev_idx)
-	if not device then
-		conn:reply(req, { error = error_messages.no_device })
-		return
-	end
-
-	local ret, errMsg = device:get_sms_messages(msg.dev_idx)
+	local ret, errMsg = runtime.mobiled.get_sms_messages()
 	if not ret then
 		return conn:reply(req, { error = errMsg })
 	end
-	conn:reply(req, ret)
+	conn:reply(req, {messages = ret})
 end
 
 local function mobiled_set_sms_status(req, msg)
@@ -557,13 +594,7 @@ local function mobiled_set_sms_status(req, msg)
 		return
 	end
 
-	local device = mobiled.get_device(msg.dev_idx)
-	if not device then
-		conn:reply(req, { error = error_messages.no_device })
-		return
-	end
-	
-	local ret, errMsg = device:set_sms_status(msg.id, msg.status)
+	local ret, errMsg = mobiled.set_sms_status(msg.id, msg.status)
 	if not ret then
 		return conn:reply(req, { error = errMsg })
 	end
@@ -578,13 +609,7 @@ local function mobiled_delete_sms(req, msg)
 		return
 	end
 
-	local device = mobiled.get_device(msg.dev_idx)
-	if not device then
-		conn:reply(req, { error = error_messages.no_device })
-		return
-	end
-	
-	local ret, errMsg = device:delete_sms(msg.id)
+	local ret, errMsg = mobiled.delete_sms(msg.id)
 	if not ret then
 		return conn:reply(req, { error = errMsg })
 	end
@@ -605,7 +630,7 @@ local function mobiled_send_sms(req, msg)
 		return
 	end
 
-	local network_info = device:get_network_info() or {}
+	local network_info = device:get_network_info(msg.max_age) or {}
 	if network_info.nas_state ~= "registered" then
 		return conn:reply(req, { error = "Network not registered" })
 	end
@@ -645,7 +670,7 @@ local function mobiled_debug(req, msg)
 	end
 end
 
-local function mobiled_collectgarbage(req, msg)
+local function mobiled_collectgarbage(req)
 	local conn = runtime.ubus
 	local before = string.format("%.2f", collectgarbage("count"))
 	runtime.log:info("Memory usage before garbage collection: " .. before)
@@ -662,16 +687,15 @@ end
 local function mobiled_qual(req, msg)
 	local conn = runtime.ubus
 	local events = runtime.events
-	local mobiled = runtime.mobiled
 	local dev_idx = msg.dev_idx or 1
 
-	local device = mobiled.get_device(dev_idx)
+	local device = runtime.mobiled.get_device(dev_idx)
 	if not device then
 		conn:reply(req, { error = error_messages.no_device })
 		return
 	end
 
-	if ( not msg ) or ( ( msg.enable == nil ) and ( msg.execute == nil ) ) then
+	if msg.enable == nil and msg.execute == nil then
 		conn:reply(req, { error = error_messages.invalid_params })
 		return
 	end
@@ -682,17 +706,13 @@ local function mobiled_qual(req, msg)
 		else
 			events.send_event("mobiled", { event = "qualtest_stop", dev_idx = dev_idx })
 		end
-	else
-		if msg.execute then
-			local ret, errMsg = device:execute_command(msg.execute)
-			if not ret then
-				if errMsg then
-					conn:reply(req, { error = errMsg })
-				end
-				return
-			else
-				conn:reply(req, { response = ret })
-			end
+	elseif msg.execute then
+		local ret, errMsg = device:execute_command(msg.execute)
+		if not ret then
+			conn:reply(req, { error = errMsg })
+			return
+		else
+			conn:reply(req, { response = ret })
 		end
 	end
 end
@@ -707,6 +727,12 @@ local function mobiled_device_errors(req, msg)
 		conn:reply(req, { error = error_messages.no_device })
 		return
 	end
+
+	if msg.flush == true then
+		device.errors = {}
+		return
+	end
+
 	if not device.errors then device.errors = {} end
 	helper.merge_tables(device.errors, device:get_errors())
 	conn:reply(req, { errors = device.errors })
@@ -821,7 +847,7 @@ local function mobiled_voice_multi_call(req, msg)
 		return
 	end
 
-	local ret, errMsg = device:multi_call(msg.call_id, msg.action)
+	local ret, errMsg = device:multi_call(msg.call_id, msg.action, msg.second_call_id)
 	if not ret and errMsg then
 		conn:reply(req, { error = errMsg })
 	end
@@ -853,6 +879,74 @@ local function mobiled_voice_supplementary_service(req, msg)
 	end
 end
 
+local function mobiled_voice_send_dtmf(req, msg)
+	local conn = runtime.ubus
+	local mobiled = runtime.mobiled
+	local dev_idx = msg.dev_idx or 1
+
+	local device = mobiled.get_device(dev_idx)
+	if not device then
+		conn:reply(req, { error = error_messages.no_device })
+		return
+	end
+
+	if not msg.tones then
+		conn:reply(req, { error = error_messages.invalid_params })
+		return
+	end
+
+	local ret, errMsg = device:send_dtmf(msg.tones, msg.interval, msg.duration)
+	if not ret and errMsg then
+		conn:reply(req, { error = errMsg })
+		return
+	end
+end
+
+local function mobiled_voice_info(req, msg)
+	local conn = runtime.ubus
+	local mobiled = runtime.mobiled
+	local dev_idx = msg.dev_idx
+
+	local device = mobiled.get_device(dev_idx)
+	if not device then
+		conn:reply(req, { error = error_messages.no_device })
+		return
+	end
+
+	conn:reply(req, device:get_voice_info() or {})
+end
+
+local function mobiled_voice_network_capabilities(req, msg)
+	local conn = runtime.ubus
+	local mobiled = runtime.mobiled
+	local dev_idx = msg.dev_idx
+
+	local device = mobiled.get_device(dev_idx)
+	if not device then
+		conn:reply(req, { error = error_messages.no_device })
+		return
+	end
+
+	conn:reply(req, device:get_voice_network_capabilities() or {})
+end
+
+local function mobiled_voice_convert_to_data_call(req, msg)
+	local conn = runtime.ubus
+	local mobiled = runtime.mobiled
+	local dev_idx = msg.dev_idx or 1
+
+	local device = mobiled.get_device(dev_idx)
+	if not device then
+		conn:reply(req, { error = error_messages.no_device })
+		return
+	end
+
+	local ret, errMsg = device:convert_to_data_call(msg.call_id, msg.codec)
+	if not ret and errMsg then
+		conn:reply(req, { error = errMsg })
+	end
+end
+
 local mobiled_methods = {
 	['mobiled'] = {
 		status = {
@@ -863,6 +957,12 @@ local mobiled_methods = {
 		},
 		debug = {
 			mobiled_debug, {}
+		},
+		reload = {
+			mobiled_reload, { force = ubus.BOOLEAN }
+		},
+		stop = {
+			mobiled_stop, {}
 		},
 		collectgarbage = {
 			mobiled_collectgarbage, {}
@@ -876,7 +976,7 @@ local mobiled_network_methods = {
 			mobiled_get_session_info, {dev_idx = ubus.INT32, session_id = ubus.INT32}
 		},
 		serving_system = {
-			mobiled_get_network_info, {dev_idx = ubus.INT32}
+			mobiled_get_network_info, {dev_idx = ubus.INT32, max_age = ubus.INT32}
 		},
 		time = {
 			mobiled_get_time_info, {dev_idx = ubus.INT32}
@@ -890,7 +990,7 @@ local mobiled_network_methods = {
 local mobiled_radio_methods = {
 	['mobiled.radio'] = {
 		signal_quality = {
-			mobiled_get_radio_signal_info, {dev_idx = ubus.INT32}
+			mobiled_get_radio_signal_info, {dev_idx = ubus.INT32, max_age = ubus.INT32}
 		}
 	}
 }
@@ -898,7 +998,10 @@ local mobiled_radio_methods = {
 local mobiled_device_methods = {
 	['mobiled.device'] = {
 		get = {
-			mobiled_get_device_info, {dev_idx = ubus.INT32, imei = ubus.STRING}
+			mobiled_get_device_info, {dev_idx = ubus.INT32, imei = ubus.STRING, dev_desc = ubus.STRING}
+		},
+		stats = {
+			mobiled_get_device_stats, {dev_idx = ubus.INT32}
 		},
 		capabilities = {
 			mobiled_get_device_capabilities, {dev_idx = ubus.INT32}
@@ -916,7 +1019,7 @@ local mobiled_device_methods = {
 			mobiled_qual, {dev_idx = ubus.INT32, enable = ubus.BOOLEAN, execute = ubus.STRING}
 		},
 		errors = {
-			mobiled_device_errors, {dev_idx = ubus.INT32}
+			mobiled_device_errors, {dev_idx = ubus.INT32, flush = ubus.BOOLEAN}
 		}
 	}
 }
@@ -958,16 +1061,16 @@ local mobiled_pin_methods = {
 local mobiled_sms_methods = {
 	['mobiled.sms'] = {
 		get = {
-			mobiled_get_sms_messages, {dev_idx = ubus.INT32}
+			mobiled_get_sms_messages, {}
 		},
 		info = {
-			mobiled_get_sms_info, {dev_idx = ubus.INT32}
+			mobiled_get_sms_info, {}
 		},
 		set_status = {
-			mobiled_set_sms_status, {dev_idx = ubus.INT32, id = ubus.INT32, status = ubus.STRING}
+			mobiled_set_sms_status, {id = ubus.INT32, status = ubus.STRING}
 		},
 		delete = {
-			mobiled_delete_sms, {dev_idx = ubus.INT32, id = ubus.INT32}
+			mobiled_delete_sms, {id = ubus.INT32}
 		},
 		send = {
 			mobiled_send_sms, {dev_idx = ubus.INT32, number = ubus.STRING, message = ubus.STRING}
@@ -998,10 +1101,22 @@ local mobiled_voice_methods = {
 			mobiled_voice_call_info, {dev_idx = ubus.INT32, call_id = ubus.INT32}
 		},
 		multi_call = {
-			mobiled_voice_multi_call, {dev_idx = ubus.INT32, call_id = ubus.INT32, action = ubus.STRING}
+			mobiled_voice_multi_call, {dev_idx = ubus.INT32, call_id = ubus.INT32, action = ubus.STRING, second_call_id = ubus.INT32}
 		},
 		supplementary_service = {
 			mobiled_voice_supplementary_service, {dev_idx = ubus.INT32, service = ubus.STRING, action = ubus.STRING}
+		},
+		send_dtmf = {
+			mobiled_voice_send_dtmf, {dev_idx = ubus.INT32, tones = ubus.STRING, interval = ubus.INT32, duration = ubus.INT32}
+		},
+		info = {
+			mobiled_voice_info, {dev_idx = ubus.INT32}
+		},
+		network_capabilities = {
+			mobiled_voice_network_capabilities, {dev_idx = ubus.INT32}
+		},
+		data_call = {
+			mobiled_voice_convert_to_data_call, {dev_idx = ubus.INT32, call_id = ubus.INT32, codec = ubus.STRING}
 		}
 	}
 }

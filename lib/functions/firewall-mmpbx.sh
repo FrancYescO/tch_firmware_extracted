@@ -4,8 +4,8 @@
 
 . $IPKG_INSTROOT/lib/functions.sh
 
-local MMPBX_CHAIN=MMPBX
-local WAN_UDP_PORTS= WAN_TCP_PORTS=
+MMPBX_CHAIN=MMPBX
+MMPBX_WAN_UDP_PORTS= MMPBX_WAN_TCP_PORTS=
 
 iptables -t nat -N "${MMPBX_CHAIN}" 2>/dev/null
 iptables -t filter -N "${MMPBX_CHAIN}" 2>/dev/null
@@ -46,9 +46,9 @@ create_jump() {
 
   if [ "$zone" == "wan" ]; then
     if [ "$transport_type" == "udp" ]; then
-      append WAN_UDP_PORTS $local_port
+      append MMPBX_WAN_UDP_PORTS $local_port
     elif [ "$transport_type" == "tcp" ]; then
-      append WAN_TCP_PORTS $local_port
+      append MMPBX_WAN_TCP_PORTS $local_port
     fi
   fi
 }
@@ -56,20 +56,20 @@ create_jump() {
 config_load "mmpbxrvsipnet"
 config_foreach create_jump network
 
-if [ -n "$WAN_UDP_PORTS" ]; then
+if [ -n "$MMPBX_WAN_UDP_PORTS" ]; then
   [ "$(uci -P /var/state -q get system.mmpbx_udp)" == "wan-service" ] ||
     uci_set_state system mmpbx_udp '' wan-service
   uci_set_state system mmpbx_udp proto udp
-  uci_set_state system mmpbx_udp ports "$WAN_UDP_PORTS"
+  uci_set_state system mmpbx_udp ports "$MMPBX_WAN_UDP_PORTS"
 else
   uci -P /var/state -q delete system.mmpbx_udp || true
 fi
 
-if [ -n "$WAN_TCP_PORTS" ]; then
+if [ -n "$MMPBX_WAN_TCP_PORTS" ]; then
   [ "$(uci -P /var/state -q get system.mmpbx_tcp)" == "wan-service" ] ||
     uci_set_state system mmpbx_tcp '' wan-service
   uci_set_state system mmpbx_tcp proto tcp
-  uci_set_state system mmpbx_tcp ports "$WAN_TCP_PORTS"
+  uci_set_state system mmpbx_tcp ports "$MMPBX_WAN_TCP_PORTS"
 else
   uci -P /var/state -q delete system.mmpbx_tcp || true
 fi

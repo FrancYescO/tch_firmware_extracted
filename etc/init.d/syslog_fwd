@@ -27,7 +27,12 @@ logfilter_config() {
 	IGNORECASE=''
 	local args log_filter_ip log_port log_type log_file log_filter log_filter_file
 	config_get log_filter_ip "$cfg" log_filter_ip
-	config_get log_size $cfg log_size 16
+	config_get log_size $cfg log_size 0
+	config_get log_buffer_size $cfg log_buffer_size 0
+	[ $log_buffer_size -eq 0 -a $log_size -gt 0 ] && log_buffer_size=$log_size
+	[ $log_buffer_size -eq 0 ] && log_buffer_size=64
+	log_size=$log_buffer_size
+	
 	config_get log_port "$cfg" log_port 514
 	if [ -x /etc/init.d/log ] ;then
 		config_get log_file "$cfg" log_file
@@ -42,6 +47,14 @@ logfilter_config() {
 	[ "${log_xfilter}" ] && log_xfilter="(${log_xfilter})"
 	echo "syslog startup : filter:'${log_filter} ${log_xfilter}' filter_ip:'${log_filter_ip}' port:'${log_port}' type:'${log_type}' size:${log_size}kB file:'${log_file}' filter_file:'${log_filter_file}' IGNORECASE:'${IGNORECASE}'" >>/var/log/slfwd.txt
 	if [ "${log_filter}" -o "${log_xfilter}" ] ; then
+		uci set system.slff='log'
+		uci set system.slff.path="filter_file"
+	else
+		uci delete system.slff
+	fi
+	uci commit system
+	
+	if [ "${log_filter}" -o "${log_xfilter}" ] ; then
 #		mkfifo ${log_filter_file}
 		touch ${log_filter_file}
 #		echo "Started..." >>${log_filter_file}
@@ -55,13 +68,23 @@ logfilter_config() {
 }
 
 start() {
+    mkdir -p "/etc/log/"
     config_load system
     config_foreach logfilter_config system
 }
 
 stop() {
-	filt_pid=$(ps | grep -v "/awk" | awk '/awk -v pattern/ {print $1}')
-#	will also kill the corresponding 'tail' or 'logread'
-	if [ -n "${filt_pid}" ] ; then kill -9 ${filt_pid} ; fi
+	filt_pids=$(ps | grep -v "/awk" | awk '/awk -v pattern/ {print $1}')
+	logread_pids=$(ps | grep -v "/tail" | awk '/tail -F|logread -f/ {print $1}')
+#	will also kill the corresponding (same group id) 'tail' or 'logread'
+	for fpid in ${filt_pids}; do 
+		pgrpid=$(cat /proc/${fpid}/stat|cut -d' ' -f5)
+		kill -9 $fpid
+		for lpid in ${logread_pids}; do
+			if [ -r /proc/$lpid/stat -a "${pgrpid}" = "$(cat /proc/$lpid/stat|cut -d' ' -f5)" ]; then
+				kill -9 ${lpid}
+			fi
+		done
+	done
 	rm -f ${log_filter_file}
 }

@@ -5,27 +5,40 @@ local Multi_X_000E50_TimeOfDay_Action_i_ = {
     access = "readOnly",
     minEntries = 0,
     maxEntries = math.huge,
+    aliasParameter = "Alias",
+    description = "Configure an action to be used in the Time Of Day framework",
     parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        description = "A non-volatile handle used to reference this instance. Alias provides a mechanism for an ACS to label this instance for future reference.",
+      },
       Name = {
         access = "readOnly",
         type = "string",
+        description = "Name of the Time Of Day action.",
       },
       Enabled = {
         access = "readWrite",
         type = "boolean",
+        description = "Indicates whether or not the action is enabled.",
       },
       Schedule = {
         access = "readWrite",
         type = "string",
         pathRef = true,
         default = "",
+        description = "Comma-separated list of strings. Each list item MUST be the path name of an available ToD schedule. If the referenced object is deleted, the corresponding item MUST be removed from the list. This table contain a single entry for each schedule this action needs to be triggered.",
       },
       Script = {
         access = "readOnly",
         type = "string",
+        description = "The script that is called when the action occurs.",
       },
     }
   },
+  aliasDefault = "Name",
 }
 
 local mapper, pcall, resolve, tokey, commitapply, ipairs = mapper, pcall, resolve, tokey, commitapply, ipairs
@@ -37,7 +50,7 @@ local todBinding = { config = "tod" }
 local configChanged
 
 local uciOption = {
-  Name		= "name",
+  Name          = "name",
   Enabled       = "enabled",
   Schedule      = "timers",
   Script        = "script",
@@ -60,7 +73,7 @@ local function getUciValue(mapping, param, key)
   if param == "Enabled" then
     todBinding.default = "0"
   else
-    todBinding.default = ""
+    todBinding.default = "1"
   end
   return getFromUci(todBinding)
 end

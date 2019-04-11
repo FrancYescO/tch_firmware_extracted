@@ -5,7 +5,7 @@ M.SenseEventSet = {
 	"platform_config_changed"
 }
 
-function M.check(runtime, event, dev_idx, previous_state)
+function M.check(runtime, event, dev_idx)
 	local mobiled = runtime.mobiled
 
 	if event.event == "device_disconnected" then

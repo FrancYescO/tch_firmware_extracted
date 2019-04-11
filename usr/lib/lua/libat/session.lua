@@ -1,4 +1,4 @@
-local string, tonumber, pairs = string, tonumber, pairs
+local format, match = string.format, string.match
 
 local M = {}
 
@@ -7,7 +7,7 @@ function M.get_supported_pdp_types(device)
 	local ret = device:send_multiline_command("AT+CGDCONT=?", "+CGDCONT:")
 	if ret then
 		for _, line in pairs(ret) do
-			local type = string.match(line, '+CGDCONT: %(.-%),"([A-Z0-9]+)"')
+			local type = match(line, '+CGDCONT: %(.-%),"([A-Z0-9]+)"')
 			if type == "IP" then
 				supported_types["ipv4"] = "IP"
 			elseif type == "IPV6" then
@@ -39,16 +39,16 @@ function M.get_pdp_type(device, type)
 end
 
 function M.get_state(device, session_id)
-	if device.sessions[session_id + 1] and device.sessions[session_id + 1].proto == "ppp" then
-		return nil
+	local cid = session_id + 1
+	if device.sessions[cid] and device.sessions[cid].proto == "ppp" then
+		return
 	end
 
-	session_id = session_id + 1
 	local ret = device:send_multiline_command("AT+CGACT?", "+CGACT:", 10000)
 	if ret then
 		for _, line in pairs(ret) do
-			local cid, state = string.match(line, "+CGACT:%s?(%d+),(%d+)$")
-			if tonumber(cid) == session_id then
+			local context, state = line:match("+CGACT:%s?(%d+),(%d+)$")
+			if tonumber(context) == cid then
 				if state == "1" then
 					return "connected"
 				end
@@ -59,7 +59,8 @@ function M.get_state(device, session_id)
 end
 
 function M.start(device, session_id, profile)
-	if device.sessions[session_id + 1] and device.sessions[session_id + 1].proto == "ppp" then
+	local cid = session_id + 1
+	if device.sessions[cid] and device.sessions[cid].proto == "ppp" then
 		return true
 	end
 
@@ -68,10 +69,10 @@ function M.start(device, session_id, profile)
 		return nil, errMsg
 	end
 
-	local command = string.format('AT+CGDCONT=%d,"%s","%s"', (session_id + 1), pdptype, profile.apn or "")
+	local command = format('AT+CGDCONT=%d,"%s","%s"', cid, pdptype, profile.apn or "")
 	local ret = device:send_command(command)
 	if ret then
-		command = string.format('AT+CGACT=1,%d', (session_id + 1))
+		command = format('AT+CGACT=1,%d', cid)
 		return device:start_command(command, 10000)
 	end
 
@@ -79,14 +80,15 @@ function M.start(device, session_id, profile)
 end
 
 function M.stop(device, session_id)
-	if device.sessions[session_id + 1] and device.sessions[session_id + 1].proto == "ppp" then
+	local cid = session_id + 1
+	if device.sessions[cid] and device.sessions[cid].proto == "ppp" then
 		return true
 	end
 
-	local command = string.format('AT+CGACT=0,%d', (session_id + 1))
+	local command = format('AT+CGACT=0,%d', cid)
 	local ret = device:send_command(command, 10000)
 	if ret then
-		command = string.format('AT+CGDCONT=%d', (session_id + 1))
+		command = format('AT+CGDCONT=%d', cid)
 		ret = device:send_command(command, 10000)
 		if ret then
 			return true
@@ -95,12 +97,67 @@ function M.stop(device, session_id)
 	return nil, "Failed to stop data session"
 end
 
+function M.get_ip_info(device, info, session_id)
+	local cid = session_id + 1
+	local ret = device:send_multiline_command("AT+CGPADDR", "+CGPADDR:")
+	if ret then
+		for _, line in pairs(ret) do
+			local context, addresses = line:match('+CGPADDR:%s?(%d+),"?(.-)"?$')
+			if tonumber(context) == cid then
+				for address in addresses:gmatch("[^,]+") do
+					if address:match("^%d+%.%d+%.%d+%.%d+$") then
+						if address ~= "0.0.0.0" then
+							info.ipv4_addr = address
+						end
+					else
+						local network = address:match("^(%d+%.%d+%.%d+%.%d+%.%d+%.%d+%.%d+%.%d+%.)%d+%.%d+%.%d+%.%d+%.%d+%.%d+%.%d+%.%d+$")
+						if network then
+							local ipv6_addr = ""
+							local all_zeroes = true
+							for msb, lsb in network:gmatch("(%d+)%.(%d+)%.") do
+								local value = tonumber(msb) * 256 + tonumber(lsb)
+								ipv6_addr = ipv6_addr .. format("%x:", value)
+								all_zeroes = all_zeroes and value == 0
+							end
+							if not all_zeroes then
+								info.ipv6_addr = ipv6_addr .. ":"
+							end
+						end
+					end
+				end
+				return true
+			end
+		end
+	end
+end
+
+function M.get_session_info(device, info, session_id)
+	local cid = session_id + 1
+	local ret = device:send_multiline_command("AT+CGDCONT?", "+CGDCONT:")
+	if ret then
+		for _, line in pairs(ret) do
+			local context, apn, flags = line:match('+CGDCONT:%s?(%d+),.-,"(.-)",".-",(.*)')
+			if not context then
+				context, apn = line:match('+CGDCONT:%s?(%d+),.-,"(.-)"')
+			end
+			if tonumber(context) == cid then
+				info.apn = apn
+				local emergency = flags:match("%d,%d,%d,(%d)")
+				if emergency then
+					info.emergency = emergency == '1'
+				end
+				return true
+			end
+		end
+	end
+end
+
 function M.get_profiles(device)
 	local profiles = {}
 	local ret = device:send_multiline_command("AT+CGDCONT?", "+CGDCONT:")
 	if ret then
 		for _, line in pairs(ret) do
-			local id, type, apn = string.match(line, '+CGDCONT:%s?(%d),"(.-)","(.-)"')
+			local id, type, apn = match(line, '+CGDCONT:%s?(%d),"(.-)","(.-)"')
 			local pdptype
 			if type == "IP" then
 				pdptype = "ipv4"

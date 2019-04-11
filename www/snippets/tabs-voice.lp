@@ -15,7 +15,7 @@ local items = {
     {"mmpbx-log-modal.lp", T"Call Log"},
     {"mmpbx-statistics-modal.lp", T"Quality Log"},
     {"mmpbx-sipdevice-modal.lp", T"Sip Device"},
-	{"mmpbx-codec-modal.lp", T"Codec"},
+    {"mmpbx-codec-modal.lp", T"Codec"},
 }
 
 local format = string.format

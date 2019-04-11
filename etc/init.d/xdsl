@@ -129,6 +129,7 @@ uciadvancedconfig2xdslctl () {
     else
       echo ""
     fi
+
 }
 
 xdsl_config() {
@@ -137,6 +138,8 @@ xdsl_config() {
     local maxdsdatarate maxusdatarate maxaggrdatarate
     local advanced
     local tpstc
+    local minINP
+    local maxDelay
 
     config_get CONNSTATUS "$cfg" enabled 1
 
@@ -155,6 +158,16 @@ xdsl_config() {
 	tpstcstring="--TpsTc $tpstc"
     fi
 
+    config_get minINP "$cfg" minINP
+    if [ -n "$minINP" ]; then
+        mininpstring="--minINP $minINP"
+    fi
+
+    config_get maxDelay "$cfg" maxDelay
+    if [ -n "$maxDelay" ]; then
+        maxdelaystring="--maxDelay $maxDelay"
+    fi
+
     config_get maxdsdatarate "$cfg" maxdsdatarate
     config_get maxusdatarate "$cfg" maxusdatarate
     config_get maxaggrdatarate "$cfg" maxaggrdatarate
@@ -162,7 +175,7 @@ xdsl_config() {
       maxdataratestring=$(ucimaxdatarate2xdslctl "$maxdsdatarate" "$maxusdatarate" "$maxaggrdatarate")
     fi
 
-    CONFIGURE_OPTIONS="$modstring $profilestring $tpstcstring"
+    CONFIGURE_OPTIONS="$modstring $profilestring $tpstcstring $mininpstring $maxdelaystring"
 
     ADVANCED_OPTIONS=$(uciadvancedconfig2xdslctl "$cfg")
     if [ -n "$maxdataratestring" ]; then
@@ -210,7 +223,9 @@ start() {
 
 stop() {
     eval "$APP connection --down"
-    eval "$APP1 connection --down"
+    if [ -e "/usr/bin/xdslctl1" ]; then
+      eval "$APP1 connection --down"
+    fi
 }
 
 restart() {

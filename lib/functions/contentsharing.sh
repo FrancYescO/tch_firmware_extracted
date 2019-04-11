@@ -631,7 +631,7 @@ cs_get_device_info () {
     return
   fi
 
-  local delcharset="()\`\$*.; /\\"
+  local delcharset="()\`\$*.; /\\|"
   local _vendor=$(tr -d "${delcharset}" < /sys/class/block/${disk}/device/vendor)
   local _model=$(tr -d "${delcharset}" < /sys/class/block/${disk}/device/model)
   eval ${2}="${_vendor}"
@@ -911,6 +911,8 @@ cs_add_device_sambauci () {
   uci -P /var/state set samba.${sharename}.read_only=no
   uci -P /var/state set samba.${sharename}.enabled=1
   uci -P /var/state set samba.${sharename}.available=${available}
+  uci -P /var/state set samba.${sharename}.name=${sharename}
+  uci -P /var/state set samba.${sharename}.description=${sharename}
   uci -P /var/state commit samba
   config_load samba
 }
@@ -1611,7 +1613,7 @@ cs_cleanup_device () {
   fi
 
   local device="${1}"
-  cs_del_device_sambashare "${device}"
+#  cs_del_device_sambashare "${device}"
 
   # Actions if minidlna is present
   if cs_is_dlna_present ; then
@@ -1627,7 +1629,7 @@ cs_cleanup_device () {
   # and is already unmounted.
   if [ -e "${CS_MOUNTD_AUTOFS_PATH}/${device}" ] ; then
     # Send SIGTERM to processes having open files on <device>.
-    local lines=$(lsof ${CS_MOUNTD_AUTOFS_PATH}/${device} | tail -n +2)
+    local lines=$(lsof ${CS_MOUNTD_AUTOFS_PATH}/${device} | tail -n +2 | grep -v nqcs)
     echo "${lines}" | while IFS= read -r line ; do
       if [ -z "${line}" ] ; then continue ; fi
 
@@ -1639,7 +1641,7 @@ cs_cleanup_device () {
     # Wait for processes to clean up. After 5 seconds, send SIGTERM to processes
     # not yet cleaned up.
     for run in 1 2 3 4 5 6; do
-      local lines=$(lsof ${CS_MOUNTD_AUTOFS_PATH}/${device} | tail -n +2)
+      local lines=$(lsof ${CS_MOUNTD_AUTOFS_PATH}/${device} | tail -n +2 | grep -v nqcs)
       if [ -z "${lines}" ] ; then break ; fi
 
       if [ "${run}" -eq "6" ] ; then

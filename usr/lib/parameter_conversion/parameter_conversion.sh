@@ -11,6 +11,8 @@
 
 . /lib/functions/uci-defaults.sh
 
+LOGFILE=/etc/parameter_conversion/log
+
 DEBUG=
 export DEBUG
 
@@ -24,7 +26,8 @@ echo_debug() {
 . /usr/lib/parameter_conversion/fcopy.sh
 
 
-rm -f /tmp/parameter_conversion.log
+rm -f $LOGFILE
+mkdir -p $(dirname $LOGFILE)
 
 if [ ! -z "$1" -a -e "$1" ]; then
 	old_config=$1
@@ -63,7 +66,7 @@ run_conversion_script() { #script
 			
 			debug_on)
 				# No parameter required
-				DEBUG=/tmp/parameter_conversion.log
+				DEBUG=$LOGFILE
 				echo_debug "Old configuration=$old_config/"
 				echo_debug "New configuration=$new_config/"
 				echo_debug "Conversion file=$script"

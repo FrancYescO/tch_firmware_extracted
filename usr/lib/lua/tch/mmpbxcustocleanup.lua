@@ -171,7 +171,8 @@ end
 -- Function to clean up DECT configuration.
 local function cleanUpDECTConfig()
     local dect_sec_info = {
-      --{section_type,   section_name, used_as,  related_to, value },
+      --{section_type,   section_name,  used_as,  related_to, value},
+	{"dectemission", "dectemission"                            },
         {"device",       "dect"                                    },
         {"outgoing_map", "",           "option", "device",   "dect"},
         {"internal_map", "",           "option", "device",   "dect"},

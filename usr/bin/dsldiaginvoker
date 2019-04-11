@@ -2,9 +2,10 @@
 -- this script will be called by commit and apply on
 -- InternetGatewayDevice.WANDevice.{i}.WANDSLDiagnostics.LoopDiagnosticsState
 local logger = require 'transformer.logger'
-local xdslctl = require("transformer.shared.xdslctl")
+--local xdslctl = require("transformer.shared.xdslctl")
 local cmdhelper = require("transformer.shared.cmdhelper")
-local execute = os.execute
+local process = require 'tch.process'
+local execute = process.execute
 local ubus = require("ubus")
 local ubus_conn
 if ubus_conn == nil then
@@ -40,7 +41,7 @@ local function getDiagResult()
         result = getDiagStatus()
         if result == "Requested" then
             -- wait until after completion of the Diagnostics
-            execute("sleep " .. sleep_time)
+            execute("sleep", {sleep_time})
         else
             break
         end
@@ -50,14 +51,14 @@ local function getDiagResult()
 end
 
 logger:debug("====== DSL will down ======")
-execute("sleep 5")
+execute("sleep", {"5"})
 logger:debug("====== DSL LoopDiagnosticsState is operating ======")
-execute("xdslctl connection --diagmode")
+execute("xdslctl", {"connection", "--diagmode"})
 local result = getDiagResult()
 
 logger:debug("====== DSL Resume ======")
-execute("xdslctl connection --up")
-execute("sleep 5")
+execute("xdslctl", {"connection", "--up"})
+execute("sleep", {"5"})
 
 -- Publish the diag result on ubus
 local info = {}

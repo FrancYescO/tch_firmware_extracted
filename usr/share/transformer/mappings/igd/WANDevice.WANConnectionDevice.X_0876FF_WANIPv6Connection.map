@@ -75,11 +75,44 @@ local WANIPv6Connection = {
         type = "string",
         description = "The IPv6 link-local address used for communications across local WAN network",
       },
+      IPv4MaskLen6rd = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The number of high-order bits that are identical across all CE IPv4 addresses within a given 6rd domain",
+        default = "0",
+      },
+      PrefixLen6rd = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "24",
+	description = "The length of the 6rd IPv6 prefix for the given 6rd domain in number of bits",
+      },
+      Prefix6rd = {
+        access = "readWrite",
+        type = "string",
+        description = "The 6rd IPv6 prefix for the given 6rd domain represented as a 16-octet IPv6 address",
+      },
+      TunnelMTU6rd = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The IPv6 6rd Tunnel MTU",
+        default = "1280",
+      },
+      DelegatedPrefix6rd = {
+        access = "readOnly",
+        type = "string",
+        description = "IPv6 prefix calculated by combining the 6rd prefix and the CE IPv4 address obtained via IPv4 configuration methods",
+      },
+      BRIPv4Addresses6rd = {
+        access = "readWrite",
+        type = "string",
+        description = "The IPv4 address of the 6rd Border Relay for a given 6rd domain",
+      },
     }
   }
 }
 
-local table, ipairs, type = table, ipairs, type
+local table, ipairs = table, ipairs
 local mapper, tostring, register, open = mapper, tostring, register, io.open
 local inet = require "tch.inet"
 local lfs = require("lfs")
@@ -88,6 +121,7 @@ local uciHelper = mapper("ucihelper")
 local common = mapper("nwcommon")
 local getIntfInfo = common.getIntfInfo
 local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
 local setOnUci = uciHelper.set_on_uci
 local wanconnection = require 'transformer.shared.wanconnection'
 local networkBinding = { config = "network" }
@@ -98,7 +132,6 @@ local concat, format, remove = table.concat, string.format, table.remove
 local getUbusInterfaceStatus = common.get_ubus_interface_status
 local xtmconnection = require 'transformer.shared.models.igd.xtmconnection'
 local device_key = xtmconnection.resolve_key
-local ubusConn = require("ubus").connect()
 local transactions = {}
 local nwcommon = mapper("nwcommon")
 local wandevice = require("transformer.shared.models.igd.wandevice")
@@ -138,6 +171,7 @@ end
 -- List of protocols in the uci section
 local protoMap = {
   ["dhcpv6"] = "DHCPv6",
+  ["6rd"] = "6RD",
 }
 
 local dhcpOptionMap = {
@@ -149,7 +183,7 @@ WANIPv6Connection.entries = function(mapping, parentKey)
   for _, intf in ipairs(keys) do
     local key = conn:getInterfaceDhcp6(intf)
     if key then
-      local dslname = parentKey:match("%S+|%S+|(%S+)")
+      local dslname = parentKey:match("%S+|(%S+)|?(%S*)")
       key = dslname and key .. "|" .. dslname or key
       return {key}
     end
@@ -177,6 +211,22 @@ end
 local function getExternalIPv6Address(intf, status)
   local ipv6 = getFirstIPv6Address(intf, status)
   return ipv6 and ipv6.address or ""
+end
+
+local function getDelegatedPrefix6rd(intf, status)
+  status = status and status or getUbusInterfaceStatus(intf)
+  return status and status['ipv6-prefix'] and status['ipv6-prefix'][1]["address"] or ""
+end
+
+local function getBRIPv4Addresses6rd(intf, status)
+  status = status and status or getUbusInterfaceStatus(intf)
+  if not status.dynamic then
+    return getUciValue(intf, "peeraddr")
+  else
+    if status and status["ipv4-address"] and status["ipv4-address"][1] then
+      return status["ipv4-address"][1]["address"] or ""
+    end
+  end
 end
 
 local function getNetMask(intf, status)
@@ -261,6 +311,24 @@ WANIPv6Connection.get = {
     return ipMap[value]
   end,
   ExternalLinkLocalAddress = getExternalLinkLocalAddress,
+  IPv4MaskLen6rd = function(mapping, param, key)
+    return getUciValue(splitKey(key) or key, "ip4prefixlen", "0")
+  end,
+  PrefixLen6rd = function (mapping, param, key)
+    return getUciValue(splitKey(key) or key, "ip6prefixlen", "24")
+  end,
+  Prefix6rd = function (mapping, param, key)
+    return getUciValue(splitKey(key) or key, "ip6prefix")
+  end,
+  TunnelMTU6rd = function(mapping, param, key)
+    return getUciValue(splitKey(key) or key, "mtu", "1280")
+  end,
+  DelegatedPrefix6rd = function(mapping, param, key)
+    return getDelegatedPrefix6rd(splitKey(key) or key)
+  end,
+  BRIPv4Addresses6rd = function(mapping, param, key)
+    return getBRIPv4Addresses6rd(splitKey(key) or key)
+  end,
 }
 
 WANIPv6Connection.getall = function(mapping, key, parentKey)
@@ -268,6 +336,7 @@ WANIPv6Connection.getall = function(mapping, key, parentKey)
   networkBinding.sectionname = key
   networkBinding.option = nil
   local status = getUbusInterfaceStatus(key)
+  local getAllValues = uci_helper.getAllFromUci
   return {
     Enable = getEnable(key),
     AddressingType = getAddressingType(key),
@@ -277,8 +346,14 @@ WANIPv6Connection.getall = function(mapping, key, parentKey)
     Netmask = getNetMask(key, status),
     DNSEnabled = getDNSEnabled("DNSEnabled", key),
     DNSServers = getDNSServers(key, status),
-    MACAddress = getMACAddress(parentKey)
-  }
+    MACAddress = getMACAddress(parentKey),
+    IPv4MaskLen6rd = getAllValues.ip4prefixlen or '0',
+    PrefixLen6rd = getAllValues.ip6prefixlen or '24',
+    Prefix6rd = getAllValues.ip6prefix or '',
+    TunnelMTU6rd = getAllValues.mtu or '1280',
+    DelegatedPrefix6rd = getDelegatedPrefix6rd(key, status),
+    BRIPv4Addresses6rd = getBRIPv4Addresses6rd(key, status),
+}
 end
 
 WANIPv6Connection.set = {
@@ -349,6 +424,30 @@ WANIPv6Connection.set = {
     value = value == "IPv4" and "4" or "6"
     setOnUci(wansensingBinding, value, commitapply)
     transactions[wansensingBinding.config] = true
+  end,
+  IPv4MaskLen6rd = function (mapping, param, value, key)
+    return setUciValue(splitKey(key) or key, "ip4prefixlen", value)
+  end,
+  PrefixLen6rd = function (mapping, param, value, key)
+    return setUciValue(splitKey(key) or key, "ip6prefixlen", value)
+  end,
+  TunnelMTU6rd = function(mapping, param, value, key)
+    return setUciValue(splitKey(key) or key, "mtu", value)
+  end,
+  BRIPv4Addresses6rd = function(mapping, param, value, key)
+    key = splitKey(key) or key
+    local status = getUbusInterfaceStatus(key)
+    if not status.dynamic then
+      local rc, err = isValidIPv4(value)
+      if not rc then
+        return nil, err
+      end
+      return setUciValue(key, "peeraddr", value)
+    end
+    return nil, "Cannot set value for dynamically configured 6rd interface"
+  end,
+  Prefix6rd = function(mapping, param, value, key)
+    return setUciValue(splitKey(key) or key, "ip6prefix", value)
   end
 }
 

@@ -70,6 +70,10 @@ local private_ssid_encrypted
 -- ETH WAN
 local ethwan_name = "eth4"
 
+-- Timer needed to ensure discovery of the used bridge port
+local bridge_port_discovery_timer
+local bridge_port_discovery_timeout = 5000 -- milliseconds
+
 -- Cache for all network interfaces
 local all_interfaces = { }
 local all_started_l3_devices = { }
@@ -81,6 +85,80 @@ local configured_upstream_rates = { }
 local function run_command(s)
 	log:info(s)
 	return os.execute(s)
+end
+
+-- Wrapper around brctl showmacs, filtered by mac address
+--
+-- Parameters:
+-- - bridge_interface: [string] the bridge interface, usually this is br-lan
+-- - macaddress: [string] the macaddress to be filtered on
+--
+-- Returns:
+-- - [table] with
+-- -- portno: [number] index of the the port in the bridge
+-- -- islocal: [boolean] whether it concerns a local device (i.e., the gateway itself)
+-- -- aging: [number] last time seen
+-- -- mac: [string] the mac address
+local function brctl_showmac(bridge_interface, macaddress)
+	local result = {}
+	local f = io.popen ("brctl showmacs ".. bridge_interface)
+
+	if f == nil then
+		return result
+	end
+
+	while true do
+		-- parse line
+		local l = f:read("*l")
+		if l == nil then
+			break
+		end
+
+		result.portno, result.mac, result.islocal, result.aging = l:match("(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+		if result.mac == macaddress then
+			-- found it
+			result.portno = tonumber(result.portno);
+			result.islocal = (result.islocal == "yes");
+			result.aging = tonumber(result.aging);
+			break
+		else
+			result = {}
+		end
+	end
+
+	f:close()
+	return result
+end
+
+-- Converts the port index of a certain bridge interface to the actual interface number
+--
+-- Parameters:
+-- - bridge_interface: [string] the bridge interface, usually this is br-lan
+-- - port: [number] index of the interface to be queried
+--
+-- Returns
+-- - [string] with the interface name
+local function bridge_getport(bridge_interface, portid)
+  local syspath = "/sys/class/net/" .. bridge_interface .. "/brif"
+  local iter, dir_obj, success
+
+  success, iter, dir_obj = pcall(lfs.dir, syspath)
+  if (not success) then
+    return ""
+  end
+  for interface in iter, dir_obj do
+    if interface ~= "." and interface ~= ".." then
+      local f = io.open(syspath .. "/" .. interface .. "/port_no")
+      if (f ~= nil) then
+	local port = f:read("*n")
+	f:close()
+	if (port == portid) then
+	  return interface
+	end
+      end
+    end
+  end
+  return ""
 end
 
 -- Helper that configures TBF queue discipline on an interface
@@ -918,7 +996,7 @@ local function refresh_tunnels_using_tunlink(l3_device)
 	end
 end
 
--- Retrieve the tunlink of a certain tunnel. 
+-- Retrieve the tunlink of a certain tunnel.
 -- Returns "wan" if tunnel isn't known or has no tunlink.
 local function get_tunnel_tunlink(name)
 	local tunnel = tunnels[name]
@@ -1695,8 +1773,15 @@ local function handle_private_ssid_event(msg)
 	end
 end
 
--- Get the lowest interface possible beneath a certain device
-local function get_lowest_interface(device)
+-- Get the lowest device possible beneath a certain device
+--
+-- Parameters:
+-- - msg: [table] the interface status
+-- Returns (lowest_device, bridge_port_unknown) where
+--          - bridge_port_unknown is true when used bridge port was not yet discovered (otherwise is nil)
+local function get_lowest_device(intf)
+	local device = intf["device"] or intf["l3_device"]
+	local bridge_port_unknown
 	while device do
 		local status = ubus_conn:call("network.device", "status", { ["name"] = device })
 		if type(status) ~= "table" then
@@ -1705,6 +1790,99 @@ local function get_lowest_interface(device)
 
 		if status["parent"] then
 			device = status["parent"]
+		elseif tostring(status["type"]):lower() == "bridge" and
+		       type(status["bridge-members"]) == "table" and
+		       #status["bridge-members"] > 0 then
+
+			-- Find the next hop MAC address
+			local nexthop_macaddr
+			if intf["proto"] == "pppoe" then
+				-- PPPoE case
+				if type(intf["data"]) == "table" and
+				   type(intf["data"]["pppinfo"]) == "table" and
+				   type(intf["data"]["pppinfo"]["access-concentrator-mac"]) == "string" then
+					nexthop_macaddr = intf["data"]["pppinfo"]["access-concentrator-mac"]:lower()
+				end
+			elseif intf["proto"] == "dhcp" then
+				-- DHCP case
+				if type(intf["route"]) ~= "table" then
+					-- Cannot discover the used bridge port wihout having a route
+					-- from where we can pick a next hop
+					break
+				end
+				-- Retrieve the network.neigh cached status
+				local neigh_status = ubus_conn:call("network.neigh", "cachedstatus", {})
+				-- then search for the next hop mac address
+				if type(neigh_status) == "table" and type(neigh_status["neigh"]) == "table" then
+					neigh_status = neigh_status["neigh"]
+					for _,r in pairs(intf["route"]) do
+						if type(r) == "table" and r["nexthop"] then
+							for _, n in pairs(neigh_status) do
+								if type(n) == "table" and n["mac-address"] and
+								   n["interface"] == device and
+								   type(n["ipv4-address"]) == "table" and
+								   n["ipv4-address"]["address"] == r["nexthop"] then
+									nexthop_macaddr = n["mac-address"]
+									break
+								end
+							end
+							-- One resolved next hop should do it
+							if nexthop_macaddr ~= nil then
+								break
+							end
+						end
+					end
+				end
+			elseif intf["proto"] == "dhcpv6" then
+				-- DHCPv6 case
+				if type(intf["route"]) ~= "table" then
+					-- Cannot discover the used bridge port wihout having a route
+					-- from where we can pick a next hop
+					break
+				end
+				-- Retrieve the network.neigh status
+				local neigh_status = ubus_conn:call("network.neigh", "status", {})
+				-- then search for the next hop mac address
+				if type(neigh_status) == "table" and type(neigh_status["neigh"]) == "table" then
+					neigh_status = neigh_status["neigh"]
+					for _,r in pairs(intf["route"]) do
+						if type(r) == "table" and r["nexthop"] then
+							for _, n in pairs(neigh_status) do
+								if type(n) == "table" and n["mac-address"] and
+								   n["interface"] == device and
+								   type(n["ipv6-address"]) == "table" and
+								   n["ipv6-address"]["address"] == r["nexthop"] then
+									nexthop_macaddr = n["mac-address"]
+									break
+								end
+							end
+							-- One resolved next hop should do it
+							if nexthop_macaddr ~= nil then
+								break
+							end
+						end
+					end
+				end
+			else
+				-- For other protocols, lowest device possible will be the bridge itself
+				break
+			end
+			if nexthop_macaddr == nil then
+				log:error("unknown next hop MAC address for interface " .. device .. " proto " .. intf["proto"])
+				bridge_port_unknown = true
+				break
+			end
+
+			-- Get the bridge port through which next hop MAC address is reachable
+			local brinfo = brctl_showmac(device, nexthop_macaddr)
+			local used_port = brinfo.portno and not brinfo.islocal and bridge_getport(device, brinfo.portno) or ""
+			if used_port ~= "" then
+				device = used_port
+			else
+				log:error("bridge " .. device .. " mactable does not contain " .. nexthop_macaddr)
+				bridge_port_unknown = true
+				break
+			end
 		elseif tostring(status["type"]):lower() == "vlan" then
 			local pos = string.find(device, "[.]")
 			if pos then
@@ -1715,7 +1893,7 @@ local function get_lowest_interface(device)
 			break
 		end
 	end
-	return device
+	return device, bridge_port_unknown
 end
 
 -- Initialize all interfaces cached state
@@ -1732,8 +1910,19 @@ local function init_all_interfaces_state()
 				if elem["interface"] then
 					local up = elem["up"] and true or nil
 					local l3_device = elem["l3_device"]
-					local lowest_device = get_lowest_interface(elem["device"] or l3_device)
+					local lowest_device, bridge_port_unknown = get_lowest_device(elem)
 					local is_over_xdsl, has_ipv4, has_ipv6
+
+					if bridge_port_unknown then
+						if up then
+							-- Lowest device is not properly discovered, retry the same operation after awhile
+							up = nil
+							bridge_port_discovery_timer:set(bridge_port_discovery_timeout)
+						else
+							-- Lowest device accuracy is relevant only on operational interfaces
+							bridge_port_unknown = nil
+						end
+					end
 
 					if lowest_device then
 						local xtmdevice = cursor_persist:get(xtmconfig, lowest_device)
@@ -1765,7 +1954,10 @@ local function init_all_interfaces_state()
 							all_started_l3_devices[l3_device] = { }
 						end
 						if has_ipv4 then
-							all_started_l3_devices[l3_device]["ipv4"] = elem["interface"]
+							if not all_started_l3_devices[l3_device]["ipv4"] or
+							   elem["proto"] == "pppoe" or elem["proto"] == "dhcp" then
+								all_started_l3_devices[l3_device]["ipv4"] = elem["interface"]
+							end
 						elseif all_started_l3_devices[l3_device]["ipv4"] then
 							lowest_device = all_interfaces[all_started_l3_devices[l3_device]["ipv4"]]["lowest_device"]
 							if not is_over_xdsl then
@@ -1773,7 +1965,10 @@ local function init_all_interfaces_state()
 							end
 						end
 						if has_ipv6 then
-							all_started_l3_devices[l3_device]["ipv6"] = elem["interface"]
+							if not all_started_l3_devices[l3_device]["ipv6"] or
+							   elem["proto"] == "dhcpv6" then
+								all_started_l3_devices[l3_device]["ipv6"] = elem["interface"]
+							end
 						elseif has_ipv4 and all_started_l3_devices[l3_device]["ipv6"] then
 							all_interfaces[all_started_l3_devices[l3_device]["ipv6"]]["lowest_device"] = lowest_device
 							if is_over_xdsl then
@@ -1784,6 +1979,7 @@ local function init_all_interfaces_state()
 
 					all_interfaces[elem["interface"]] = {
 						up = up,
+						bridge_port_unknown = bridge_port_unknown,
 						l3_device = l3_device,
 						lowest_device = lowest_device,
 						is_over_xdsl = is_over_xdsl,
@@ -1806,10 +2002,16 @@ local function handle_network_interface_event(msg)
 	if type(msg) == "table" and msg["interface"] then
 		if msg["action"] == "ifup" then
 			local status = ubus_conn:call("network.interface." .. msg["interface"], "status", { })
-			if status then
+			if type(status) == "table" then
+				local up = true
 				local l3_device = status["l3_device"]
-				local lowest_device = get_lowest_interface(status["device"] or l3_device)
+				local lowest_device, bridge_port_unknown = get_lowest_device(status)
 				local is_over_xdsl, has_ipv4, has_ipv6
+
+				if bridge_port_unknown then
+					-- Lowest device is not properly discovered, retry the same operation after awhile
+					bridge_port_discovery_timer:set(bridge_port_discovery_timeout)
+				end
 
 				if lowest_device then
 					local xtmconfig = "xtm"
@@ -1844,7 +2046,10 @@ local function handle_network_interface_event(msg)
 						all_started_l3_devices[l3_device] = { }
 					end
 					if has_ipv4 then
-						all_started_l3_devices[l3_device]["ipv4"] = msg["interface"]
+						if not all_started_l3_devices[l3_device]["ipv4"] or
+						   status["proto"] == "pppoe" or status["proto"] == "dhcp" then
+							all_started_l3_devices[l3_device]["ipv4"] = msg["interface"]
+						end
 					elseif all_started_l3_devices[l3_device]["ipv4"] then
 						lowest_device = all_interfaces[all_started_l3_devices[l3_device]["ipv4"]]["lowest_device"]
 						if not is_over_xdsl then
@@ -1852,7 +2057,10 @@ local function handle_network_interface_event(msg)
 						end
 					end
 					if has_ipv6 then
-						all_started_l3_devices[l3_device]["ipv6"] = msg["interface"]
+						if not all_started_l3_devices[l3_device]["ipv6"] or
+						   status["proto"] == "dhcpv6" then
+							all_started_l3_devices[l3_device]["ipv6"] = msg["interface"]
+						end
 					elseif has_ipv4 and all_started_l3_devices[l3_device]["ipv6"] then
 						all_interfaces[all_started_l3_devices[l3_device]["ipv6"]]["lowest_device"] = lowest_device
 						if is_over_xdsl then
@@ -1865,7 +2073,8 @@ local function handle_network_interface_event(msg)
 				end
 
 				all_interfaces[msg["interface"]] = {
-					up = true,
+					up = bridge_port_unknown == nil or nil,
+					bridge_port_unknown = bridge_port_unknown,
 					l3_device = l3_device,
 					lowest_device = lowest_device,
 					is_over_xdsl = is_over_xdsl,
@@ -1901,6 +2110,7 @@ local function handle_network_interface_event(msg)
 			local interface = all_interfaces[msg["interface"]]
 			if interface then
 				interface["up"] = nil
+				interface["bridge_port_unknown"] = nil
 				local l3_device = interface["l3_device"]
 
 				if l3_device and all_started_l3_devices[l3_device] then
@@ -1956,6 +2166,29 @@ local function handle_network_interface_event(msg)
 		perform_ubus_operations(ubus_operations)
 	end
 end
+
+-- Retry discovery of the used bridge port on interfaces with
+-- bridge_port_unknown attribute set to true
+--local handle_network_interface_event
+local function bridge_port_discovery_timer_handler()
+	local reset_timer
+
+	for interface, status in pairs(all_interfaces) do
+		if status["bridge_port_unknown"] then
+			handle_network_interface_event({ ["interface"]=interface, ["action"]="ifup" })
+
+			if all_interfaces[interface]["bridge_port_unknown"] then
+				-- Retry again after a few seconds
+				reset_timer = true
+			end
+		end
+	end
+
+	if reset_timer then
+		bridge_port_discovery_timer:set(bridge_port_discovery_timeout)
+	end
+end
+bridge_port_discovery_timer = uloop.timer(bridge_port_discovery_timer_handler)
 
 local function errhandler(err)
 	log:critical(err)

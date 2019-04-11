@@ -1,10 +1,9 @@
---lines 551 and 560 added and line 532 commented to address NG-71427
--- NG-71427 hidden = "true", reverted in NG-79929 to support unhide_pattern
 local lfs = require("lfs")
 
 if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
   return
 end
+local crypto = require("tch.simplecrypto")
 local string = string
 local match, format, find, sub, commitapply, eventsource, mapper, math, os, ceil = string.match, string.format, string.find, string.sub, commitapply, eventsource, mapper, math, os, math.ceil
 local tostring, tonumber, ipairs, pairs, setmetatable, register, table, type = tostring, tonumber, ipairs, pairs, setmetatable, register, table, type
@@ -28,7 +27,6 @@ local rtp_session = {}
 local service_default = require("transformer.shared.servicedefault")
 local add_service = service_default.services.add
 local named_parameter = service_default.services.named_service_section
-local profile_update = {}
 local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_ = {
     objectType = {
         name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.",
@@ -190,34 +188,11 @@ local function isInTable(value, list)
     return nil
 end
 
+local function isEncrypted(data)
+  return #data >=72 and match(data,"^$%d%d$%d%d%$")
+end
+
 local function line_commit()
-    for index, value in pairs(profile_update) do
-	local profile_new = {}
-        for index1, value1 in pairs(value) do
-	    profile_new["profile"] = index
-	    if index1 == "Enable" then
-                profile_new["enable"] = tonumber(EnableStatus[value1])
-	    else
-		if not profile_new["SIP"] then
-		    profile_new["SIP"] = {}
-		    profile_new["SIP"][1] = {}
-	        end
-	        if index1 == "URI" then
-		    profile_new["SIP"][1]["uri"] = value1
-	        elseif index1 == "AuthPassword" then
-		    profile_new["SIP"][1]["password"] = value1
-	        elseif index1 == "AuthUserName" then
-		    profile_new["SIP"][1]["user_name"] = value1
-	        elseif index1 == "CallerIDName" then
-		    profile_new["SIP"][1]["display_name"] = value1
-	        elseif index1 == "X_000E50_DisplayName" then
-		    profile_new["SIP"][1]["display_name"] = value1
-	        end
-	    end
-        end
-	conn:call("mmpbx.profile", "update",profile_new)
-    end
-    profile_update = {}
     local binding = {}
     for config in pairs(transactions) do
         binding.config = config
@@ -242,7 +217,9 @@ local function getEnable(config, name)
         option = "enabled",
         default = "0"
     }
-    return EnableStatus[uci_helper.get_from_uci(binding)]
+    local val = EnableStatus[uci_helper.get_from_uci(binding)]
+    binding.default = nil
+    return val
 end
 
 local line_sip_net_map = {
@@ -250,7 +227,7 @@ local line_sip_net_map = {
         Enable = getEnable,
         Reset = function() return "0" end,
         CallState = function(config, name)
-            local calls = conn:call("mmpbx.call", "get", {})
+            local calls = conn:call("mmpbx.call", "get", {}) or {}
 	    local callTable = {}
 	    local mediaTable = {}
             if calls and type(calls) == "table" then
@@ -299,7 +276,7 @@ local line_sip_net_map = {
 	    return "Idle"
         end,
         Status = function(config, name)
-            local profiles = conn:call("mmpbx.profile", "get", {})
+            local profiles = conn:call("mmpbx.profile", "get", {}) or {}
             local regStatus = profiles and profiles[name] and profiles[name]["sipRegisterState"] or ""
             if (ProfileRegStatus[regStatus] == "Disabled") and profiles and profiles[name] and (profiles[name]["enable"] == "true") then
                 return "Error"
@@ -371,7 +348,7 @@ local line_sip_server_map = {
             if addr ~= "" then
                 local ipaddr = addr:match("(%d+%.%d+.%d+.%d+)")
                 if ipaddr then
-                    local hosts = conn:call("hostmanager.device", "get", {})
+                    local hosts = conn:call("hostmanager.device", "get", {}) or {}
                     getMacAddress(hosts, ip)
                     return macaddr
                 end
@@ -407,7 +384,7 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_.entries = function(mapping,
 
     numOfFxs, numOfDect, numOfSipdev = profile_helper.find_device_support(parentkey)
 
-    registrars = conn:call("mmpbxrvsipdev.registrar", "list", {})
+    registrars = conn:call("mmpbxrvsipdev.registrar", "list", {}) or {}
     return entries
 end
 
@@ -445,7 +422,19 @@ local function getParam(maps)
                 binding.config = config
                 binding.sectionname = name
                 binding.option = map.value[param]
-                return uci_helper.get_from_uci(binding)
+                if param == "AuthPassword" then
+                    local value, errMsg
+                    value = uci_helper.get_from_uci(binding)
+                    if isEncrypted(value) then
+                        value, errMsg = crypto.decrypt(value)
+                        if not value then
+                            return nil, errMsg
+                        end
+                    end
+                    return value
+                else
+                  return uci_helper.get_from_uci(binding)
+                end
             end
         else
             return map.default[param]
@@ -460,21 +449,20 @@ local function setParam(maps, set_maps)
         binding.sectionname = name
         local map = maps[ltype]
         local set_map = set_maps[ltype]
-        local mmpbx_state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
-	if not profile_update[name] then
-	    profile_update[name] = {}
-	end
+
         if set_map[param] then
             if type(set_map[param]) == "function" then
+		if param == "AuthPassword" then
+                    local errMsg
+                    if not isEncrypted(value) then
+                        value, errMsg = crypto.encrypt_keysel(value, crypto.AES_256_CBC, crypto.RIP_RANDOM_A)
+                        if not value then
+                            return nil, errMsg
+                        end
+                    end
+                end
                 binding.option = nil
-		if ((ltype == "sip_profile") and (param == "Enable" or param == "URI" or param == "AuthPassword") and (mmpbx_state == "RUNNING")) then
-		    local err, msg = set_map[param](binding, value, ltype)
-                    transactions[binding.config] = true
-		    profile_update[name][param] = value
-		else
-		    local err, msg = set_map[param](binding, value)
-		    transactions[binding.config] = true
-		end
+                local err, msg = set_map[param](binding, value)
                 if not err and msg then
                     return err, msg
                 end
@@ -482,14 +470,7 @@ local function setParam(maps, set_maps)
                 return true
             elseif type(map.value[param]) == "string" then
                 binding.option = map.value[param]
-		if ((ltype == "sip_profile") and (param == "X_000E50_DisplayName" or param == "AuthUserName") and (mmpbx_state == "RUNNING")) then
-		    uci_helper.set_on_uci(binding, value)
-		    transactions[binding.config] = true
-		    profile_update[name][param] = value
-		else
-		    uci_helper.set_on_uci(binding, value, commitapply)
-		    transactions[binding.config] = true
-		end
+                uci_helper.set_on_uci(binding, value, commitapply)
                 transactions[binding.config] = true
                 return true
             end
@@ -498,20 +479,14 @@ local function setParam(maps, set_maps)
     end
 end
 
-local function setEnable(binding, paramvalue, ltype)
+local function setEnable(binding, paramvalue)
     local value = "0"
-    local mmpbx_state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
     binding.option = "enabled"
     if paramvalue == "Quiescent" then
        paramvalue = "Disabled"
     end
     value = EnableStatus[paramvalue]
-    if (ltype == "sip_profile") and (mmpbx_state == "RUNNING") then
-	uci_helper.set_on_uci(binding, value)
-    else
-	uci_helper.set_on_uci(binding, value, commitapply)
-    end
-
+    uci_helper.set_on_uci(binding, value, commitapply)
 end
 
 local function setReset(binding, paramvalue)
@@ -649,8 +624,7 @@ local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_ = {
             },
             AuthPassword = {
                 access = "readWrite",
---NG-71427 hidden = "true", reverted in NG-79929 to support unhide_pattern28.11. workaround reintroduced
---				hidden = "true",
+                hidden = "true",
                 type = "string",
                 max = "128",
                 default = "",
@@ -665,7 +639,6 @@ local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_ = {
         }
     }
 }
-
 
 local sip_sip_net_map = {
     value = {
@@ -692,23 +665,17 @@ local sip_maps = {
 
 local set_sip_sip_net_map = {
     AuthUserName = true,
-    AuthPassword = function(binding, value, ltype)
+    AuthPassword = function(binding, value)
         binding.option = "password"
-        local mmpbx_state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
-	if (ltype == "sip_profile") and (mmpbx_state == "RUNNING") then
-            uci_helper.set_on_uci(binding, value)
-	else
-	    uci_helper.set_on_uci(binding, value, commitapply)
-	end
+        uci_helper.set_on_uci(binding, value, commitapply)
         return true
     end,
-    URI = function(binding, value, ltype)
+    URI = function(binding, value)
         binding.option = "uri"
         local uris = {}
-        local mmpbx_state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
         local profile_binding = { config = "mmpbxrvsipnet", sectionname = "profile", option = "uri"}
 
-	uci_helper.foreach_on_uci(profile_binding, function(s)
+        uci_helper.foreach_on_uci(profile_binding, function(s)
             if s.uri ~= nil then
                 uris[s.uri] = true
             end
@@ -717,11 +684,7 @@ local set_sip_sip_net_map = {
         if uci_helper.get_from_uci(binding) ~= value and uris[value] then
             return nil, "this URI has already existed"
         end
-	if (ltype == "sip_profile") and (mmpbx_state == "RUNNING") then
-            uci_helper.set_on_uci(binding, value)
-        else
-            uci_helper.set_on_uci(binding, value, commitapply)
-        end
+        uci_helper.set_on_uci(binding, value, commitapply)
         return true
     end,
 }
@@ -749,9 +712,14 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.getall = function(mappi
         uri = v[map.value["URI"]]
     end
 
+    local password = v[map.value["AuthPassword"]]
+    if password and isEncrypted(password) then
+        password = crypto.decrypt(password)
+    end
+
     return {
         AuthUserName = v[map.value["AuthUserName"]] or map.default["AuthUserName"],
-        AuthPassword = v[map.value["AuthPassword"]] or map.default["AuthPassword"],
+        AuthPassword = password or map.default["AuthPassword"],
         URI = uri or map.default["URI"],
     }
 end
@@ -840,12 +808,33 @@ local function subscribe_getter(mapping, paramname, key, parentkey)
     binding.option = subscribe_map[paramname]
     local value_table = get_from_uci(binding)
     local index = key:match(".*|.*|(.*)")
-    return value_table[tonumber(index)]
+    if paramname == "AuthPassword" then
+        local value = value_table[tonumber(index)]
+        local errMsg
+        if value and isEncrypted(value) then
+            value, errMsg = crypto.decrypt(value)
+            if not value then
+                return nil, errMsg
+            end
+            return value
+        end
+     else
+        return value_table[tonumber(index)]
+     end
 end
 local function subscribe_setter(mapping, paramname, paramvalue, key, parentkey)
     binding.config = "mmpbxrvsipnet"
     binding.sectionname = parentkey
     binding.option = subscribe_map[paramname]
+    if paramname == "AuthPassword" then
+        local errMsg
+        if not isEncrypted(paramvalue) then
+            paramvalue, errMsg = crypto.encrypt_keysel(paramvalue, crypto.AES_256_CBC, crypto.RIP_RANDOM_A)
+            if not paramvalue then
+                return nil, errMsg
+            end
+        end
+    end
     local index = key:match(".*|.*|(.*)")
     local value_table = get_from_uci(binding)
     if (#value_table > 0 and value_table[tonumber(index)] ~= nil) then
@@ -937,7 +926,7 @@ local function session_entries(mapping, parentkey, grandkey)
       return {}
    end
 
-   rtp_session = conn:call("mmpbx.rtp.session", "list", {})
+   rtp_session = conn:call("mmpbx.rtp.session", "list", {}) or {}
    if rtp_session then
         for k,v in pairs (rtp_session) do
 	   if uri == v["LineName"] then
@@ -1596,10 +1585,23 @@ local function convert2Sec(value)
     return 0
 end
 
+local function getModifiedUri(uri)
+    local delimiter1 = find(uri,":")
+    local delimiter2 = find(uri,"@")
+    if delimiter1 and delimiter2 then
+        return sub(uri,(delimiter1+1),(delimiter2-1))
+    elseif delimiter2 then
+        return sub(uri,0,(delimiter2-1))
+    else
+        return uri
+    end
+end
+
 local function stats_get(mapping, param, key, parentkey)
-    local uri_get=getParam(sip_maps)
+    local uri_get = getParam(sip_maps)
     local uri = uri_get(mapping, "URI", key, parentkey)
-    if uri == "" then
+    local modified_uri = getModifiedUri(uri)
+    if modified_uri == "" then
         return "0"
     end
     local value = "0"
@@ -1608,14 +1610,14 @@ local function stats_get(mapping, param, key, parentkey)
     end
     if param == "ServerDownTime" then
         local _, name = getInfoFromKey(key, parentkey)
-        local profiles = conn:call("mmpbx.profile", "get", {})
+        local profiles = conn:call("mmpbx.profile", "get", {}) or {}
         if profiles and profiles[name] then
             value = profiles[name]["serverDownTime"] or "0"
         end
         return tostring(value)
     end
     if callnumber_statistic_map[param] then
-        local callnumber_stats = conn:call("mmdbd.callnumber.statistics", "get", {["profile"]=uri})
+        local callnumber_stats = conn:call("mmdbd.callnumber.statistics", "get", {["profile"]=modified_uri}) or {}
         if callnumber_stats and callnumber_stats[1] then
             local ubus_name = callnumber_statistic_map[param]
             value = tostring(callnumber_stats[1][ubus_name] or "0")
@@ -1623,7 +1625,7 @@ local function stats_get(mapping, param, key, parentkey)
         return value
     end
     if current_ongoing_stats_map[param] then
-        local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=uri})
+        local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=modified_uri}) or {}
         if rtp_session and rtp_session[1] then
             if param ~= "X_000E50_CurrCallCodecInUse" then
                 local ubus_name = current_ongoing_stats_map[param]
@@ -1646,7 +1648,7 @@ local function stats_get(mapping, param, key, parentkey)
     end
 
     if current_ongoing_call_map[param] then
-        local call_info = conn:call("mmpbx.call", "get", {["profile"]=uri})
+        local call_info = conn:call("mmpbx.call", "get", {["profile"]=modified_uri}) or {}
         local ubus_name = current_ongoing_call_map[param]
         for _,callinfo_param in pairs (call_info) do
             value = tostring(callinfo_param[ubus_name] or "0")
@@ -1654,7 +1656,7 @@ local function stats_get(mapping, param, key, parentkey)
         return value
     end
     if last_call_stats_map[param] then
-        local call_stats = conn:call("mmdbd.call.statistics", "get", {["profile"]=uri})
+        local call_stats = conn:call("mmdbd.call.statistics", "get", {["profile"]=modified_uri}) or {}
         local ubus_name = last_call_stats_map[param]
         if call_stats then
             for _, v in pairs(call_stats) do
@@ -1805,23 +1807,13 @@ local function stats_getall(mapping, key, parentkey)
     }
     local uri_get=getParam(sip_maps)
     local uri = uri_get(mapping, "URI", key, parentkey)
-    local delimiter1 = find(uri,":")
-    local delimiter2 = find(uri,"@")
-    local modified_uri
-    if delimiter1 ~= nil and delimiter2 ~= nil then
-       modified_uri = sub(uri,(delimiter1+1),(delimiter2-1))
-    elseif delimiter1 == nil and delimiter2 ~= nil then
-       modified_uri = sub(uri,0,(delimiter2-1))
-    else
-       modified_uri = uri
-    end
+    local modified_uri = getModifiedUri(uri)
     if modified_uri == "" then
-        return results
+         return results
     end
-
 
     local cur_codec = 0
-    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=modified_uri} )
+    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=modified_uri} ) or {}
     if rtp_session and rtp_session[1] then
         for k, v in pairs(current_ongoing_stats_map) do
             if k ~= X_000E50_CurrCallCodecInUse then
@@ -1847,21 +1839,21 @@ local function stats_getall(mapping, key, parentkey)
 	end
     end
 
-    local call_info = conn:call("mmpbx.call", "get", {["profile"]=modified_uri} )
+    local call_info = conn:call("mmpbx.call", "get", {["profile"]=modified_uri} ) or {}
     if call_info and call_info[1] then
         for k, v in pairs(current_ongoing_call_map) do
             results[k] = tostring(call_info[1][v] or "0")
         end
     end
 
-    local callnumber = conn:call("mmdbd.callnumber.statistics", "get", {["profile"]=modified_uri} )
+    local callnumber = conn:call("mmdbd.callnumber.statistics", "get", {["profile"]=modified_uri} ) or {}
     if callnumber and callnumber[1] then
         for k, v in pairs(callnumber_statistic_map) do
 	   results[k] = tostring(callnumber[1][v] or "0")
 	end
     end
 
-    local call_stats = conn:call("mmdbd.call.statistics", "get", {["profile"]=modified_uri})
+    local call_stats = conn:call("mmdbd.call.statistics", "get", {["profile"]=modified_uri}) or {}
     if call_stats then
         for _, v in pairs(call_stats) do
             for _, v2 in pairs(v) do
@@ -1886,7 +1878,7 @@ local function stats_getall(mapping, key, parentkey)
     end
 
     local _, name = getInfoFromKey(key, parentkey)
-    local profiles = conn:call("mmpbx.profile", "get", {})
+    local profiles = conn:call("mmpbx.profile", "get", {}) or {}
     if profiles and profiles[name] then
         results.ServerDownTime =  tostring(profiles[name]["serverDownTime"]) or "0"
     end
@@ -1994,7 +1986,7 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_X_List_i_.entries = fu
   if uri == "" then
     return {}
   end
-  local callStats = conn:call("mmdbd.call.statistics", "get", {["profile"] = uri} )
+  local callStats = conn:call("mmdbd.call.statistics", "get", {["profile"] = uri} ) or {}
   if callStats then
     for _, calllog in pairs(callStats) do
       for _, params in ipairs(calllog) do
@@ -2314,6 +2306,23 @@ local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_ = {
                 type = "boolean",
                 description = "Enable/Disable call transfer service",
             },
+            X_FASTWEB_CallWaitingResponseType = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                  "180",
+                  "180+Alert-Info",
+                  "182",
+                },
+            },
+            X_FASTWEB_CallWaitingDropTimer = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            X_FASTWEB_CallWaitingAlertInfo = {
+                access = "readWrite",
+                type = "string",
+            },
         }
     }
 }
@@ -2425,6 +2434,9 @@ local call_common_default = setmetatable({
     CallReturnEnable = "0",
     X_FASTWEB_SendRemoteCHTone = "true",
     X_FASTWEB_PlayLocalCHTone = "true",
+    X_FASTWEB_CallWaitingResponseType = "180+Alert-Info",
+    X_FASTWEB_CallWaitingDropTimer = "30",
+    X_FASTWEB_CallWaitingAlertInfo = "http://127.0.0.1/Beep2",
     CallWaitingStatus = "Idle",
     ConferenceCallingStatus = "Idle",
     ConferenceCallingSessionCount = "0",
@@ -2456,6 +2468,9 @@ local call_sip_net_map = {
         ConferenceCallingSessionCount = {nil, "conferenceCallingSessionCount",nil, nil},
         X_FASTWEB_SendRemoteCHTone = {"sip_net","sdp_direction_call_hold", nil, convertSdpInfo},
         X_FASTWEB_PlayLocalCHTone = {"sip_net","sdp_direction_call_hold_answer", nil, convertSdpInfo2},
+        X_FASTWEB_CallWaitingResponseType = {"sip_net", "call_waiting_provisional_response", nil, nil},
+        X_FASTWEB_CallWaitingDropTimer = {"CALL_WAITING", "timeout", true, getSipDevice},
+        X_FASTWEB_CallWaitingAlertInfo = {"sip_net", "call_waiting_alert_info", nil, nil},
         X_CallHoldProv = {"HOLD", "provisioned"},
         X_CallHoldEnable = {"HOLD", "activated"},
         X_CallWaitingProv = {"CALL_WAITING", "provisioned", true, getSipDevice},
@@ -2514,6 +2529,9 @@ local set_call_sip_net_map = {
     DoNotDisturbEnable = false,
     X_FASTWEB_SendRemoteCHTone = false,
     X_FASTWEB_PlayLocalCHTone = false,
+    X_FASTWEB_CallWaitingResponseType = false,
+    X_FASTWEB_CallWaitingDropTimer = false,
+    X_FASTWEB_CallWaitingAlertInfo = false,
     X_CallHoldProv = false,
     X_CallHoldEnable = false,
     X_CallWaitingProv = false,
@@ -2589,7 +2607,7 @@ local function getCallValue(map, s, param, hasprofile, name)
 end
 
 local function getCallWaitingAndConferenceStatus(map,param, key, data)
-    local call_status = conn:call("mmpbx.device", "get", {})
+    local call_status = conn:call("mmpbx.device", "get", {}) or {}
     if call_status and type(call_status) == "table" then
         local device = {}
         local isMatchingDevice = false
@@ -2644,7 +2662,7 @@ local function getCallWaitingAndConferenceStatus(map,param, key, data)
 end
 
 local function getMessageWaitingStatus(map,param, key,data)
-    local profiles = conn:call("mmpbx.profile", "get", {})
+    local profiles = conn:call("mmpbx.profile", "get", {}) or {}
     if profiles and profiles[key] then
         if (type(data) == "table") then
             data[param] = MessageWaitingStatus[(profiles[key][map.value[param][2]])] or "0"
@@ -2669,13 +2687,23 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.getall = fu
     end)
     for p,_ in pairs(Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.objectType.parameters) do
         if type(map.value[p]) == "table" then
-            if (p == "X_FASTWEB_SendRemoteCHTone" or p == "X_FASTWEB_PlayLocalCHTone") then
+            if (p == "X_FASTWEB_SendRemoteCHTone" or p == "X_FASTWEB_PlayLocalCHTone" or p == "X_FASTWEB_CallWaitingResponseType" or p == "X_FASTWEB_CallWaitingAlertInfo") then
                 binding.config = configfile_sip
                 binding.sectionname = map.value[p][1]
                 binding.option = map.value[p][2]
+                binding.default = nil
                 local cb = map.value[p][4]
                 local res = get_from_uci(binding)
-                data[p] = cb and cb(res)
+                if p == "X_FASTWEB_CallWaitingResponseType" then
+                    binding.option = "call_waiting_alert_info"
+                    local alertInfo = get_from_uci(binding)
+                    if alertInfo ~= nil and alertInfo ~="" then
+                        res = "180+Alert-Info"
+                    end
+                elseif p == "X_FASTWEB_CallWaitingAlertInfo" then
+                    res = res and match(res, "<(.*)>") or ""
+                end
+                data[p] = cb and cb(res) or res
             elseif (p == "ConferenceCallingStatus" or p == "CallWaitingStatus" or p == "ConferenceCallingSessionCount") then
                 getCallWaitingAndConferenceStatus(map,p, key,  data)
             elseif (p == "MessageWaiting") then
@@ -2699,13 +2727,23 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.get = funct
     local map = call_maps[ltype]
     local res = map.default[param]
     if type(map.value[param]) == "table" then
-        if (param == "X_FASTWEB_SendRemoteCHTone" or param == "X_FASTWEB_PlayLocalCHTone") then
+        if (param == "X_FASTWEB_SendRemoteCHTone" or param == "X_FASTWEB_PlayLocalCHTone" or param == "X_FASTWEB_CallWaitingResponseType" or param == "X_FASTWEB_CallWaitingAlertInfo") then
             binding.config = configfile_sip
             binding.sectionname = map.value[param][1]
             binding.option = map.value[param][2]
+            binding.default = nil
             local cb = map.value[param][4]
             res = get_from_uci(binding)
-            res =  cb and cb(res) or "true"
+            if param == "X_FASTWEB_CallWaitingResponseType" then
+                binding.option = "call_waiting_alert_info"
+                local alertInfo = get_from_uci(binding)
+                if alertInfo ~= nil and alertInfo ~="" then
+                    res = "180+Alert-Info"
+                end
+            elseif param == "X_FASTWEB_CallWaitingAlertInfo" then
+                res = res and match(res,"<(.*)>") or ""
+            end
+            res = cb and cb(res) or res
         elseif (param == "ConferenceCallingStatus" or param == "CallWaitingStatus" or param == "ConferenceCallingSessionCount") then
            res =  getCallWaitingAndConferenceStatus(map,param, key, res)
         elseif (param == "MessageWaiting") then
@@ -2784,6 +2822,12 @@ local function checkDevice(cb, name, value, s, stype, option)
                             set_on_uci(device_binding, value, commitapply)
                         end
                     end
+                    if (option == "timeout") then
+                        if s.provisioned == "1" then
+                            device_binding.option = "timeout"
+                            set_on_uci(device_binding, value, commitapply)
+                        end
+                    end
                     transactions[device_binding.config] = true
                 end
             else
@@ -2800,6 +2844,12 @@ local function checkDevice(cb, name, value, s, stype, option)
                         if (option == "activated") then
                             if s.provisioned == "1" then
                                 device_binding.option = "activated"
+                                set_on_uci(device_binding, value, commitapply)
+                            end
+                        end
+                        if (option == "timeout") then
+                            if s.provisioned == "1" then
+                                device_binding.option = "timeout"
                                 set_on_uci(device_binding, value, commitapply)
                             end
                         end
@@ -2825,35 +2875,48 @@ Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.set = funct
     local config, name, ltype = getInfoFromKey(key, parentkey)
     local map = call_maps[ltype]
     local set_map = set_call_maps[ltype]
-    local mmpbx_state = uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
-    if not profile_update[name] then
-        profile_update[name] = {}
-    end
+
     if set_map[param] ~= nil then
         if type(map.value[param]) == "string" then
             binding.config = config
             binding.sectionname = name
             binding.option = map.value[param]
-	    if (ltype == "sip_profile") and (param == "CallerIDName") and (mmpbx_state == "RUNNING") then
-		uci_helper.set_on_uci(binding, value)
-		transactions[binding.config] = true
-		profile_update[name][param] = value
-	    else
-		uci_helper.set_on_uci(binding, value, commitapply)
-		transactions[binding.config] = true
-            end
+            uci_helper.set_on_uci(binding, value, commitapply)
+            transactions[binding.config] = true
             return true
         elseif type(map.value[param]) == "table" then
             local stype = map.value[param][1]
             local option = map.value[param][2]
             local isdevice = map.value[param][3]
             local cb = map.value[param][4]
-            if (param == "X_FASTWEB_SendRemoteCHTone" or param == "X_FASTWEB_PlayLocalCHTone") then
+            if (param == "X_FASTWEB_SendRemoteCHTone" or param == "X_FASTWEB_PlayLocalCHTone" or param =="X_FASTWEB_CallWaitingResponseType" or param == "X_FASTWEB_CallWaitingAlertInfo") then
                 binding.config = configfile_sip
                 binding.sectionname = stype
                 binding.option = option
                 value = cb and cb(value) or value
-                set_on_uci(binding, value, commitapply)
+                local alertInfo = ""
+                if (param == "X_FASTWEB_CallWaitingResponseType" and value == "180+Alert-Info") then
+                    set_on_uci(binding, "180", commitapply)
+                    binding.option = "call_waiting_alert_info"
+                    alertInfo = get_from_uci(binding)
+                    if alertInfo == "" or alertInfo == nil then
+	                set_on_uci(binding, "<http://127.0.0.1/Beep2>", commitapply)
+                    end
+                elseif (param == "X_FASTWEB_CallWaitingResponseType" and value ~= "180+Alert-Info") then
+                    set_on_uci(binding, value, commitapply)
+                    binding.option = "call_waiting_alert_info"
+                    set_on_uci(binding, "", commitapply)
+                elseif param == "X_FASTWEB_CallWaitingAlertInfo" then
+                    alertInfo = tostring(get_from_uci(binding))
+                    if alertInfo and alertInfo ~= "" then
+                       value = "<"..value..">"
+                       set_on_uci(binding,value,commitapply)
+                    else
+                       return nil, "Cannot set CallWaitingAlertInfo when CallWaitingResponseType is other than 180+Alert-Info"
+                    end
+                else
+                    set_on_uci(binding, value, commitapply)
+                end
                 transactions[binding.config] = true
                 return true
             else
@@ -3163,7 +3226,7 @@ local function rtcp_get(mapping, param, key, parentkey)
         local obj_name = mapping["objectType"]["name"] or ""
         path = string.match(obj_name, ".+%.([^%.].+)%.") or ""
     end
-    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=uri})
+    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=uri}) or {}
     if rtp_session and rtp_session[1] then
         if param == "RxPacket" then
             if path == "Current" then
@@ -3200,7 +3263,7 @@ local function rtcp_getall(mapping, key, parentkey)
         local obj_name = mapping["objectType"]["name"] or ""
         path = string.match(obj_name, ".+%.([^%.].+)%.") or ""
     end
-    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=uri} )
+    local rtp_session = conn:call("mmpbx.rtp.session", "list", {["rtcp"]="1", ["name"]=uri} ) or {}
     if rtp_session and rtp_session[1] then
         if path == "Current" then
             results.RxPacket = rtp_session[1]["FirstRxRtcpFrame"] or ""
@@ -3467,7 +3530,7 @@ local function codec_get(mapping, param, key, parentkey)
       return value
    end
 
-   rtp_session = conn:call("mmpbx.rtp.session", "list", {})
+   rtp_session = conn:call("mmpbx.rtp.session", "list", {}) or {}
    if rtp_session then
         for k,v in pairs (rtp_session) do
             if uri == v["LineName"] then
@@ -3482,12 +3545,14 @@ local function codec_get(mapping, param, key, parentkey)
                         value = tostring(v[1][1]["packetTime"])
                     end
                 end
-                if param == "ReceiveCodec" then
-                    value = v[2][1]["codec"]
-                elseif param == "ReceiveBitRate" then
-                    value = tostring(v[2][1]["bitRate"])
-                elseif param == "ReceiveSilenceSuppression" then
-                    value = tostring(v[2][1]["vad"])
+                if v[2][1] ~=nil then
+                    if param == "ReceiveCodec" then
+                        value = v[2][1]["codec"]
+                    elseif param == "ReceiveBitRate" then
+                        value = tostring(v[2][1]["bitRate"])
+                    elseif param == "ReceiveSilenceSuppression" then
+                        value = tostring(v[2][1]["vad"])
+                    end
                 end
 	    end
 	end
@@ -3513,7 +3578,7 @@ local function codec_getall(mapping, key, parentkey)
         return results
     end
 
-    rtp_session = conn:call("mmpbx.rtp.session", "list", {})
+    rtp_session = conn:call("mmpbx.rtp.session", "list", {}) or {}
     if rtp_session then
         for k,v in pairs (rtp_session) do
             if uri == v["LineName"] then
@@ -3523,7 +3588,7 @@ local function codec_getall(mapping, key, parentkey)
                     results.TransmitSilenceSuppression = tostring(v[1][1]["vad"])
                     results.TransmitPacketizationPeriod = tostring(v[1][1]["packetTime"])
                 end
-                if v[2]["direction"] == "Receive" then
+                if v[2]["direction"] == "Receive" and v[2][1] ~=nil then
                     results.Receiveresults = v[2][1]["codec"]
                     results.ReceiveBitRate = tostring(v[2][1]["bitRate"])
                     results.ReceiveSilenceSuppression = tostring(v[2][1]["vad"])

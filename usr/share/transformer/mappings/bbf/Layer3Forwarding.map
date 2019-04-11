@@ -123,9 +123,8 @@ local Multi_Layer3Forwarding_Forwarding_i_ = {
         },
         default = "-1",
       },
---[[
       MTU = {
-        access = "readOnly",  -- readWrite currently not supported
+        access = "readWrite",
         type = "unsignedInt",
         range = {
           {
@@ -134,7 +133,6 @@ local Multi_Layer3Forwarding_Forwarding_i_ = {
           },
         },
       },
---]]
     }
   }
 }
@@ -161,7 +159,7 @@ local mask2netmask = nwCommon.mask2netmask
 local commitKeys = uciHelper.commit_keys
 local revertKeys = uciHelper.revert_keys
 local splitKey = nwCommon.split_key
-local isConfigChanged
+local isConfigChanged = false
 local commitapply = commitapply
 
 local function getVlanDeviceName(device)
@@ -198,19 +196,27 @@ local function get_interfaces()
 end
 
 local intf_cache
-local function get_intf(L3name)
+local function get_intf(L3name, src)
   if not intf_cache then
     local interfaces = get_interfaces()
     local L3map = {}
     for _, intf in pairs(interfaces) do
       local l3 = intf.l3_device
+      local ipv4 = intf.ipv4.address or "0.0.0.0"
       if l3 then
-        L3map[l3] = intf
+        L3map[l3.."|"..ipv4] = intf
       end
     end
     intf_cache = L3map
   end
-  return intf_cache[L3name]
+  if src and src ~= "0.0.0.0" then
+    return intf_cache[L3name.."|"..src]
+  end
+  for interface, value in pairs(intf_cache) do
+    if match(interface, "^([^|]*)|") == L3name then
+      return value
+    end
+  end
 end
 
 local function get_physical(intf)
@@ -377,6 +383,26 @@ local function getRouteTable()
   return routetable
 end
 
+--- Returns only the IP part, since the input may contains IP and Mask value
+local function justIP(ip)
+  ip = ip and match(ip, "(%d+.%d+.%d+.%d+)")
+  return ip
+end
+
+--- Checks if the route is contained in staticRoutes
+local function isRoutePresent(route, staticRoutes, deviceMap)
+  if staticRoutes and route and deviceMap then
+    for _, sRoute in pairs(staticRoutes) do
+      if route.ifname and sRoute.interface and deviceMap[sRoute.interface] then
+        if (route.ifname == deviceMap[sRoute.interface].device) and (justIP(route.destip) == justIP(sRoute.target)) and (route.gateway == (sRoute.gateway or "0.0.0.0")) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 local keyToInterface
 Multi_Layer3Forwarding_Forwarding_i_.entries = function(mapping, parentKey)
   intf_cache = nil
@@ -411,7 +437,7 @@ Multi_Layer3Forwarding_Forwarding_i_.entries = function(mapping, parentKey)
       keyToInterface[key] = get_intf(status.l3_device)
     else
       -- for dev2 add entry to specific route table
-      if parentKey == route.table or parentKey == routetable[route.table] or parentKey == "main" then
+      if parentKey == route.table or parentKey == routetable[route.table] or (parentKey == "main" and not route.table)then
         ipv4FwdEntries[#ipv4FwdEntries+1] = key
         routes[key] = route
         routeType[key] = route._routeType
@@ -427,29 +453,36 @@ Multi_Layer3Forwarding_Forwarding_i_.entries = function(mapping, parentKey)
   local srcDestIPAndMask, srcIPAndMask
   -- local table to store source, destination ip address and subnetmask
   local srcDestIPAndMaskList = {}
+  local networkData = ubus:call("network.interface", "dump", { }) or {}
+  local deviceMap = {}
+  for _, intf in ipairs(networkData.interface or {}) do
+    deviceMap[intf.interface] = intf
+  end
   -- add dynamic routes to entries
   for _, route in ipairs(intfRoutes) do
-    key = route.ifname .."|" .. route.destip .. "|" .. route.gateway
-    -- Store source and destination, ip and subnetmask in a table to find the duplicate entries
-    keyToInterface[key] = get_intf(route.ifname)
-    if keyToInterface[key] then
-      local ip = keyToInterface[key].ipv4
-      local srcIPAddr = ip and ip.address or ''
-      local srcSubnetMask = ip and ip.mask or "0"
-      srcIPAndMask = srcIPAddr .. "/" .. srcSubnetMask
-    else
-      srcIPAndMask = ""
+    if not isRoutePresent(route, staticRoutes, deviceMap)then
+      key = route.ifname .."|" .. route.destip .. "|" .. route.gateway
+      -- Store source and destination, ip and subnetmask in a table to find the duplicate entries
+      keyToInterface[key] = get_intf(route.ifname, route.src)
+      if keyToInterface[key] then
+        local ip = keyToInterface[key].ipv4
+        local srcIPAddr = ip and ip.address or ''
+        local srcSubnetMask = ip and ip.mask or "0"
+        srcIPAndMask = srcIPAddr .. "/" .. srcSubnetMask
+      else
+        srcIPAndMask = ""
+      end
+      srcDestIPAndMask = route.destip .. "|" .. srcIPAndMask
+      -- Duplicate check for source and destination, ip and subnetmask
+      -- As per the bbf standards the combination of the former four fields should be unique
+      -- Only if it is not a duplicate add it to entries
+      if not staticRoutes[key] and not srcDestIPAndMaskList[srcDestIPAndMask] then
+        ipv4FwdEntries[#ipv4FwdEntries+1] = key
+        routes[key] = route
+        routeType[key] = "dynamic"
+      end
+      srcDestIPAndMaskList[srcDestIPAndMask] = true
     end
-    srcDestIPAndMask = route.destip .. "|" .. srcIPAndMask
-    -- Duplicate check for source and destination, ip and subnetmask
-    -- As per the bbf standards the combination of the former four fields should be unique
-    -- Only if it is not a duplicate add it to entries
-    if not staticRoutes[key] and not srcDestIPAndMaskList[srcDestIPAndMask] then
-      ipv4FwdEntries[#ipv4FwdEntries+1] = key
-      routes[key] = route
-      routeType[key] = "dynamic"
-    end
-    srcDestIPAndMaskList[srcDestIPAndMask] = true
   end
 
   local orderName = mapping.objectType.name
@@ -527,10 +560,6 @@ Multi_Layer3Forwarding_Forwarding_i_.get = {
   end,
   Interface = function(mapping, param, key)
     local route = routes[key]
-    local intf = route.ifname
-    if not intf and route.interface then
-      intf = getIntfName(route.interface)
-    end
     return resolve_connection_device(mapping, route and keyToInterface[key])
   end,
   ForwardingMetric = function(mapping, param, key)
@@ -542,6 +571,14 @@ Multi_Layer3Forwarding_Forwarding_i_.get = {
       return "0"
     end
     return "1"
+  end,
+  MTU = function(mapping, param, key)
+    local route = routes[key]
+    if route.mtu then
+      return route.mtu
+    end
+    local devStatus = ubus:call('network.device', 'status', {["name"] = route.ifname}) or {}
+    return devStatus and devStatus.mtu and tostring(devStatus.mtu) or ""
   end,
 }
 
@@ -607,6 +644,7 @@ Multi_Layer3Forwarding_Forwarding_i_.set = {
       networkBinding.sectionname = sectionName
       networkBinding.option = "target"
       uciHelper.set_on_uci(networkBinding, destIP, commitapply)
+      routes[key].target = destIP
       isConfigChanged = true
     else
       return nil, "Only static routes can be modified"
@@ -663,14 +701,18 @@ Multi_Layer3Forwarding_Forwarding_i_.set = {
     if routeType[key] ~= "dynamic" then
       -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
       local pvalue = tokey(value,
-        "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.",
+        "InternetGatewayDevice.LANDevice.{i}.",
         "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.",
         "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.",
         "Device.IP.Interface.{i}.")
 
       if pvalue and pvalue:match("|") then
-        -- Interface name is the first part of the WANDevice.WANConnectionDevice.WANIP/WANPPP key
-        value = splitKey(pvalue)
+	-- Incase of virtual instance (vdfsp), Interface name will be second part of the WANDevice.WANConnectionDevice.WANIP/WANPPP key
+	local intf, devname = splitKey(pvalue)
+	if intf == "ACTIVE" then
+	  intf = devname
+	end
+        value = intf
       else
         value = pvalue
       end
@@ -700,7 +742,17 @@ Multi_Layer3Forwarding_Forwarding_i_.set = {
       return nil, "Only static routes can be modified."
     end
   end,
-
+  MTU = function(mapping, param, value, key)
+    if routeType[key] ~= "dynamic" then
+      local route = routes[key]
+      networkBinding.sectionname = route[".name"]
+      networkBinding.option = "mtu"
+      uciHelper.set_on_uci(networkBinding, value, commitapply)
+      isConfigChanged = true
+    else
+      return nil, "Only static routes can be modified."
+    end
+  end,
 }
 
 Multi_Layer3Forwarding_Forwarding_i_.add = function(mapping, key)
@@ -709,7 +761,7 @@ Multi_Layer3Forwarding_Forwarding_i_.add = function(mapping, key)
   if sectionName then
     networkBinding.sectionname = sectionName
     if match(mapping.objectType.name, "^Device") and key ~= "main" then
-      networkBinding.option = "interface"
+      networkBinding.option = "table"
       uciHelper.set_on_uci(networkBinding, key, commitapply)
     end
     uciHelper.commit(networkBinding)
@@ -728,6 +780,7 @@ Multi_Layer3Forwarding_Forwarding_i_.delete = function(mapping, key)
   if routeType[key] ~= "dynamic" then
     local route = routes[key]
     networkBinding.sectionname = route[".name"]
+    networkBinding.option = nil
     uciHelper.delete_on_uci(networkBinding, commitapply)
     isConfigChanged = true
     return true

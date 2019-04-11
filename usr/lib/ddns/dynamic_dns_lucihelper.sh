@@ -1,6 +1,6 @@
 #!/bin/sh
 #.Distributed under the terms of the GNU General Public License (GPL) version 2.0
-#.2014-2017 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
+#.2014-2018 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
 . /usr/lib/ddns/dynamic_dns_functions.sh
 usage() {
 cat << EOF
@@ -81,6 +81,7 @@ case "$1" in
 get_registered_ip)
 [ -z "$lookup_host" ] && usage_err "command 'get_registered_ip': 'lookup_host' not set"
 write_log 7 "-----> get_registered_ip IP"
+[ -z "$SECTION" ] || IPFILE="$ddns_rundir/$SECTION.ip"
 IP=""
 get_registered_ip IP
 __RET=$?

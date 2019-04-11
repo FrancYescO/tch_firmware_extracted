@@ -10,6 +10,7 @@ return {
         },
         operations = {
             { "uci.network.interface.@wan.proto", "dhcp"},
+            { "uci.network.interface.@wan.reqopts", "1 3 6 15 33 42 51 121 249"},
         },
     },
     {

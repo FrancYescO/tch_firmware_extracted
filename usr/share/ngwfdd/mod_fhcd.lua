@@ -58,7 +58,7 @@ end
 
 local function get_num_fhcd_fd(info)
   local num_fd = 0
-  for file in lfs.dir("/proc/" .. info.pid .. "/fdinfo") do
+  for _ in lfs.dir("/proc/" .. info.pid .. "/fdinfo") do
     num_fd = num_fd +1
   end
   info.num_fd = num_fd
@@ -121,6 +121,12 @@ local function get_dump_fhcd(info)
   info.dump = dump
 end
 
+local cpu_history = {
+  fhcd_user = 0,
+  fhcd_system = 0,
+  child_user = 0,
+  child_system = 0
+}
 local fhcd_service_events = {}
 local function service_cb(msg, name)
   if msg.service ~= "fhcd" then
@@ -140,12 +146,6 @@ end
 
 ubus_conn:subscribe("service", { notify = service_cb })
 
-local cpu_history = {
-  fhcd_user = 0,
-  fhcd_system = 0,
-  child_user = 0,
-  child_system = 0
-}
 do
   local tot_user, tot_system = get_total_cpu()
   cpu_history.tot_user = tot_user
@@ -198,7 +198,6 @@ local function get_fhcd_info()
     end
   end
   gwfd.write_msg_to_file(info, fifo_file_path)
-  info = nil
   collectgarbage()
   timer:set(interval) -- reschedule on the uloop
 end

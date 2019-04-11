@@ -16,11 +16,7 @@ local untaint = string.untaint
 local srp = require("srp")
 local session = ngx.ctx.session
 local printf = require("web.web").printf
-
-local tech = false
-if session:getrole() == "engineer" then
-   tech = true
-end
+local role = ngx.ctx.session:getrole()
 
 -- Shortcuts to validation helpers to make lines shorter
 local gVIES = post_helper.getValidateInEnumSelect
@@ -238,8 +234,8 @@ local umgr_options = {
     valid = setCryptedPassword
 }
 
-if not tech then
-	umgr_options.canAdd = false
+if role ~= "engineer" then
+    umgr_options.canAdd = false
 end
 
 local function userStateModified(object)

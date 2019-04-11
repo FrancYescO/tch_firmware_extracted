@@ -1,5 +1,3 @@
--- Automatically generated from Device:2.10
--- using generator version 2.3
 local Device_Hosts_Host_i_ = {
   objectType = {
     name = "Device.Hosts.Host.{i}.",
@@ -24,19 +22,6 @@ local Device_Hosts_Host_i_ = {
         access = "readOnly",
         type = "string",
       },
---[[ Deprecated
-      AddressSource = {
-        access = "readOnly",
-        status = "deprecated",
-        type = "string",
-        enumeration = {
-          "DHCP",
-          "Static",
-          "AutoIP",
-          "None",
-        },
-      },
---]]
       DHCPClient = {
         access = "readOnly",
         list = true,
@@ -74,33 +59,8 @@ local Device_Hosts_Host_i_ = {
         pathRef = true,
         targetParent = "Device.IP.Interface.{i}.",
       },
---[[ Removed as the Status attribute is deprecated
-      VendorClassID = {
-        access = "readOnly",
-        status = "deprecated",
-        type = "string",
-        max = "255",
-      },
-      ClientID = {
-        access = "readOnly",
-        status = "deprecated",
-        type = "hexBinary",
-        max = "65535",
-      },
-      UserClassID = {
-        access = "readOnly",
-        status = "deprecated",
-        type = "hexBinary",
-        max = "65535",
-      },
---]]
       HostName = {
         access = "readOnly",
-        type = "string",
-        max = "64",
-      },
-      X_FASTWEB_GroupName = {
-        access = "readWrite",
         type = "string",
         max = "64",
       },
@@ -112,6 +72,11 @@ local Device_Hosts_Host_i_ = {
         access = "readOnly",
         type = "dateTime",
       },
+      ["X_TELMEX-COM_FriendlyName"] = {
+        access = "readWrite",
+        type = "string",
+        description = "Name of the device connected to the computer network",
+      },
       -- IPv4AddressNumberOfEntries
       -- automatically created when Device.Hosts.Host.{i}.IPv4Address.{i}. is loaded
       -- IPv6AddressNumberOfEntries
@@ -120,16 +85,17 @@ local Device_Hosts_Host_i_ = {
   }
 }
 
-local mapper, os, pairs, resolve, next, string = mapper, os, pairs, resolve, next, string
+local format, gsub, match = string.format, string.gsub, string.match
+local mapper, os, pairs, resolve, next = mapper, os, pairs, resolve, next
 local conn = mapper("ubus").connect()
 local uciHelper = mapper("ucihelper")
 local network = require("transformer.shared.common.network")
-local getHostDataByName = network.getHostDataByName
 local foreachOnUci = uciHelper.foreach_on_uci
 local getFromUci = uciHelper.get_from_uci
+local dhcp = require("transformer.shared.dhcp")
 
 Device_Hosts_Host_i_.entries = function(mapping)
-  return network.getHostInfo()
+  return network.getHostInfo( nil, function(info) return info["mac-address"] end)
 end
 
 local wlanPort = network.wlanRemotePort()
@@ -137,19 +103,12 @@ local wlanPort = network.wlanRemotePort()
 local function getLeaseTime(addr,hostData)
   local leaseTime = 0
   if addr.configuration == "dynamic" then
-    local f = io.open("/tmp/dhcp.leases","r")
-    if f then
-      for line in f:lines() do
-        local remaining, mac = string.match(line, "^(%d+)%s+([%x:]+)")
-        if mac == hostData["mac-address"] then
-          leaseTime = os.difftime(tonumber(remaining),os.time())
-          if leaseTime < 0 then
-            leaseTime = 0
-          end
-          break
-        end
+    local hostDetails = dhcp.getDhcpInfo(hostData["mac-address"])
+    if hostDetails.leasetime then
+      leaseTime = os.difftime(tonumber(hostDetails.leasetime), os.time())
+      if leaseTime < 0 then
+        leaseTime = 0
       end
-      f:close()
     end
   end
   return tostring(leaseTime)
@@ -160,23 +119,23 @@ local function getPrimaryAddress(hostData)
   if next(hostData.ipv4) ~= nil then
     for _,n in pairs(hostData.ipv4) do
       if n.state == "connected" then
-       primaryAddress = n
+        primaryAddress = n
       end
     end
   elseif next(hostData.ipv6) ~= nil then
-   for _,n in pairs(hostData.ipv6) do
-    if n.state == "connected" then
-     primaryAddress  = n
+    for _,n in pairs(hostData.ipv6) do
+      if n.state == "connected" then
+        primaryAddress  = n
+      end
     end
-   end
   end
- return primaryAddress  or {}
+  return primaryAddress  or {}
 end
 
 local wirelessBinding = { config = "wireless" }
 local function getLayer1Interface(ifName)
   if not ifName or ifName == "" then
-     return ""
+    return ""
   end
   local ethInterface = resolve("Device.Ethernet.Interface.{i}.", ifName)
   if ethInterface then
@@ -227,99 +186,106 @@ local function getAP(macaddr)
   return ""
 end
 
+local function getFriendlyName(hostData)
+  if hostData["user-friendly-name"] and hostData["user-friendly-name"] ~= "" then
+    return hostData["user-friendly-name"]
+  elseif hostData.hostname and hostData.hostname ~= "" then
+    return hostData.hostname
+  end
+  return "Unknown-" .. hostData["mac-address"] or ""
+end
+
 Device_Hosts_Host_i_.get = {
   Active = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return (hostData.state == "connected") and "1" or "0"
   end,
 
   PhysAddress = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return hostData["mac-address"]
   end,
 
   IPAddress = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     local addr = getPrimaryAddress(hostData)
     return addr.address or ""
   end,
 
   AssociatedDevice = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
-    local macAddress = hostData["mac-address"] or ""
-    local ap = getAP(macAddress)
-    return (resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' , ap .. "|" .. macAddress) or "")
+    local ap = getAP(key)
+    return (resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' , ap .. "|" .. key) or "")
   end,
 
   HostName = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
-    local macAddress = hostData["mac-address"] or ""
+    local hostData = network.getHostDataByMAC(key)
+    local macAddress = key or ""
     return hostData.hostname or "unknown-" .. macAddress
   end,
 
-  X_FASTWEB_GroupName = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
-    return hostData["device-type"] or ""
-  end,
-
   DHCPClient = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return (resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData.interface.. "|" ..key) or "")
   end,
 
   LeaseTimeRemaining = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     local addr = getPrimaryAddress(hostData)
     return getLeaseTime(addr,hostData)
   end,
 
   Layer1Interface = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return getLayer1Interface(hostData.l2interface)
   end,
 
   Layer3Interface = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return resolve("Device.IP.Interface.{i}.",hostData.interface) or ""
   end,
 
   ActiveLastChange = function(mapping,param,key)
-    local hostData = getHostDataByName(key)
+    local hostData = network.getHostDataByMAC(key)
     return os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or ""
   end,
+  ["X_TELMEX-COM_FriendlyName"] = function(mapping, param, key)
+    local hostData = network.getHostDataByMAC(key)
+    return getFriendlyName(hostData)
+  end
 }
 
 Device_Hosts_Host_i_.getall = function(mapping,key)
-  local hostData = getHostDataByName(key)
-  local macAddress = hostData["mac-address"] or ""
+  local hostData, dev = network.getHostDataByMAC(key)
+  local macAddress = key or ""
   local ap = getAP(macAddress)
   local addr = getPrimaryAddress(hostData)
+  local friendlyName = getFriendlyName(hostData)
   return {
     Active = hostData.state == "connected" and "1" or "0",
     PhysAddress = macAddress,
     IPAddress = addr.address or "",
     AssociatedDevice = resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' ,ap .. "|" .. macAddress) or "",
     HostName = hostData.hostname or "unknown-" .. macAddress,
-    X_FASTWEB_GroupName = hostData["device-type"] or "",
-    DHCPClient = resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..key) or "",
+    DHCPClient = resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..dev) or "",
     LeaseTimeRemaining = getLeaseTime(addr,hostData),
     Layer1Interface =  getLayer1Interface(hostData.l2interface),
     Layer3Interface = resolve("Device.IP.Interface.{i}.",hostData.interface) or "",
     ActiveLastChange = os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or "",
+    ["X_TELMEX-COM_FriendlyName"] = friendlyName,
   }
 end
 
 Device_Hosts_Host_i_.set = {
-  X_FASTWEB_GroupName = function(mapping, param, value, key)
-    local hostData = getHostDataByName(key)
-    local macAddress = hostData["mac-address"] or ""
-    if macAddress then
-      conn:call("hostmanager.device", "set", { ["mac-address"] = macAddress, ["device-type"] = value })
+  ["X_TELMEX-COM_FriendlyName"] = function(mapping, param, value, key)
+    local fd = io.open("/tmp/.friendlyname","w")
+    if fd then
+      fd:write(key..","..value.."\n")
+      fd:close()
+      commitapply:newset("friendlyname")
     else
-      return nil, "macAddress is null!"
+      return nil, "unexpected write error"
     end
   end,
 }
 
 register(Device_Hosts_Host_i_)
-

@@ -12,10 +12,9 @@ local usb_descriptors = {
 	{
 		plugin = "libat",
 		device_identifiers = {
-			-- Quectel EC25
+			-- Quectel EC25 and EP06
 			{
-				vid = "2c7c",
-				pid = "0125"
+				vid = "2c7c"
 			}
 		}
 	},
@@ -32,14 +31,12 @@ local usb_descriptors = {
 				vid = "19d2",
 				pid = "1403"
 			},
+			-- ZTE MF710 / Vodafone K4201
 			{
-				vid = "12d1",
-				pid = "157f"
+				vid = "19d2",
+				pid = "1048"
 			},
-			{
-				vid = "12d1",
-				pid = "1590"
-			},
+			-- Huawei E8372 (TA)
 			{
 				vid = "12d1",
 				pid = "14db"
@@ -93,6 +90,10 @@ local usb_descriptors = {
 				"huawei_cdc_ncm"
 			},
 			{
+				"option",
+				"GobiNet"
+			},
+			{
 				"option"
 			},
 			{
@@ -120,7 +121,7 @@ local function get_usb_info(desc)
 		drivers = {}
 	}
 
-	local ret = helper.split(helper.capture_cmd("find /sys/bus/usb/drivers | grep " .. desc .. ": | cut -d '/' -f 6", "r"), "\n")
+	local ret = helper.split(helper.capture_cmd("find /sys/bus/usb/drivers -name '" .. desc .. ":*' | cut -d '/' -f 6", "r"), "\n")
 	for _, driver in pairs(ret) do
 		if info.drivers[driver] then info.drivers[driver] = info.drivers[driver] + 1 else info.drivers[driver] = 1 end
 	end
@@ -166,7 +167,7 @@ end
 local function match_identifiers(plugin_device_identifiers, usb_info)
 	if type(plugin_device_identifiers) == "table" then
 		for _, identifier in ipairs(plugin_device_identifiers) do
-			if usb_info.vid == identifier.vid and usb_info.pid == identifier.pid then
+			if usb_info.vid == identifier.vid and (not identifier.pid or usb_info.pid == identifier.pid) then
 				return true
 			end
 		end
@@ -223,7 +224,7 @@ local function detect_usb_devices(runtime, detector)
 	return nil
 end
 
-local function detect_eth_devices(runtime)
+local function detect_eth_devices()
 	return nil
 end
 

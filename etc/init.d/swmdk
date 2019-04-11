@@ -13,9 +13,13 @@ stop() {
 
 boot() {
        local eth4lanwanmode
+       local ret
        config_load ethernet
        config_get eth4lanwanmode globals eth4lanwanmode
-       ethswctl -c lanwan -p 1 -v $eth4lanwanmode
+       ret=`ethswctl -c lanwan -p 1 2>/dev/null | grep AN`
+       if ([ "$ret" = "WAN" ] || [ "$ret" = "LAN" ]) ; then
+           ethswctl -c lanwan -p 1 -v $eth4lanwanmode
+       fi
        start
        . /etc/init.d/phypower
        phypower down

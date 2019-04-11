@@ -15,18 +15,18 @@ local Device_Firewall_Chain_i_Rule_i_ = {
         type = "boolean",
         default = "false",
       },
---[[ TODO
       Status = {
         access = "readOnly",
         type = "string",
         enumeration = {
           "Disabled",
           "Enabled",
-          "Error_Misconfigured",
-          "Error",
+          "Error_Misconfigured",         -- Not supported
+          "Error",                       -- Not supported
         },
         default = "Disabled",
       },
+--[[ TODO
       Order = {
         access = "readWrite",
         type = "unsignedInt",
@@ -83,7 +83,7 @@ local Device_Firewall_Chain_i_Rule_i_ = {
       },
 --]]
       SourceInterface = {
-        access = "readOnly", -- currently readWrite not supported
+        access = "readWrite",
         type = "string",
         max = "256",
         pathRef = true,
@@ -102,7 +102,7 @@ local Device_Firewall_Chain_i_Rule_i_ = {
       },
 --]]
       DestInterface = {
-        access = "readOnly", -- currently readWrite not supported
+        access = "readWrite",
         type = "string",
         max = "256",
         pathRef = true,
@@ -194,7 +194,6 @@ local Device_Firewall_Chain_i_Rule_i_ = {
         },
         default = "-1",
       },
---[[ TODO
       DestPortRangeMax = {
         access = "readWrite",
         type = "int",
@@ -206,6 +205,7 @@ local Device_Firewall_Chain_i_Rule_i_ = {
         },
         default = "-1",
       },
+--[[ TODO
       DestPortExclude = {
         access = "readWrite",
         type = "boolean",
@@ -223,7 +223,6 @@ local Device_Firewall_Chain_i_Rule_i_ = {
         },
         default = "-1",
       },
---[[ TODO
       SourcePortRangeMax = {
         access = "readWrite",
         type = "int",
@@ -235,6 +234,7 @@ local Device_Firewall_Chain_i_Rule_i_ = {
         },
         default = "-1",
       },
+--[[ TODO
       SourcePortExclude = {
         access = "readWrite",
         type = "boolean",
@@ -264,6 +264,22 @@ local Device_Firewall_Chain_i_Rule_i_ = {
        type = "string",
        description = "Displays the MAC address in case the firewall rule applies to a MAC-based firewall rule",
      },
+     X_000E50_IPSet = {
+       access = "readWrite",
+       type = "string",
+       pathRef = true,
+       targetParent = "Device.Firewall.X_000E50_IPSet.{i}.",
+       default = "",
+       description = "To link the ipset section of firewall config to config rule",
+     },
+     X_BELGACOM_IPSet = {
+       access = "readWrite",
+       type = "string",
+       pathRef = true,
+       targetParent = "Device.Firewall.X_BELGACOM_IPSet.{i}.",
+       default = "",
+       description = "To link the ipset section of firewall config to config rule",
+     },
      X_BELGACOM_DstMACAddress = {
        access = "readWrite",
        type = "string",
@@ -277,6 +293,7 @@ local Device_Firewall_Chain_i_Rule_i_ = {
 
 local mapper, resolve, commitapply, register, mapping = mapper, resolve, commitapply, register, mapping
 local string, tostring = string, tostring
+local pcall, tokey = pcall, tokey
 local inet = require("tch.inet")
 --local tprint = require("tch.tableprint") -- for debug
 local uciHelper = mapper("ucihelper")
@@ -286,11 +303,14 @@ local firewallBinding = {config = "firewall"}
 local networkBinding = {config = "network" , option = "ifname"}
 local isConfigChanged = false
 local keyToSectionName = {}
+local interfaces = {}
+local count = 1
 local resolve, ipairs = resolve, ipairs
 local fwHelper = require("transformer.shared.firewall_helper")
 local network = require("transformer.shared.common.network")
 local ubusConnect = mapper("ubus").connect()
 local common = mapper("nwcommon")
+local interface2zone = common.interface2zone
 
 local paramMap = {
   ["Enable"]          = "enabled",
@@ -317,15 +337,17 @@ local paramMap = {
   ["Protocol"]        = "proto",
 -- ProtocolExclude
   ["DestPort"]        = "dest_port",
--- DestPortRangeMax
+  ["DestPortRangeMax"] = "dest_port",
 -- DestPortExclude
   ["SourcePort"]      = "src_port",
--- SourcePortRangeMax
+  ["SourcePortRangeMax"] = "src_port",
 -- SourcePortExclude
   ["DSCP"]            = "extra",
 -- DSCPExclude
   ["X_000E50_DstMACAddress"] = "dest_mac",
   ["X_BELGACOM_DstMACAddress"] = "dest_mac",
+  ["X_000E50_IPSet"] = "ipset",
+  ["X_BELGACOM_IPSet"] = "ipset"
 }
 
 local targetMap = {
@@ -348,20 +370,21 @@ local protocolMap = {
   ["all"]     = "-1",
 }
 
--- get all IPv6 interfaces from network configuration
-local function getAllIPv6Intf()
-  local ipv6Intf = {}
-  foreach_on_uci(networkBinding, function(s)
-    if s.proto == "dhcpv6" or s.proto == "6rd" then
-      ipv6Intf[s[".name"]] = true
-    end
-  end)
-  return ipv6Intf
-end
+local reverseProtocolMap = {
+  ["6"]     = "tcp",
+  ["17"]    = "udp",
+  ["1"]     = "icmp",
+  ["50"]    = "esp",
+  ["51"]    = "ah",
+  ["132"]   = "sctp",
+  ["-1"]    = "all",
+}
 
 Device_Firewall_Chain_i_Rule_i_.entries = function(mapping, parentKey)
   local chainRuleEntries = {}
   keyToSectionName = {}
+  interfaces = {}
+  count = 1
   local isKeyGenerated = false
   local ruleType = getFromUci({ config = "firewall", sectionname = parentKey, option = "type" })
   firewallBinding.sectionname = ruleType
@@ -388,19 +411,20 @@ Device_Firewall_Chain_i_Rule_i_.entries = function(mapping, parentKey)
 
     -- If there are no interfaces this will permit table entry creation
     -- This is necessary when adding an entry via TR69
-    if (not srcInterfaces) then
-      srcInterfaces = { "emptySrc" }
+    if not srcInterfaces or srcInterfaces == "" then
+      srcInterfaces = { "" }
     end
-    if (not destInterfaces) then
-      destInterfaces = { "emptyDest" }
+    if not destInterfaces or destInterfaces == "" then
+      destInterfaces = { "" }
     end
 
-    local ipv6Intf = getAllIPv6Intf()
     local entryValue
     for _, srcIntf in ipairs(srcInterfaces) do
       for _, destIntf in ipairs(destInterfaces) do
-        if not ipv6Intf[srcIntf] then
-          entryValue = parentKey .. "|" .. key .. "|" .. srcIntf .. "|" .. destIntf
+        if resolve("Device.IP.Interface.{i}.", srcIntf) then
+          entryValue = parentKey .. "|" .. key .. "|" .. count
+          interfaces[count] = { ["src"] = srcIntf, ["dest"] = destIntf }
+          count = count + 1
           if not network.listContains(chainRuleEntries, entryValue) then
             chainRuleEntries[#chainRuleEntries+1] = entryValue
           end
@@ -452,8 +476,22 @@ local function getDestIntf(destIntf)
   return path
 end
 
+local function getStatus(key)
+  local enable = getParamValue("Enable", key, "1")
+  return enable == "1" and "Enabled" or "Disabled"
+end
+
+local function getPortNumber(param, key)
+  local port_range = getParamValue(param, key, "-1")
+  local min, max = port_range:match("(%d+):(%d+)")
+  if param == "DestPort" or param == "SourcePort" then
+    return min and min or port_range
+  end
+  return max and max or port_range
+end
+
 Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
-  local rulegroup, key, srcIntf, destIntf = entry:match("^(.*)|(.*)|(.*)|(.*)")
+  local rulegroup, key, index = entry:match("^(.*)|(.*)|(.*)")
 
   -- string match magic for ipAddr and ipMask "<IP>/<mask>". The trailing
   -- "/<mask>" is optional ... and the leading "<IP>" is optional
@@ -461,6 +499,8 @@ Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
 
   if param == "Enable" then
     return getParamValue(param, key, "1")
+  elseif param == "Status" then
+    return getStatus(key)
   elseif param == "Description" then
     return getParamValue(param, key, "")
   elseif param == "Target" then
@@ -468,9 +508,9 @@ Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
   elseif param == "TargetChain" then
     return resolve("Device.Firewall.Chain.{i}.", rulegroup) or ""
   elseif param == "SourceInterface" then
-    return resolve("Device.IP.Interface.{i}.", srcIntf) or ""
+    return resolve("Device.IP.Interface.{i}.", interfaces[tonumber(index)].src) or ""
   elseif param == "DestInterface" then
-    return getDestIntf(destIntf)
+    return getDestIntf(interfaces[tonumber(index)].dest) or ""
   elseif param == "IPVersion" then
     return getParamValue(param, key, "-1"):match("ipv(%d)") or "-1"
   elseif param == "DestIP" then
@@ -478,7 +518,7 @@ Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
     return destIp or ""
   elseif param == "DestMask" then
     local _, destMask = getParamValue(param, key, ""):match(ip_mask_pattern)
-    return destMask or ""
+    return destMask ~= "" and "/" .. destMask or ""
   elseif param == "SourceIP" then
     local srcIp = getParamValue(param, key, ""):match(ip_mask_pattern)
     return srcIp or ""
@@ -490,9 +530,13 @@ Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
     tmp = getParamValue(param, key, "-1")
     return protocolMap[tmp] or tmp
   elseif param == "DestPort" then
-    return getParamValue(param, key, "")
+    return getPortNumber(param, key)
+  elseif param == "DestPortRangeMax" then
+    return getPortNumber(param, key)
   elseif param == "SourcePort" then
-    return getParamValue(param, key, "")
+    return getPortNumber(param, key)
+  elseif param == "SourcePortRangeMax" then
+    return getPortNumber(param, key)
   elseif param == "DSCP" then
     -- TODO: This is not good enough. The "extra" option could have
     -- other stuff in it
@@ -506,26 +550,33 @@ Device_Firewall_Chain_i_Rule_i_.get = function(mapping, param, entry)
     if destMac == "" then
       local ipVersion = getParamValue("IPVersion", key, "")
       local destIP = getParamValue("DestIP", key, "")
-      destMac = fwHelper.ip2mac(ubusConnect, destIP, ipVersion) or ""
+      destMac = fwHelper.ip2mac(ubusConnect, ipVersion, destIP) or ""
     end
     return destMac
+  elseif param == "X_000E50_IPSet" or param == "X_BELGACOM_IPSet" then
+    return resolve(mapping.objectType.parameters[param].targetParent, getParamValue(param, key)) or ""
   else
     return getParamValue(param, key)
   end
 end
 
 Device_Firewall_Chain_i_Rule_i_.getall = function(mapping, entry)
-  local rulegroup, key, srcIntf, destIntf = entry:match("^(.*)|(.*)|(.*)|(.*)")
+  local rulegroup, key, index = entry:match("^(.*)|(.*)|(.*)")
   firewallBinding.sectionname = keyToSectionName[key]
   local firewallValues = uciHelper.getall_from_uci(firewallBinding)
   return {
     Enable = firewallValues["enabled"] or "1",
+    Status = getStatus(key),
     Description = firewallValues["name"] or "",
     Target = targetMap[firewallValues["target"]] or "Drop",
     TargetChain = resolve("Device.Firewall.Chain.{i}.", rulegroup) or "",
-    SourceInterface = resolve("Device.IP.Interface.{i}.", srcIntf) or "",
-    DestInterface = getDestIntf(destIntf),
+    SourceInterface = resolve("Device.IP.Interface.{i}.", interfaces[tonumber(index)].src) or "",
+    DestInterface = getDestIntf(interfaces[tonumber(index)].dest) or "",
     IPVersion =  firewallValues["family"] and firewallValues["family"]:match("ipv(%d)") or "-1",
+    DestPort = getPortNumber("DestPort", key),
+    DestPortRangeMax = getPortNumber("DestPortRangeMax", key),
+    SourcePort = getPortNumber("SourcePort", key),
+    SourcePortRangeMax = getPortNumber("SourcePortRangeMax", key),
   }
 end
 
@@ -538,6 +589,32 @@ local function setParamValue(mapping, param, value, key)
   uciHelper.set_on_uci(firewallBinding, value, commitapply)
   isConfigChanged = true
   return true
+end
+
+local function setPortValues(param, key, value)
+  local port_range = getParamValue(param, key)
+  if port_range and port_range == "" then
+    return value
+  end
+  local min, max = port_range:match("(%d+):?(%d*)")
+  local newValue
+  if param == "DestPort" or param == "SourcePort" then
+    if max and not max == "" then
+      if tonumber(max) < tonumber(value) then
+        return nil, "Invalid port range. start should be less than or equal to max port."
+      end
+      newValue = value..":"..max
+    end
+  end
+  if param == "DestPortRangeMax" or param == "SourcePortRangeMax" then
+    if tonumber(min) > tonumber(value) then
+      return nil, "Invalid port range. Max port should be greater than or equal to start port."
+    end
+    if tonumber(min) < tonumber(value) then
+      newValue = min..":"..value
+    end
+  end
+  return newValue and newValue or value
 end
 
 -- function to set the mac address and corresponding destip
@@ -584,8 +661,27 @@ local function isValidIP(ipCheck)
     return nil, "Internal error, bad parameter"
 end
 
+local function setInterface(mapping, param, value, entry)
+  local key, index  = entry:match("^.*|(.*)|(.*)")
+  local intf = interfaces[tonumber(index)][paramMap[param]] or ""
+  if not intf or intf == "" then
+    local rc
+    rc, value = pcall(tokey, value, "Device.IP.Interface.{i}.")
+    if not rc then
+      return nil, "invalid value"
+    end
+    local intf_zone = interface2zone(value)
+    if not intf_zone then
+      return nil, "interface zone not found"
+    end
+    setParamValue(mapping, param, intf_zone.name, key)
+  else
+    return nil, "Interface zone cannot be modified"
+  end
+end
+
 Device_Firewall_Chain_i_Rule_i_.set = function(mapping, param, value, entry)
-  local key = entry:match("^.*|(.*)|.*|.*")
+  local key = entry:match("^.*|(.*)|.*")
   local paramIp    -- IP part of CIDR ipAddr/Mask
   local paramMask  -- mask part of CIDR ipAddr/Mask
   local _          -- ignore return value
@@ -605,8 +701,12 @@ Device_Firewall_Chain_i_Rule_i_.set = function(mapping, param, value, entry)
     value = targetMap[value] or "DROP"
 
   elseif param == "DestIP" or param == "SourceIP" then
-    -- get the current mask and prepend the ip addr
-    if not isValidIP(value) then
+    -- when dest_mac exist, do not set DestIP
+    local macAddress = getParamValue("X_000E50_DstMACAddress", key, "")
+    if param == "DestIP" and macAddress ~= "" then
+      return nil, "IP address cannot be set on MAC based pinhole rule"
+    elseif not isValidIP(value) then
+      -- get the current mask and prepend the ip addr
       return nil, string.format("%s is not a valid IPv4 or IPv6 Address",value)
     end
     _, paramMask = getParamValue(param, key, ""):match(ip_mask_pattern)
@@ -615,6 +715,11 @@ Device_Firewall_Chain_i_Rule_i_.set = function(mapping, param, value, entry)
     end
 
   elseif param == "DestMask" or param == "SourceMask" then
+    -- when dest_mac exist, do not set DestMask
+    local macAddress = getParamValue("X_000E50_DstMACAddress", key, "")
+    if param == "DestMask" and macAddress ~= "" then
+      return nil, "DestMask cannot be set on MAC based pinhole rule"
+    end
     -- get the current ip addr and append the mask
     paramIp, _ = getParamValue(param, key, ""):match(ip_mask_pattern)
     _, paramMask = value:match(ip_mask_pattern)
@@ -631,10 +736,9 @@ Device_Firewall_Chain_i_Rule_i_.set = function(mapping, param, value, entry)
     end
 
   elseif param == "Protocol" then
-    if (value == "-1") then
-        -- overwrite existing value
-        value = ""
-    end
+    local proto = {}
+    proto[#proto+1] = reverseProtocolMap[value]
+    value = proto
 
   elseif param == "X_000E50_DstMACAddress" or param == "X_BELGACOM_DstMACAddress" then
     if value == "" or common.isMAC(value) then
@@ -645,7 +749,20 @@ Device_Firewall_Chain_i_Rule_i_.set = function(mapping, param, value, entry)
     else
       return nil, "Invalid MAC address"
     end
+
+  elseif param == "DestPort" or param == "DestPortRangeMax" or param == "SourcePort" or param == "SourcePortRangeMax" then
+    value = setPortValues(param, key, value)
+  elseif param == "X_000E50_IPSet" or param == "X_BELGACOM_IPSet" then
+    local rc
+    rc, value = pcall(tokey, value, mapping.objectType.parameters[param].targetParent)
+    if not rc then
+      return nil, "Invalid value"
+    end
+
+  elseif param == "SourceInterface" or param == "DestInterface" then
+    return setInterface(mapping, param, value, entry)
   end
+
   return setParamValue(mapping, param, value, key)
 end
 
@@ -695,7 +812,8 @@ Device_Firewall_Chain_i_Rule_i_.add = function(mapping, name)
             -- When Src/Dest are filled in most likely the table will
             -- report *extra* rules in Device2 ... those rules won't exist
             -- in UCI ... that further compicates the problem
-            entryValue = name .. "|" .. key .. "|" .. "emptySrc" .. "|" .. "emptyDest"
+            entryValue = name .. "|" .. key .. "|" .. count
+            count = count + 1
             return entryValue
         else
             uciHelper.revert_keys(binding)

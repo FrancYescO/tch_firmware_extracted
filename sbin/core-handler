@@ -3,29 +3,40 @@
 exec 3<&0
 exec <&-
 
-. $IPKG_INSTROOT/lib/functions.sh
+. "$IPKG_INSTROOT/lib/functions.sh"
 
 log() {
 	echo $@ | tee /dev/console | logger -t postmortem
 }
 
-filename=$1
-pid=$2
-action=$(uci_get system @coredump[0] action nocore)
-path=$(uci_get system @coredump[0] path "/tmp")
-reboot=$(uci_get system @coredump[0] reboot 1)
+filename="$1"
+pid="$2"
+action="$(uci_get system @coredump[0] action nocore)"
+path="$(uci_get system @coredump[0] path /tmp)"
+reboot="$(uci_get system @coredump[0] reboot 1)"
 
-if [ "$action" == "upload" ]
+action_option="system.@coredump[0].action"
+reboot_option="system.@coredump[0].reboot"
+
+if [ -f /sbin/core-handler-lxc ]; then
+  . /sbin/core-handler-lxc
+fi
+
+if [ "$action" = "upload" ]
 then
-	url=$(uci_get system @coredump[0] url)
-	version=$(uci_get version @version[0] version unknown)
-	oid=$(uci_get version @version[0] oid unknown)
-	factory_id=$(uci_get env rip factory_id unknown)
-	serial=$(uci_get env rip serial unknown)
-	board=$(uci_get env rip board_mnemonic unknown)
+	url="$(uci_get system @coredump[0] url)"
+	version="$(uci_get version @version[0] version unknown)"
+	oid="$(uci_get version @version[0] oid unknown)"
+	factory_id="$(uci_get env rip factory_id unknown)"
+	serial="$(uci_get env rip serial unknown)"
+	board="$(uci_get env rip board_mnemonic unknown)"
+
+	# Insert the ngwfdd tag when uploading to Kibana
+	[ "$(uci_get ngwfdd config enable)" = "1" -a "$url" = "$(uci_get ngwfdd config core_url)" ] && tag="$(uci_get ngwfdd config tag)"
+
 	[ -z "${url}" ] && exit
 	log "uploading core to ${url}"
-	curl -m 360 -X POST -F "exe=$(readlink -f /proc/${pid}/exe)" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@-;filename=${filename}" ${url} <&3 || action=compress
+	curl -m 360 -X POST -F "exe=$(readlink -f /proc/${pid}/exe)" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@-;filename=${filename}" ${tag:+-F tag="$tag"} "${url}" <&3 || action=compress
 fi
 case "${action}" in
 	compress)
@@ -44,12 +55,12 @@ case "${action}" in
 		;;
 
 	*)
-		log "core dump for pid ${pid} file ${filename} ignored due to system.coredump.action setting"
+		log "core dump for pid ${pid} file ${filename} ignored due to $action_option setting"
 		;;
 esac
 
 if [ "${reboot}" -eq 1 ]
 then
-    log "Rebooting due to core dump and system.coredump.reboot=1"
+    log "Rebooting due to core dump and $reboot_option=1"
     /sbin/reboot
 fi

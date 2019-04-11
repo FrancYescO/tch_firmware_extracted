@@ -84,7 +84,10 @@ then
 			echo -e "Unable to fetch details as voice daemon may not be running \n" >> $logfile
 			break
 		fi
-		echo "$lineStatus" | sed 's/fxs_dev_/Line /g' >> $logfile
+		echo "$lineStatus" | sed 's/fxs_dev_/Line /g' | sed '/\"callState\"/{N s/\n/ /}' | sed 's/\(",\).*\(: "\)/ - /g' |
+		sed '/\"callState\"/{N s/"\n/ Call"\n/}' | sed 's/callState/state/g' | sed 's/MMPBX_CALLSTATE_//g' |
+		sed 's/DISCONNECTED/Ended/g' | sed 's/DIALING/Calling/g' | sed 's/ALERTING/Ringing/g' | sed 's/CONNECTED/Talking/g'|
+		sed 's/IDLE//g' | sed 's/CALL_DELIVERED/Calling/g' | sed 's/ - Unknown Call/Unknown/g' >> $logfile
 	done
 
 

@@ -20,6 +20,7 @@ clear_firewall_part() {
         (
         ${cmd} -t mangle -D PREROUTING -p tcp --sport 80 -j urlfilter-svr
         ${cmd} -t mangle -D PREROUTING -p tcp --dport 80 -j urlfilter-clnt
+        ${cmd} -t mangle -D PREROUTING -p tcp --dport 443 -j urlfilter-clnt
 
         ${cmd} -t mangle -F urlfilter-clnt
         ${cmd} -t mangle -F urlfilter-svr
@@ -52,6 +53,7 @@ setup_firewall_part() {
         # svr only needed if keyword filtering is enabled
         [ "${keyword_enabled}" == "1" ] && ${cmd} -t mangle -A PREROUTING -p tcp --sport 80 -j urlfilter-svr
         ${cmd} -t mangle -A PREROUTING -p tcp --dport 80 -j urlfilter-clnt
+        ${cmd} -t mangle -A PREROUTING -p tcp --dport 443 -j urlfilter-clnt
         ${cmd} -t mangle -A urlfilter-clnt -m socket -j RETURN
 
         for intf in ${interfaces}
@@ -66,8 +68,8 @@ setup_firewall_part() {
         ${cmd} -t mangle -A urlfilter-svr -m mark --mark ${REDIR}/${MASK} -j DROP
 
         # disable FlowCache accelerator
-        ${cmd} -t mangle -A urlfilter-svr -p tcp --sport 80 -m mark --mark 0x0/${MASK} -j SKIPLOG || true
-        ${cmd} -t mangle -A urlfilter-svr -p tcp --sport 80 -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
+        ${cmd} -t mangle -A urlfilter-svr -m mark --mark 0x0/${MASK} -j SKIPLOG
+        ${cmd} -t mangle -A urlfilter-svr -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
 
         ##
         ## LAN -> WAN
@@ -78,9 +80,9 @@ setup_firewall_part() {
 
         for intf in ${interfaces}
         do
-		# disable FlowCache accelerator for the first x packets
-		${cmd} -t mangle -A urlfilter -p tcp -i ${intf} --dport 80 -m mark --mark 0x0/${MASK} -m connbytes --connbytes-mode packets --connbytes-dir original ! --connbytes 8 -j SKIPLOG
-                ${cmd} -t mangle -A urlfilter -p tcp -i ${intf} --dport 80 -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
+                # disable FlowCache accelerator for the first x packets
+                ${cmd} -t mangle -A urlfilter -i ${intf} -m mark --mark 0x0/${MASK} -m connbytes --connbytes-mode packets --connbytes-dir original ! --connbytes 8 -j SKIPLOG
+                ${cmd} -t mangle -A urlfilter -i ${intf} -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
         done
 
         ${cmd} -t mangle -A urlfilter -j CONNMARK --save-mark --nfmask ${MASK} --ctmask ${MASK}
@@ -204,7 +206,7 @@ weburl_config() {
         config_get MSKIP general skipped_mark 0x1000000
         MASK=$(( ${MSKIP} | ${MSTOP} | ${REDIR} ))
 
-        config_get blocked_page_redirect redirect blocked_page_redirect ""
+        config_get blocked_page_redirect general blocked_page_redirect ""
         if [ -z "$blocked_page_redirect" ]; then
                 local hostname=$(uci get dhcp.@dnsmasq[0].hostname 2>/null | awk -F ' ' '{print $1}')
                 if [ -n "$hostname" ]; then

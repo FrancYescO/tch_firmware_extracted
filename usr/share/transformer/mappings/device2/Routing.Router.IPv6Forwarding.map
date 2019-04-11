@@ -106,50 +106,40 @@ local ubus = mapper("ubus").connect()
 local deviceInterfaceMap = {}
 local format =string.format
 local routingHelper = require('transformer.shared.secrouting_helper')
-local popen = io.popen
+local process = require("tch.process")
 local match = string.match
 
 local function loadRoutes()
   local ipv6Routes = {}
   local keys = {}
   local key
-  local routeCmds = { { cmd = 'ip -6 route show' , pattern1 = "(%S+)%s+%S+%s+%S+%s+%S+%s+%S+%s+%S+%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)",
-                                                   pattern2 = "%S+%s+(%S+)%s+%S+%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)",
-                                                   pattern3 = "(%S+)%s+%S+%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)",
-                                                   pattern4 = "(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)%s+%S+%s+(%S+)"},
-                      { cmd = 'ip -6 route show table local', pattern1 = "%S+%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)%s+%S+%s+%S+%s+%S+%s+(%S+)",
-                                                              pattern3 = "(%S+)%s+%S+%s+(%S+)%s+%S+%s+(%S+)"} }
-  for _, v in ipairs(routeCmds) do
-    local fd = popen(v.cmd)
+  local routeParams = {
+    {"-6", "route", "show"},
+    {"-6", "route", "show", "table", "local"},
+  }
+  for _, cmd in ipairs(routeParams) do
+    local fd = process.popen("ip", cmd)
     if fd then
       for line in fd:lines() do
         local fields = {}
-        if match(line,"via") then
-          if line:match("^default") or line:match("^local") then
-            fields.destNetwork, fields.deviceName, fields.metric = match(line, v.pattern1)
-          else
-            fields.destNetwork, fields.deviceName, fields.metric = match(line, v.pattern4)
-          end
-          fields.metric = fields.metric or "0"
-        elseif match(line,"unreachable") then
-          fields.destNetwork, fields.deviceName, fields.metric = match(line, v.pattern2)
-          fields.metric = fields.metric or "0"
-        else
-          fields.destNetwork, fields.deviceName, fields.metric = match(line, v.pattern3)
-          if fields.destNetwork == nil then
-            fields.destNetwork, fields.deviceName = line:match("(%S+)%s+%S+%s+(%S+)")
-            fields.metric = line:match("%S+%s+%S+%s+%S+%s+%S+%s+(%S+)")
-          end
+        if line:match("^local") then
+          fields.destNetwork = match(line, "^%S+%s+(%S+)")
+        elseif not line:match("^unreachable") then
+          fields.destNetwork = match(line, "^(%S+)")
         end
-        fields.destPrefixLen = match(fields.destNetwork or "",'/(%d+)') or "0"
-        if fields.destNetwork == "default" then
-          fields.destNetwork = "0.0.0.0"
-        end
-        fields.destNetwork = fields.destNetwork and fields.destNetwork:match("[^%/]*") or ""
-        key = fields.destNetwork .. (fields.deviceName or "")
-        if not keys[key] then
-          keys[key] = true
-          ipv6Routes[#ipv6Routes+1] = fields
+        if fields.destNetwork then
+          fields.deviceName = match(line, "dev%s+(%S+)") or ""
+          fields.metric = match(line, "metric%s+(%d+)") or "0"
+          fields.destPrefixLen = match(fields.destNetwork, '/(%d+)') or "0"
+          if fields.destNetwork == "default" then
+            fields.destNetwork = "::"
+          end
+          fields.destNetwork = fields.destNetwork:match("[^/]*")
+          key = fields.destNetwork .. fields.deviceName
+          if not keys[key] then
+            keys[key] = true
+            ipv6Routes[#ipv6Routes+1] = fields
+          end
         end
       end
       fd:close()
@@ -162,11 +152,22 @@ local function loadDeviceInterfaceMap()
   local devIntfMap = {}
   local interfaceDump = ubus:call("network.interface", "dump", {})
   for _, intf in ipairs(interfaceDump.interface or {}) do
+    local ipv4 = intf['ipv4-address']
+    ipv4 = ipv4 and ipv4[1] and ipv4[1].address or ""
     if intf.l3_device then
-      devIntfMap[intf.l3_device] = intf.interface or ""
+      devIntfMap[intf.l3_device.."|"..ipv4] = intf.interface or ""
     end
   end
   return devIntfMap
+end
+
+local function resolveInterfaces(intfNames, devName)
+  for dev, intf in pairs(intfNames) do
+    local intfName = resolve("Device.IP.Interface.{i}.", intf)
+    if (match(dev, "^([^|]*)|") == devName) and intfName then
+      return intfName
+    end
+  end
 end
 
 local routes= {}
@@ -178,8 +179,10 @@ Device_Routing_Router_i_IPv6Forwarding_i_.entries = function(mapping, parentKey)
   local intfRoutes = routingHelper.getRoutesforRtTable(parentKey, loadRoutes(), secIntfRtTableMap)
   for _, route in ipairs(intfRoutes) do
     key = format("%s|%s|%s|%s", route.deviceName or "", route.destNetwork or "", route.destPrefixLen or "", route.metric or "")
-    ipv6FwdEntries[#ipv6FwdEntries+1] = key
-    routes[key] = route
+    if resolveInterfaces(deviceInterfaceMap, route.deviceName) then
+      ipv6FwdEntries[#ipv6FwdEntries+1] = key
+      routes[key] = route
+    end
   end
   return ipv6FwdEntries
 end
@@ -209,7 +212,7 @@ Device_Routing_Router_i_IPv6Forwarding_i_.get = {
   end,
   Interface = function(mapping, param, key)
     local deviceName = routes[key].deviceName
-    return resolve("Device.IP.Interface.{i}.", deviceInterfaceMap[deviceName]) or ''
+    return resolveInterfaces(deviceInterfaceMap, deviceName) or ""
   end,
   ForwardingMetric = function(mapping, param, key)
     return routes[key].metric or ""
@@ -222,3 +225,4 @@ Device_Routing_Router_i_IPv6Forwarding_i_.get = {
 -- data, no work is duplicated.
 
 register(Device_Routing_Router_i_IPv6Forwarding_i_)
+

@@ -1,3 +1,5 @@
+-- custo NG-155433/GHG-3810/NG-155973
+
 local uc = require("uciconv")
 local oldConfig = uc.uci('old')
 local newConfig = uc.uci('new')
@@ -36,16 +38,16 @@ oldConfig:foreach("tod", "action", function(s)
   -- Creating the new wifitod section with the old config.
   local ap = oldConfig:get("tod", obj:match("%.(.*)$"), "ap")
   newConfig:set("tod", "wifitod"..unique, "wifitod")
-  newConfig:set("tod", "wifitod"..unique, "ap", {"ap0"..unique, "ap1"..unique})
+  newConfig:set("tod", "wifitod"..unique, "ap", {"ap0"..unique, "ap1"..unique}) -- custo NG-155433/GHG-3810
 
   -- Creating the new ap section with the old config.
-  newConfig:set('tod', "ap0"..unique, "ap")
+  newConfig:set('tod', "ap0"..unique, "ap")            -- custo NG-155433/GHG-3810/NG-155973
   local state = oldConfig:get("tod", ap[1], "state")
-  newConfig:set("tod", "ap0"..unique, "ap", "ap0")
-  newConfig:set("tod", "ap0"..unique, "state", state)
-  newConfig:set('tod', "ap1"..unique, "ap")
-  newConfig:set("tod", "ap1"..unique, "ap", "ap1")
-  newConfig:set("tod", "ap1"..unique, "state", state)
+  newConfig:set("tod", "ap0"..unique, "ap", "ap0")     -- custo NG-155433/GHG-3810
+  newConfig:set("tod", "ap0"..unique, "state", state)  -- custo NG-155433/GHG-3810
+  newConfig:set('tod', "ap1"..unique, "ap")            -- custo NG-155433/GHG-3810
+  newConfig:set("tod", "ap1"..unique, "ap", "ap1")     -- custo NG-155433/GHG-3810
+  newConfig:set("tod", "ap1"..unique, "state", state)  -- custo NG-155433/GHG-3810
 
   -- Creating the new timer section with the old config.
   newConfig:set("tod", newtimer, "timer")

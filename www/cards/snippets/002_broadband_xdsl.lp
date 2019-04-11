@@ -1,5 +1,7 @@
-<%
+--pretranslated: do not change this file
+ 
 -- Enable localization
+-- TCOMITAGW-2087; TCOMITAGW-2088
 gettext.textdomain('webui-core')
 
 local format = string.format
@@ -43,11 +45,11 @@ if session:hasAccess("/modals/broadband-modal.lp") then
     switchName = "dsl_enable"
     modalPath = "modals/broadband-modal.lp"
 end
-%>
-
-<%= ui_helper.createCardHeader(T"Broadband", modalPath) %>
-<div class="content">
-<%
+  ngx.print('\
+\
+');  ngx.print( ui_helper.createCardHeader(T"Broadband", modalPath) ); ngx.print('\
+<div class="content">\
+');  
   local iconUp = "<i class=\"icon-upload icon-small gray\"></i> "
   local iconDown = " <i class=\"icon-download icon-small gray\"></i> "
 
@@ -100,14 +102,25 @@ end
       "</p>"
     )
   else
-    ngx.print(
-      "<div class=\"light orange\" id=\"Broadband_LED\"></div><p>",
-      T"Connecting",
-      ": ",
-      T(xdsl_data["dsl_status"]),
-      "...</p>"
-    )
+    if (xdsl_data["dsl_status"] == "NoSignal") then
+      ngx.print(
+        "<div class=\"light orange\" id=\"Broadband_LED\"></div><p>",
+        T"Connecting",
+        ": ",
+        T"No Signal",
+        "...</p>"
+      )
+    else
+      ngx.print(
+        "<div class=\"light orange\" id=\"Broadband_LED\"></div><p>",
+        T"Connecting",
+        ": ",
+        T(xdsl_data["dsl_status"]),
+        "...</p>"
+      )
+    end
   end
-%>
-
-</div>
+  ngx.print('\
+\
+</div>\
+'); 

@@ -38,8 +38,11 @@ function M.start()
 	end
 
 	-- Setup the log facilities
-
 	runtime.log.init("mobiled", tonumber(config.globals.tracelevel))
+
+	local threshold = tonumber(config.globals.gc_threshold) or 130
+	runtime.log:debug("Setting garbage collection threshold to %d", threshold)
+	collectgarbage("setpause", threshold)
 
 	-- Initialize uloop
 	runtime.uloop.init()
@@ -57,6 +60,7 @@ function M.start()
 	runtime.events.start()
 	runtime.informer.start()
 	runtime.uloop.run()
+	runtime.mobiled.cleanup()
 	runtime.log:info("Exit")
 end
 

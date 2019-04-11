@@ -9,8 +9,12 @@ local ui_helper = require("web.ui_helper")
 local post_helper = require("web.post_helper")
 local content_helper = require("web.content_helper")
 local uimessage_helper = require("web.uimessage_helper")
+local timhelper = require("tim_helper")
 local format, match, floor = string.format, string.match, math.floor
 local session = ngx.ctx.session
+local gOV = post_helper.getOrValidation
+local gAV = post_helper.getAndValidation
+local vSIDN = post_helper.validateStringIsDomainName
 
 local mapValid = {
     mmpbx_enabled = post_helper.validateBoolean,
@@ -122,12 +126,26 @@ local function validateStringIsVoicePort(value, object, key)
     return nil, T"Port is invalid. It should be 0 or between 1024 and 65535."
 end
 
+local function validateRegProxy(value)
+    if post_helper.validateStringIsIP(value) then
+        local isRes, errorMsg = post_helper.reservedIPValidation(value)
+        if not isRes then
+            return nil, errorMsg
+        end
+        local isQTN, errmsg = post_helper.validateQTN(value)
+        if not isQTN then
+            return nil, errmsg
+        end
+    end
+    return vSIDN(value)
+end
+
 local sipnet_valid = {
     primaryRegistrarPort = validateStringIsVoicePort,
-    primaryRegistrar = post_helper.getOrValidation(post_helper.validateStringIsIP,post_helper.validateStringIsDomainName),
-    primaryProxy = post_helper.getOrValidation(post_helper.validateStringIsIP,post_helper.validateStringIsDomainName),
+    primaryRegistrar = validateRegProxy,
+    primaryProxy = validateRegProxy,
     primaryProxyPort = validateStringIsVoicePort,
-    regExpire = post_helper.validateRegExpire,
+    regExpire = timhelper.validateRegExpire,
     transportType = post_helper.getValidateInEnumSelect(transport_types)
 }
 

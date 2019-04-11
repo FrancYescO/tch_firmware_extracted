@@ -48,10 +48,6 @@ local wireless_ap_ = {
             access = "readOnly",
             type = "string",
         },
-		display_connected_devices = {
-            access = "readOnly",
-            type = "boolean",
-        },
     },
   }
 }
@@ -90,24 +86,19 @@ local function getall(mapping, key)
 end
 
 local function get(mapping, paramName, key)
-	if paramName == "display_connected_devices" then
-		local value = uci_helper.get_from_uci({ config = "wireless", sectionname = key , option = 'display_connected_devices'})
-		return nilToEmptyString(value)
-	else
-    local apData =  network.getAccessPointInfo(key)
-    return nilToEmptyString(apData[paramName]);
-	end
+      local apData =  network.getAccessPointInfo(key)
+      return nilToEmptyString(apData[paramName]);
 end
 
 local namemap = {admin_state="state"}
 local set = function(mapping, param, value, key)
-	if param == "admin_state" then
-		local SSIDwl = uci_helper.get_from_uci({ config = "wireless", sectionname = key, option = "iface"})
-		uci_helper.set_on_uci({ config = "wireless", sectionname = SSIDwl , option = "state"}, value, commitapply)
-		uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = "state"}, value, commitapply)
-	else
-    uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = namemap[param] or param}, value, commitapply)
-	end
+    if param == "admin_state" then
+      local SSIDwl = uci_helper.get_from_uci({ config = "wireless", sectionname = key, option = "iface"})
+      uci_helper.set_on_uci({ config = "wireless", sectionname = SSIDwl , option = "state"}, value, commitapply)
+      uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = "state"}, value, commitapply)
+    else
+      uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = namemap[param] or param}, value, commitapply)
+    end
 end
 
 wireless_ap_.entries = entriesWirelessAP

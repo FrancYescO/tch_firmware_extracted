@@ -19,6 +19,7 @@ print_help ()
   echo "--errors_rec           : SFP received errors "
   echo "--discardpackets_sent  : SFP sent discard  packets "
   echo "--discardpackets_rec   : SFP received discard packets "
+  echo "--omcirxstats          : SFP received omci packets "
   echo "--reboot               : Reboot SFP module "
   echo "--help                 : Dump the info text"
   exit 1
@@ -55,6 +56,8 @@ do
         shift;;
     --discardpackets_rec) TOPIC=discardpacketsrec;
         shift;;
+    --omcirxstats) TOPIC=omcirxstats;
+        shift;;
     --reboot) TOPIC=reboot;
         shift;;
     --allstats) TOPIC=allstats;
@@ -80,6 +83,7 @@ reboot_cmd="reboot -d 3"
 onu_state_cmd="gpon get onu-state"
 opt_all="mib dump counter port all nonZero"
 optical_cmd="cat /proc/optical_info"
+omcirxstats_cmd="gpon show counter global ds-omci"
 
 ###### get the ip address of SFP ###start###
 # There have two interfaces in /etc/config/network:
@@ -146,7 +150,18 @@ if [ "$TOPIC" = "reset" ] ; then
 	echo `(echo "$diag_cmd"; echo "$counter_reset"; sleep 1; echo "$exit_cmd";)|${connect_cmd}`> /tmp/reset.txt
 fi
 
-if [ "$TOPIC" != "state" -a "$TOPIC" != "optical" -a "$TOPIC" != "config" -a "$TOPIC" != "reset" -a "$TOPIC" != "reboot" ] ; then
+if [ "$TOPIC" = "omcirxstats" ] ; then
+	echo `(echo "$diag_cmd"; echo "$omcirxstats_cmd"; sleep 1; echo "$exit_cmd";)|${connect_cmd}` > /tmp/omcirxstats.txt
+
+	sed -i 's/\r/\n/g' /tmp/omcirxstats.txt
+	omciRxStats=`cat /tmp/omcirxstats.txt | grep 'Total RX OMCI' | tr -cd "[0-9]"`
+	if [ ! $omciRxStats ] ; then
+		omciRxStats=0
+	fi
+	echo "$omciRxStats"
+fi
+
+if [ "$TOPIC" != "state" -a "$TOPIC" != "optical" -a "$TOPIC" != "config" -a "$TOPIC" != "reset" -a "$TOPIC" != "reboot" -a "TOPIC" != "omcirxstats" ] ; then
 
 	echo `(echo "$diag_cmd"; echo "$opt_cmd"; sleep 1; echo "$exit_cmd";)|${connect_cmd}` > /tmp/sfp_counter.txt
 

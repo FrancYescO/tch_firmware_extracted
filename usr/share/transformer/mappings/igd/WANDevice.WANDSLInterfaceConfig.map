@@ -302,7 +302,6 @@ local InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_ = {
         access = "readOnly",
         type = "int",
       },
---[[
       ACTSNRMODEds = {
         access = "readOnly",
         type = "unsignedInt",
@@ -311,6 +310,7 @@ local InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_ = {
         access = "readOnly",
         type = "unsignedInt",
       },
+--[[
       VirtualNoisePSDds = {
         access = "readOnly",
         type = "base64",
@@ -323,11 +323,11 @@ local InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_ = {
         min = "0",
         max = "49",
       },
+]]
       ACTUALCE = {
         access = "readOnly",
         type = "unsignedInt",
       },
-]]
       LineNumber = {
         access = "readOnly",
         type = "int",
@@ -578,14 +578,16 @@ local InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_ = {
 
 local setmetatable = setmetatable
 local tostring = tostring
+local split_key = mapper("nwcommon").split_key
 local tonumber = tonumber
 local match = string.match
+local luabcm = require('luabcm')
 
 local mapper = mapper
 
 local lfs = require("lfs")
 local fmod = math.fmod
-local xdslctl = require("transformer.shared.xdslctl")
+local dsl_supported, xdslctl = pcall(require,"transformer.shared.xdslctl")
 local conn = mapper("ubus").connect()
 local wandevice = require 'transformer.shared.models.igd.wandevice'
 
@@ -599,6 +601,11 @@ local revert = ucihelper.revert
 local transactions = {}
 
 local empty_mt = { __index = function() return "" end }
+
+local function dslLineNumber(key)
+  local _, dslNumber = split_key(key)
+  return tonumber((dslNumber or ""):match("^dsl(%d+)$"))
+end
 
 -- translate Channel to DataPath
 local channelmapping = setmetatable({
@@ -708,6 +715,19 @@ local function times10(val)
   end
   return tostring(10*v)
 end
+
+local function getDSLStats(key, option)
+  local luastats
+  local dsllinenumber = dslLineNumber(key)
+  if dsllinenumber then
+    luastats = luabcm.getAdslMib(dsllinenumber)
+  end
+  if luastats and type(luastats) == "table" then
+    return tostring(luastats[option])
+  end
+  return "0"
+end
+
 
 local function getShapingRate(key)
     local _, devname = getDevtypeAndName(key)
@@ -943,6 +963,15 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.get = {
   X_000E50_NumberOfCuts = function(mapping, param, key)
     return xdslctl.stats("total", "retr")
   end,
+  ACTSNRMODEds = function(mapping, param, key)
+    return getDSLStats(key, param)
+  end,
+  ACTSNRMODEus = function(mapping, param, key)
+    return getDSLStats(key, param)
+  end,
+  ACTUALCE = function(mapping, param, key)
+    return getDSLStats(key, param)
+  end,
 }
 
 
@@ -980,7 +1009,7 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.getall = function(mappi
   local mode = convertMode(xdslinfovalues["mode"])
   local standards = xdslinfovalues["StandardUsed"]
   local standard = xdslinfovalues["StandardsSupported"]
-  local channel
+  local channel, luastats
   if xdslinfovalues["currentrate"] ~= nil then
     channel = xdslinfovalues["currentrate"]["channel"]
   else
@@ -1073,6 +1102,9 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.getall = function(mappi
   allvalues.X_000E50_ShapingBurstSize = "0"
   allvalues.X_000E50_ShapingRate = getShapingRate(key)
   allvalues.X_000E50_NumberOfCuts = xdslstatsvalues["total"]["retr"] or "0"
+  allvalues.ACTSNRMODEds = getDSLStats(key, "ACTSNRMODEds")
+  allvalues.ACTSNRMODEus = getDSLStats(key, "ACTSNRMODEus")
+  allvalues.ACTUALCE = getDSLStats(key, "ACTUALCE")
   return allvalues
 end
 

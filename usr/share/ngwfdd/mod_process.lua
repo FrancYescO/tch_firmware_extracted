@@ -36,6 +36,25 @@ local function get_process_name(info)
   info.name = name
 end
 
+local function get_process_pss(info)
+
+  local file = io.open("/proc/" .. info.pid .. "/smaps", "r")
+  if not file then
+    return
+  end
+  local sum = 0
+  for line in file:lines() do
+    if line:match("^Pss:") then
+      local incr = line:match("(%d+)%s*kB")
+      sum = sum + (tonumber(incr) or 0)
+    end
+  end
+  file:close()
+  if sum ~= 0 then
+    info.pss = sum
+  end
+end
+
 local function get_process_memory(info)
   local file = io.open("/proc/" .. info.pid .. "/status", "r")
   if not file then
@@ -178,6 +197,14 @@ local function get_process_cmdline(info)
   info.cmdline = cmdline
 end
 
+--[[
+local function print_err(status,err)
+  if not status then 
+     gwfd.errorhandler(err))
+  end
+end
+--]]
+
 local function get_process_info()
   local pid_exp = "^[0-9]+$"
 
@@ -192,6 +219,15 @@ local function get_process_info()
       get_process_memory(info)
       get_process_cpu(info)
 
+-- original (unprotected): Exits on error:
+--    get_process_pss(info)
+-- alternative: Do not exit on error; protect with 'pcall()' and handle error:
+--    print_err(pcall(get_process_pss,info))
+-- final: protect with 'xpcall()' and use ngwfdd error handler:
+--   Also other 'get_process_(info)' function calls could be protected in the same way.
+--   3 params 'xpcall(f,err,...)' does not work in current lua 5.1, so use 2 params 'xpcall(f,err)' :
+      xpcall(function() get_process_pss(info) end, gwfd.errorhandler)
+ 
       get_process_name(info)
       get_process_cmdline(info)
 

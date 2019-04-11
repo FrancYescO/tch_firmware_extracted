@@ -6,17 +6,18 @@
 
   Summary:
     The script calls `ip(6)tables` with the provided arguments, with one important exception:
-       `-L all`
-       As the other options, `-L` is also passed through as is, except when it is set with value `all`.
-       Value `all` is stripped from the arguments, so that `ip(6)tables` is executed with plain `-L`.
+       `-L all` and `-Z all`
+       As the other options, `-L` and `-Z` is also passed through as is, except when it is set with value `all`.
+       Value `all` is stripped from the arguments, so that `ip(6)tables` is executed with plain `-L` or `-Z`.
        When `-L` is set to a chain name, `-L 'that_chain_name'` is simply passed to ip(6)tables.
+       Similarly when `-Z` is set to a chain name, `-Z 'that_chain_name'` is simply passed to ip(6)tables.
 
   Background:
-    Declaring the clash command with flag `-L (string default "")` is insufficient to get the arguments flow
+    Declaring the clash command with flag `-L (string default "")` or `-Z (string default "")` is insufficient to get the arguments flow
     correctly from clash -> transformer -> ip(6)tables in all cases.
 
-    Due to design, when `-L` is left empty, it never arrives at ip(6)tables, hence we would not be able to
-    list all chains from ip(6)tables. The wrapper script covers this by translating `-L all` to `-L` before calling
+    Due to design, when `-L` or `-Z` is left empty, it never arrives at ip(6)tables, hence we would not be able to
+    list all chains from ip(6)tables. The wrapper script covers this by translating `-L all` to `-L` and `-Z all` to `-Z`  before calling
     ip(6)tables.
 
   The wrapper script also determines whether to call `iptables` or `ip6tables`.
@@ -48,7 +49,7 @@ local function arg_fixup(arguments)
     if arg == "--ipv6" then
       ipv6 = true
     else
-      if lastarg == "-L" and arg == "all" then
+      if (lastarg == "-L" or lastarg == "-Z") and arg == "all" then
         -- filter out `all` for `-L`; see summary
       else
         fixedargs[#fixedargs + 1] = arg

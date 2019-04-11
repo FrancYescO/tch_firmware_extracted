@@ -13,7 +13,7 @@ configure_switch() {
 		ethswctl -c regaccess -v 0x28 -l 4 -n $unit -d 0x800000
 	fi
 	if [ "$unit" -eq "0" ] ; then
-		ethswctl -c jumbo -p 9 -v $jumbo
+		ethswctl -c jumbo -p 9 -v $jumbo > /dev/null
 	fi
 	if [ "$unit" -ne "0" ] ; then
 		if [ "$jumbo" != "0" ] ; then
@@ -32,6 +32,8 @@ setup_switch() {
 	# Configure options for all switches
 	config_foreach configure_switch switch
 
-	bcmswconfig reset
-	bcmswconfig load network
+	[ -e "/usr/bin/bcmswconfig" ] && {
+		bcmswconfig reset
+		bcmswconfig load network
+	}
 }

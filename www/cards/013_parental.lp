@@ -1,5 +1,5 @@
-<%
--- NG-82219
+--pretranslated: do not change this file
+ 
 -- Enable localization
 gettext.textdomain('webui-parental')
 
@@ -82,16 +82,18 @@ local session = ngx.ctx.session
 if session:hasAccess("/modals/parental-modal.lp") then
     modalPath = "/modals/parental-modal.lp"
     modal_link = 'class="modal-link" id = "Site_Blocking_Count" data-toggle="modal" data-remote="modals/parental-modal.lp" data-id="parental-modal"'
+elseif not session:isdefaultuser() then
+    return
 end
-%>
-
-<div class="span3">
-  <div class="smallcard">
-
-    <%= ui_helper.createCardHeader(T"Parental Controls", modalPath, switchName, nil) %>
-
-    <div class="content">
-    <% ngx.print(
+  ngx.print('\
+\
+<div class="span3">\
+  <div class="smallcard">\
+\
+    ');  ngx.print( ui_helper.createCardHeader(T"Parental Controls", modalPath, switchName, nil) ); ngx.print('\
+\
+    <div class="content">\
+    ');  ngx.print(
             ui_helper.createSimpleLight(blockenabled, switchtext, { light = { id =  "Site_BlockingStatus_Led" }, span = { id =  "Site_Blocking_Status" } }),
             '<p></p>',
             '<p class="subinfos">',
@@ -101,7 +103,8 @@ end
             '</p>'
             )
 
-    %>
-    </div>
-  </div>
-</div>
+      ngx.print('\
+    </div>\
+  </div>\
+</div>\
+'); 

@@ -98,11 +98,10 @@ local Multi_TraceRouteDiagnostics_ = {
         access = "readWrite",
         type = "string",
         enumeration = {
-          "Any",
+          -- "Any", currently not supported
           "IPv4",
           "IPv6",
         },
-        default = "Any",
       },
     -- RouteHopsNumberOfEntries
     -- automatically created when InternetGatewayDevice.TraceRouteDiagnostics.RouteHops.{i}. is loaded
@@ -181,9 +180,9 @@ local splitKey = nwCommon.split_key
 local findLanWanInterfaces = nwCommon.findLanWanInterfaces
 local wanconn = require("transformer.shared.wanconnection")
 local traceRouteHelper = require("transformer.shared.traceroutehelper")
+local network = require("transformer.shared.common.network")
 local clearTraceRouteResults = traceRouteHelper.clear_traceroute_results
 local readTraceRouteResults = traceRouteHelper.read_traceroute_results
-local protocolVersion = { Any = "", IPv4 = "ipv4", IPv6 = "ipv6" }
 
 -- map used to identify the location of each RouteHops parameter in
 -- the table returned by readTraceRouteResults() for DEV2/IGD.
@@ -192,14 +191,6 @@ local userParamIndexMap =
     device2 = { Host = 1, HostAddress = 2, RTTimes = 3, ErrorCode = 4 },
     igd = { HopHost = 1, HopHostAddress = 2, HopRTTimes = 3, HopErrorCode = 4 }
   }
-
-local function getSectionName(mapping)
-  if mapping.objectType.name:match("^InternetGatewayDevice.") then
-    return "igd"
-  else
-    return "device2"
-  end
-end
 
 Multi_TraceRouteDiagnostics_.get = function(mapping, pname)
   local value
@@ -237,9 +228,6 @@ Multi_TraceRouteDiagnostics_.get = function(mapping, pname)
     if pname == "DiagnosticsState" and value == "InProgress" then
       value = "Requested"
     end
-    if pname == "ProtocolVersion" and value == "" then
-      value = "Any"
-    end
   elseif (pname == "ResponseTime") then
     local _, time = readTraceRouteResults(mapping._section)
     value = (time and tostring(time)) or "0"
@@ -256,9 +244,6 @@ end
 Multi_TraceRouteDiagnostics_.set = function(mapping, pname, pvalue)
   -- Interface is displayed in IGD/DEV2 as path, but stored as UCI/UBUS interface in UCI, so convert it first
   -- allow empty value
-  if pname == "ProtocolVersion" then
-    pvalue = protocolVersion[pvalue]
-  end
   if pname == "Interface" and pvalue ~= "" then
     -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
     if mapping._section == "device2" then
@@ -323,7 +308,7 @@ Multi_TraceRouteDiagnostics_.revert = traceRouteHelper.uci_traceroute_revert
 local duplicator = mapper("multiroot").duplicate
 local duplicates = duplicator(Multi_TraceRouteDiagnostics_, "#ROOT", {"InternetGatewayDevice.TraceRouteDiagnostics", "Device.IP.Diagnostics.TraceRoute"})
 for _, dupli in ipairs(duplicates) do
-  dupli._section = getSectionName(dupli)
+  dupli._section = network.getMappingType(dupli)
   dupli._uciBinding = {
     DiagnosticsState = { config = config, sectionname = dupli._section, option = "state" },
     Interface = { config = config, sectionname = dupli._section, option = "interface" },
@@ -344,7 +329,7 @@ end
 
 duplicates = duplicator(Multi_TraceRouteDiagnostics_RouteHops_i_, "#ROOT", {"InternetGatewayDevice.TraceRouteDiagnostics.RouteHops", "Device.IP.Diagnostics.TraceRoute.RouteHops"})
 for _, dupli in ipairs(duplicates) do
-  dupli._section = getSectionName(dupli)
+  dupli._section = network.getMappingType(dupli)
   if dupli._section == 'igd' then
     -- Remove device2-specific parameters from igd
     dupli.objectType.parameters["Host"] = nil

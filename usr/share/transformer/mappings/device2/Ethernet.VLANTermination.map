@@ -3,7 +3,7 @@
 local Device_Ethernet_VLANTermination_i_ = {
   objectType = {
     name = "Device.Ethernet.VLANTermination.{i}.",
-    access = "readOnly",
+    access = "readWrite",
     numEntriesParameter = "VLANTerminationNumberOfEntries",
     enableParameter = "Enable",
     minEntries = 0,
@@ -41,7 +41,7 @@ local Device_Ethernet_VLANTermination_i_ = {
         max = "64",
       },
       LowerLayers = {
-        access = "readOnly", -- VLAN cannot be separated from the Eth.Link
+        access = "readWrite",
         list = true,
         max = "1024",
         type = "string",
@@ -78,13 +78,15 @@ local Device_Ethernet_VLANTermination_i_ = {
 local nwmodel = require "transformer.shared.models.device2.network"
 local VLAN = nwmodel.register("VLAN", Device_Ethernet_VLANTermination_i_.objectType.name)
 local model
+local uciobject = require "transformer.shared.uciobject"
+local lowerlayer = require "transformer.shared.device2.lowerlayer"
 
 local nwCommon = mapper("nwcommon")
 local getIntfInfo = nwCommon.getIntfInfo
 local uciHelper = mapper("ucihelper")
-local getFromUci = uciHelper.get_from_uci
+local get_from_uci = uciHelper.get_from_uci
 local commitApply = commitapply
-local isConfigChanged = false
+local changedConfig = {}
 local vlanDeviceBinding = { config = "network"}
 
 local vlanStatus = {
@@ -96,17 +98,42 @@ local vlanStatus = {
   ["lowerlayerdown"] = "LowerLayerDown",
 }
 
+local function getFromUci(key, param, default)
+  local ucikey = model:getUciKey(key)
+  vlanDeviceBinding.sectionname = ucikey
+  vlanDeviceBinding.option = param
+  vlanDeviceBinding.default = default
+  return get_from_uci(vlanDeviceBinding)
+end
+
 Device_Ethernet_VLANTermination_i_.entries = function(mapping)
   model = nwmodel.load()
   return model:getKeys(VLAN)
 end
 
-local function getUciParam(key, paramName, default)
+Device_Ethernet_VLANTermination_i_.add = function()
+  model = nwmodel:load()
+  local key = uciobject.create("network", "device", "dev_dyn", {
+    dev2_dynamic = "1",
+    name = uciobject.GeneratedKey,
+    type = "8021q",
+  }, commitapply)
+  -- we must add the new object to the model make Alias generation
+  -- work properly.
+  key = "vlan:"..key
+  model:add(VLAN, key)
+  -- but the model is now no longer valid
+  nwmodel.invalidate()
+  return key
+end
+
+Device_Ethernet_VLANTermination_i_.delete = function(_, key)
   local ucikey = model:getUciKey(key)
-  vlanDeviceBinding.sectionname = ucikey
-  vlanDeviceBinding.option = paramName
-  vlanDeviceBinding.default = default
-  return getFromUci(vlanDeviceBinding)
+  if getFromUci(ucikey, "dev2_dynamic")=="1" then
+    uciobject.delete("network", ucikey, commitapply)
+    return true
+  end
+  return nil, "predefined object can not be deleted"
 end
 
 local function getEthVlanStatus(key)
@@ -127,7 +154,7 @@ Device_Ethernet_VLANTermination_i_.get = {
     if vid then
       return "1"
     else
-      return getUciParam(key,"enabled","1")
+      return getFromUci(key,"enabled","1")
     end
   end,
 
@@ -148,7 +175,7 @@ Device_Ethernet_VLANTermination_i_.get = {
     if vid then
       return vid
     else
-      return getUciParam(key,"vid","1")
+      return getFromUci(key,"vid","1")
     end
   end,
 }
@@ -157,7 +184,7 @@ local function setUciParam(key, option, value)
   vlanDeviceBinding.sectionname = model:getUciKey(key)
   vlanDeviceBinding.option = option
   uciHelper.set_on_uci(vlanDeviceBinding, value, commitApply)
-  isConfigChanged = true
+  changedConfig[vlanDeviceBinding.config] = true
 end
 
 Device_Ethernet_VLANTermination_i_.set = {
@@ -178,20 +205,31 @@ Device_Ethernet_VLANTermination_i_.set = {
       return nil, "this vlan can not change its vlan id"
     end
   end,
+
+  LowerLayers = function(_, _, value, key)
+    return lowerlayer.setLowerLayer(model, key, value,
+      "Device.Ethernet.Link.{i}."
+    )
+  end
 }
 
 Device_Ethernet_VLANTermination_i_.commit = function()
-  if isConfigChanged then
-    uciHelper.commit(vlanDeviceBinding)
-    isConfigChanged = false
+  uciobject.commit()
+  lowerlayer.commit()
+  for config in pairs(changedConfig) do
+    uciHelper.commit{config=config}
   end
+  changedConfig = {}
 end
 
 Device_Ethernet_VLANTermination_i_.revert = function()
-  if isConfigChanged then
-    uciHelper.revert(vlanDeviceBinding)
-    isConfigChanged = false
+  uciobject.revert()
+  lowerlayer.revert()
+  nwmodel.invalidate()
+  for config in pairs(changedConfig) do
+    uciHelper.commit{config=config}
   end
+  changedConfig = {}
 end
 
 register(Device_Ethernet_VLANTermination_i_)

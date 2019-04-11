@@ -5,16 +5,27 @@
 gettext.textdomain('webui-core')
 local content_helper = require("web.content_helper")
 local ipairs, string, table = ipairs, string, table
-
 local lfs = require("lfs")
+local checkgpon = require("checkgponboard_helper")
+local is_gpon = checkgpon.isGPONBoard()
 local items = {
     {"diagnostics-xdsl-modal.lp", T"xDSL"},
     {"diagnostics-ping-modal.lp", T"Ping & Traceroute"},
     {"diagnostics-connection-modal.lp", T"Connection"},
     {"diagnostics-network-modal.lp", T"Network"},
     {"diagnostics-igmpproxy-modal.lp", T"Igmpproxy"},
-    {"diagnostics-tcpdump-modal.lp", T"Tcpdump"},
+    {"diagnostics-tcpdump-modal.lp", T"Tcpdump"}
 }
+if is_gpon then
+  items = {
+      {"diagnostics-gpon-modal.lp", T"GPON"},
+      {"diagnostics-ping-modal.lp", T"Ping & Traceroute"},
+      {"diagnostics-connection-modal.lp", T"Connection"},
+      {"diagnostics-network-modal.lp", T"Network"},
+      {"diagnostics-tcpdump-modal.lp", T"Tcpdump"}
+  }
+end
+
 local xdsl_exist = false
 
 if lfs.attributes("/etc/config/xdsl", "mode") == "file" then

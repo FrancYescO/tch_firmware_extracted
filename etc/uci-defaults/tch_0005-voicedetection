@@ -1,17 +1,8 @@
 #!/bin/sh
 
 touch /etc/slicstate
-insmod endpointdd
-if [ -f /proc/voice/detectslic ]
-then
-    echo "this is a non voice platform "
-else
-    /usr/bin/mmdetectslic
-fi
 
-[ -f /proc/voice/detectslic ] && cat /proc/voice/detectslic  >> /etc/slicstate
-
-rmmod endpointdd
+/usr/bin/mmdetectslic || true
 
 cat /etc/slicstate  | grep "isVoiceOn:"
 if [ "$?" = 0 ]		#/etc/slicstate is not empty
@@ -31,6 +22,9 @@ then
 	then
 	    rm $(find /usr/share/transformer -name '*dect*')
 	    rm $(find /etc/config -name '*dect*')
+            rm $(find /usr/lib/lua/tch -name 'mmpbxdect_backup.lua')
+            rm $(find /etc/parameter_conversion -name 'conversion_dectemission')
+            rm $(find /usr/lib/parameter_conversion -name 'mmpbx_dectemission.sh')
 	    rm $(find /www/docroot/modals -name 'mmpbx-dect-modal.lp')
 	fi
 	if [ -f /usr/lib/mmpbx/libmmpbxrvsipdev.so ]
@@ -54,17 +48,26 @@ then
 	then
 	    #call lua script for cleaning mmpbx file.
 	    echo "dectEpNumber=$dectEpNumber fxoEpNumber=$fxoEpNumber sipDevSupported=$sipDevSupported"
-	    /usr/bin/lua /usr/lib/lua/tch/mmpbxcustocleanup.lua $dectEpNumber $fxoEpNumber $sipDevSupported
+	    /usr/bin/lua /usr/lib/lua/tch/mmpbxcustocleanup.lua "$dectEpNumber" "$fxoEpNumber" "$sipDevSupported"
 	fi
-        emission=$(uci get mmpbx.dectemission.state)
-	if [ "$emission" = 0 ]
+
+	if [ ! "$dectEpNumber" = 0 ]
 	then
-	    rm /etc/config/mmpbxbrcmdectdev
-	    /usr/bin/lua /usr/lib/lua/tch/mmpbxdect_backup.lua $emission
+	    emission=$(uci get mmpbx.dectemission.state)
+	    if [ "$emission" = 0 ]
+	    then
+	        rm /etc/config/mmpbxbrcmdectdev
+	        if [ -f /usr/lib/lua/tch/mmpbxdect_backup.lua ]
+	        then
+	            /usr/bin/lua /usr/lib/lua/tch/mmpbxdect_backup.lua $emission
+	        fi
+	    fi
 	fi
     else
 	echo "This is not a voice platform, do the clean up ..."
 	opkg remove --force-removal-of-dependent mmpbx
+	opkg remove mmpbxfwctl
+	opkg remove mmpbxipv6fwctl
 	opkg remove --force-depends mappings-mmpbxd
 	rm $(find /etc/config -name '*mmpbx*')
 	rm $(find /etc/config -name mmdbd)

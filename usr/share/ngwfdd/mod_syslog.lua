@@ -8,30 +8,25 @@ local dkjson = require("dkjson")
 local gwfd = require("gwfd-common")
 
 -- Absolute path to the output fifo file
-local fifo_file_path = arg[1]
+local fifo_file_path = assert(arg[1])
+local file = assert(io.open(fifo_file_path, "w"))
 
-local file = io.open(fifo_file_path, "w")
+-- Read the logs with logread to get all logs until now
+-- followed by logread -f to read any future log messages
+local logs = assert(io.popen("logread && logread -f", 'r'))
 
-if file then
-  -- Read the logs with logread to get all logs until now
-  -- followed by logread -f to read any future log messages
-  local logs = io.popen("logread && logread -f", 'r')
-  if logs then
-    local msg = {}
-    local line = logs:read('*l')
-    while line do
-      local uptime = gwfd.get_uptime()
-      msg["uptime"] = uptime
-      msg["msg"] = gwfd.fixUTF8(line)
-      local str = dkjson.encode(msg)
-      file:write(str)
-      file:write('\n')
-      file:flush()
-      line = logs:read('*l')
-    end
-    io.close(logs)
-  end
-  io.close(file)
+for line in logs:lines() do
+  local msg = {
+    uptime = gwfd.get_uptime(),
+    msg = gwfd.fixUTF8(line)
+  }
+  file:write(dkjson.encode(msg))
+  file:write('\n')
+  file:flush()
 end
+
+logs:close()
+file:close()
+
 
 

@@ -1,4 +1,5 @@
-local table, pairs, tonumber = table, pairs, tonumber
+local tinsert = table.insert
+
 local helper = require("mobiled.scripthelpers")
 local M = {}
 
@@ -12,7 +13,7 @@ local function find_usb_interfaces(desc)
 		interface.protocol = tonumber(helper.read_file(i .. "/bInterfaceProtocol"), 16)
 		interface.number = tonumber(helper.read_file(i .. "/bInterfaceNumber"), 16)
 		interface.path = i
-		table.insert(interfaces, interface)
+		tinsert(interfaces, interface)
 	end
 	return interfaces
 end
@@ -40,7 +41,7 @@ function M.find_interfaces(desc, filter)
 			end
 		end
 		if matched then
-			table.insert(result, interface)
+			tinsert(result, interface)
 		end
 	end
 	if #result > 0 then
@@ -54,7 +55,7 @@ function M.find_tty_interfaces(desc, filter)
 	local ttys = {}
 	local interfaces = M.find_interfaces(desc, filter) or {}
 	for _, interface in pairs(interfaces) do
-		table.insert(ttys, find_usb_tty(interface))
+		tinsert(ttys, find_usb_tty(interface))
 	end
 	if #ttys > 0 then
 		return ttys

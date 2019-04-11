@@ -1,9 +1,9 @@
 #!/bin/sh
 #.Distributed under the terms of the GNU General Public License (GPL) version 2.0
-#.2014-2017 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
+#.2014-2018 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
 . /lib/functions.sh
 . /lib/functions/network.sh
-VERSION="2.7.6-15"
+VERSION="2.7.8-3"
 SECTION_ID=""
 VERBOSE=0
 MYPROG=$(basename $0)
@@ -12,6 +12,7 @@ PIDFILE=""
 UPDFILE=""
 DATFILE=""
 ERRFILE=""
+IPFILE=""
 TLDFILE=/usr/share/public_suffix_list.dat.gz
 CHECK_SECONDS=0
 FORCE_SECONDS=0
@@ -39,14 +40,12 @@ KNOT_HOST=$(which khost)
 DRILL=$(which drill)
 HOSTIP=$(which hostip)
 NSLOOKUP=$(which nslookup)
-NSLOOKUP_MUSL=$($(which nslookup) localhost 2>&1 | grep -F "(null)")
 WGET=$(which wget)
 WGET_SSL=$(which wget-ssl)
 CURL=$(which curl)
-CURL_SSL=$($(which curl) -V 2>/dev/null | grep "Protocols:" | grep -F "https")
-CURL_PROXY=$(find /lib /usr/lib -name libcurl.so* -exec grep -i "all_proxy" {} 2>/dev/null \;)
+CURL_SSL=$($CURL -V 2>/dev/null | grep -F "https")
+CURL_PROXY=$(find /lib /usr/lib -name libcurl.so* -exec strings {} 2>/dev/null \; | grep -im1 "all_proxy")
 UCLIENT_FETCH=$(which uclient-fetch)
-UCLIENT_FETCH_SSL=$(find /lib /usr/lib -name libustream-ssl.so* 2>/dev/null)
 upd_privateip=$(uci -q get ddns.global.upd_privateip) || upd_privateip=0
 ddns_rundir=$(uci -q get ddns.global.ddns_rundir) || ddns_rundir="/var/run/ddns"
 [ -d $ddns_rundir ] || mkdir -p -m755 $ddns_rundir
@@ -133,7 +132,7 @@ stop_section_processes "$__SECTIONID"
 done
 }
 write_log() {
-local __LEVEL __EXIT __CMD __MSG
+local __LEVEL __EXIT __CMD __MSG __MSE
 local __TIME=$(date +%H%M%S)
 [ $1 -ge 10 ] && {
 __LEVEL=$(($1-10))
@@ -164,7 +163,13 @@ __MSG=" $__TIME  info : $__MSG" ;;
 esac
 [ $VERBOSE -gt 0 -o $__EXIT -gt 0 ] && echo -e "$__MSG"
 if [ ${use_logfile:-1} -eq 1 -o $VERBOSE -gt 1 ]; then
-echo -e "$__MSG" >> $LOGFILE
+if [ -n "$password" ]; then
+urlencode __MSE "$__MSG"
+__MSG=$( echo -e "$__MSE" \
+| sed -e "s/$URL_PASS/***PW***/g" \
+| sed -e "s/+/ /g; s/%00/\n/g; s/%/\\\\x/g" | xargs -0 printf "%b" )
+fi
+printf "%s\n" "$__MSG" >> $LOGFILE
 [ $VERBOSE -gt 1 ] || sed -i -e :a -e '$q;N;'$ddns_loglines',$D;ba' $LOGFILE
 fi
 [ -n "$LUCI_HELPER" ] && return
@@ -496,6 +501,7 @@ fi
 __RUNPROG="$__PROG '$__URL'"
 __PROG="cURL"
 elif [ -n "$UCLIENT_FETCH" ]; then
+UCLIENT_FETCH_SSL=$(find /lib /usr/lib -name libustream-ssl.so* 2>/dev/null)
 __PROG="$UCLIENT_FETCH -q -O $DATFILE"
 [ -n "$__BINDIP" ] && \
 write_log 14 "uclient-fetch: FORCE binding to specific address not supported"
@@ -577,7 +583,7 @@ __URL=$(echo $update_url | sed -e "s#\[USERNAME\]#$URL_USER#g"	-e "s#\[PASSWORD\
 -e "s#\[DOMAIN\]#$domain#g"	-e "s#\[IP\]#$__IP#g")
 [ $use_https -ne 0 ] && __URL=$(echo $__URL | sed -e 's#^http:#https:#')
 do_transfer "$__URL" || return 1
-write_log 7 "DDNS Provider answered:\n$(cat $DATFILE)"
+write_log 7 "DDNS Provider answered:${N}$(cat $DATFILE)"
 [ -z "$UPD_ANSWER" ] && return 0
 grep -i -E "$UPD_ANSWER" $DATFILE >/dev/null 2>&1
 return $?
@@ -590,6 +596,7 @@ local __RUNPROG __DATA __URL __ERR
 write_log 7 "Detect local IP on '$ip_source'"
 while : ; do
 if [ -n "$ip_network" ]; then
+network_flush_cache
 [ $use_ipv6 -eq 0 ] && __RUNPROG="network_get_ipaddr" \
 || __RUNPROG="network_get_ipaddr6"
 eval "$__RUNPROG __DATA $ip_network" || \
@@ -756,6 +763,7 @@ __IP="$__IP \`"
 __RUNPROG="$__PROG $lookup_host >$DATFILE 2>$ERRFILE"
 __PROG="hostip"
 elif [ -n "$NSLOOKUP" ]; then
+NSLOOKUP_MUSL=$($(which nslookup) localhost 2>&1 | grep -F "(null)")
 [ $force_dnstcp -ne 0 ] && \
 write_log 14 "Busybox nslookup - no support for 'DNS over TCP'"
 [ -n "$NSLOOKUP_MUSL" -a -n "$dns_server" ] && \
@@ -790,12 +798,14 @@ __DATA=$(cat $DATFILE | sed -ne "/^Name:/,\$ { s/^Address[0-9 ]\{0,\}: \($__REGE
 fi
 [ -n "$__DATA" ] && {
 write_log 7 "Registered IP '$__DATA' detected"
+[ -z "$IPFILE" ] || echo "$__DATA" > $IPFILE
 eval "$1=\"$__DATA\""
 return 0
 }
 write_log 4 "NO valid IP found"
 __ERR=127
 fi
+[ -z "$IPFILE" ] || echo "" > $IPFILE
 [ -n "$LUCI_HELPER" ] && return $__ERR
 [ -n "$2" ] && return $__ERR
 [ $VERBOSE -gt 1 ] && {
@@ -827,16 +837,16 @@ local __NEWLINE_IFS='
 [ $PID_SLEEP -ne 0 ] && kill -$1 $PID_SLEEP 2>/dev/null
 case $1 in
 0)	if [ $__ERR -eq 0 ]; then
-write_log 5 "PID '$$' exit normal at $(eval $DATE_PROG)\n"
+write_log 5 "PID '$$' exit normal at $(eval $DATE_PROG)${N}"
 else
-write_log 4 "PID '$$' exit WITH ERROR '$__ERR' at $(eval $DATE_PROG)\n"
+write_log 4 "PID '$$' exit WITH ERROR '$__ERR' at $(eval $DATE_PROG)${N}"
 fi ;;
 1)	write_log 6 "PID '$$' received 'SIGHUP' at $(eval $DATE_PROG)"
 /usr/lib/ddns/dynamic_dns_updater.sh -v "0" -S "$__SECTIONID" -- start || true
 exit 0 ;;
-2)	write_log 5 "PID '$$' terminated by 'SIGINT' at $(eval $DATE_PROG)\n";;
-3)	write_log 5 "PID '$$' terminated by 'SIGQUIT' at $(eval $DATE_PROG)\n";;
-15)	write_log 5 "PID '$$' terminated by 'SIGTERM' at $(eval $DATE_PROG)\n";;
+2)	write_log 5 "PID '$$' terminated by 'SIGINT' at $(eval $DATE_PROG)${N}";;
+3)	write_log 5 "PID '$$' terminated by 'SIGQUIT' at $(eval $DATE_PROG)${N}";;
+15)	write_log 5 "PID '$$' terminated by 'SIGTERM' at $(eval $DATE_PROG)${N}";;
 *)	write_log 13 "Unhandled signal '$1' in 'trap_handler()'";;
 esac
 __PIDS=$(pgrep -P $$)

@@ -1,4 +1,5 @@
 --pretranslated: do not change this file
+ 
 
 -- Enable localization
 -- NG-88797 WAN statistics is not automatically getting updates as LAN statistics
@@ -146,7 +147,7 @@ local mapParams = {
   uci_wan_username = "uci.network.interface.@wan.username",
   uci_wan_password = "uci.network.interface.@wan.password",
   uci_wan_masq = "uci.firewall.zone."..zonenum..".masq",
-  uci_wan_ipv6 = "uci.network.interface.@wan.ipv6", --custo TCOMITAGW-2157
+  uci_wan_ipv6 = "uci.network.interface.@wan.ipv6",
 }
 
 local mapPPPstats = {
@@ -234,10 +235,8 @@ local function isWanEnabled(value, object, key)
   return object["uci_wan_auto"] ~= "0"
 end
 
-------------------custo start TCOMITAGW-2157
 local function IPv6andUsername(value, object, key)
 	local valid, msg = vB(value)
-
 	local ipv6_state = proxy.get("uci.network.interface.@wan.ipv6")[1].value
 	if valid and ipv6_state ~= value then
 	local ipv6_realm = proxy.get("uci.env.var.ppp_realm_ipv6")[1].value
@@ -257,7 +256,7 @@ local function IPv6andUsername(value, object, key)
 	end
 	return valid, msg
 end
------------------custo end TCOMITAGW-2157
+
 -- Validation allows empty values if wan access disabled but will stil check for validity if the parameter is set
 -- if wan is enabled then it checks for validaty anyway
 local mapValid = {
@@ -265,7 +264,7 @@ local mapValid = {
   uci_wan_username = gCV(isWanEnabled, validateUsername, gOV(validateUsername)),
   uci_wan_password = gCV(isWanEnabled, gVP(vNES), gVP()),
   uci_wan_masq = validateNat,
-  uci_wan_ipv6 = IPv6andUsername,--custo TCOMITAGW-2157
+  uci_wan_ipv6 = IPv6andUsername,
 }
 
 local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
@@ -286,6 +285,7 @@ local content_rpc = {
   ipaddr = "rpc.network.interface.@wan.ipaddr",
   nexthop = "rpc.network.interface.@wan.nexthop",
   dns_wan = "rpc.network.interface.@wan.dnsservers",
+  ipv6_gua = "rpc.network.interface.@wan6.ipv6uniquelocaladdr",
   dns_loopback = "rpc.network.interface.@loopback.dnsservers", -- Added to include static dns servers configured on loopback interface (for TI custo)
 }
 
@@ -369,10 +369,6 @@ if wan_ppp_over_atm then
     params[wan_atm_uci_path.."ulp"] = "eth"
     setting = true
   end
-  if content_uci_xtm.wan_atm_enc ~= "llc" then
-    params[wan_atm_uci_path.."enc"] = "llc"
-    setting = true
-  end
 
   if setting then
     proxy.set(params)
@@ -407,14 +403,12 @@ else
 end
 
   ngx.print('\
-\
 <fieldset>\
-');
+');  
 ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 <legend>');  ngx.print( T"PPP connection" ); ngx.print('</legend>\
-\
-');
+');  
     local html = {}
     -- Label that shows PPP status
 	ajax_attr_light.light.class = ppp_light_map[ppp_status]
@@ -422,7 +416,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     -- Switch PPP on/off
     html[#html + 1] = ui_helper.createSwitch(T"Enabled", "uci_wan_auto", content.uci_wan_auto)
     html[#html + 1] = ui_helper.createSwitch(T"NAT", "uci_wan_masq", content.uci_wan_masq)
-	html[#html + 1] = ui_helper.createSwitch(T"IPv6", "uci_wan_ipv6", content.uci_wan_ipv6)--custo TCOMITAGW-2157
+    html[#html + 1] = ui_helper.createSwitch(T"IPv6", "uci_wan_ipv6", content.uci_wan_ipv6)
     -- PPP username
     local class_username = {
       input = {
@@ -443,7 +437,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     html[#html + 1] = ui_helper.createInputPassword(T"Password", "uci_wan_password", content["uci_wan_password"], class_username, helpmsg["uci_wan_password"])
 	end
 	ajax_attr.span.id = "ipaddr"
-    html[#html+1] = ui_helper.createLabel(T"IP address", content_rpc["ipaddr"], ajax_attr)
+    html[#html+1] = ui_helper.createLabel(T"IPv4 address", content_rpc["ipaddr"], ajax_attr)
 	ajax_attr.span.id = "nexthop"
     html[#html+1] = ui_helper.createLabel(T"Gateway", content_rpc["nexthop"], ajax_attr)
 	ajax_attr.span.id = "dns"
@@ -452,6 +446,10 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
    --if content_rpc["ip6addr"] and content_rpc["ip6addr"]:len() > 0 then
 		ajax_attr.span.id = "ip6addr"
         html[#html+1] = ui_helper.createLabel(T"IPv6 Address", content_rpc["ip6addr"], ajax_attr)
+    --end
+    --if content_rpc["ipv6_gua"] and content_rpc["ipv6_gua"]:len() > 0 then
+		ajax_attr.span.id = "ipv6_gua"
+        html[#html+1] = ui_helper.createLabel(T"IPv6 GUA", content_rpc["ipv6_gua"], ajax_attr)
     --end
     --if content_rpc["ip6prefix"] and content_rpc["ip6prefix"]:len() > 0 then
 		ajax_attr.span.id = "ip6prefix"
@@ -462,9 +460,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
         html[#html+1] = ui_helper.createLabel(T"IPv6 DNS", content_rpc["dnsv6"],ajax_attr)
    --end
    end
-
-
-    -- ATM VP/VC
+   -- ATM VP/VC
     if wan_ppp_over_atm then
       local advanced = {
         group = {
@@ -477,14 +473,14 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
     end
 
     ngx.print(html)
+
+
   ngx.print('\
 \
 </fieldset>\
-\
 <fieldset>\
 <legend>');  ngx.print( T"PPP statistics" ); ngx.print('</legend>\
-');
-
+');  
         local html = {}
 		ajax_attr.span.id = "discard"
 		ajax_attr.span.class = "span4 simple-desc"
@@ -538,4 +534,4 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 \
 </fieldset>\
-');
+'); 

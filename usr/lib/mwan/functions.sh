@@ -1,14 +1,5 @@
 #!/bin/sh
 
-mwan_set_host_mark() {
-	local path=$1
-	local nfmark
-	[ -f /var/etc/mwan.config ] || return
-
-	nfmark=$(awk "\$1==\"$path\" { print \$2 }" /var/etc/mwan.config)
-	[ -n "$nfmark" ] && export SO_MARK=$nfmark
-}
-
 mwan_get_dest_ip_policy()
 {
 	get_policy_cb()
@@ -24,9 +15,6 @@ mwan_get_dest_ip_policy()
 }
 
 case "$1" in
-	set_host_mark)
-		mwan_set_host_mark $2
-		;;
 	get_dest_ip_policy)
 		mwan_get_dest_ip_policy $2 $3
 		;;

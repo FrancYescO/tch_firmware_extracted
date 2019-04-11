@@ -544,7 +544,7 @@ end
 -- @return {boolean} whether the current L2 went down or not
 M.checkIfCurrentL2WentDown = function(l2type, event, ethintf)
     local intfdown = 'network_device_' .. ethintf .. '_down'
-    if event == 'xdsl_0' and (l2type == "ADSL" or l2type == "VDSL") then
+    if event == 'xdsl_0' and (l2type == "ADSL" or l2type == "VDSL" or l2type == "GFAST") then
         -- xDSL interface is down and we were over xDSL
         return true
     elseif event == intfdown and l2type == "ETH" then
@@ -632,7 +632,7 @@ end
 -- @return {up/down} the linkstate
 local function run_checkLinkState(intf)
    local f = io.open('/sys/class/net/' .. intf .. '/carrier')
-   local linkstate
+   local linkstate = nil
    if f then
       local state = f:read(1)
       if state == '1' then
@@ -654,7 +654,8 @@ local function run_checkLinkState(intf)
       if pipe then
          for line in pipe:lines() do
             if not linkstate then
-               linkstate = match(line, "^Link is%s+([^%s]+)$")
+               line = line:gsub("^%s*","")
+               linkstate = match(line, "^Link is%s+([^%s]+)")
             end
          end
          pipe:close()
@@ -677,18 +678,55 @@ M.l2HasCarrier = function(l2intf)
     end
 end
 
+--- Helper function that performs the actual Link speed check
+-- it is pcalled by l2GetSpeed
+-- @param l2intf the interface name (netdevice interface name)
+-- @return {number} the link speed
+local function run_getLinkSpeed(intf)
+   local f = io.open('/sys/class/net/' .. intf .. '/speed')
+   local linkspeed = nil
+   if f then
+      linkspeed = f:read("*number")
+      f:close()
+   end
+
+   return linkspeed or 0
+end
+
+--- Returns the link speed for specified l2 device
+-- @param l2intf the interface name (netdevice interface name)
+-- @return {number} the link speed
+M.l2GetLinkSpeed = function(l2intf)
+    local status, linkspeed = pcall(run_getLinkSpeed,l2intf)
+
+    return status and linkspeed or 0
+end
+
 function M.set_state(uci, param, value)
    if type(param) ~= "string" or type(value) ~= "string" then
       error("both param and value parameter should be of type string")
    end
 
-   local config = "wansensing"
+   local config, section = "wansensing", "state"
    local x = uci.cursor(UCI_CONFIG, "/var/state")
 
    x:load(config)
-   x:revert("wansensing", "state", param)
-   x:set("wansensing", "state", param, value)
-   x:save("wansensing")
+   x:revert(config, section, param)
+   x:set(config, section, param, value)
+   x:save(config)
+end
+
+function M.clear_state(uci, param)
+   if type(param) ~= "string" then
+      error("param parameter should be of type string")
+   end
+
+   local config, section = "wansensing", "state"
+   local x = uci.cursor(UCI_CONFIG, "/var/state")
+
+   x:load(config)
+   x:revert(config, section, param)
+   x:save(config)
 end
 
 --- Format neighbor event name

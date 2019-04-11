@@ -118,7 +118,7 @@ function M.destroy_device(dev_idx, force)
 	local device, errMsg = get_device(dev_idx)
 	if not device then return nil, errMsg end
 
-	runtime.log:info("Destroy device " .. dev_idx)
+	runtime.log:notice("Destroy device " .. dev_idx)
 
 	for i=#device.interfaces,1,-1 do
 		local intf = device.interfaces[i]
@@ -519,7 +519,7 @@ local function stop_data_session(device, session_id)
 		local data_handle = device.session_state[session_id+1].data_handle
 		local cid = device.session_state[session_id+1].cid
 		if data_handle and cid then
-			runtime.log:info("Stopping data session " .. data_handle .. " with CID " .. cid)
+			runtime.log:notice("Stopping data session " .. data_handle .. " with CID " .. cid)
 			local ret = device:send_command("--set-client-id wds," .. cid .. " --stop-network " .. data_handle)
 			if ret and device:clear_session_cid(session_id) then
 				device:set_session_data_handle(session_id, nil)

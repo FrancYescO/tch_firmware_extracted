@@ -1,12 +1,8 @@
 --pretranslated: do not change this file
  
 -- Enable localization
---NG-102397 GUI internal error when changing LAN4 LAN/WAN mode
---NG-161381 GPON ONT - OpticalSignalLevel value shown on GUI is not divided by 1000
 
 gettext.textdomain('webui-core')
-
-local format = string.format
 
 local ui_helper = require("web.ui_helper")
 local content_helper = require("web.content_helper")

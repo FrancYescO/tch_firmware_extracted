@@ -24,12 +24,7 @@ config "firewall" {
   -- DMZ
   section "dmzredirect" {
     convert = function(s)
-      keepOptions("dest_mac", "dest_ip","src","dest","family","target","proto","enabled")
-    end,
-  },
-  section "dmzredirects" {
-    convert = function(s)
-      keepOptions("dest_mac", "dest_ip","enabled")
+      keepOptions("dest_mac", "dest_ip")
     end,
   },
   -- WAN NAT
@@ -43,9 +38,6 @@ config "firewall" {
     clear_list = true,
   },
   sectiontype "dmzredirect" {
-    clear_list = true,
-  },
-  sectiontype "dmzredirects" {
     clear_list = true,
   },
 }

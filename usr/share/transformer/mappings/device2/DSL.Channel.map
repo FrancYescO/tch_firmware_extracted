@@ -193,7 +193,7 @@ local DSLChannel = nwmodel.register("DSLChannel", Device_DSL_Channel_i_.objectTy
 local model
 
 local ubusConnection = mapper("ubus").connect()
-local xdslctl = require("transformer.shared.xdslctl")
+local dsl_supported, xdslctl = pcall(require,"transformer.shared.xdslctl")
 local posix = require("tch.posix")
 local tostring = tostring
 local getClockTime = posix.clock_gettime
@@ -383,7 +383,7 @@ Device_DSL_Channel_i_.get = {
   end,
 
   X_FASTWEB_RTXON = function(mapping, param, key)
-    return rtXonValue(key)
+    return xdslctl.infoValue("ginp_status", nil, nil, xdslctlLineIdMap[key]) or "0"
   end,
 
   X_000E50_RTXON = function(mapping, param, key)
@@ -421,7 +421,7 @@ Device_DSL_Channel_i_.getall = function(mapping, key)
     LastChange = tostring(getClockTime(posix.CLOCK_MONOTONIC) - lastStateChangeTime),
     X_FASTWEB_SpectrumProfile = xdslInfoValues["vdsl2profile"] or "",
     X_000E50_SpectrumProfile = xdslInfoValues["vdsl2profile"] or "",
-    X_FASTWEB_RTXON = rtXonValue(key),
+    X_FASTWEB_RTXON = xdslInfoValues.ginp_status or "0",
     X_000E50_RTXON = rtXonValue(key),
     X_FASTWEB_CPEXDSLCapabilities = capabilitiesList(key),
     X_000E50_CPEXDSLCapabilities = capabilitiesList(key)

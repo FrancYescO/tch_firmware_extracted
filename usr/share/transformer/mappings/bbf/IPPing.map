@@ -21,10 +21,10 @@ local Multi_IP_Diagnostics_IPPing_ = {
         pathRef = true,
       },
       ProtocolVersion = {
-        access = "readOnly", -- readWrite not Supported
+        access = "readWrite",
         type = "string",
         enumeration = {
-          "Any",
+          -- "Any", currently not supported
           "IPv4",
           "IPv6",
         },
@@ -128,6 +128,7 @@ local findLanWanInterfaces = nwCommon.findLanWanInterfaces
 local ipPingHelper = require('transformer.shared.ippinghelper')
 local wanConn = require("transformer.shared.wanconnection")
 local activedevice = require 'transformer.shared.models.igd.activedevice'
+local network = require 'transformer.shared.common.network'
 
 -- Parameters that are applicable only for TR181: Device2
 local dev2OnlyParams = {
@@ -147,6 +148,7 @@ local uciBindingParamMap = {
   Timeout = "timeout",
   DataBlockSize = "size",
   DSCP = "dscp",
+  ProtocolVersion = "iptype",
 }
 
 local function getSectionName(mapping)
@@ -252,7 +254,7 @@ Multi_IP_Diagnostics_IPPing_.get = {
   Interface = function(mapping, param)
     return mapping._getInterface(mapping,param)
   end,
-  ProtocolVersion = "IPv4",
+  ProtocolVersion = getFromIPPingHelper,
   Host = getFromIPPingHelper,
   NumberOfRepetitions =getFromIPPingHelper,
   Timeout = getFromIPPingHelper,
@@ -274,11 +276,17 @@ Multi_IP_Diagnostics_IPPing_.set = {
   Interface = function(mapping, param, value)
     return mapping._setInterface(mapping, param, value)
   end,
-  Host = SetOnIPPingHelper,
+  Host = function(mapping, param, value)
+    if network.domainValidation(value) then
+      return SetOnIPPingHelper(mapping, param, value)
+    end
+    return nil, "Invalid value"
+  end,
   NumberOfRepetitions = SetOnIPPingHelper,
   Timeout = SetOnIPPingHelper,
   DataBlockSize = SetOnIPPingHelper,
   DSCP = SetOnIPPingHelper,
+  ProtocolVersion = SetOnIPPingHelper,
 }
 
 Multi_IP_Diagnostics_IPPing_.commit = ipPingHelper.uci_ipping_commit

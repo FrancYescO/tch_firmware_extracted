@@ -3,7 +3,6 @@
 --! @brief The platform module giving access to platform specific methods
 ---------------------------------
 
-local pairs = pairs
 local runtime, plugin
 
 local M = {}
@@ -15,115 +14,158 @@ function M.get_capabilities()
 	return {}
 end
 
-function M.get_linked_antenna_controls(device)
-	local controls = {}
+local function get_linked_capability(device, cap_type)
 	if plugin then
 		local info = plugin.get_platform_capabilities()
-		if info and info.antenna_controls then
-			for _, antenna_control in pairs(info.antenna_controls) do
-				if antenna_control.linked_device.dev_desc == device.desc then
-					table.insert(controls, antenna_control)
+		if info and info[cap_type] then
+			for _, cap in pairs(info[cap_type]) do
+				if cap.linked_device and cap.linked_device.dev_desc == device.desc then
+					return cap
 				end
 			end
 		end
 	end
-	return controls
+end
+
+function M.get_linked_antenna_control(device)
+	return get_linked_capability(device, "antenna_controls")
+end
+
+function M.get_linked_rf_control(device)
+	return get_linked_capability(device, "rf_controls")
 end
 
 function M.get_linked_power_control(device)
-	if plugin then
-		local info = plugin.get_platform_capabilities()
-		if info and info.power_controls then
-			for _, power_control in pairs(info.power_controls) do
-				if power_control.linked_device.dev_desc == device.desc then
-					return power_control
-				end
-			end
-		end
-	end
+	return get_linked_capability(device, "power_controls")
+end
+
+function M.get_linked_voice_interface(device)
+	return get_linked_capability(device, "voice")
 end
 
 function M.sim_hotswap_supported(device)
+	return get_linked_capability(device, "sim_hotswap") ~= nil
+end
+
+local function power_control_action(action)
 	if plugin then
 		local info = plugin.get_platform_capabilities()
-		if info and info.sim_hotswap then
-			for _, sim_hotswap in pairs(info.sim_hotswap) do
-				if sim_hotswap.linked_device.dev_desc == device.desc then
-					return true
+		if info and info.power_controls then
+			for _, power_control in pairs(info.power_controls) do
+				if power_control[action] then
+					power_control[action]()
 				end
 			end
 		end
 	end
-	return false
 end
 
 function M.power_all_on()
-	if plugin then
-		local info = plugin.get_platform_capabilities()
-		if info and info.power_controls then
-			for _, power_control in pairs(info.power_controls) do
-				power_control.power_on()
-			end
-		end
-	end
+	power_control_action("power_on")
 end
 
 function M.power_all_off()
-	if plugin then
-		local info = plugin.get_platform_capabilities()
-		if info and info.power_controls then
-			for _, power_control in pairs(info.power_controls) do
-				power_control.power_off()
-			end
-		end
-	end
+	power_control_action("power_off")
 end
 
-local function ubus_get_capabilities(req, msg)
+function M.reset_all()
+	power_control_action("reset")
+end
+
+function M.get_capabilities()
 	local capabilities = {}
 	if plugin then
 		local info = plugin.get_platform_capabilities()
-		if info and info.power_controls then
-			capabilities.power_controls = {}
-			for _, power_control in pairs(info.power_controls) do
-				table.insert(capabilities.power_controls, { linked_device = power_control.linked_device, id = power_control.id })
+		if info then
+			if info.power_controls then
+				capabilities.power_controls = {}
+				for _, power_control in pairs(info.power_controls) do
+					local cap = { linked_device = power_control.linked_device, power_on = false, power_off = false, reset = false, power_state = false }
+					cap.power_on = not not power_control.power_on
+					cap.power_off = not not power_control.power_off
+					cap.reset = not not power_control.reset
+					cap.power_state = not not power_control.power_state
+					table.insert(capabilities.power_controls, cap)
+				end
 			end
-		end
-		if info and info.antenna_controls then
-			capabilities.antenna_controls = {}
-			for _, antenna_control in pairs(info.antenna_controls) do
-				table.insert(capabilities.antenna_controls, { linked_device = antenna_control.linked_device, detector_type = antenna_control.detector_type, id = antenna_control.id, name = antenna_control.name })
+			if info.rf_controls then
+				capabilities.rf_controls = {}
+				for _, rf_control in pairs(info.rf_controls) do
+					local cap = { linked_device = rf_control.linked_device, enable = false, disable = false, rf_state = false }
+					cap.enable = not not rf_control.enable
+					cap.disable = not not rf_control.disable
+					cap.rf_state = not not rf_control.rf_state
+					table.insert(capabilities.rf_controls, cap)
+				end
 			end
-		end
-		if info and info.sim_hotswap then
-			capabilities.sim_hotswap = info.sim_hotswap
+			if info.antenna_controls then
+				capabilities.antenna_controls = {}
+				for _, antenna_control in pairs(info.antenna_controls) do
+					for _, antenna in pairs(antenna_control.antenna) do
+						table.insert(capabilities.antenna_controls, { linked_device = antenna_control.linked_device, detector_type = antenna.detector_type, name = antenna.name })
+					end
+				end
+			end
+			if info.sim_hotswap then
+				capabilities.sim_hotswap = info.sim_hotswap
+			end
+			if info.voice then
+				capabilities.voice = info.voice
+			end
 		end
 	end
-	runtime.ubus:reply(req, capabilities)
+	return capabilities
 end
 
-local function ubus_get_info(req, msg)
+local function ubus_get_capabilities(req)
+	runtime.ubus:reply(req, M.get_capabilities())
+end
+
+local function ubus_get_info(req)
 	local info = {}
 	if plugin then
 		local platform_info = plugin.get_platform_capabilities()
-		if platform_info and platform_info.power_controls then
-			info.power_controls = {}
-			for _, power_control in pairs(platform_info.power_controls) do
-				table.insert(info.power_controls, { current_power_state = power_control.power_state(), id = power_control.id })
-			end
-		end
-		if platform_info and platform_info.antenna_controls then
-			info.antenna_controls = {}
-			for _, antenna_control in pairs(platform_info.antenna_controls) do
-				local antenna_info = {
-					current_antenna = antenna_control.antenna_state(),
-					id = antenna_control.id,
-					auto_selected_antenna = antenna_control.auto_selected_antenna
-				}
-				if antenna_control.external_detected then
-					antenna_info.external_detected = antenna_control.external_detected()
+		if platform_info then
+			if platform_info.power_controls then
+				for _, power_control in pairs(platform_info.power_controls) do
+					if power_control.power_state then
+						if not info.power_controls then
+							info.power_controls = {}
+						end
+						table.insert(info.power_controls, { linked_device = power_control.linked_device, power_state = power_control.power_state() })
+					end
 				end
-				table.insert(info.antenna_controls, antenna_info)
+			end
+			if platform_info.rf_controls then
+				for _, rf_control in pairs(platform_info.rf_controls) do
+					if rf_control.rf_state then
+						if not info.rf_controls then
+							info.rf_controls = {}
+						end
+						table.insert(info.rf_controls, { linked_device = rf_control.linked_device, rf_state = rf_control.rf_state() })
+					end
+				end
+			end
+			if platform_info.antenna_controls then
+				for _, antenna_control in pairs(platform_info.antenna_controls) do
+					if antenna_control.antenna then
+						for _, antenna in pairs(antenna_control.antenna) do
+							local antenna_info = {
+								linked_device = antenna_control.linked_device,
+								current_antenna = antenna.antenna_state(),
+								name = antenna.name,
+								auto_selected_antenna = antenna.auto_selected_antenna
+							}
+							if antenna.external_detected then
+								antenna_info.external_detected = antenna.external_detected()
+							end
+							if not info.antenna_controls then
+								info.antenna_controls = {}
+							end
+							table.insert(info.antenna_controls, antenna_info)
+						end
+					end
+				end
 			end
 		end
 	end
@@ -143,19 +185,10 @@ end
 function M.init(rt)
 	runtime = rt
 	local status, m = pcall(require, "libplatform")
-	plugin = status and m or nil
-	if plugin and plugin.init then
-		plugin.init()
-	end
-
-	local capabilities = M.get_capabilities()
-	if capabilities then
-		if capabilities.module_power_control then
-			M.module_power_on = plugin.module_power_on
-			M.module_power_off = plugin.module_power_off
-		end
-		if capabilities.antenna_selection then
-			M.select_antenna = plugin.select_antenna
+	if status and m then
+		plugin = m
+		if plugin.init then
+			plugin.init()
 		end
 	end
 end

@@ -8,7 +8,10 @@ local gwfd = require("gwfd-common")
 
 -- Library to read DSL parameters
 
-local bcm = require('luabcm')
+local status, bcm = pcall(require, 'luabcm')
+if not status then
+  os.exit(0)
+end
 
 -- Ubus Connection
 

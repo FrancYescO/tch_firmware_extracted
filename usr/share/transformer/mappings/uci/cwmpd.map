@@ -1,5 +1,6 @@
 local config_cwmpd = "cwmpd"
 local uci_helper = mapper("ucihelper")
+local encryptionBinding = {config = "cwmpd", sectionname = "cwmpd_config", option = "encrypt_passwords"}
 
 -- uci.cwmpd
 local uci_cwmpd = mapper("uci_1to1").createConfigMap(config_cwmpd)
@@ -17,7 +18,9 @@ local cwmpd_config = {
               "rollback_cwmpd", "rollback_delayed", "rollback_gui", "rollback_unknown",
               "namespace_version", "ssl_castore", "ssl_clientfile", "ssl_ciphersuite",
               "ssl_hostnamecheck", "ssl_verifypeer", "backoff_minwait", "backoff_multiplier",
-              "datamodel", "enforce_https", "connectionrequest_throttle_time", "connectionrequest_throttle_number"
+              "datamodel", "enforce_https", "connectionrequest_throttle_time", "connectionrequest_throttle_number",
+              "last_periodic_inform", "connectionrequest_url", "parameter_key", "last_session_try", "session_retry_count",
+              "bootstrapped", "inform_trigger",
             },
   passwords = {
     "acs_pass", "connectionrequest_password"
@@ -28,6 +31,29 @@ local cwmpd_config = {
 }
 
 local uci_cwmpd_config = mapper("uci_1to1").createSimpleMap(cwmpd_config)
+
+local crypto = require("tch.simplecrypto")
+local function crypto_wrapper(param)
+  -- passwords are not automatically set to hidden
+  uci_cwmpd_config.objectType.parameters[param].hidden = true
+
+  local set = uci_cwmpd_config.set[param]
+
+  -- Encrypt on set. Show encrypted value on get.
+  uci_cwmpd_config.set[param] = function(mapping, paramname, value)
+    local result, errmsg = crypto.encrypt(value, crypto.AES_256_CBC)
+    if not result then
+      return nil, errmsg
+    end
+    return set(mapping, paramname, result)
+  end
+end
+
+if uci_helper.get_from_uci(encryptionBinding) == "1" then
+  for _,param in ipairs(cwmpd_config.passwords) do
+    crypto_wrapper(param)
+  end
+end
 
 local uci = require("uci")
 local function removeFromState(option)

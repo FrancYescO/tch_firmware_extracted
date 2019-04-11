@@ -14,11 +14,11 @@ local M = {}
 M.SenseEventSet = {
     'xdsl_0',
     'network_device_eth4_down',
-    'network_interface_wan_ifup', 
+    'network_interface_wan_ifup',
     'network_interface_wan_ifdown' ,
 }
 local xdslctl = require('transformer.shared.xdslctl')
-local sfp = require('transformer.shared.sfp')
+local optical = require('transformer.shared.optical')
 local match = string.match
 
 function M.check(runtime)
@@ -33,8 +33,8 @@ function M.check(runtime)
    local x = uci.cursor()
 	-- check if wan ethernet port is up
 	if scripthelpers.l2HasCarrier("eth4") then
-				logger:notice("SFP connection: "..sfp.getSfpPhyState())
-				if sfp.getSfpPhyState() == "connect" and sfp.getSfpVendName() ~= "" then
+				logger:notice("SFP connection: "..optical.getLinkStatus())
+				if optical.getLinkStatus() == "linkup" or optical.getWanType() == "SFP" then
 					logger:notice("SFP connected")
 					return "L3Sense", "SFP"
 				else
@@ -52,11 +52,11 @@ function M.check(runtime)
 			end
 		end
 	end
-	--DR Section to check if wwan is enabled and if not enable it (covered config errors) 
+	--DR Section to check if wwan is enabled and if not enable it (covered config errors)
    local mobile = x:get("network", "wwan", "auto")
 	logger:notice("WAN Sensing Mobile: "..mobile)
-    
-	if mobile == "0" then 
+
+	if mobile == "0" then
 		 logger:notice("WAN Sensing - Enabling Mobile interface")
 		 x:set("network", "wwan", "auto", "1")
 		 x:commit("network")

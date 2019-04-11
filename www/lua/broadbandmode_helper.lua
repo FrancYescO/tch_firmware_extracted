@@ -17,267 +17,259 @@ local M = {}
 function M.broadBandDetails()
 local tablecontent ={}
 tablecontent[#tablecontent + 1] = {
-        name = "adsl",
-        default = false,
-        description = "ADSL2+",
-        view = "broadband-adsl-advanced.lp",
-        card = "002_broadband_xdsl.lp",
-        check = function()
+     name = "adsl",
+     default = false,
+     description = "ADSL2+",
+     view = "broadband-adsl-advanced.lp",
+     card = "002_broadband_xdsl.lp",
 
-					if wansensing == "1" then
-						local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
-						if L2 == "ADSL" then
-							return true
-						end
-					else
-						local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
-
-						local iface = string.match(ifname, "atm")
-
-						if iface then
-							return true
-						end
-					end
-				end
-		,
-        operations = function()
-						local difname =  proxy.get("uci.network.device.@wanatmwan.ifname")
-						if sfp == "1" then
-						if difname then
-						local dname = proxy.get("uci.network.device.@wanatmwan.name")[1].value
-						difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
-							proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-						end
-						else
-						if difname then
-						local dname = proxy.get("uci.network.device.@wanatmwan.name")[1].value
-						difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
-						end
-						end
-                                                local ptmdev = proxy.get("uci.xtm.ptmdevice.")
-                                                if next(ptmdev) then
-                                                        proxy.del("uci.xtm.ptmdevice.")
-                                                end
-		end
-		,
-    }
+     check = function()
+       if wansensing == "1" then
+         local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
+         if L2 == "ADSL" then
+           return true
+         end
+       else
+         local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
+         local iface = string.match(ifname, "atm")
+         if iface then
+           return true
+         end
+       end
+     end
+     ,
+     operations = function()
+       local difname =  proxy.get("uci.network.device.@wanatmwan.ifname")
+       if sfp == "1" then
+         if difname then
+           local dname = proxy.get("uci.network.device.@wanatmwan.name")[1].value
+           difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "atmwan")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "atmwan")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+           proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+         end
+       else
+         if difname then
+           local dname = proxy.get("uci.network.device.@wanatmwan.name")[1].value
+           difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "atmwan")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "atmwan")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+         end
+       end
+       local ptmdev = proxy.get("uci.xtm.ptmdevice.")
+       if next(ptmdev) then
+         proxy.del("uci.xtm.ptmdevice.")
+       end
+     end
+     ,
+}
 tablecontent[#tablecontent + 1] =    {
-        name = "vdsl",
-        default = true,
-        description = "VDSL2",
-        view = "broadband-vdsl-advanced.lp",
-        card = "002_broadband_xdsl.lp",
-        check = function()
+     name = "vdsl",
+     default = true,
+     description = "VDSL2",
+     view = "broadband-vdsl-advanced.lp",
+     card = "002_broadband_xdsl.lp",
 
-					if wansensing == "1" then
-						local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
-						if L2 == "VDSL" then
-							return true
-						end
-					else
-						local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
-
-						local iface = string.match(ifname, "ptm0")
-
-						if iface then
-							return true
-						end
-					end
-				end
-		,
-        operations = function()
-						local difname =  proxy.get("uci.network.device.@wanptm0.ifname")
-						if sfp == "1" then
-						if difname then
-						local dname = proxy.get("uci.network.device.@wanptm0.name")[1].value
-						difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
-							proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-						end
-						else
-						if difname then
-						local dname = proxy.get("uci.network.device.@wanptm0.name")[1].value
-						difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
-						end
-						end
-                                                local ptmdev = proxy.get("uci.xtm.ptmdevice.")
-                                                if not next(ptmdev) then
-                                                        proxy.add("uci.xtm.ptmdevice.","ptm0")
-                                                        proxy.set("uci.xtm.ptmdevice.@ptm0.priority","low")
-                                                        proxy.set("uci.xtm.ptmdevice.@ptm0.path","fast")
-                                                end
-		end
-		,
+     check = function()
+       if wansensing == "1" then
+         local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
+         if L2 == "VDSL" then
+           return true
+         end
+       else
+         local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
+         local iface = string.match(ifname, "ptm0")
+         if iface then
+           return true
+         end
+       end
+     end
+     ,
+     operations = function()
+       local difname =  proxy.get("uci.network.device.@wanptm0.ifname")
+       if sfp == "1" then
+         if difname then
+           local dname = proxy.get("uci.network.device.@wanptm0.name")[1].value
+           difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "ptm0")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "ptm0")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+           proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+         end
+       else
+         if difname then
+           local dname = proxy.get("uci.network.device.@wanptm0.name")[1].value
+           difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "ptm0")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "ptm0")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+         end
+       end
+       local ptmdev = proxy.get("uci.xtm.ptmdevice.")
+       if not next(ptmdev) then
+         proxy.add("uci.xtm.ptmdevice.","ptm0")
+         proxy.set("uci.xtm.ptmdevice.@ptm0.priority","low")
+         proxy.set("uci.xtm.ptmdevice.@ptm0.path","fast")
+       end
+     end
+     ,
     }
 tablecontent[#tablecontent + 1] = {
-        name = "ethernet",
-        default = false,
-        description = "Ethernet",
-        view = "broadband-ethernet-advanced.lp",
-        card = "002_broadband_ethernet.lp",
-        check = function()
+     name = "ethernet",
+     default = false,
+     description = "Ethernet",
+     view = "broadband-ethernet-advanced.lp",
+     card = "002_broadband_ethernet.lp",
 
-					if wansensing == "1" then
-						local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
-						if L2 == "ETH" then
-							return true
-						end
-					else
-						local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
+     check = function()
+       if wansensing == "1" then
+         local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
+         if L2 == "ETH" then
+           return true
+         end
+       else
+         local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
+         local iface = string.match(ifname, "eth4")
+         if sfp == "1" then
+           local lwmode = proxy.get("uci.ethernet.globals.eth4lanwanmode")[1].value
+           if iface and lwmode == "0" then
+             return true
+           end
+         else
+           if iface then
+             return true
+           end
+         end
+       end
+     end
+     ,
+     operations = function()
+       local difname =  proxy.get("uci.network.device.@waneth4.ifname")
+       if sfp == "1" then
+         if difname then
+           local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
+           difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "eth4")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+             proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "eth4")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
+         end
+       else
+         if difname then
+           local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
+           difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
+           if difname ~= "" and difname ~= nil then
+             proxy.set("uci.network.interface.@wan.ifname", dname)
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+           else
+             proxy.set("uci.network.interface.@wan.ifname", "eth4")
+             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           end
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "eth4")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+         end
+       end
+     end
+     ,
+    }
+if sfp == "1" and session:getrole() ~= "ispuser" then
+tablecontent[#tablecontent + 1] = {
+     name = "gpon",
+     default = false,
+     description = "GPON",
+     view = "broadband-gpon-advanced.lp",
+     card = "002_broadband_gpon.lp",
 
-						local iface = string.match(ifname, "eth4")
-						if sfp == "1" then
-							local lwmode = proxy.get("uci.ethernet.globals.eth4lanwanmode")[1].value
-							if iface and lwmode == "0" then
-								return true
-							end
-						else
-							if iface then
-								return true
-							end
-						end
-					end
-				end
-		,
-        operations = function()
-						local difname =  proxy.get("uci.network.device.@waneth4.ifname")
-						if sfp == "1" then
-						if difname then
-						local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
-						difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-							proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
-						end
-						else
-						if difname then
-						local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
-						difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-						end
-						end
-		end
-		,
+     check = function()
+       if wansensing == "1" then
+         local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
+         if L2 == "SFP" then
+           return true
+         end
+       else
+         local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
+         local iface = string.match(ifname, "eth4")
+         if sfp == "1" then
+           local lwmode = proxy.get("uci.ethernet.globals.eth4lanwanmode")[1].value
+           if iface and lwmode == "1" then
+             return true
+           end
+	 else
+           if iface then
+             return true
+           end
+         end
+       end
+     end
+     ,
+     operations = function()
+       local difname =  proxy.get("uci.network.device.@waneth4.ifname")
+       if difname then
+         local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
+         difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
+         if difname ~= "" and difname ~= nil then
+           proxy.set("uci.network.interface.@wan.ifname", dname)
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+           proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+         else
+           proxy.set("uci.network.interface.@wan.ifname", "eth4")
+           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+         end
+       else
+         proxy.set("uci.network.interface.@wan.ifname", "eth4")
+         proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+         proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
+       end
+     end
+     ,
     }
 
-	if sfp == "1" and session:getrole() ~= "ispuser" then
-
-	tablecontent[#tablecontent + 1] = {
-        name = "gpon",
-        default = false,
-        description = "GPON",
-        view = "broadband-gpon-advanced.lp",
-        card = "002_broadband_gpon.lp",
-        check = function()
-					if wansensing == "1" then
-						local L2 = proxy.get("uci.wansensing.global.l2type")[1].value
-						if L2 == "SFP" then
-							return true
-						end
-					else
-						local ifname = proxy.get("uci.network.interface.@wan.ifname")[1].value
-
-						local iface = string.match(ifname, "eth4")
-
-						if sfp == "1" then
-							local lwmode = proxy.get("uci.ethernet.globals.eth4lanwanmode")[1].value
-							if iface and lwmode == "1" then
-								return true
-							end
-						else
-							if iface then
-								return true
-							end
-						end
-					end
-				end
-		,
-        operations = function()
-						local difname =  proxy.get("uci.network.device.@waneth4.ifname")
-						if difname then
-						local dname = proxy.get("uci.network.device.@waneth4.name")[1].value
-						difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
-							if difname ~= "" and difname ~= nil then
-								proxy.set("uci.network.interface.@wan.ifname", dname)
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							else
-								proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                                proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-								proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-							end
-						else
-							proxy.set("uci.network.interface.@wan.ifname", "eth4")
-                                                        proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
-							proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
-						end
-		end
-		,
-    }
-
-	end
+end
 return tablecontent
 end
 return M

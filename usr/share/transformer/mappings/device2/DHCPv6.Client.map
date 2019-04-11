@@ -66,6 +66,13 @@ local Device_DHCPv6_Client_i_ = {
         type = "boolean",
         default = "false",
       },
+      X_000E50_ReleaseRenew = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+	description = "When set to true, trigger an IPv6 DHCP release/renew",
+        default = "false",
+      },
 --[[ TODO
       SuggestedT1 = {
         access = "readWrite",
@@ -274,6 +281,7 @@ Device_DHCPv6_Client_i_.get = {
   RequestPrefixes = getRequestPrefixes,
   RapidCommit = getRapidCommit,
   Renew = '0',
+  X_000E50_ReleaseRenew = '0',
   RequestedOptions = getRequestedOptions,
   SupportedOptions = '01,15,16,18'
 }
@@ -290,6 +298,7 @@ Device_DHCPv6_Client_i_.getall = function(mapping, key)
     RequestPrefixes = getRequestPrefixes(mapping, nil, key, uciValues["reqopts"]),
     RapidCommit = getRapidCommit(mapping, nil, key, uciValues["reqopts"]),
     Renew = '0',
+    X_000E50_ReleaseRenew = '0',
     RequestedOptions = getRequestedOptions(mapping, nil, key, uciValues["reqopts"]),
   }
   return allvalues
@@ -344,6 +353,18 @@ Device_DHCPv6_Client_i_.set = {
         outFile:write(ifname,"\n")
         outFile:close()
         commitApply:newset("Device.DHCPv6.Client.{i}.Renew")
+      end
+    end
+  end,
+
+  X_000E50_ReleaseRenew = function(mapping, param, value, key)
+    if value == "1" then
+      local ifname = getUciParam(key,"ifname")
+      local outFile = io.open("/tmp/.dhcpv6_release_renew_clients","a")
+      if outFile then
+        outFile:write(ifname,"\n")
+        outFile:close()
+        commitApply:newset("dhcpv6_ReleaseRenew")
       end
     end
   end,

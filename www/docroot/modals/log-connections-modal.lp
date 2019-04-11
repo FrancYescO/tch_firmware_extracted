@@ -200,47 +200,43 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 \
 <fieldset>\
-    <form class="form-horizontal" method="post" action="');  ngx.print( ngx.var.request_uri ); ngx.print('">\
-    ');  
-
-	ngx.print('\
+\
+<form class="form-horizontal" method="post" action="');  ngx.print( ngx.var.request_uri ); ngx.print('">\
+\
 <div class="span2">\
-    <ul class="nav nav-list">\
-    ');
-	local html = {}
-	local tab2 = {
-					{
-						desc = T"Log Viewer",
-						target = "modals/logviewer-modal.lp",
-					},
-					--[[{
-						desc = T"Routing Table",
-						target = "modals/log-routingtable-modal.lp",
-					},]]
-					{
-						desc = T"Connections",
-						active = "active",
-						target = "modals/log-connections-modal.lp",
-					},
+  <ul class="nav nav-list">\
+');  
+  local html = {}
+  local tab2 = {
+    {
+      desc = T"Log Viewer",
+      target = "modals/logviewer-modal.lp",
+    },
+    {
+      desc = T"Connections",
+      active = "active",
+      target = "modals/log-connections-modal.lp",
+    },
 
-				}
-	html[#html + 1] = format('<li class="nav-header">%s</li>', T"Index")
-	for i,v in ipairs(tab2) do
-		if v.active == "active" then
-			html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "active", i, v.target, v.desc)
-		else
-			html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "", i, v.target, v.desc)
-		end
-	end
-	ngx.print(html)
-ngx.print('\
-    </ul>\
+  }
+  html[#html + 1] = format('<li class="nav-header">%s</li>', T"Index")
+  for i,v in ipairs(tab2) do
+    if v.active == "active" then
+      html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "active", i, v.target, v.desc)
+    else
+      html[#html+1] = format('<li class="%s"><a  id = "Logmodal_%s" href="#" data-remote="%s">%s</a></li>', "", i, v.target, v.desc)
+    end
+  end
+  ngx.print(html)
+  ngx.print('\
+\
+</ul>\
 </div>\
 <div class="span6">\
-');
+<legend>');  ngx.print( T"System Log - Active Connections" ); ngx.print('</legend>\
+    \
+    ');  
 
-ngx.print('<legend>');  ngx.print( T"System Log - Active Connections" ); ngx.print('</legend>\
-')
     -- add input filter for user searching
     local filterclass = {
         input = {

@@ -70,10 +70,12 @@ local Multi_Time_ = {
       DaylightSavingsStart = {
         access = "readOnly",
         type = "dateTime",
+	default = "0000-00-00T00:00:00",
       },
       DaylightSavingsEnd = {
         access = "readOnly",
         type = "dateTime",
+	default = "0000-00-00T00:00:00",
       },
     }
   }
@@ -112,6 +114,8 @@ local find, match, sub = string.find, string.match, string.sub
 local timezone = require('transformer.shared.timezone')
 local ubus = mapper("ubus").connect()
 local ntp_servers_cache
+local zonenames = require("transformer.shared.zonenames")
+local network = require("transformer.shared.common.network")
 
 local ntp_uci = {
   config = "system",
@@ -144,6 +148,7 @@ local networkTime_uci = {
   sectionname = "@system[0]",
   option = "network_timezone",
   extended=true,
+  default = "1"
 }
 
 local sysBinding = {
@@ -176,17 +181,20 @@ local function hourminFormatForTimezone(value)
 end
 
 -- Get Functions
+
+local getall_NTPServer
+
 local function get_DayLightSavingsDayStart()
   local value = get_from_uci(timezone_uci)
   local timezoneValuePos = string.find(value,",")
   if timezoneValuePos then
     local daylightsavingstart = timezone.getStartEndDay(value)
     if not daylightsavingstart then
-      return ""
+      return "0000-00-00T00:00:00"
     end
     return daylightsavingstart
   else
-    return ""
+    return "0000-00-00T00:00:00"
   end
 end
 
@@ -196,11 +204,11 @@ local function get_DayLightSavingsDayEnd()
   if timezoneValuePos then
     local _, daylightsavingend = timezone.getStartEndDay(value)
     if not daylightsavingend then
-      return ""
+      return "0000-00-00T00:00:00"
     end
     return daylightsavingend
   else
-    return ""
+    return "0000-00-00T00:00:00"
   end
 end
 
@@ -239,7 +247,7 @@ local function get_enable()
   local enableClient = get_from_uci(ntp_enable_uci)
 
   if not enableClient  or enableClient == "" then
-    local servers = get_from_uci(ntp_uci)
+    local servers = getall_NTPServer()
 
     if not servers or  servers == "" then
       enableClient = "0"
@@ -259,7 +267,7 @@ local function get_status()
 end
 
 local function set_enable(info, value)
-  local servers = get_from_uci(ntp_uci)
+  local servers = getall_NTPServer()
   if( (value == "1") and (not servers or servers == "") ) then
     return nil, "Please set NTP Servers firstly"
   else
@@ -267,7 +275,38 @@ local function set_enable(info, value)
   end
 end
 
+------------------------------------------------------------------------------------------
+-- Get the first matched zonename from timezone table according to timezone
+--
+-- 'LocalTimeZone' of IGD/Device2 only has timezone but not zonename,
+-- so restriction is that only the first matched zonename in timezone table will be used.
+--
+-- e.g.
+--   LocalTimeZone == AEST-10EST,M10.1.0,M4.1.0/3
+--   zonename could be below 4:
+--     {'AEST-10AEDT,M10.1.0,M4.1.0/3_timezone_Australia/Currie', 'Australia/Currie'},
+--     {'AEST-10AEDT,M10.1.0,M4.1.0/3_timezone_Australia/Hobart', 'Australia/Hobart'},
+--     {'AEST-10AEDT,M10.1.0,M4.1.0/3_timezone_Australia/Melbourne', 'Australia/Melbourne'},
+--     {'AEST-10AEDT,M10.1.0,M4.1.0/3_timezone_Australia/Sydney', 'Australia/Sydney'}
+------------------------------------------------------------------------------------------
+local function get_zonename(tz)
+  local zonename = ""
+  tz = tz:gsub("[+%s]", "")
+  for _,v in ipairs(zonenames) do
+    local key = string.match(v[1], "^([^_]*)")
+    if key == tz then
+      zonename = v[2]
+      break
+    end
+  end
+  return zonename
+end
+
 local function set_localTimeZoneName(info, value)
+  local zoneName = get_zonename(value)
+  if zoneName == "" then
+    return nil, "Timezone not supported"
+  end
   local timezoneValuePos = string.find(value,",")
   local localtimezoneValue, localtimezone
   if timezoneValuePos then
@@ -285,7 +324,7 @@ local function set_localTimeZoneName(info, value)
   end
   set_on_uci(networkTime_uci, "1", commitapply)
   set_on_uci(timezone_uci, value, commitapply)
-  set_on_uci(zonename_uci, "", commitapply)
+  set_on_uci(zonename_uci, zoneName, commitapply)
 end
 
 local BROADCASTADDR = "255.255.255.255"
@@ -318,34 +357,6 @@ local function ntpIPValidation(value)
   return true
 end
 
-local function ntpDomainValidation(value)
-  local count, currLabelIndex = 0, 0
-  if type(value) ~= "string" or #value == 0 or #value > 255 then
-    return nil, "Domain name cannot be empty or greater than 255 characters or non string value"
-  end
-  repeat
-    count = count+1
-    currLabelIndex = find(value, ".", count, true)
-    local label = sub(value, count, currLabelIndex)
-    local strippedLabel = match(label, "[^%.]*")
-    if strippedLabel ~= nil then
-      if #strippedLabel == 0 or #strippedLabel > 63 then
-        return nil, "Label should not be empty or more than 63 characters"
-      end
-      local correctLabel = match(strippedLabel, "^[a-zA-z0-9][a-zA-Z0-9-_]*[a-zA-Z0-9]")
-      if #strippedLabel == 1 then
-        if not match(strippedLabel, "[a-zA-Z0-9]") then
-          return nil, "Label within domain name has invalid syntax"
-        end
-      elseif strippedLabel ~= correctLabel then
-        return nil, "Label within domain name has invalid syntax"
-      end
-    end
-    count = currLabelIndex
-  until not currLabelIndex
-  return true
-end
-
 -- Checks whether the received 'value' is a valid address (IP or domain name)
 -- @function ntpAddressValidation
 -- @param value
@@ -354,12 +365,10 @@ end
 local function ntpAddressValidation(value)
   local valid, err = ntpIPValidation(value)
   if not valid and not err then
-    return ntpDomainValidation(value)
+    return network.domainValidation(value)
   end
   return valid, err
 end
-
-local getall_NTPServer
 
 local function set_NTPServer(info, value)
   local ret, err = ntpAddressValidation(value)
@@ -398,9 +407,7 @@ local binding = {
 
 function getall_NTPServer()
   local ntp_servers = get_from_uci(ntp_uci)
-  if ntp_servers == "" then
-    ntp_servers = {}
-  end
+  ntp_servers = ntp_servers ~= "" and ntp_servers or {}
   local interfaceDump = ubus:call("network.interface", "dump", {})
   for _, intf in ipairs(interfaceDump.interface or {}) do
     if #ntp_servers < 5 then

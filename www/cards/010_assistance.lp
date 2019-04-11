@@ -1,11 +1,14 @@
-<%
+--pretranslated: do not change this file
+ 
 -- The card is shown, even if the modal is not accessible
 -- NG-74016 assistance card hidden for admin
+-- TCOMITAGW-2087; TCOMITAGW-2090
 gettext.textdomain('webui-core')
 
 local modal = '/modals/assistance-modal.lp'
 
 local format = string.format
+local ngx = ngx
 
 local session = ngx.ctx.session
 local admin = session:hasAccess(modal)
@@ -45,21 +48,21 @@ if assistant then
             ui_helper.createSimpleLight(state, T"Disabled", { light = { id =  "Assistance_LEDStatus" }, span = { id =  "Assistance_Status" } })
         }
     end
-	if session:hasAccess(modal) then
-%>
-
-<div class="span3">
-  <div class="smallcard">
-    <% if admin then
+    if session:hasAccess(modal) then
+  ngx.print('\
+<div class="span3">\
+  <div class="smallcard">\
+    ');  if admin then
         ngx.print(ui_helper.createCardHeader(T"Assistance", modal))
     else
         ngx.print(ui_helper.createCardHeader(T"Assistance"))
-    end %>
-    <div class="content">
-        <%= content %>
-    </div>
-  </div>
-</div>
-<% end 
-end
-%>
+    end   ngx.print('\
+    <div class="content">\
+        ');  ngx.print( content ); ngx.print('\
+    </div>\
+  </div>\
+</div>\
+');  end 
+end 
+  ngx.print('\
+'); 

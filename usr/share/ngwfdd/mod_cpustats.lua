@@ -7,10 +7,6 @@ package.path = "/usr/share/ngwfdd/lib/?.lua;" .. package.path
 local gwfd = require("gwfd-common")
 local uloop = require("uloop")
 
--- Logger
-
-local log
-
 -- Uloop timer
 
 local timer
@@ -89,7 +85,7 @@ end
 -- Main code
 uloop.init()
 
-log = gwfd.init("gwfd_cpustats", 6, { init_transformer = true })
+gwfd.init("gwfd_cpustats", 6, { init_transformer = true })
 
 cpu_stats = parse_proc_stat_file()
 

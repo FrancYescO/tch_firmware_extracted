@@ -169,8 +169,8 @@ configure_dynamic_interface() {
 	local zone=0
 	local network
 	while network="$(uci -q get "firewall.@zone[$zone].network")"; do
-		if echo "$network" | grep -wq "$parent_interface"; then
-			if ! echo "$network" | grep -wq "$interface"; then
+		if echo "$network" | grep -wqF "$parent_interface"; then
+			if ! echo "$network" | grep -wqF "$interface"; then
 				uci add_list "firewall.@zone[$zone].network=$interface" && uci commit
 				/etc/init.d/firewall enabled && /etc/init.d/firewall reload
 			fi
@@ -178,6 +178,15 @@ configure_dynamic_interface() {
 		fi
 		let ++zone
 	done
+
+	# Add the dynamic interfaces to the intercept WAN interfaces list
+	local intercept_wan="$(uci_get intercept config wan)"
+	if echo "$intercept_wan" | grep -wqF "$parent_interface"; then
+		if ! echo "$intercept_wan" | grep -wqF "$interface"; then
+			uci add_list "intercept.config.wan=$interface" && uci commit
+			/etc/init.d/intercept enabled && /etc/init.d/intercept reload
+		fi
+	fi
 }
 
 create_dhcp_interface() {
@@ -261,6 +270,7 @@ if [ "$action" = "setup" ]; then
 	fi
 
 	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		logger -t "$LOGGER_TAG" "Failed to retrieve session info for $interface"
 		proto_notify_error "$interface" "NO_SESSION_INFO"
 		exit 1
 	fi
@@ -352,6 +362,7 @@ elif [ "$action" = "connected" ]; then
 	fi
 
 	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		logger -t "$LOGGER_TAG" "Failed to retrieve session info for $interface"
 		proto_notify_error "$interface" "NO_SESSION_INFO"
 		exit 1
 	fi
@@ -486,6 +497,8 @@ elif [ "$action" = "disconnected" ]; then
 	# This can fail when a device is unplugged so not validating the output
 	if ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
 		json_get_vars ipv4 ipv6
+	else
+		logger -t "$LOGGER_TAG" "Failed to retrieve session info for $interface"
 	fi
 
 	if [ "$ipv4" != 1 ]; then
@@ -520,6 +533,7 @@ elif [ "$action" = "augment" ]; then
 	fi
 
 	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		logger -t "$LOGGER_TAG" "Failed to retrieve session info for $interface"
 		proto_notify_error "$interface" "NO_SESSION_INFO"
 		exit 1
 	fi

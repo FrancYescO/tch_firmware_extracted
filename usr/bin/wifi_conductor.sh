@@ -70,7 +70,7 @@ case "$CMD" in
     CLI_CMD="station_db dump"
     ;;
   clear_db_all)
-    CLI_CMD="station_db clear"
+    CLI_CMD="station_db clear all"
     ;;
   clear_db)
     if [ -n "$MAC" ]; then

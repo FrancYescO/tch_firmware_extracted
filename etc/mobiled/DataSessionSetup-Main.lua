@@ -32,7 +32,8 @@ M.SenseEventSet = {
 	"qualtest_start",
 	"antenna_change_detected",
 	"pdn_retry_timer_expired",
-	"sim_removed"
+	"sim_removed",
+	"sim_acl_changed"
 }
 
 function M.check(runtime, event, dev_idx)
@@ -63,10 +64,10 @@ function M.check(runtime, event, dev_idx)
 		return "QualTest"
 	elseif event.event == "sim_removed" then
 		return "SimInit"
-	elseif helper.startswith(event.event, "session_") or event.event == "timeout" or event.event == "pdn_retry_timer_expired" then
+	elseif helper.startswith(event.event, "session_") or event.event == "timeout" or event.event == "pdn_retry_timer_expired" or event.event == "sim_acl_changed" then
 		local info = device:get_network_info()
 		if info and info.nas_state ~= "registered" then
-			log:info("Not registered to network")
+			log:warning("Not registered to network!")
 			return "RegisterNetwork"
 		end
 
@@ -77,21 +78,24 @@ function M.check(runtime, event, dev_idx)
 				session.pdn_retry_timer.timer:cancel()
 				session.pdn_retry_timer.timer = nil
 				session.pdn_retry_timer.value = nil
+				session.reject_cause = nil
 				log:info("Canceled PDN retry timer")
 			end
 
 			-- Check if we need to start a PDN retry timer for the current reject cause
-			if event.reject_cause and session.session_id == event.session_id and not session.pdn_retry_timer.timer then
-				local cause = tonumber(event.reject_cause)
-				log:warning(string.format('Data session setup attempt failed with error "%s"', error_handler.get_error_cause(cause) or "Unknown"))
-				if cause and valid_pdn_retry_causes[cause] then
+			if session.reject_cause and not session.pdn_retry_timer.timer then
+				log:warning(string.format('Data session setup attempt for PDN %d failed with error "%s"', session.session_id, error_handler.get_error_cause(session.reject_cause) or "Unknown"))
+				if session.reject_cause and valid_pdn_retry_causes[session.reject_cause] then
 					session.pdn_retry_timer.value = session.pdn_retry_timer.default_value
-					log:info(string.format("Starting PDN retry timer of %d seconds", session.pdn_retry_timer.value))
+					log:info(string.format("Starting PDN retry timer of %d seconds for PDN %d", session.pdn_retry_timer.value, session.session_id))
 					session.pdn_retry_timer.timer = runtime.uloop.timer(function()
 						session.pdn_retry_timer.timer = nil
 						log:info("PDN retry timer expired for session " .. session.session_id)
+						session.reject_cause = nil
 						runtime.events.send_event("mobiled", { event = "pdn_retry_timer_expired", dev_idx = device.sm.dev_idx })
 					end, session.pdn_retry_timer.value * 1000)
+					-- Bring down the PPP daemon
+					mobiled.propagate_session_state(device, "teardown", "ipv4v6", { session })
 				end
 			end
 
@@ -100,37 +104,53 @@ function M.check(runtime, event, dev_idx)
 			if info then
 				log:info("Current state for session " .. session.session_id .. ": " .. info.session_state)
 				if session.session_id == 0 and session.changed then
-					log:info("Restart network registration")
+					log:notice("Restart network registration")
 					-- Bring down the PPP daemon
 					mobiled.propagate_session_state(device, "teardown", "ipv4v6", { session })
 					return "RegisterNetwork"
 				end
 
+				local profile = mobiled.get_profile(device, session.profile_id)
+				if not profile then
+					log:error("Failed to retrieve profile")
+					return "DataSessionSetup"
+				end
+
+				if not mobiled.apn_is_allowed(device, profile.apn) then
+					session.allowed = false
+				else
+					session.allowed = true
+				end
+
 				if info.session_state == "disconnected" then
-					if not session.activated then
-						if session.session_id == 0 then
-							local config = mobiled.get_device_config(device)
-							if config.device.detach_mode == "detach" or config.device.detach_mode == "poweroff" then
-								log:info("Need to detach from network")
-								return "RegisterNetwork"
-							end
-						end
-					else
+					if session.activated and session.allowed then
 						-- Check if we are allowed to try again
 						if not session.pdn_retry_timer.timer then
-							local profile = mobiled.get_profile(device, session.profile_id)
-							if profile and not info.autoconnect then
-								mobiled.start_data_session(device, session.session_id, profile, session.interface)
+							if not info.autoconnect and not session.autoconnect then
+								log:notice("Starting data session %d", session.session_id)
+								mobiled.start_data_session(device, session.session_id, profile)
 							end
 							session.changed = false
 						end
 						if not session.optional then
 							retState = "DataSessionSetup"
 						end
+					elseif session.session_id == 0 then
+						local config = mobiled.get_device_config(device)
+						if config.device.detach_mode == "detach" or config.device.detach_mode == "poweroff" then
+							log:notice("Need to detach from network")
+							return "RegisterNetwork"
+						end
 					end
 				elseif info.session_state == "connected" then
-					if not session.activated or session.changed then
-						log:info("Deactivating session " .. tostring(session.session_id))
+					session.reject_cause = nil
+					if session.pdn_retry_timer.timer then
+						session.pdn_retry_timer.timer:cancel()
+						session.pdn_retry_timer.timer = nil
+						session.pdn_retry_timer.value = nil
+					end
+					if not session.allowed or not session.activated or session.changed then
+						log:notice("Deactivating session %d", session.session_id)
 						mobiled.stop_data_session(device, session.session_id, session.interface)
 						if not session.optional then
 							retState = "DataSessionSetup"

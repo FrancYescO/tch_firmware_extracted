@@ -1,5 +1,7 @@
-<%
+--pretranslated: do not change this file
+ 
 -- Enable localization
+-- TCOMITAGW-2087; TCOMITAGW-2088
 gettext.textdomain('webui-core')
 
 local format, ngx = string.format, ngx
@@ -36,21 +38,22 @@ else
   light = "off"
 end
 
-%>
-
-<div class="span3">
-    <div class="smallcard">
-        <%= ui_helper.createCardHeader(T"CWMP", modalPath) %>
-        <div class="content">
-            <%= ui_helper.createSimpleLight(nil, state, { light = { class = light, id = "cwmpconfcard_cwmpstatusled"}, span = { id = "cwmpconfcard_cwmpstatus" } }) %>
-            <p class="subinfos">
-                <% ngx.print(format(T"ACS URL: <strong id=\"cwmpconfcard_acsurl\">%s</strong>",url )) %>
-                <% ngx.print(format(T"Periodic: <strong id=\"cwmpconfcard_periodicinterval\">%s</strong>",content["cwmp_periodic"] )) %>
-            </p>
-         </div>
-    </div>
-</div>
-
-<%
+  ngx.print('\
+\
+<div class="span3">\
+    <div class="smallcard">\
+        ');  ngx.print( ui_helper.createCardHeader(T"CWMP", modalPath) ); ngx.print('\
+        <div class="content">\
+            ');  ngx.print( ui_helper.createSimpleLight(nil, state, { light = { class = light, id = "cwmpconfcard_cwmpstatusled"}, span = { id = "cwmpconfcard_cwmpstatus" } }) ); ngx.print('\
+            <p class="subinfos">\
+                ');  ngx.print(format(T"ACS URL: <strong id=\"cwmpconfcard_acsurl\">%s</strong>",url ))   ngx.print('\
+                ');  ngx.print(format(T"Periodic: <strong id=\"cwmpconfcard_periodicinterval\">%s</strong>",content["cwmp_periodic"] ))   ngx.print('\
+            </p>\
+         </div>\
+    </div>\
+</div>\
+\
+');  
 end
-%>
+  ngx.print('\
+'); 

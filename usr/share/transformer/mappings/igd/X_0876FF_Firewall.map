@@ -171,7 +171,10 @@ end
 -- Function to check if the given ip address is in private subnet
 local function ipv4PrivateIPValidation(ipaddr)
   local ip = ipv4ToNum(ipaddr)
-  if ip and (ipv4ToNum("192.168.0.0") >= ip and ip <= ipv4ToNum("192.168.255.255")) or (ipv4ToNum("172.16.0.0") >= ip and ip <= ipv4ToNum("172.31.255.255")) or (ipv4ToNum("10.0.0.0") >= ip and ip <= ipv4ToNum("10.255.255.255")) then
+  if not ip then
+    return "PublicSubnet"
+  end
+  if (ipv4ToNum("192.168.0.0") >= ip and ip <= ipv4ToNum("192.168.255.255")) or (ipv4ToNum("172.16.0.0") >= ip and ip <= ipv4ToNum("172.31.255.255")) or (ipv4ToNum("10.0.0.0") >= ip and ip <= ipv4ToNum("10.255.255.255")) then
     return "PrivateSubnet"
   end
   return "PublicSubnet"
@@ -311,8 +314,5 @@ end
 local duplicator = mapper("multiroot").duplicate
 local duplicates = duplicator(InternetGatewayDevice_Multi_, "#ROOT", {"Firewall.Config.X_0876FF_Custom", "X_0876FF_IPv6Firewall.Config.X_0876FF_Custom"})
 for _, dupli in ipairs(duplicates) do
-  if dupli.objectType.name:match("^InternetGatewayDevice.X_0876FF_IPv6Firewall") then
-    dupli.objectType.parameters["Config"] = nil
-  end
   register(dupli)
 end

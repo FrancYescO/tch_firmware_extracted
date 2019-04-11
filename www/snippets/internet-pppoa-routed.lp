@@ -1,4 +1,5 @@
 --pretranslated: do not change this file
+ 
 
 -- NG-84683; NG-89573
 
@@ -19,7 +20,7 @@ local role = session:getrole()
 
 local tech = false
 if role == "engineer" or role == "ispuser" then
-   tech = true
+  tech = true
 end
 
 local ppp_state_map = {
@@ -144,7 +145,7 @@ local mapParams = {
   uci_wan_username = "uci.network.interface.@wan.username",
   uci_wan_password = "uci.network.interface.@wan.password",
   uci_wan_masq = "uci.firewall.zone."..zonenum..".masq",
-  uci_wan_ipv6 = "uci.network.interface.@wan.ipv6", --custo TCOMITAGW-2157
+  uci_wan_ipv6 = "uci.network.interface.@wan.ipv6",
 }
 
 -- Shortcuts to validation helpers to make lines shorter
@@ -212,30 +213,28 @@ local function isWanEnabled(value, object, key)
   return object["uci_wan_auto"] ~= "0"
 end
 
-------------------custo start TCOMITAGW-2157
 local function IPv6andUsername(value, object, key)
-	local valid, msg = vB(value)
+  local valid, msg = vB(value)
 
-	local ipv6_state = proxy.get("uci.network.interface.@wan.ipv6")[1].value
-	if valid and ipv6_state ~= value then
-	local ipv6_realm = proxy.get("uci.env.var.ppp_realm_ipv6")[1].value
-	local ipv4_realm = proxy.get("uci.env.var.ppp_realm_ipv4")[1].value
-		if value == "1" then
-			proxy.set("uci.network.interface.@wan6.auto", "1")
-			proxy.set("uci.network.interface.@wan.username", ipv6_realm)
-			proxy.set("uci.network.device.@waneth4.ipv6", "1")
-			proxy.set("uci.network.device.@wanptm0.ipv6", "1")
-		else
-			proxy.set("uci.network.interface.@wan6.auto", "0")
-			proxy.set("uci.network.interface.@wan.username", ipv4_realm)
-			proxy.set("uci.network.device.@waneth4.ipv6", "0")
-			proxy.set("uci.network.device.@wanptm0.ipv6", "0")
-		end
-	proxy.apply()
-	end
-	return valid, msg
+  local ipv6_state = proxy.get("uci.network.interface.@wan.ipv6")[1].value
+  if valid and ipv6_state ~= value then
+    local ipv6_realm = proxy.get("uci.env.var.ppp_realm_ipv6")[1].value
+    local ipv4_realm = proxy.get("uci.env.var.ppp_realm_ipv4")[1].value
+    if value == "1" then
+      proxy.set("uci.network.interface.@wan6.auto", "1")
+      proxy.set("uci.network.interface.@wan.username", ipv6_realm)
+      proxy.set("uci.network.device.@waneth4.ipv6", "1")
+      proxy.set("uci.network.device.@wanptm0.ipv6", "1")
+    else
+      proxy.set("uci.network.interface.@wan6.auto", "0")
+      proxy.set("uci.network.interface.@wan.username", ipv4_realm)
+      proxy.set("uci.network.device.@waneth4.ipv6", "0")
+      proxy.set("uci.network.device.@wanptm0.ipv6", "0")
+    end
+    proxy.apply()
+  end
+  return valid, msg
 end
------------------custo end TCOMITAGW-2157
 
 -- Validation allows empty values if wan access disabled but will stil check for validity if the parameter is set
 -- if wan is enabled then it checks for validaty anyway
@@ -244,7 +243,7 @@ local mapValid = {
   uci_wan_username = gCV(isWanEnabled, validateUsername, gOV(validateUsername)),
   uci_wan_password = gCV(isWanEnabled, gVP(vNES), gVP()),
   uci_wan_masq = validateNat,
-  uci_wan_ipv6 = IPv6andUsername,--custo TCOMITAGW-2157
+  uci_wan_ipv6 = IPv6andUsername,
 }
 
 local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
@@ -335,10 +334,6 @@ if content_uci_xtm.wan_atm_ulp ~= "ppp" then
   params[wan_atm_uci_path.."ulp"] = "ppp"
   setting = true
 end
-if content_uci_xtm.wan_atm_enc ~= "vcmux" then
-  params[wan_atm_uci_path.."enc"] = "vcmux"
-  setting = true
-end
 
 if setting then
   proxy.set(params)
@@ -371,14 +366,13 @@ else
 end
 
   ngx.print('\
-\
 <fieldset>\
-');
+');  
 ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   ngx.print('\
 <legend>');  ngx.print( T"PPP connection" ); ngx.print('</legend>\
-\
-');
+');  
+
   local html = {}
   -- Label that shows PPP status
   ajax_attr_light.light.class = ppp_light_map[ppp_status]
@@ -386,7 +380,7 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
   -- Switch PPP on/off
   html[#html + 1] = ui_helper.createSwitch(T"Enabled", "uci_wan_auto", content.uci_wan_auto)
   html[#html + 1] = ui_helper.createSwitch(T"NAT", "uci_wan_masq", content.uci_wan_masq)
-  html[#html + 1] = ui_helper.createSwitch(T"IPv6", "uci_wan_ipv6", content.uci_wan_ipv6)--custo TCOMITAGW-2157
+  html[#html + 1] = ui_helper.createSwitch(T"IPv6", "uci_wan_ipv6", content.uci_wan_ipv6)
   -- PPP username
   local class_username = {
     input = {
@@ -440,6 +434,5 @@ ngx.print(ui_helper.createMessages(message_helper.popMessages()))
 
   ngx.print(html)
   ngx.print('\
-\
 </fieldset>\
-');
+'); 

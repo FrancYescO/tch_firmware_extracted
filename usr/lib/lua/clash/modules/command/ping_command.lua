@@ -28,6 +28,8 @@ local cmd_assist = require("helper.command")
 local cmd_name = "ping"
 local usage_msg = [[
   Send ICMP ECHO_REQUEST to network hosts
+    --v4 Force IPv4 name resolution
+    --v6 Force IPv6 name resolution
     -q  Quiet, only displays output at start and when finished
     -c (string default 5) Only sent count pings
     -I (optional string) Set source address to specified interface address
@@ -37,9 +39,16 @@ local usage_msg = [[
     <host> (string) Host to ping
 ]]
 
-local function ps_function(args)
+local function ping_function(args)
   args = cmd_assist.rename_args(usage_msg, args)
   -- Possibility to further rename args here
+  if args["--v4"] then
+    args["-4"] = true
+  elseif args["--v6"] then
+    args["-6"] = true
+  end
+  args["--v4"] = nil
+  args["--v6"] = nil
   local ok, errmsg = cmd_assist.launch_command(cmd_name, args)
   if not ok then
     print(errmsg)
@@ -50,7 +59,7 @@ end
 local command = {
   name = cmd_name,
   usage_msg = usage_msg,
-  action = ps_function,
+  action = ping_function,
 }
 
 local M = {}

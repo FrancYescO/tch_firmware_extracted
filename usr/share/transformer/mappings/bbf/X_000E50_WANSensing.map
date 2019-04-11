@@ -32,6 +32,15 @@ local Multi_X_000E50_WANSensing_ = {
         access = "readWrite",
         type = "unsignedInt",
       },
+      WANSupervision = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+            "BFD",
+            "DNS",
+            "Disabled",
+          },
+      },
     }
   }
 }
@@ -73,6 +82,10 @@ Multi_X_000E50_WANSensing_.get = {
     binding.option = "autofailovermaxwait"
     return uci_helper.get_from_uci(binding)
   end,
+  WANSupervision = function(mapping)
+    binding.option = "supervision_mode"
+    return uci_helper.get_from_uci(binding)
+  end,
 }
 
 Multi_X_000E50_WANSensing_.getall = function(mapping)
@@ -84,6 +97,7 @@ Multi_X_000E50_WANSensing_.getall = function(mapping)
     InitMode = allValues.initmode or '',
     AutoFailover = allValues.autofailover or '0',
     AutoFailoverMaxWait = allValues.autofailovermaxwait or '',
+    WANSupervision = allValues.supervision_mode or ""
   }
 end
 
@@ -103,7 +117,7 @@ Multi_X_000E50_WANSensing_.set = {
     uci_helper.set_on_uci(binding, value, commitapply)
     transactions[binding.config] = true
 
-    binding_mobiled.sectionname = "device_defaults"
+    binding_mobiled.sectionname = "device_customer_defaults"
     binding_mobiled.option = "maximum_attach_delay"
     local dev = uci_helper.getall_from_uci(binding_mobiled)
     if not dev['.name'] then
@@ -145,6 +159,11 @@ Multi_X_000E50_WANSensing_.set = {
     else
       return nil, "Invalid value for InitMode"
     end
+  end,
+  WANSupervision = function(mapping, param, value)
+    binding.option = "supervision_mode"
+    uci_helper.set_on_uci(binding, value, commitapply)
+    transactions[binding.config] = true
   end,
 }
 

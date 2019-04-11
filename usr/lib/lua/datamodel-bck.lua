@@ -465,7 +465,7 @@ end
 -- Returns the resolved path of the instance or nil + error message. If
 -- the path instance was not found the returned path will be an empty string.
 -- Throws an error if you pass anything other than a string.
-function M.resolve(uuid, typePath, key)
+function M.resolve(uuid, typePath, key, sync)
   if uuid == nil or uuid == "" then
     return nil, "no UUID"
   end
@@ -474,7 +474,7 @@ function M.resolve(uuid, typePath, key)
   end
   -- construct message to send to Transformer
   msg:init_encode(RESOLVE_REQ, max_size, uuid)
-  msg:encode(typePath, key)
+  msg:encode(unpack{typePath, key, sync})
   msg:mark_last()
   -- send the request
   local sk, errmsg = send_on_sk(msg:retrieve_data())

@@ -1,16 +1,9 @@
 local M = {}
 
-function M.entry(runtime, dev_idx)
-	runtime.log:notice("DataSessionSetup-> Entry Function")
-	return true
-end
-
 -- Reset the PDN retry timer(s) when leaving the DataSessionSetup state
-function M.exit(runtime, transition, dev_idx)
+function M.exit(runtime, _, dev_idx)
 	local mobiled = runtime.mobiled
 	local log = runtime.log
-
-	log:notice("DataSessionSetup-> Exit Function")
 
 	local device, errMsg = mobiled.get_device(dev_idx)
 	if not device then

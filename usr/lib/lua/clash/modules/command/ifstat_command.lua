@@ -30,8 +30,8 @@ local usage_msg = [[
   This command provides the bandwidth monitoring of network interfaces
     -t Adds a timestamp at the beginning of each line
     -i (optional string) Only monitor the specified interface
-    -T Reports total bandwith for all monitored interfaces
-    -b Reports bandwith in kbits/sec instead of kbytes/sec
+    -T Reports total bandwidth for all monitored interfaces
+    -b Reports bandwidth in kbits/sec instead of kbytes/sec
 ]]
 
 local function ifstat_function(args)

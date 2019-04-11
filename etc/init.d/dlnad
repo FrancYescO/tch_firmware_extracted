@@ -2,6 +2,7 @@
 
 START=98
 STOP=02
+USE_PROCD=1
 
 . "$IPKG_INSTROOT"/lib/functions/network.sh
 
@@ -10,13 +11,8 @@ DLNAD_PID_FILE=/var/run/dlnad.pid
 CONF_FILE=/var/etc/dlnad.conf
 MNT_FILE=/var/etc/mount_path.conf
 
-start()
+start_service()
 {
-   if [ -f $DLNAD_PID_FILE ]; then
-     logger -t dlnad "dlnad already running"
-     return 1
-   fi
-
    config_load dlnad
    local enabled mountpath manufacturer_url radiostations_enabled friendly_name uuid modelname interface
    local loglevel
@@ -86,17 +82,18 @@ start()
      mkdir -m 0777 -p /tmp/dlnad
      #Added a extra check for the existence of the dlnad process to prevent recursive case
      if ! pgrep -x "/usr/bin/dlnad" > /dev/null; then
-       $DLNAD_BIN -f $CONF_FILE &
+     procd_open_instance
+     procd_set_param command $DLNAD_BIN -f $CONF_FILE
+     procd_set_param pidfile $DLNAD_PID_FILE
+     procd_close_instance
      fi
-     pid_dlnad=$(ps | grep $DLNAD_BIN | grep -v grep | awk '{print $1}')
-     echo $pid_dlnad > $DLNAD_PID_FILE
   else
     logger -t dlnad "dlnad config disabled"
     return 1;
   fi
 }
 
-reload() {
+reload_service() {
   local dlnad_enabled
   config_load dlnad
   config_get dlnad_enabled config enabled
@@ -111,14 +108,10 @@ reload() {
   return 0
 }
 
-stop()
+stop_service()
 {
    logger -t dlnad "Stopping dlnad"
    service_stop $DLNAD_BIN
-
-   if [ -f $DLNAD_PID_FILE ]; then
-     rm -f $DLNAD_PID_FILE
-   fi
 
    if [ -f $CONF_FILE ]; then
      rm -f $CONF_FILE

@@ -10,7 +10,7 @@ __URL=$(echo $__UPDURL | sed -e "s#\[USERNAME\]#$URL_USER#g" -e "s#\[PASSWORD\]#
 -e "s#\[DOMAIN\]#$domain#g" -e "s#\[IP\]#$__DUMMY#g")
 [ $use_https -ne 0 ] && __URL=$(echo $__URL | sed -e 's#^http:#https:#')
 do_transfer "$__URL" || return 1
-write_log 7 "'no-ip.com' answered:\n$(cat $DATFILE)"
+write_log 7 "'no-ip.com' answered:${N}$(cat $DATFILE)"
 grep -E "good|nochg" $DATFILE >/dev/null 2>&1 || return 1
 sleep 1
 write_log 7 "sending real IP to 'no-ip.com'"
@@ -18,6 +18,6 @@ __URL=$(echo $__UPDURL | sed -e "s#\[USERNAME\]#$URL_USER#g" -e "s#\[PASSWORD\]#
 -e "s#\[DOMAIN\]#$domain#g" -e "s#\[IP\]#$__IP#g")
 [ $use_https -ne 0 ] && __URL=$(echo $__URL | sed -e 's#^http:#https:#')
 do_transfer "$__URL" || return 1
-write_log 7 "'no-ip.com' answered:\n$(cat $DATFILE)"
+write_log 7 "'no-ip.com' answered:${N}$(cat $DATFILE)"
 grep -E "good|nochg" $DATFILE >/dev/null 2>&1
 return $?

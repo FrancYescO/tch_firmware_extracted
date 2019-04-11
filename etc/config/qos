@@ -28,34 +28,34 @@ config label 'Voice_Sig'
 
 #TO_WAN
 config class 'W_Q0'
+	option weight '1'
 	option priority '0'
-	option weight '7'
- 
+
 config class 'W_Q1'
-	option priority '0'
 	list trafficid '2'
-	option weight '7'
- 
-config class 'W_Q2'
+	option weight '1'
 	option priority '0'
+
+config class 'W_Q2'
 	list trafficid '3'
-	option weight '14'
- 
+	option weight '2'
+	option priority '0'
+
 config class 'W_Q3'
 	list trafficid '4'
+	option weight '2'
 	option priority '0'
-	option weight '14'
- 
+
 config class 'W_Q4'
-	option priority '0'
 	list trafficid '5'
-	option weight '27'
- 
-config class 'W_Q5'
+	option weight '4'
 	option priority '0'
+
+config class 'W_Q5'
 	list trafficid '6'
-	option weight '27'
- 
+	option weight '4'
+	option priority '0'
+
 config class 'W_Q6'
 	list trafficid '7'
 	option priority '6'
@@ -63,6 +63,7 @@ config class 'W_Q6'
 config class 'W_Q7'
 	list trafficid '8'
 	option priority '7'
+
 
 #TO_LAN
 config class 'L_Q0'
@@ -118,6 +119,10 @@ config classgroup 'TO_WAN'
 	option default 'W_Q0'
 	option policy 'sp_wrr'
 
+config classgroup 'TO_XDSL'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q1'
+	option policy 'sp_wfq'
 
 config classgroup 'TO_LAN'
 	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
@@ -136,17 +141,18 @@ config interface 'lan'
 #	option classgroup 'TO_WAN'
 
 config interface 'wlnet_b_24'
-        option classgroup 'TO_WLAN'
- 
+	option classgroup 'TO_WLAN'
+
 config interface 'wlnet_b_5'
-        option classgroup 'TO_WLAN'
+	option classgroup 'TO_WLAN'
+
 
 # Devices
 config device 'atmwan'
-	option classgroup 'TO_WAN'
+	option classgroup 'TO_XDSL'
 
 config device 'ptm0'
-	option classgroup 'TO_WAN'
+	option classgroup 'TO_XDSL'
 
 config device 'eth4'
 	option classgroup 'TO_WAN'
@@ -174,18 +180,17 @@ config classify
 
 config classify
 	option target 'Interactive'
-	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option dstports '443,993,995,1701,1935,3074,3478,3479,3480,3658,8080,37483'
 	option proto 'tcp'
 
 config classify
 	option target 'Interactive'
-	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option dstports '443,993,995,1701,1935,3074,3478,3479,3480,3658,8080,37483'
 	option proto 'udp'
 
 config classify
 	option target 'Network_Control'
 	option proto 'icmp'
-	option proto_option 'icmp-type=redirect'
 
 config classify
 	option target 'Network_Control'
@@ -198,7 +203,7 @@ config classify
 
 config classify
 	option target 'Network_Control'
-	option dstports '22,23,53,67,68,123'
+	option dstports '22,23,53,67,68,123,500,4500'
 	option proto 'udp'
 
 config classify
@@ -231,11 +236,12 @@ config classify
 	option proto 'tcp'
 	list srcif 'loopback'
 	list dstif 'wan'
- 
+
 # helper match requires reclassify
 config reclassify
 	option target 'Voice_Data'
 	option helper 'sip'
+
 
 config classify
 	option target 'Voice_Sig'
@@ -248,6 +254,7 @@ config classify
 	option proto 'udp'
 
 
+
 # for TI WAN side
 #R.122
 config classify
@@ -256,7 +263,7 @@ config classify
 	list srcif 'lan'
 	list dstif 'wan'
 
-#R.122	
+#R.122
 config classify
 	option target 'Voice_Sig'
 	list dscp '0x28'
@@ -279,12 +286,10 @@ config reclassify
 	list dscp '!0x18'
 	list dscp '!0x28'
 	list srcif 'lan'
-	list srcif 'wl0'
-	list srcif 'wl1'
 	list srcif 'wlnet_b_24'
 	list srcif 'wlnet_b_5'
 	list dstif 'wan'
-    
+
 config label 'pcp_5'
 	option pcp '5'
 

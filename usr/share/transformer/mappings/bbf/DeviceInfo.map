@@ -1,5 +1,4 @@
---NG-48510
---Automatically generated from InternetGatewayDevice:1.3 and Device:2.10
+-- Automatically generated from InternetGatewayDevice:1.3 and Device:2.10
 -- using generator version 2.3
 local Multi_DeviceInfo_ = {
   objectType = {
@@ -93,6 +92,11 @@ local Multi_DeviceInfo_ = {
         activeNotify = "canDeny",
         type = "dateTime",
       },
+      X_FirstUseDate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "dateTime",
+      },
       X_000E50_NewSoftwareBank = {
         access = "readWrite",
         type = "string",
@@ -121,7 +125,8 @@ local Multi_DeviceInfo_ = {
       X_BELGACOM_SSIDPrefix = {
         access = "readWrite",
         type = "string",
-        default = "WiFi-PXS",
+        default = "Proximus-Home-",
+        max = "28",
       },
       NewSoftwareBank = {
         access = "readWrite",
@@ -175,6 +180,10 @@ local Multi_DeviceInfo_ = {
         access = "readOnly",
         type = "string",
       },
+      X_RebootCause = {
+        access = "readOnly",
+        type = "string",
+      },
       X_000E50_TotalSWReboot = {
         access = "readOnly",
         type = "unsignedInt",
@@ -209,6 +218,16 @@ local Multi_DeviceInfo_ = {
         type = "dateTime",
         description = "Schedule a reboot at the specified date and time if X_0876FF_ScheduledReboot is enabled",
       },
+      X_000E50_ScheduledReboot = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables/disables the scheduled reboot",
+      },
+      X_000E50_RebootTime = {
+        access = "readWrite",
+        type = "dateTime",
+        description = "Schedule a reboot at the specified date and time if X_000E50_ScheduledReboot is enabled",
+      },
       X_000E50_LabelMACAddress = {
         access = "readOnly",
         type = "string",
@@ -219,16 +238,35 @@ local Multi_DeviceInfo_ = {
         type = "string",
         description = "MAC address as printed on the device label",
       },
-      X_TELMEX_COM_FriendlyName = {
+      ["X_TELMEX-COM_FriendlyName"] = {
         access = "readOnly",
         type = "string",
         description = "Device Product Friendly Name",
+      },
+      X_0876FF_NetworkMessage = {
+        access = "readOnly",
+        type = "string",
+        description = "Last Network Message",
+      },
+      X_0876FF_WGInstance = {
+        access = "readOnly",
+        type = "string",
+        description = "Last WG Instance",
+      },
+      X_000E50_FactoryReset = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_000E50_FactoryReset_Wireless = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Resetting the Wireless configurations to default",
       },
       X_TELECOMITALIA_IT_Unlocked = {
         access = "readWrite",
         type = "boolean",
         description = "Unlock gateway to configure other ISP",
-      },
+      }
       -- VendorConfigFileNumberOfEntries
       -- automatically created when Device.DeviceInfo.VendorConfigFile.{i}. is loaded
       -- SupportedDataModelNumberOfEntries
@@ -250,9 +288,9 @@ local io = io
 local string = string
 local floor = math.floor
 local open = io.open
-local tostring, tonumber, os = tostring, tonumber, os
-local pcall,tokey = pcall,tokey
-local uci = require('uci')
+local process = require 'tch.process'
+local pcall, tokey = pcall, tokey
+local lfs = require("lfs")
 local uciHelper = mapper("ucihelper")
 local nwCommon = mapper("nwcommon")
 local ubusConnection = mapper("ubus").connect()
@@ -260,23 +298,22 @@ local getFromUci = uciHelper.get_from_uci
 local forEachOnUci = uciHelper.foreach_on_uci
 local setOnUci = uciHelper.set_on_uci
 local banktable = require "transformer.shared.banktable"
-local validation = require "tch.validation"
 local commitApply = commitapply
-local networkBinding = { config = "network", option = "reqopts"}
-local envBinding = {config = "env", sectionname = "var"}
-local versionBinding = { config = "versioncusto", sectionname = "override", option = "fwversion_prefix" }
-local rtfdsBinding = { config = "env", sectionname = "var", option = "rtfds", default = "0" }
-local cwmpBinding = {config = "cwmpd", sectionname = "cwmpd_config", option = "firstusedate"}
+local transactions = {}
+local networkBinding = { config = "network" }
+local envBinding = { config = "env" }
+local ledBinding = { config = "smartled", sectionname = "dnstxtrecord" }
+local versionBinding = { config = "versioncusto" }
+local cwmpBinding = { config = "cwmpd" }
 local sysBinding = { config = "system" }
 local systemBinding = { config = "system", sectionname = "@system[0]", extended = true }
-local envRipBinding = { config = "env", sectionname = "rip", option = "eth_mac" }
 local wansensingBinding = { config = "wansensing" }
-local webBinding = { config = "web" }
 local ethernetBinding = { config = "ethernet" }
+local webBinding = { config = "web" }
 local webserviceBinding = { config = "webservice" }
+local rebootHelper = require("transformer.shared.reboot_helper")
 local rip_entry_Refurbished = "c100"
 local rip_entry_SSIDPrefix = "c101"
-local transactions = {}
 --Reference - https://confluence.technicolor.com/display/Linux/Syslog+implementation+and+configuration
 
 local valueMap = {
@@ -327,9 +364,15 @@ local function firstline(filename, nb)
   return result
 end
 
+local function getUciValue(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return getFromUci(binding)
+end
+
 local function friendlyName(mapping)
-  envBinding.option = "prod_description"
-  local value = getFromUci(envBinding)
+  local value = getUciValue(envBinding, "var", "prod_description")
   if value == "" then
     value = firstline("/proc/rip/0040")
   end
@@ -355,6 +398,19 @@ local function switchOverToNewSoftwareBank(mapping,param,value)
     return nil, "Cannot Switch Over"
   end
   commitApply:newset("switchOver")
+end
+
+local function getDnsTxtRecord(param)
+  local section
+  local nwMessage = ""
+  ledBinding.sectionname = "dnstxtrecord"
+  forEachOnUci(ledBinding, function(s)
+    section = s[".name"]
+  end)
+  if section then
+    nwMessage = getUciValue(ledBinding, section, param)
+  end
+  return nwMessage
 end
 
 local function rip_entry_exists(entry)
@@ -391,14 +447,13 @@ local function rip_entry_read(entry)
 end
 
 local function rip_entry_create(entry)
-    return rip_entry_write("new", entry)
+  return rip_entry_write("new", entry)
 end
 
 Multi_DeviceInfo_.get = {
   DeviceCategory = "",
   Manufacturer = function(mapping)
-    envBinding.option = "company"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "company_name")
     if value == "" then
       value = "Technicolor"
     end
@@ -406,22 +461,18 @@ Multi_DeviceInfo_.get = {
     return value
   end,
   ManufacturerOUI = function(mapping)
-    envBinding.option = "oui_override_igd"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "oui_override_igd")
     if value == "" then
-        envBinding.option = "oui"
-        value = getFromUci(envBinding)
+      value = getUciValue(envBinding, "var", "oui")
     end
     mapping.get.ManufacturerOUI = value
     return value
   end,
   ModelName = function()
-    envBinding.option = "variant_friendly_name"
-    return getFromUci(envBinding)
+    return getUciValue(envBinding, "var", "variant_friendly_name")
   end,
   ModelNumber = function(mapping)
-    envBinding.option = "prod_number"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "prod_number")
     mapping.get.ModelNumber = value
     return value
   end,
@@ -429,62 +480,52 @@ Multi_DeviceInfo_.get = {
     return friendlyName(mapping)
   end,
   ProductClass = function(mapping)
-    envBinding.option = "prod_friendly_name"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "prod_friendly_name")
     mapping.get.ProductClass = value
     return value
   end,
   SerialNumber = function(mapping)
-    envBinding.option = "serial"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "serial")
     mapping.get.SerialNumber = value
     return value
   end,
   HardwareVersion = function(mapping)
-    envBinding.option = "hardware_version"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "hardware_version")
     mapping.get.HardwareVersion = value
     return value
   end,
   SoftwareVersion = function(mapping)
-    envBinding.option = "friendly_sw_version_activebank"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "friendly_sw_version_activebank")
     local newvalue = value:match("^([^-]+%-[^-]+)")
     if newvalue then
       value = newvalue
     end
-    versionBinding.option = "fwversion_prefix"
-    local fwp = getFromUci(versionBinding)
-    versionBinding.option = "fwversion_suffix"
-    local fws = getFromUci(versionBinding)
-    versionBinding.option = "fwversion_override"
-    local fwover = getFromUci(versionBinding)
+    local fwp = getUciValue(versionBinding, "override", "fwversion_prefix")
+    local fws = getUciValue(versionBinding, "override", "fwversion_suffix")
+    local fwover = getUciValue(versionBinding, "override", "fwversion_override")
     if fwover ~= "" and fwover ~= "override1" then
       value = fwover
     end
     value = fwp .. value .. fws
-    versionBinding.option = "fwversion_seperator"
-    local seperator = getFromUci(versionBinding)
+    local seperator = getUciValue(versionBinding, "override", "fwversion_seperator")
     if seperator ~= "" then
-        value = value:gsub("%.", seperator)
+      value = value:gsub("%.", seperator)
     end
     mapping.get.SoftwareVersion = value
     return value
   end,
   AdditionalSoftwareVersion = function(mapping)
-    envBinding.option = "friendly_sw_version_activebank"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "friendly_sw_version_activebank")
     local newvalue = value:match("([%x]+)$")
     if newvalue then
-       value = newvalue
+      value = newvalue
     end
     mapping.get.AdditionalSoftwareVersion = value
     return value
   end,
   AdditionalHardwareVersion = "",
   ProvisioningCode = function()
-    envBinding.option = "provisioning_code"
-    return getFromUci(envBinding)
+    return getUciValue(envBinding, "var", "provisioning_code")
   end,
   UpTime = function()
     local fd, msg = open("/proc/uptime")
@@ -496,7 +537,7 @@ Multi_DeviceInfo_.get = {
     return tostring(floor(uptime))
   end,
   FirstUseDate = function()
-    local value = getFromUci(cwmpBinding)
+    local value = getUciValue(cwmpBinding, "cwmpd_config", "firstusedate")
     return value ~= "" and value or "0001-01-01T00:00:00Z"
   end,
   NewSoftwareBank = "",
@@ -520,16 +561,11 @@ Multi_DeviceInfo_.get = {
     return ""
   end,
   X_BELGACOM_Telco = function()
-    envBinding.option = "BGC_VARIANT"
-    local value = getFromUci(envBinding)
+    local value = getUciValue(envBinding, "var", "BGC_VARIANT")
     return value ~= "" and value or "BGC"
   end,
   X_BELGACOM_Refurbished = function()
-    if rip_entry_exists(rip_entry_Refurbished) then
-      return "1"
-    else
-      return "0"
-    end
+    return rip_entry_exists(rip_entry_Refurbished) and "1" or "0"
   end,
   X_BELGACOM_SSIDPrefix = function()
     if rip_entry_exists(rip_entry_SSIDPrefix) then
@@ -542,14 +578,14 @@ Multi_DeviceInfo_.get = {
     local dsl_supported, dsl = pcall(require,"transformer.shared.xdslctl")
     local version = ""
     if dsl_supported then
-        version = dsl.infoValue('firmware_version')
+      version = dsl.infoValue('firmware_version')
     end
     mapping.get.ModemFirmwareVersion = version
     return version
   end,
   EnabledOptions = "",
   DeviceLog = function()
-    local log = io.popen("/sbin/logread")
+    local log = process.popen("/sbin/logread")
     if not log then
       return ""
     end
@@ -563,34 +599,27 @@ Multi_DeviceInfo_.get = {
   -- Obsolute, must be set to 1.0 by TR-098-Amdt2
   SpecVersion = "1.0",
   X_000E50_SoftwareVersionPassiveBank = function()
-      local value = PassiveBankVersion()
-      if value ~= "Unknown" then
-          versionBinding.option = "fwversion_prefix"
-          local fwp = getFromUci(versionBinding)
-          versionBinding.option = "fwversion_suffix"
-          local fws = getFromUci(versionBinding)
-          value = fwp .. value .. fws
-          versionBinding.option = "fwversion_seperator"
-          local seperator = getFromUci(versionBinding)
-          if seperator ~= "" then
-            value = value:gsub("%.", seperator)
-          end
+    local value = PassiveBankVersion()
+    if value ~= "Unknown" then
+      local fwp = getUciValue(versionBinding, "override", "fwversion_prefix")
+      local fws = getUciValue(versionBinding, "override", "fwversion_suffix")
+      value = fwp .. value .. fws
+      local seperator = getUciValue(versionBinding, "override", "fwversion_seperator")
+      if seperator ~= "" then
+        value = value:gsub("%.", seperator)
       end
-      return value
+    end
+    return value
   end,
   X_000E50_SwitchtoPassiveBank = "0",
   X_000E50_ReturnToFactoryDefaultsSoft = function()
-    local value = getFromUci(rtfdsBinding)
-    return value
+    return getUciValue(envBinding, "var", "rtfds", "0")
   end,
   X_000E50_BootloaderVersion = function()
-    envBinding.option = "bootloader_version"
-    return getFromUci(envBinding)
+    return getUciValue(envBinding, "var", "bootloader_version")
   end,
   X_000E50_RebootCause = function()
-    sysBinding.sectionname = "warmboot"
-    sysBinding.option = "reboot"
-    return valueMap[getFromUci(sysBinding)] or ""
+    return valueMap[getUciValue(sysBinding, "warmboot", "reboot")] or ""
   end,
   X_000E50_TotalSWReboot = function()
     systemBinding.option = "sw_reboot_count"
@@ -603,92 +632,80 @@ Multi_DeviceInfo_.get = {
     return getFromUci(systemBinding)
   end,
   X_0876FF_IPv6Capable = "1",
-  X_0876FF_ScheduledReboot = function()
-    sysBinding.sectionname = "scheduledreboot"
-    sysBinding.option = "enabled"
-    sysBinding.default = "0"
-    return getFromUci(sysBinding)
+  X_000E50_ScheduledReboot = function()
+    return rebootHelper.getRebootOptions("enabled", "0")
   end,
-  X_0876FF_RebootTime = function()
-    sysBinding.sectionname = "scheduledreboot"
-    sysBinding.option = "time"
-    sysBinding.default = nil
-    return getFromUci(sysBinding)
+  X_000E50_RebootTime = function()
+    return rebootHelper.getRebootOptions("time", "0001-01-01T00:00:00Z")
   end,
   X_000E50_LabelMACAddress = function()
-    return getFromUci(envRipBinding)
+    return getUciValue(envBinding, "rip", "eth_mac")
   end,
-  X_TELMEX_COM_FriendlyName = function()
-    envBinding.option = "prod_friendly_name"
-    return getFromUci(envBinding)
+  ["X_TELMEX-COM_FriendlyName"] = function()
+    return getUciValue(envBinding, "var", "prod_friendly_name")
   end,
+  X_0876FF_NetworkMessage = function()
+    return getDnsTxtRecord("network_message")
+  end,
+  X_0876FF_WGInstance = function()
+    return getDnsTxtRecord("wg_instance")
+  end,
+  X_000E50_FactoryReset = "0",
+  X_000E50_FactoryReset_Wireless = "0",
   X_TELECOMITALIA_IT_Unlocked = function()
-    envBinding.option = "unlockedstatus"
-    return getFromUci(envBinding)
+    return getUciValue(envBinding, "var", "unlockedstatus")
   end,
 }
 
 Multi_DeviceInfo_.get.X_0876FF_LabelMACAddress = Multi_DeviceInfo_.get.X_000E50_LabelMACAddress
 Multi_DeviceInfo_.get.X_FASTWEB_TotalSWReboot = Multi_DeviceInfo_.get.X_000E50_TotalSWReboot
 Multi_DeviceInfo_.get.X_FASTWEB_TotalHWReboot = Multi_DeviceInfo_.get.X_000E50_TotalHWReboot
+Multi_DeviceInfo_.get.X_0876FF_ScheduledReboot = Multi_DeviceInfo_.get.X_000E50_ScheduledReboot
+Multi_DeviceInfo_.get.X_0876FF_RebootTime = Multi_DeviceInfo_.get.X_000E50_RebootTime
+Multi_DeviceInfo_.get.X_RebootCause = Multi_DeviceInfo_.get.X_000E50_RebootCause
+Multi_DeviceInfo_.get.X_FirstUseDate = Multi_DeviceInfo_.get.FirstUseDate
 
---- set the given value to corresponding section and option in /var/state
--- @function setScheduledReboot
--- @param section #string holds the sectionname in which the value has to be stored
--- @param option #string holds the option name in which the value has to be stored
--- @param value #string holds the value to be stored in the given section and option
-local function setScheduledReboot(section, option, value)
-  local cursor = uci.cursor(nil, "/var/state")
-  local scheduledreboot = cursor:get("system", section)
-  if not scheduledreboot then
-    cursor:set("system", section, section)
+local function setRebootTime(value)
+  local ok, errmsg = rebootHelper.setRebootOptions("time", value)
+  if not ok then
+    return nil, errmsg
   end
-  local enabled = cursor:get("system", section, option)
-  if enabled then
-    cursor:revert("system", section, option)
-  end
-  cursor:set("system", section, option, value)
-  cursor:save("system")
-  cursor:close()
+  commitapply:newset("scheduledReboot")
+  return true
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  setOnUci(binding, value, commitApply)
+  transactions[binding.config] = true
 end
 
 local function setVariant(option, value)
-  envBinding.option = option
-  local currVal = getFromUci(envBinding)
+  local currVal = getUciValue(envBinding, "var", option)
   if value == "BGC" then
     currVal = currVal:match("Ovac") and currVal:gsub("Ovac", "Bvac") or currVal:gsub("Ovn", "Bvn")
   else
     currVal = currVal:match("Bvac") and currVal:gsub("Bvac", "Ovac") or currVal:gsub("Bvn", "Ovn")
   end
-  setOnUci(envBinding, currVal, commitApply)
+  setUciValue(envBinding, "var", option, currVal)
 end
 
 local function setProdVariables(value)
   for _, param in ipairs(prodVariables) do
     setVariant(param, value)
   end
-  envBinding.option = "PXS_productname"
-  local productName = getFromUci(envBinding)
+  local productName = getUciValue(envBinding, "var", "PXS_productname")
   if friendlyNameMap[productName] then
     local prod, pxs = friendlyNameMap[productName]:match("([^:]+):([^:]+)")
     if prod then
-      envBinding.option = "prod_friendly_name"
-      setOnUci(envBinding, prod, commitApply)
-      envBinding.option = "PXS_friendly_name"
-      setOnUci(envBinding, pxs, commitApply)
+      setUciValue(envBinding, "var", "prod_friendly_name", prod)
+      setUciValue(envBinding, "var", "PXS_friendly_name", pxs)
     end
   end
 end
 
-local function setUciValue(binding, sectionname, option, value)
-  binding.sectionname = sectionname
-  binding.option = option
-  setOnUci(binding, value, commitapply)
-  transactions[binding.config] = true
-end
-
 local function setUnlockStatus(value)
-  envBinding.option = "unlockGUIbutton"
   if value == "1" then
     ----create new password for admin user with get_access_key 1
     local check = string.format("name=$(uci get web.%s.name); ackey=$(/usr/bin/get_access_key 2>&1); SRP=$(newsrpuser -f -u $name -p $ackey); echo $SRP","usr_admin")
@@ -708,34 +725,28 @@ local function setUnlockStatus(value)
     setUciValue(webBinding, "usr_admin", "role", "ispuser")
     setUciValue(wansensingBinding, "global", "enable", "0")
     setUciValue(networkBinding, "public_lan", "auto", "0")
-	setUciValue(webserviceBinding, "admin", "role", "disabled")		
-    wansensingBinding.section = "global"
-    wansensingBinding.option = "l2type"
-    local currentl2 = getFromUci(wansensingBinding)
+    setUciValue(webserviceBinding, "admin", "role", "disabled")
+    local currentl2 = getUciValue(wansensingBinding, "global", "l2type")
     if currentl2 == "" then
       setUciValue(networkBinding, "wan", "ifname", "wanptm0")
       setUciValue(networkBinding, "lan", "pppoerelay", {"wanptm0"})
     end
-    networkBinding.sectionname = "wwan"
-    networkBinding.option = "auto"
-    local wwanIfState = getFromUci(networkBinding)
-    cwmpBinding.sectionname = "cwmpd_config"
-    cwmpBinding.option = "interface"
+    local wwanIfState = getUciValue(networkBinding, "wwan", "auto")
     if wwanIfState == "1" then
       setUciValue(networkBinding, "wwan", "auto", "0")
     end
-    envRipBinding.option = "sfp"
-    local sfpState = getFromUci(envRipBinding) or ""
+    local sfpState = getUciValue(envBinding, "rip", "sfp") or ""
     if sfpState == "1" and currentl2 ~= "ETH" then
       setUciValue(ethernetBinding,"globals","eth4lanwanmode","1")
     end
-	setUciValue(cwmpBinding, "cwmpd_config", "state", "0")
+    setUciValue(cwmpBinding, "cwmpd_config", "state", "0")
   else
     setUciValue(webBinding, "usr_admin", "role", "admin")
     setUciValue(webBinding, "usr_admin", "password_reminder", "0")
     setUciValue(wansensingBinding, "global", "enable", "1")
-	setUciValue(webserviceBinding, "admin", "role", "device2")
-	setUciValue(cwmpBinding, "cwmpd_config", "state", "1")
+    setUciValue(networkBinding, "public_lan", "auto", "1")
+    setUciValue(webserviceBinding, "admin", "role", "device2")
+    setUciValue(cwmpBinding, "cwmpd_config", "state", "1")
   end
   setUciValue(envBinding, "var", "unlockedstatus", value)
 end
@@ -743,8 +754,7 @@ end
 Multi_DeviceInfo_.set = {
   ProvisioningCode = function(mapping,param,value)
     envBinding.option = "provisioning_code"
-    setOnUci(envBinding, value, commitApply)
-    transactions[envBinding.config] = true
+    setUciValue(envBinding, "var", "provisioning_code", value)
   end,
   X_000E50_SwitchtoPassiveBank = function(mapping,param,value)
     if banktable.isOtherBankValid() then
@@ -754,14 +764,11 @@ Multi_DeviceInfo_.set = {
     end
   end,
   X_000E50_ReturnToFactoryDefaultsSoft = function(mapping,param,value)
-    setOnUci(rtfdsBinding, value, commitApply)
-    transactions[rtfdsBinding.config] = true
+    setUciValue(envBinding, "var", "rtfds", value)
   end,
   X_BELGACOM_Telco = function(mapping, param, value)
-    envBinding.option = "BGC_VARIANT"
-    setOnUci(envBinding, value, commitApply)
+    setUciValue(envBinding, "var", "BGC_VARIANT", value)
     setProdVariables(value)
-    transactions[envBinding.config] = true
   end,
   X_BELGACOM_Refurbished = function(mapping, param, value)
     if value == "1" then
@@ -795,23 +802,32 @@ Multi_DeviceInfo_.set = {
   end,
   X_000E50_NewSoftwareBank = switchOverToNewSoftwareBank,
   NewSoftwareBank = switchOverToNewSoftwareBank,
-  X_0876FF_ScheduledReboot = function(mapping, param, value, key)
-    setScheduledReboot("scheduledreboot", "enabled", value)
+  X_000E50_ScheduledReboot = function(mapping, param, value)
+    rebootHelper.setRebootOptions("enabled", value)
   end,
-  X_0876FF_RebootTime = function(mapping, param, value, key)
-    local validTime, errMsg = validation.validateTime(value, true)
-    if not validTime then
-      return nil, errMsg
+  X_000E50_RebootTime = function(mapping, param, value)
+    return setRebootTime(value)
+  end,
+  X_000E50_FactoryReset = function(mapping, param, value)
+    if value == "1" then
+      commitApply:newset("rpc.system.reset")
     end
-    setScheduledReboot("scheduledreboot", "time", value)
-    commitApply:newset("scheduledReboot")
+  end,
+  X_000E50_FactoryReset_Wireless = function(mapping, param, value)
+    if value == "1" then
+      commitApply:newset("rpc.resetconfig.wireless.trigger")
+    end
   end,
   X_TELECOMITALIA_IT_Unlocked = function(mapping,param,value)
     setUnlockStatus(value)
   end
 }
 
+Multi_DeviceInfo_.set.X_0876FF_ScheduledReboot = Multi_DeviceInfo_.set.X_000E50_ScheduledReboot
+Multi_DeviceInfo_.set.X_0876FF_RebootTime = Multi_DeviceInfo_.set.X_000E50_RebootTime
+
 Multi_DeviceInfo_.commit = function()
+  rebootHelper.uci_system_commit()
   for config in pairs(transactions) do
     uciHelper.commit({config = config})
   end
@@ -819,6 +835,7 @@ Multi_DeviceInfo_.commit = function()
 end
 
 Multi_DeviceInfo_.revert = function()
+  rebootHelper.uci_system_revert()
   for config in pairs(transactions) do
     uciHelper.revert({config = config})
   end
@@ -826,8 +843,7 @@ Multi_DeviceInfo_.revert = function()
 end
 
 local function setUciEventClid(mapping, action, config, sectionType, sectionName, option)
-  networkBinding.sectionname = sectionName
-  local reqOption = getFromUci(networkBinding)
+  local reqOption = getUciValue(networkBinding, sectionName, "reqopts")
   if reqOption and reqOption:match("129") then
     local ubusStatus = ubusConnection:call("network.interface." .. sectionName, "status", {})
     if ubusStatus and ubusStatus["data"] and ubusStatus["data"]["passthru"] then
@@ -839,8 +855,6 @@ end
 local function setUciEventProvisioningCode(mapping, action, config, sectionType, sectionName, option)
   return { { key = "", paramname = "ProvisioningCode" } }
 end
-
-
 
 Multi_DeviceInfo_.add_watchers = function(mapping)
   local uciEventSource = eventsource("uci")
@@ -867,6 +881,9 @@ for _, dupli in ipairs(duplicates) do
     dupli.objectType.parameters["X_000E50_SwitchtoPassiveBank"] = nil
     dupli.objectType.parameters["X_0876FF_LabelMACAddress"] = nil
     dupli.objectType.parameters["X_000E50_LabelMACAddress"] = nil
+    dupli.objectType.parameters["X_000E50_FactoryReset"] = nil
+    dupli.objectType.parameters["X_FirstUseDate"] = nil
+    dupli.objectType.parameters["X_RebootCause"] = nil
   end
   register(dupli)
 end

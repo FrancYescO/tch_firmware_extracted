@@ -100,12 +100,15 @@ local InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_ = {
   }
 }
 
+local network = require("transformer.shared.common.network")
 local mapper, register = mapper, register
 local common = mapper("nwcommon")
+local split_key = common.split_key
 local ubus = mapper("ubus").connect()
 local uciHelper = mapper("ucihelper")
 local forEachOnUci = uciHelper.foreach_on_uci
 local wandevice = require 'transformer.shared.models.igd.wandevice'
+local ubusConnection = mapper("ubus").connect()
 
 -- function aliases
 local getIntfInfo = common.getIntfInfo
@@ -157,16 +160,18 @@ end
 
 local function getInterfaceStat(devname, ...)
   local stat = 0
-  for _, statName in ipairs{...} do
-    if devname:match("^dsl") then
-      local dslDevice = getDslDevName()
-      for k in pairs(dslDevice) do
-        local s = getIntfInfo(k, statName, "0")
+  if devname then
+    for _, statName in ipairs{...} do
+      if devname:match("^dsl") then
+        local dslDevice = getDslDevName()
+        for k in pairs(dslDevice) do
+          local s = getIntfInfo(k, statName, "0")
+          stat = stat + (tonumber(s) or 0)
+        end
+      else
+        local s = getIntfInfo(devname, statName, "0")
         stat = stat + (tonumber(s) or 0)
       end
-    else
-      local s = getIntfInfo(devname, statName, "0")
-      stat = stat + (tonumber(s) or 0)
     end
   end
   return tostring(stat)
@@ -217,6 +222,18 @@ local getters = {
         return "Up"
       end
       return "Down"
+    end
+    if devtype == "MOB" then
+      local data = ubus:call("network.interface." .. devname, "status", {})
+      if data and data.l3_device then
+        local operstate = getIntfInfo(data.l3_device, "operstate")
+        if operstate == "up" then
+          return "Up"
+        elseif operstate == "unknown" then
+          return "Unavailable"
+        end
+        return "Down"
+      end
     end
     return "Unavailable"
   end,
@@ -297,12 +314,52 @@ local InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_Connection_i_ =
 }
 
 InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_Connection_i_.get = {
-  ActiveConnectionDeviceContainer = "",
-  ActiveConnectionServiceID = "",
+  ActiveConnectionDeviceContainer = function(mapping, param, key, parentKey)
+    local devType = split_key(key)
+    local containerDeviceName
+    if key:match("ETH") then
+      containerDeviceName = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.', parentKey)
+    else
+      devType = "ATM" .. "|" ..devType
+      containerDeviceName = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.', devType)
+    end
+    return containerDeviceName or ""
+  end,
+  ActiveConnectionServiceID = function(mapping, param, key)
+    local dev, interface = split_key(key)
+    interface = split_key(interface)
+    local serviceDeviceName
+    local protoType = ubusConnection:call("network.interface." .. interface, "proto", {})
+    if interface and dev then
+      local keyName = interface.."|"..dev
+      if protoType == "pppoe" or protoType == "pppoa" then
+         serviceDeviceName = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.', keyName)
+      else
+         serviceDeviceName = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.', keyName)
+      end
+    end
+    return serviceDeviceName or ""
+  end,
 }
 
-InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_Connection_i_.entries = function()
-  return {}
+InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_Connection_i_.entries = function(mapping, parentkey)
+  local keys = {}
+  --@wanInterfaceList, to list out all wan interfaces
+  local wanInterfaces = network.getWanInterfaces()
+  local _, devname = split_key(parentkey)
+  local intfName
+  local networkDump = ubusConnection:call("network.interface", "dump", {})
+  for _, intf in pairs(networkDump.interface) do
+    if intf.up and intf.device and intf.interface then
+      intfName = intf.device
+      if wanInterfaces[intf.interface] then
+        if intfName == devname or intfName:match("ptm") or intfName:match("atm") then
+          keys[#keys+1] = intfName.."|"..intf.interface.."|"..parentkey
+        end
+      end
+    end
+  end
+  return keys
 end
 
 register(InternetGatewayDevice_WANDevice_i_WANCommonInterfaceConfig_Connection_i_)

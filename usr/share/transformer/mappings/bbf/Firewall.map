@@ -46,8 +46,6 @@ local fwConfigMap = {
   },
 }
 
-local configForDisabled = "Off"
-
 -- Automatically generated from InternetGatewayDevice:1.14 and Device:2.10
 -- using generator version 2.3
 local Multi_Firewall_ = {
@@ -76,13 +74,13 @@ local Multi_Firewall_ = {
         type = "string",
         max = "16",
       },
---[[ TODO
       AdvancedLevel = {
         access = "readWrite",
         type = "string",
         pathRef = true,
         targetParent = "Device.Firewall.Level.{i}.",
       },
+--[[ TODO
       Type = {
         access = "readOnly",
         type = "string",
@@ -216,6 +214,45 @@ local function setConfig(config)
   return nil, "Invalid config"
 end
 
+local function getActiveRuleKey(config)
+  if fwConfigMap[config] then
+    return fwConfigMap[config].rules or ""
+  end
+  return ""
+end
+
+local function getActiveLevel(rules)
+  for _, v in pairs(fwConfigMap) do
+    if rules == v.rules then
+      return v.level
+    end
+  end
+  return ""
+end
+
+local function getAdvancedLevel(mapping)
+  local value = getActiveConfig(mapping)
+  if value then
+    return resolve("Device.Firewall.Level.{i}.", getActiveRuleKey(value)) or ""
+  end
+  return ""
+end
+
+local function setAdvancedLevel(mapping, paramName, paramValue)
+  local value
+  local config = getActiveConfig(mapping)
+  local rule = getActiveRuleKey(config)
+  if rule ~= "userrules" then
+    return nil, "Not in user level, Write Permission is denied"
+  end
+  if paramValue ~= "" then
+    paramValue = tokey(paramValue, "Device.Firewall.Level.{i}.")
+    value = getActiveLevel(paramValue)
+  end
+  setOnUci(fwBinding_actual_level, value, commitApply)
+  isConfigChanged = true
+end
+
 Multi_Firewall_.get = {
   Enable = "1",
   X_000E50_EnableIPv6 = function()
@@ -234,6 +271,7 @@ Multi_Firewall_.get = {
     return getFromUci(fwBinding_admin_config)
   end,
   Version = "",
+  AdvancedLevel = getAdvancedLevel,
 }
 
 Multi_Firewall_.set = {
@@ -246,6 +284,7 @@ Multi_Firewall_.set = {
   Config = function (mapping, paramName, paramValue)
     return setConfig(paramValue)
   end,
+  AdvancedLevel = setAdvancedLevel,
 }
 
 Multi_Firewall_.commit = function()

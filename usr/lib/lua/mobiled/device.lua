@@ -11,6 +11,46 @@ local runtime
 local Device = {}
 Device.__index = Device
 
+function Device:get_stats()
+	local uptime = helper.uptime()
+	local stats = {
+		uptime = uptime - self.stats.creation_uptime,
+		network = self.stats.network,
+		sim = self.stats.sim,
+		interfaces = {},
+		sessions = {}
+	}
+	for _, session in pairs(self.__sessions) do
+		table.insert(stats.sessions, { session_id = session.session_id, disconnected = session.stats.disconnected, deactivated = session.stats.deactivated })
+		if session.interface and runtime.mobiled.stats.interfaces[session.interface] then
+			local ifstats = runtime.mobiled.stats.interfaces[session.interface]
+			table.insert(stats.interfaces, { interface = session.interface, ifup = ifstats.ifup, ifdown = ifstats.ifdown, ['ifup-failed'] = ifstats['ifup-failed'], ifupdate = ifstats.ifupdate })
+		end
+	end
+	return stats
+end
+
+function Device:get_info_from_cache(key, max_age, ...)
+	if max_age then
+		local cached_result = self.info.cache[key]
+		if cached_result then
+			local current_age = os.difftime(os.time(), cached_result.time)
+			if current_age < max_age then
+				runtime.log:debug("%s result from cache (%d seconds old, max_age %d)", key, current_age, max_age)
+				return cached_result.info
+			end
+		end
+	end
+	runtime.log:debug("%s renew cache", key)
+	local ret, errMsg = self.__plugin.plugin[key](self.__plugin_id, ...)
+	if ret then
+		self.info.cache[key] = { time = os.time(), info = ret }
+	else
+		self.info.cache[key] = nil
+	end
+	return ret, errMsg
+end
+
 --! @brief Initialize the device. This function will make sure the initialized value in the device_info table is set to true
 --! @return true on success. nil and an error message on failure
 
@@ -22,6 +62,13 @@ end
 --! @return true on success. nil and an error message on failure
 
 function Device:configure(params)
+	local voice_interface = runtime.mobiled.platform.get_linked_voice_interface(self)
+	if voice_interface then
+		if not params.platform then
+			params.platform = {}
+		end
+		params.platform.voice_interfaces = voice_interface.interfaces
+	end
 	return self.__plugin.plugin.configure_device(self.__plugin_id, params)
 end
 
@@ -33,7 +80,6 @@ function Device:destroy(force)
 	if not force then
 		self:network_detach()
 	end
-
 	return self.__plugin.plugin.destroy_device(self.__plugin_id, force)
 end
 
@@ -66,7 +112,29 @@ function Device:get_device_info()
 	if not info.device_config_parameter then
 		info.device_config_parameter = self.info.device_config_parameter
 	end
+	if (info.cs_voice_support or info.volte_support) and not info.voice_interfaces then
+		local voice_interfaces = runtime.mobiled.platform.get_linked_voice_interfaces(self)
+		if voice_interfaces then
+			info.voice_interfaces = voice_interfaces.interfaces
+		end
+	end
+
+	if info.imei and info.imei_svn then
+		info.imeisv = string.sub(info.imei, 1, 14) .. info.imei_svn
+	end
+
 	return info
+end
+
+--! @brief Get device statistics like uptime, number of disconnects
+--! @return A table containing the requested info on success. nil and an error message on failure
+
+function Device:get_device_stats()
+	local stats = self:get_stats()
+	if self.__plugin.plugin.get_device_stats then
+		helper.merge_tables(stats, self.__plugin.plugin.get_device_stats(self.__plugin_id) or {})
+	end
+	return stats
 end
 
 --! @brief Get device capabilities like band_selection_support
@@ -79,15 +147,43 @@ end
 --! @brief Get network info like cell_id and nas_state
 --! @return A table containing the requested info on success. nil and an error message on failure
 
-function Device:get_network_info()
-	return self.__plugin.plugin.get_network_info(self.__plugin_id)
+function Device:get_network_info(max_age)
+	local info = self:get_info_from_cache("get_network_info", max_age)
+	if info.cell_id and info.plmn_info and info.plmn_info.mcc and info.plmn_info.mnc then
+		local cgi = string.format('%s%s%X', info.plmn_info.mcc, info.plmn_info.mnc, info.cell_id)
+		if info.tracking_area_code then
+			info.ecgi = cgi
+		elseif info.location_area_code then
+			info.cgi = cgi
+		end
+	end
+	return info
 end
 
-local function get_ppp_session_info(info, interface)
-	local ret = helper.getUbusData(runtime.ubus, "network.interface." .. interface .. "_ppp", "status", {})
-	if ret and ret.up == "true" then
-		info.session_state = "connected"
+local function get_ppp_session_info(info, session)
+	if session.interface then
+		local ret = helper.getUbusData(runtime.ubus, "network.interface." .. session.interface .. "_ppp", "status", {})
+		if ret and ret.up == "true" then
+			info.session_state = "connected"
+		end
 	end
+end
+
+--! @brief Get the supported PDP types from the device and compare against the preferred PDP type
+--! @param The preferred PDP type
+--! @return The preferred PDP type when supported. nil and an error message on failure
+
+function Device:get_supported_pdp_type(pdp_type_pref)
+	local info = self.__plugin.plugin.get_device_capabilities(self.__plugin_id)
+	if info and info.supported_pdp_types then
+		for _, pdp_type in pairs(info.supported_pdp_types) do
+			if pdp_type == pdp_type_pref then
+				return pdp_type_pref
+			end
+		end
+		return nil, "Unsupported PDP type"
+	end
+	return pdp_type_pref
 end
 
 --! @brief Get session info like state, duration and packet counters
@@ -105,11 +201,7 @@ function Device:get_session_info(session_id)
 		if ifname then
 			info[info.proto].ifname = ifname
 		end
-		if info.proto == "dhcp" then
-			if info.dhcp.use_l3_ifname == nil then
-				info.dhcp.use_l3_ifname = false
-			end
-		elseif info.proto == "ppp" then
+		if info.proto == "ppp" then
 			local session = self:get_data_session(session_id)
 			if session and session.profile_id then
 				local profile = runtime.mobiled.get_profile(self, session.profile_id)
@@ -118,12 +210,35 @@ function Device:get_session_info(session_id)
 					info.ppp.password = profile.password
 					info.ppp.authentication = profile.authentication
 					info.ppp.apn = profile.apn
+					local supported_pdp_type = self:get_supported_pdp_type(profile.pdptype)
+					if not supported_pdp_type then
+						runtime.log:info("Unsupported PDP type requested. Falling back to IPv4")
+						info.ppp.pdptype = "ipv4"
+					else
+						info.ppp.pdptype = supported_pdp_type
+					end
 					info.ppp.dial_string = profile.dial_string
 				end
 			end
-			get_ppp_session_info(info, session.interface)
+			get_ppp_session_info(info, session)
+		elseif info.proto == "dhcp" then
+			local session = self:get_data_session(session_id)
+			if session and session.profile_id then
+				local profile = runtime.mobiled.get_profile(self, session.profile_id)
+				if profile then
+					local supported_pdp_type = self:get_supported_pdp_type(profile.pdptype)
+					if not supported_pdp_type then
+						runtime.log:info("Unsupported PDP type requested. Falling back to IPv4")
+						info.dhcp.pdptype = "ipv4"
+					else
+						info.dhcp.pdptype = supported_pdp_type
+					end
+				end
+			end
 		end
-		helper.merge_tables(info[info.proto], self:get_ip_info(session_id))
+		if info.session_state == "connected" then
+			helper.merge_tables(info[info.proto], self:get_ip_info(session_id))
+		end
 	end
 
 	return info
@@ -316,10 +431,11 @@ end
 --! @brief Starts a new PDN connectivity request
 --! @param session_id Which PDN to activate
 --! @param profile A table containing info like APN, PDP type, username and password
+--! @param internal Indicates to the device the PDN will not be used by the host
 --! @return true on success. nil and an error message on failure
 
-function Device:start_data_session(session_id, profile)
-	return self.__plugin.plugin.start_data_session(self.__plugin_id, session_id, profile)
+function Device:start_data_session(session_id, profile, internal)
+	return self.__plugin.plugin.start_data_session(self.__plugin_id, session_id, profile, internal)
 end
 
 --! @brief Stops PDN connectivity
@@ -347,8 +463,8 @@ end
 --! @brief Get radio info like rssi, rsrp and rsrq
 --! @return A table containing the requested info on success. nil and an error message on failure
 
-function Device:get_radio_signal_info()
-	return self.__plugin.plugin.get_radio_signal_info(self.__plugin_id)
+function Device:get_radio_signal_info(max_age)
+	return self:get_info_from_cache("get_radio_signal_info", max_age)
 end
 
 --! @brief Creates the default attach profile. Some modules require doing this before they register to the network
@@ -381,16 +497,12 @@ function Device:get_firmware_upgrade_info()
 	return self.__plugin.plugin.get_firmware_upgrade_info(self.__plugin_id)
 end
 
---! @brief Activate a PDN on a given device
---! @param session_config table containing session_id, profile_id, optional parameter and interface
---! @return session context on success. nil and an error message on failure
-
-function Device:activate_data_session(session_config)
-	local session, errMsg = self:add_data_session(session_config)
-	if session then
-		session.activated = true
+local function update_not_nil(session, session_config, params)
+	for _, param in pairs(params) do
+		if session_config[param] ~= nil then
+			session[param] = session_config[param]
+		end
 	end
-	return session, errMsg
 end
 
 --! @brief Adds a PDN on a given device
@@ -404,27 +516,37 @@ function Device:add_data_session(session_config)
 			session_id = session_config.session_id,
 			profile_id = session_config.profile_id,
 			interface = session_config.interface,
+			internal = session_config.internal or false,
 			optional = session_config.optional or false,
-			bridge = session_config.bridge
+			autoconnect = session_config.autoconnect or false,
+			bridge = session_config.bridge,
+			name = session_config.name or "internet",
+			activated = session_config.activated or false,
+			allowed = true,
+			pdn_retry_timer = { default_value = session_config.pdn_retry_timer_value or runtime.config.get_config().pdn_retry_timer_value },
+			stats = {
+				disconnected = 0,
+				deactivated = 0
+			}
 		}
-		session.activated = false
-		session.changed = true
-		session.pdn_retry_timer = { default_value = session_config.pdn_retry_timer_value or runtime.config.get_config().pdn_retry_timer_value }
+		if not session.internal then
+			session.changed = true
+		end
 		self.__sessions[session_config.session_id] = session
 	else
-		if session.profile_id ~= session_config.profile_id then
+		if session_config.profile_id and session_config.profile_id ~= session.profile_id then
 			local info = self:get_session_info(session.session_id)
 			if info.session_state == "connected" then
 				return nil, "Not allowed to make changes. Disconnect data session first"
 			else
 				session.changed = true
 			end
+			session.profile_id = session_config.profile_id
 		end
-		session.optional = session_config.optional or false
-		session.profile_id = session_config.profile_id
-		session.interface = session_config.interface
-		session.bridge = session_config.bridge
-		session.pdn_retry_timer.default_value = session_config.pdn_retry_timer_value or runtime.config.get_config().pdn_retry_timer_value
+		update_not_nil(session, session_config, {"autoconnect", "internal", "interface", "bridge", "pdn_retry_timer_value", "optional", "name"})
+	end
+	if self.__plugin.plugin.add_data_session then
+		self.__plugin.plugin.add_data_session(self.__plugin_id, session_config)
 	end
 	return session
 end
@@ -434,7 +556,7 @@ end
 --! @return true on success. nil and an error message on failure
 
 function Device:deactivate_data_session(session_id)
-	if self.__sessions[session_id] then
+	if session_id and self.__sessions[session_id] then
 		self.__sessions[session_id].activated = false
 		return true
 	end
@@ -442,7 +564,7 @@ function Device:deactivate_data_session(session_id)
 end
 
 function Device:get_data_session(session_id)
-	if self.__sessions[session_id] then
+	if session_id and self.__sessions[session_id] then
 		return self.__sessions[session_id]
 	end
 	return nil, "Failed to get info for data session " .. tostring(session_id)
@@ -545,11 +667,12 @@ end
 --! @brief Multi party call actions
 --! @param call_id The call to apply the action to
 --! @param action The action to execute
+--! @param second_call_id The optional second call to apply the action to
 --! @return true on success. nil and an error message on failure
 
-function Device:multi_call(call_id, action)
+function Device:multi_call(call_id, action, second_call_id)
 	if self.__plugin.plugin.multi_call then
-		return self.__plugin.plugin.multi_call(self.__plugin_id, call_id, action)
+		return self.__plugin.plugin.multi_call(self.__plugin_id, call_id, action, second_call_id)
 	end
 	return nil, "Not supported"
 end
@@ -568,6 +691,19 @@ function Device:supplementary_service(service, action, forwarding_type, forwardi
 	return nil, "Not supported"
 end
 
+--! @brief Send DTMF tones
+--! @param tones A string of ASCII characters representing the DTMF tones to send
+--! @param interval Optional, The time to wait between sending DTMF tones in 1/10ths of a second
+--! @param duration Optional, The duration of each tone in 1/10ths of a second
+--! @return true on success. nil and an error message on failure
+
+function Device:send_dtmf(tones, interval, duration)
+	if self.__plugin.plugin.send_dtmf then
+		return self.__plugin.plugin.send_dtmf(self.__plugin_id, tones, interval, duration)
+	end
+	return nil, "Not supported"
+end
+
 --! @brief Get a list of errors from the device
 --! @return a list of errors
 
@@ -576,6 +712,59 @@ function Device:get_errors()
 		return self.__plugin.plugin.get_errors(self.__plugin_id) or {}
 	end
 	return {}
+end
+
+--! @brief Clear the list of errors from the device
+--! @return true on success. nil and an error message on failure
+
+function Device:flush_errors()
+	if self.__plugin.plugin.flush_errors then
+		return self.__plugin.plugin.flush_errors(self.__plugin_id)
+	end
+	return nil, "Not supported"
+end
+
+--! @brief Retrieve IMS info
+--! @return A table containing the requested info on success. nil and an error message on failure
+
+function Device:get_voice_info()
+	if self.__plugin.plugin.get_voice_info then
+		return self.__plugin.plugin.get_voice_info(self.__plugin_id)
+	end
+	return nil, "Not supported"
+end
+
+--! @brief Retrieve IMS capabilities
+--! @return A table containing the requested info on success. nil and an error message on failure
+
+function Device:get_voice_network_capabilities()
+	if self.__plugin.plugin.get_voice_network_capabilities then
+		return self.__plugin.plugin.get_voice_network_capabilities(self.__plugin_id)
+	end
+	return nil, "Not supported"
+end
+
+--! @brief Converts an existing call to a data (e.g. fax) call
+--! @param call_id The call to convert
+--! @param codec The desired codec (e.g., "PCMA", "PCMU", ...) or nil to use the codec that is specified in the configuration
+--! @return true on success. nil and an error message on failure
+
+function Device:convert_to_data_call(call_id, codec)
+	if self.__plugin.plugin.convert_to_data_call then
+		return self.__plugin.plugin.convert_to_data_call(self.__plugin_id, call_id, codec)
+	end
+	return nil, "Not supported"
+end
+
+--! @brief Configures the emergency numbers
+--! @param numbers An array containing the emergency numbers
+--! @return true on success. nil and an error message on failure
+
+function Device:set_emergency_numbers(numbers)
+	if self.__plugin.plugin.set_emergency_numbers then
+		return self.__plugin.plugin.set_emergency_numbers(self.__plugin_id, numbers)
+	end
+	return nil, "Not supported"
 end
 
 local M = {}
@@ -593,15 +782,35 @@ function M.create(rt, params, plugin)
 			firmware_upgrade = {
 				status = "not_running"
 			},
-			wifi_coexistence = {}
+			wifi_coexistence = {},
+			cache = {}
 		},
-		errors = {}
+		errors = {},
+		attach_retry_timer = {
+			value = runtime.config.get_config().attach_retry_timer_value,
+			attach_retry_count = runtime.config.get_config().attach_retry_count,
+			attach_retries = 0
+		},
+		stats = {
+			creation_uptime = helper.uptime(),
+			network = {
+				tracking_area_code_changed = 0,
+				location_area_code_changed = 0,
+				radio_interface_changed = 0,
+				deregistered = 0,
+				ecgi_changed = 0,
+				cgi_changed = 0
+			},
+			sim = {
+				removed = 0
+			}
+		}
 	}
 
 	local id, errMsg = device.__plugin.plugin.add_device(params)
 	if not id then return nil, errMsg end
-	--[[ 
-		The ID assigned here is used internally in the plugin to identifty the device 
+	--[[
+		The ID assigned here is used internally in the plugin to identifty the device
 		for cases where multiple devices use the same plugin
 	]]--
 	device.__plugin_id = id

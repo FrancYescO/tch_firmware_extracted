@@ -38,6 +38,20 @@
 PROCD_RELOAD_DELAY=1000
 _PROCD_SERVICE=
 
+procd_lock() {
+	local basescript=$(readlink "$initscript")
+	local service_name="$(basename ${basescript:-$initscript})"
+
+	flock -n 1000 &> /dev/null
+	if [ "$?" != "0" ]; then
+		exec 1000>/var/lock/procd_${service_name}.lock
+		flock 1000
+		if [ "$?" != "0" ]; then
+			logger "warning: procd flock for $service_name failed"
+		fi
+	fi
+}
+
 _procd_call() {
 	local old_cb
 
@@ -47,6 +61,7 @@ _procd_call() {
 }
 
 _procd_wrapper() {
+	procd_lock
 	while [ -n "$1" ]; do
 		eval "$1() { _procd_call _$1 \"\$@\"; }"
 		shift
@@ -79,7 +94,9 @@ _procd_close_service() {
 	_procd_open_trigger
 	service_triggers
 	_procd_close_trigger
-
+	_procd_open_data
+	service_data
+	_procd_close_data
 	_procd_ubus_call ${1:-set}
 }
 
@@ -133,6 +150,18 @@ _procd_close_trigger() {
 	let '_procd_trigger_open = _procd_trigger_open - 1'
 	[ "$_procd_trigger_open" -lt 1 ] || return
 	json_close_array
+}
+
+_procd_open_data() {
+	let '_procd_data_open = _procd_data_open + 1'
+	[ "$_procd_data_open" -gt 1 ] && return
+	json_add_object "data"
+}
+
+_procd_close_data() {
+	let '_procd_data_open = _procd_data_open - 1'
+	[ "$_procd_data_open" -lt 1 ] || return
+	json_close_object
 }
 
 _procd_open_validate() {
@@ -384,6 +413,10 @@ _procd_send_signal() {
 	local instance="$2"
 	local signal="$3"
 
+	case "$signal" in
+		[A-Z]*)	signal="$(kill -l "$signal" 2>/dev/null)" || return 1;;
+	esac
+
 	json_init
 	json_add_string name "$service"
 	[ -n "$instance" -a "$instance" != "*" ] && json_add_string instance "$instance"
@@ -424,7 +457,7 @@ procd_add_mdns_service() {
 	json_add_int port "$port"
 	[ -n "$1" ] && {
 		json_add_array txt
-		for txt in $@; do json_add_string "" $txt; done
+		for txt in "$@"; do json_add_string "" "$txt"; done
 		json_select ..
 	}
 	json_select ..
@@ -433,7 +466,7 @@ procd_add_mdns_service() {
 procd_add_mdns() {
 	procd_open_data
 	json_add_object "mdns"
-	procd_add_mdns_service $@
+	procd_add_mdns_service "$@"
 	json_close_object
 	procd_close_data
 }

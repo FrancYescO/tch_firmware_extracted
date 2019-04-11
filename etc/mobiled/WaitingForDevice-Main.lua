@@ -7,7 +7,7 @@ M.SenseEventSet = {
 	"platform_config_changed"
 }
 
-function M.check(runtime, event, dev_idx)
+function M.check(runtime, event)
 	local log = runtime.log
 	local retState = "WaitingForDevice"
 

@@ -1,7 +1,6 @@
-local string, pairs, table = string, pairs, table
-local helper = require("mobiled.scripthelpers")
 local session = require("libat.session")
 local attty = require("libat.tty")
+local sim = require("libat.sim")
 
 local Mapper = {}
 Mapper.__index = Mapper
@@ -54,9 +53,10 @@ function Mapper:get_device_capabilities(device, info)
 	end
 
 	info.radio_interfaces = radio_interfaces
+	info.supported_auth_types = "none pap chap"
 
 	if device.pid == "68aa" then
-		info.supported_pdp_types = "ipv4"
+		info.supported_pdp_types = {"ipv4"}
 	end
 end
 
@@ -113,9 +113,11 @@ function Mapper:set_attach_params(device, profile)
 
 	-- Disable default profile
 	device:send_command(string.format('AT!SCPROF=%d," ",0,0,0,0', (session_id+1)))
+
+	return true
 end
 
-function Mapper:start_data_session(device, session_id, profile)
+function Mapper:start_data_session(device, session_id, profile) --luacheck: no unused args
 	if device.sessions[session_id + 1].proto == "ppp" then
 		return true
 	end
@@ -161,22 +163,12 @@ function Mapper:get_session_info(device, info, session_id)
 	end
 end
 
-function Mapper:get_sim_info(device, info, session_id)
+function Mapper:get_sim_info(device, info) --luacheck: no unused args
 	local ret = device:send_singleline_command('AT!ICCID?', '!ICCID:')
 	if ret then
 		local iccid = string.match(ret, '!ICCID:%s?(.+)')
-		if iccid then
-			if tonumber(string.sub(iccid, 20, 20)) then
-				iccid = string.sub(iccid, 1, 20)
-			else
-				iccid = string.sub(iccid, 1, 19)
-			end
-			if string.match(string.sub(iccid, 1, 2), "98") then
-				iccid = helper.swap(iccid)
-			end
-			if helper.isnumeric(iccid) then
-				device.buffer.sim_info.iccid = iccid
-			end
+		if sim.check_iccid(iccid) then
+			device.buffer.sim_info.iccid = iccid
 		end
 	end
 end
@@ -270,7 +262,7 @@ function Mapper:debug(device)
 	end
 end
 
-function M.create(runtime, device)
+function M.create(runtime, device) --luacheck: no unused args
 	local mapper = {
 		mappings = {
 			get_session_info = "override",

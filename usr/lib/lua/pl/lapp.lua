@@ -6,13 +6,13 @@
 --      Does some calculations
 --        -o,--offset (default 0.0)  Offset to add to scaled number
 --        -s,--scale  (number)  Scaling factor
---         <number>; (number )  Number to be scaled
+--        <number> (number) Number to be scaled
 --      ]]
 --
 --      print(args.offset + args.scale * args.number)
 --
--- Lines begining with '-' are flags; there may be a short and a long name;
--- lines begining wih '<var>' are arguments.  Anything in parens after
+-- Lines beginning with `'-'` are flags; there may be a short and a long name;
+-- lines beginning with `'<var>'` are arguments.  Anything in parens after
 -- the flag/argument is either a default, a type name or a range constraint.
 --
 -- See @{08-additional.md.Command_line_Programs_with_Lapp|the Guide}
@@ -136,7 +136,7 @@ end
 
 -- deducing type of variable from default value;
 local function process_default (sval,vtype)
-    local val
+    local val, success
     if not vtype or vtype == 'number' then
         val = tonumber(sval)
     end
@@ -150,6 +150,18 @@ local function process_default (sval,vtype)
             return true, 'boolean'
         end
         if sval:match '^["\']' then sval = sval:sub(2,-2) end
+
+        local ps = types[vtype] or {}
+        ps.type = vtype
+
+        local show_usage_error = lapp.show_usage_error
+        lapp.show_usage_error = "throw"
+        success, val = pcall(convert_parameter, ps, sval)
+        lapp.show_usage_error = show_usage_error
+        if success then
+          return val, vtype or 'string'
+        end
+
         return sval,vtype or 'string'
     end
 end
@@ -294,6 +306,12 @@ function lapp.process_options_string(str,args)
 
     usage = str
 
+    for _,a in ipairs(arg) do
+      if a == "-h" or a == "--help" then
+        return lapp.quit()
+      end
+    end
+
     lapp.process_usage(str)
 
     -- cool, we have our parms, let's parse the command line args
@@ -301,9 +319,10 @@ function lapp.process_options_string(str,args)
     local iextra = 1
     local i = 1
     local parm,ps,val
+    local end_of_flags = false
 
     local function check_parm (parm)
-        local eqi = parm:find '='
+        local eqi = parm:find '[=:]'
         if eqi then
             tinsert(arg,i+1,parm:sub(eqi+1))
             parm = parm:sub(1,eqi-1)
@@ -318,8 +337,18 @@ function lapp.process_options_string(str,args)
     while i <= #arg do
         local theArg = arg[i]
         local res = {}
+        -- after '--' we don't parse args and they end up in
+        -- the array part of the result (args[1] etc)
+        if theArg == '--' then
+            end_of_flags = true
+            i = i + 1
+            theArg = arg[i]
+            if not theArg then
+                break
+            end
+        end
         -- look for a flag, -<short flags> or --<long flag>
-        if match('--$S{long}',theArg,res) or match('-$S{short}',theArg,res) then
+        if not end_of_flags and (match('--$S{long}',theArg,res) or match('-$S{short}',theArg,res)) then
             if res.long then -- long option
                 parm = check_parm(res.long)
             elseif #res.short == 1 or is_flag(res.short) then

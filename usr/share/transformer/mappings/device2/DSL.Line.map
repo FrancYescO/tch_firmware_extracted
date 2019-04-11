@@ -216,7 +216,6 @@ local Device_DSL_Line_i_ = {
           "L4",
         },
       },
---[[ TODO
       SuccessFailureCause = {
         access = "readOnly",
         type = "unsignedInt",
@@ -533,16 +532,22 @@ local Device_DSL_Line_i_ = {
         access = "readOnly",
         type = "unsignedInt",
       },
+      X_NumberOfCuts = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        description = "Number of times the DSL connection was lost and reestablished since boot",
+      },
       X_000E50_UpstreamAttenuation = {
         access = "readOnly",
         activeNotify = "canDeny",
-        type = "int",
+        type = "string",
         description = "The current Upstream signal loss in dB.",
       },
       X_000E50_DownstreamAttenuation = {
         access = "readOnly",
         activeNotify = "canDeny",
-        type = "int",
+        type = "string",
         description = "The current Downstream signal loss in dB.",
       },
     }
@@ -558,7 +563,8 @@ local model
 local isConfigChanged = false
 
 local xdslctl = require("transformer.shared.xdslctl")
-local tostring, tonumber, match, gmatch, upper = tostring, tonumber, string.match, string.gmatch, string.upper
+local tostring, tonumber, match = tostring, tonumber, string.match
+local ceil = math.ceil
 local getClockTime = posix.clock_gettime
 
 local phonelinepairmapping = { Inner = "1" , Outer = "2" }
@@ -710,37 +716,15 @@ local function getEnable(mapping, _, key)
 end
 
 local function getAttenuationValues(key)
-  local mode = xdslctl.infoValue("mode", nil, nil, key)
+  local mode = xdslctl.infoValue("mode",nil,nil, key)
   local upStream, downStream = "0", "0"
   if mode then
-    if match(upper(mode), "VDSL") then
-      local upStreamValue = xdslctl.infoPbParamsValue("attn", "us", "0", xdslctlLineIdMap[key])
-      local downStreamValue = xdslctl.infoPbParamsValue("attn", "ds", "0", xdslctlLineIdMap[key])
-      local usAttenuationValues = {}
-      local dsAttenuationValues = {}
-      for value in gmatch(upStreamValue, "[^,%s]+") do
-        usAttenuationValues[#usAttenuationValues + 1] = value
-      end
-      for value in gmatch(downStreamValue, "[^,%s]+") do
-        dsAttenuationValues[#dsAttenuationValues + 1] = value
-      end
-      --Read the first upstream value other than "N/A" and the corresponding downstream value
-      for _, usattn in pairs(usAttenuationValues) do
-        if usattn ~= "N/A" then
-          upStream = usattn
-          break
-        end
-      end
-      for _, dsattn in pairs(dsAttenuationValues) do                                      
-        if dsattn ~= "N/A" then
-          downStream = dsattn
-          break
-        end
-      end
-      return upStream, downStream
+    if match(string.upper(mode), "VDSL") then
+      upStream = xdslctl.infoPbParamsValue("attn","us","", key)
+      downStream = xdslctl.infoPbParamsValue("attn","ds","", key)
     else
-      upStream = xdslctl.infoValue("attn", "us", "0", xdslctlLineIdMap[key])
-      downStream = xdslctl.infoValue("attn", "ds", "0", xdslctlLineIdMap[key])
+      upStream = xdslctl.infoValue("attn","us","", key)
+      downStream = xdslctl.infoValue("attn","ds","", key)
     end
   end
   return upStream, downStream
@@ -801,12 +785,10 @@ Device_DSL_Line_i_.get = {
     return times10(xdslctl.infoValue("snr", "ds", "0", xdslctlLineIdMap[key]))
   end,
   UpstreamAttenuation = function(mapping, param, key)
-    local upStream = getAttenuationValues(key)
-    return times10(upStream)
+    return times10(xdslctl.infoValue("attn", "us", "0", xdslctlLineIdMap[key]))
   end,
   DownstreamAttenuation = function(mapping, param, key)
-    local _, downStream =  getAttenuationValues(key)
-    return times10(downStream)
+    return times10(xdslctl.infoValue("attn", "ds", "0", xdslctlLineIdMap[key]))
   end,
   UpstreamPower = function(mapping, param, key)
     return times10(xdslctl.infoValue("pwr", "us", "0", xdslctlLineIdMap[key]))
@@ -830,9 +812,48 @@ Device_DSL_Line_i_.get = {
   XTUCCountry = function (mapping, param, key)
     return xdslctl.infoValue("XTUCCountry", nil, nil, xdslctlLineIdMap[key])
   end,
-
+  RXTHRSHds = function (mapping, param, key)
+    return "0"
+  end,
+  ACTRAMODEds = function (mapping, param, key)
+    return "0"
+  end,
+  ACTRAMODEus = function (mapping, param, key)
+    return "0"
+  end,
+  ACTINPROCds = function (mapping, param, key)
+    return "0"
+  end,
+  ACTINPROCus = function (mapping, param, key)
+    return "0"
+  end,
+  SNRMROCds = function (mapping, param, key)
+    return "0"
+  end,
+  SNRMROCus = function (mapping, param, key)
+    return "0"
+  end,
+  LastStateTransmittedDownstream = function (mapping, param, key)
+    return xdslctl.infoValue("LastStateTransmitted", "ds", "0", xdslctlLineIdMap[key])
+  end,
+  LastStateTransmittedUpstream = function (mapping, param, key)
+    return xdslctl.infoValue("LastStateTransmitted", "us", "0", xdslctlLineIdMap[key])
+  end,
   UPBOKLE = function (mapping, param, key)
-    return xdslctl.infoValue("UPBOKLE", nil, nil, xdslctlLineIdMap[key])
+    local value =  tonumber(xdslctl.infoValue("UPBOKLE", nil, nil, xdslctlLineIdMap[key])) or 0
+    return tostring(ceil(value/10))
+  end,
+  UPBOKLER = function (mapping, param, key)
+    local value = tonumber(xdslctl.infoValue("UPBOKLER", nil, nil, xdslctlLineIdMap[key])) or 0
+    return tostring(ceil(value/10))
+  end,
+  UPBOKLEPb = function (mapping, param, key)
+    local valUPBOKLEPb = xdslctl.infoValue("UPBOKLEPb", nil, nil, xdslctlLineIdMap[key])
+    return valUPBOKLEPb:gsub("N/A", "0")
+  end,
+  UPBOKLERPb = function (mapping, param, key)
+    local valUPBOKLERPb = xdslctl.infoValue("UPBOKLERPb", nil, nil, xdslctlLineIdMap[key])
+    return valUPBOKLERPb:gsub("N/A", "0")
   end,
   US0MASK = function (mapping, param, key)
     return xdslctl.infoValue("US0MASK", nil, nil, xdslctlLineIdMap[key])
@@ -855,6 +876,12 @@ Device_DSL_Line_i_.get = {
   end,
   XTUCANSIRev = function (mapping, param, key)
     return xdslctl.infoValue("XTUCANSIRev", nil, nil, xdslctlLineIdMap[key])
+  end,
+  SuccessFailureCause = function (mapping, param, key)
+    return xdslctl.infoValue("SuccessFailureCause", "", "", key)
+  end,
+  X_NumberOfCuts = function(mapping, param, key)
+    return xdslctl.stats("total", "retr")
   end,
   X_000E50_UpstreamAttenuation = function(mapping, param, key)
     return getAttenuationValues(key)
@@ -889,8 +916,8 @@ Device_DSL_Line_i_.getall = function(mapping, key)
     DownstreamMaxBitRate = xdslInfoValues["maxrate"]["ds"] or "0",
     UpstreamNoiseMargin = times10(xdslInfoValues["snr"]["us"] or "0"),
     DownstreamNoiseMargin = times10(xdslInfoValues["snr"]["ds"] or "0"),
-    UpstreamAttenuation = times10(upStream),
-    DownstreamAttenuation = times10(downStream),
+    UpstreamAttenuation = times10(xdslInfoValues["attn"]["us"] or "0"),
+    DownstreamAttenuation = times10(xdslInfoValues["attn"]["ds"] or "0"),
     UpstreamPower = times10(xdslInfoValues["pwr"]["us"] or "0"),
     DownstreamPower = times10(xdslInfoValues["pwr"]["ds"] or "0"),
     XTURVendor = getXTURVendor(),
@@ -901,10 +928,23 @@ Device_DSL_Line_i_.getall = function(mapping, key)
     XTUCCountry = xdslInfoValues["XTUCCountry"] or "",
     SNRMpbus = xdslInfoValues["SNRMpb"]["us"] or "0",
     SNRMpbds = xdslInfoValues["SNRMpb"]["ds"] or "0",
-    UPBOKLE = xdslInfoValues["UPBOKLE"] or "0",
+    RXTHRSHds = "0",
+    ACTRAMODEds = "0",
+    ACTRAMODEus = "0",
+    ACTINPROCds = "0",
+    ACTINPROCus = "0",
+    SNRMROCds = "0",
+    SNRMROCus = "0",
+    LastStateTransmittedDownstream = xdslInfoValues["LastStateTransmitted"]["ds"] or "0",
+    LastStateTransmittedUpstream = xdslInfoValues["LastStateTransmitted"]["us"] or "0",
+    UPBOKLE = tonumber(xdslInfoValues["UPBOKLE"]) and tostring(ceil(tonumber(xdslInfoValues["UPBOKLE"])/10)) or "0",
+    UPBOKLER = tonumber(xdslInfoValues["UPBOKLER"]) and tostring(ceil(tonumber(xdslInfoValues["UPBOKLER"])/10)) or "0",
+    UPBOKLEPb = xdslInfoValues["UPBOKLEPb"] and xdslInfoValues["UPBOKLEPb"]:gsub("N/A", "0") or "0",
+    UPBOKLERPb = xdslInfoValues["UPBOKLERPb"] and xdslInfoValues["UPBOKLERPb"]:gsub("N/A", "0") or "0",
     US0MASK = xdslInfoValues["MASK"] or "0",
     VirtualNoisePSDds = VirtualNoisePSDds:match("^%d+") or "0",
     VirtualNoisePSDus = VirtualNoisePSDus:match("^%d+") or "0",
+    SuccessFailureCause = "0",
     XTUCVendor = xdslInfoValues["XTUCVendor"] or "0",
     XTUCANSIStd = xdslInfoValues["XTUCANSIStd"] or "0",
     XTUCANSIRev = xdslInfoValues["XTUCANSIRev"] or "0",

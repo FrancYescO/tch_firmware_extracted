@@ -12,22 +12,23 @@ local Multi_X_000E50_KernelCrash_= {
         max = "256",
         description = "URL where to upload the kernel crash data to",
       },
+      Path = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "The path to store the kernel crash data to when selecting compress or store",
+      },
       Action = {
         access = "readWrite",
         type = "string",
         max = "64",
-        description = "Specifies what to do with the kernel crash data after uploading",
+        description = "Specifies what to do with the kernel crash data",
         enumeration = {
           "compress",
-          "delete",
+          "upload",
+          "store",
         },
-      },
-      Upload = {
-        access = "readWrite",
-        type = "boolean",
-        default = "1",
-        description = "Enable or disable the uploading of the kernel crash data",
-      },
+      }
     }
   }
 }
@@ -36,7 +37,7 @@ local Multi_X_000E50_KernelCrash_= {
 -- Local definitions
 -- -------------------------------------------------------
 local uciHelper = mapper("ucihelper")
-local kernelCrashBinding = { config = "kernel_crash_handler", sectionname = "@kernel_crash[0]", extended = true }
+local kernelCrashBinding = { config = "system", sectionname = "@kernel_crash[0]", extended = true }
 local configChanged
 
 ----------------------------------------------------------
@@ -46,14 +47,14 @@ local configChanged
 local paramMap = {
   ["URL"] = "url",
   ["Action"] = "action",
-  ["Upload"] = "upload",
+  ["Path"] = "path",
 }
 
 local function getKernelCrashValues(mapping, param)
   kernelCrashBinding.option = paramMap[param]
   kernelCrashBinding.default = nil
-  if param == "Upload" then
-    kernelCrashBinding.default = "1"
+  if param == "Path" then
+    kernelCrashBinding.default = "/tmp"
   end
   return uciHelper.get_from_uci(kernelCrashBinding)
 end
@@ -65,7 +66,7 @@ Multi_X_000E50_KernelCrash_.getall = function()
   return {
     URL = allValues.url or "",
     Action = allValues.action or "",
-    Upload = allValues.upload or "1",
+    Path = allValues.path or "/tmp",
   }
 end
 

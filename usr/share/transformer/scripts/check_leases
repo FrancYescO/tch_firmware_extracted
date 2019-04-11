@@ -11,24 +11,8 @@ local dhcppools = {config="dhcp", sectiontype="dhcp"}
 local static_leases = {config="dhcp", sectiontype="host"}
 local network_config = "network"
 local port_forwards = {config="firewall", sectiontype="userredirect"}
-
--- Return number representing the IP address / netmask (first byte is first part ...)
+local inet = require("tch.inet")
 local ipmatch = "(%d+)%.(%d+)%.(%d+)%.(%d+)"
-local function ipv42num(ipstr)
-  if not ipstr then
-    return nil
-  end
-  local result = 0
-  local ipblocks = { match(ipstr, ipmatch) }
-  if #ipblocks < 4 then
-    return nil
-  end
-
-  for _,v in ipairs(ipblocks) do
-    result = bit.lshift(result, 8) + v
-  end
-  return result
-end
 
 -- Return base ip number base on the IP address / netmask
 local function poolbase(ipstr,maskstr)
@@ -90,7 +74,7 @@ if result and #ranges > 0 then
   result = cursor:foreach(static_leases.config, static_leases.sectiontype, function(section)
       if section.owner == "portforward" then
         local ip = section.ip
-        local ip_numeric = ipv42num(ip)
+        local ip_numeric = inet.ipv4ToNumber(ip)
         local delete = true
         for _, range in ipairs(ranges) do
           if ip_numeric>=range.range_start and ip_numeric<=range.range_end then

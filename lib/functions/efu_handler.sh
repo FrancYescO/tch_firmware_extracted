@@ -109,6 +109,7 @@ store_default_package_state() {
 
 			*)
 				log "unknown object type '$_type'"
+				json_cleanup
 				exit 1
 				;;
 
@@ -122,6 +123,7 @@ store_default_package_state() {
 
 	json_set_namespace "$_js_namespace_state"
 	json_dump > "$_js_state_file"
+	json_cleanup
 }
 
 # Function: restore_default_state
@@ -170,6 +172,7 @@ restore_default_state() {
 
 			*)
 				log "unknown object type '$_type'" >/dev/stderr
+				json_cleanup
 				return 1
 				;;
 
@@ -181,6 +184,7 @@ restore_default_state() {
 
 	uci commit
 	rm -f "$_js_state_file" # Restore the state only once
+	json_cleanup
 }
 
 
@@ -207,7 +211,7 @@ unlock() {
 	json_init
 	json_load "$(cat "$_js_config_file")"
 
-	json_select "unlock" || return 1
+	json_select "unlock" || { json_cleanup; return 1; }
 
 	# Loop through all elements
 	local _index="1"
@@ -229,6 +233,7 @@ unlock() {
 
 			*)
 				log "unknown object type '$_type'"
+				json_cleanup
 				exit 1
 				;;
 
@@ -238,6 +243,7 @@ unlock() {
 
 	done
 
+	json_cleanup
 }
 
 # Function: _adapt_banner
@@ -248,19 +254,25 @@ unlock() {
 #    none
 adapt_banner(){
 	local _banner="/etc/banner"
-	local _warning_msg="    WARNING: Development board (EFU bit set)    "
-	local      _spaces="                                                "
+	local _warning_msg="WARNING: Development board (EFU tag present)"
 
 	[[ ! -f "$_banner" ]] && return
 	if [[ "$1" == "1" ]]; then # Add message to banner
 		if ! grep -q "$_warning_msg" "$_banner"; then
 			if grep -q . /proc/efu/allowed; then
-				echo -e "\n\e[1;30m\e[43m$_spaces\n$_warning_msg\n$_spaces\e[0m" >> "$_banner"
+				echo -ne "\n\e[1;30m\e[43m" >> "$_banner"
+				echo " " | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+				echo "$_warning_msg" | sed -e :a -e 's/^.\{1,49\}$/ & /;ta' >> "$_banner"
+				echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
+				echo "Features enabled:" | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+				echo "$(cat /proc/efu/allowed)" | sed -e 's/^/   /' | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+				echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
+				echo -ne "\e[0m" >> "$_banner"
 			fi
 		fi
 	else # Remove message from banner
-		sed -i "/^${_spaces}\$/d;/$_warning_msg/d" "$_banner"
-		sed -i "\$d" "$_banner"
+		awk '/\x1B\[1;30m/{p=1}/\x1B\[0m/{p=0;next}!p&&NF' "$_banner" >> /tmp/banner
+		mv /tmp/banner "$_banner"
 	fi
 }
 
@@ -291,7 +303,23 @@ efu_handler_is_unlocked(){
 			_is_unlocked=0
 		fi
 	fi
+	json_cleanup
 	return "$_is_unlocked"
+}
+
+efu_run_execute_handler() {
+	local config_file="$config_dir/$1"
+	local action="$2"
+	local command
+
+	json_init
+	json_load_file "$config_file"
+	json_get_var command "exec"
+	json_cleanup
+
+	if [[ -n "$command" ]]; then
+		$command $action
+	fi
 }
 
 # Function: efu_handler_apply_config
@@ -312,15 +340,18 @@ efu_handler_apply_config() {
 		[[ -d ${config_dir} ]] && _packages="$(find ${config_dir} -maxdepth 1 -type f -exec basename {} \;)"
 
 		local _pkg
+		local action
 		for _pkg in $_packages; do
 
 			if efu_handler_is_unlocked "$_pkg"; then
 				store_default_package_state "$_pkg" && unlock "$_pkg"
 				_efu_active=1
+				action="unlock"
 			else
 				restore_default_state "$_pkg"
+				action="lock"
 			fi
-
+			efu_run_execute_handler "$_pkg" "$action"
 		done
 		uci commit
 

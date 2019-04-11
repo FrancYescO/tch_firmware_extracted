@@ -4,16 +4,21 @@ START=99
 STOP=10
 USE_PROCD=1
 
-. /lib/functions.sh
+. ${IPKG_INSTROOT}/lib/functions.sh
 
-set_default_acs() {
+set_default_acs()
+{
   local radio=$1
+  local ubus_call
   local acs_list
+  local chan_list
+  local list
   config_load "wireless"
   config_get acs_list $radio acs_allowed_channels
   if [ -z "$acs_list" ]
   then
     # list is empty, try UBUS
+    # We need the intersect of .radio and .radio.acs (see NG-177126)
     ubus_call="ubus call wireless.radio.acs get '{ \"name\" : \"$radio\" }' | grep allowed_channels"
     acs_list="`eval $ubus_call`"
     if [ $? != 0 ]
@@ -21,7 +26,20 @@ set_default_acs() {
        logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - UBUS returned error"
        return
     fi
-    acs_list="`echo $acs_list | sed "s/[^0-9 ]//g" `"
+
+    ubus_call="ubus call wireless.radio get '{ \"name\" : \"$radio\" }' | grep allowed_channels"
+    chan_list="`eval $ubus_call`"
+    if [ $? != 0 ]
+    then
+       logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - UBUS returned error"
+       return
+    fi
+
+    # Calculate the intersect of both lists
+    # Note the itteration 1 - 200 is crude, but limited AWK functionality on OWA ...
+    # This limits the channel range from 1 .. 200 which should be OK.
+    list="`echo $acs_list $chan_list | sed "s/[^0-9 ]//g" `"
+    acs_list=`echo "${list} " | awk 'BEGIN {RS=" "; ORS=" "} { cnts[$0] += 1} END { for ( i=1 ; i < 200 ; i++ ) if (cnts[i] > 1 ) print i }'`
     if [ ${#acs_list} -lt 2 ] # Check that there is at least one channel in the list (has a leading ' ')
     then
       logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - empty ACS list"

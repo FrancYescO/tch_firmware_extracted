@@ -56,8 +56,9 @@ local function updateRedirectCacheEntry(macAddress, family, addresses)
         local newvalue
         local oldpref, newpref = 0, 0
         for _, entry in pairs(addresses) do
-            if entry.state == "connected" and entry.address then
-                local pref = (entry.configuration == "dynamic" and 2 or 1)
+            if (entry.state == "connected" or entry.state == "stale") and entry.address then
+                local pref = (entry.state == "connected" and 3 or 0) +
+                    (entry.configuration == "dynamic" and 2 or 1)
                 if redirectips[key] == entry.address then
                     oldpref = pref
                 elseif newpref < pref then

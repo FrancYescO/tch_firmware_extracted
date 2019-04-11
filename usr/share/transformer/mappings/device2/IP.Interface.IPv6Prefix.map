@@ -10,9 +10,8 @@ local Device_IP_Interface_i_IPv6Prefix_i_ = {
     maxEntries = math.huge,
     aliasParameter = "Alias",
     parameters = {
---[[ TODO
       Enable = {
-        access = "readWrite",
+        access = "readOnly",  -- readWrite currently not supported
         type = "boolean",
         default = "false",
       },
@@ -26,6 +25,7 @@ local Device_IP_Interface_i_IPv6Prefix_i_ = {
         },
         default = "Disabled",
       },
+--[[ TODO
       PrefixStatus = {
         access = "readOnly",
         type = "string",
@@ -108,6 +108,11 @@ local Device_IP_Interface_i_IPv6Prefix_i_ = {
         type = "dateTime",
         default = "9999-12-31T23:59:59Z",
       },
+      X_000E50_PrefixMaskLength = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "IPv6 prefix length for the Interface",
+      },
     }
   }
 }
@@ -156,6 +161,7 @@ Device_IP_Interface_i_IPv6Prefix_i_.entries = function(mapping, parentKey)
         preferred = makeLifetimeAbsolute(now, values.preferred),
         valid = makeLifetimeAbsolute(now, values.valid),
         mask=values.mask,
+        enable = true,
       }
       entries[#entries+1] = key
     end
@@ -172,6 +178,14 @@ local function getPrefix(prefix)
 end
 
 Device_IP_Interface_i_IPv6Prefix_i_.get = {
+  Enable = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.enable and "1" or "0"
+  end,
+  Status = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.enable and "Enabled" or "Disabled"
+  end,
   Prefix = function(_, _, key, parent)
     return getPrefix(getCachedPrefix(key, parent))
   end,
@@ -183,14 +197,21 @@ Device_IP_Interface_i_IPv6Prefix_i_.get = {
     local prefix = getCachedPrefix(key, parent)
     return network.convertEpochToISO(prefix.valid)
   end,
+  X_000E50_PrefixMaskLength = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.mask and tostring(prefix.mask) or "0"
+  end,
 }
 
 Device_IP_Interface_i_IPv6Prefix_i_.getall = function(_, key, parent)
   local prefix = getCachedPrefix(key, parent)
   return {
+    Enable = prefix.enable and "1" or "0",
+    Status = prefix.enable and "Enabled" or "Disabled",
     Prefix = getPrefix(prefix),
     PreferredLifetime = network.convertEpochToISO(prefix.preferred),
     ValidLifetime = network.convertEpochToISO(prefix.valid),
+    X_000E50_PrefixMaskLength = prefix.mask and tostring(prefix.mask) or "0",
   }
 end
 

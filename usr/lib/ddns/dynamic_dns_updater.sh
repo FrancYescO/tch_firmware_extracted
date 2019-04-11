@@ -1,6 +1,6 @@
 #!/bin/sh
 #.Distributed under the terms of the GNU General Public License (GPL) version 2.0
-#.2014-2017 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
+#.2014-2018 Christian Schoenebeck <christian dot schoenebeck at gmail dot com>
 . $(dirname $0)/dynamic_dns_functions.sh
 usage() {
 cat << EOF
@@ -77,6 +77,7 @@ PIDFILE="$ddns_rundir/$SECTION_ID.pid"
 UPDFILE="$ddns_rundir/$SECTION_ID.update"
 DATFILE="$ddns_rundir/$SECTION_ID.dat"
 ERRFILE="$ddns_rundir/$SECTION_ID.err"
+IPFILE="$ddns_rundir/$SECTION_ID.ip"	#
 LOGFILE="$ddns_logdir/$SECTION_ID.log"
 [ $VERBOSE -gt 1 -a -f $LOGFILE ] && rm -f $LOGFILE
 trap "trap_handler 0 \$?" 0
@@ -103,19 +104,22 @@ ERR_LAST=$?
 [ "$ip_source" = "web" -a -z "$ip_url" -a $use_ipv6 -eq 0 ] && ip_url="http://checkip.dyndns.com"
 [ "$ip_source" = "web" -a -z "$ip_url" -a $use_ipv6 -eq 1 ] && ip_url="http://checkipv6.dyndns.com"
 [ "$ip_source" = "interface" -a -z "$ip_interface" ] && ip_interface="eth1"
+[ -n "$username" ] && urlencode URL_USER "$username"
+[ -n "$password" ] && urlencode URL_PASS "$password"
+[ -n "$param_enc" ] && urlencode URL_PENC "$param_enc"
 [ $ERR_LAST -ne 0 ] && {
 [ $VERBOSE -le 1 ] && VERBOSE=2
 [ -f $LOGFILE ] && rm -f $LOGFILE
 write_log  7 "************ ************** ************** **************"
 write_log  5 "PID '$$' started at $(eval $DATE_PROG)"
 write_log  7 "ddns version  : $VERSION"
-write_log  7 "uci configuration:\n$(uci -q show ddns | grep '=service' | sort)"
+write_log  7 "uci configuration:${N}$(uci -q show ddns | grep '=service' | sort)"
 write_log 14 "Service section '$SECTION_ID' not defined"
 }
 write_log 7 "************ ************** ************** **************"
 write_log 5 "PID '$$' started at $(eval $DATE_PROG)"
 write_log 7 "ddns version  : $VERSION"
-write_log 7 "uci configuration:\n$(uci -q show ddns.$SECTION_ID | sort)"
+write_log 7 "uci configuration:${N}$(uci -q show ddns.$SECTION_ID | sort)"
 case $VERBOSE in
 0) write_log  7 "verbose mode  : 0 - run normal, NO console output";;
 1) write_log  7 "verbose mode  : 1 - run normal, console mode";;
@@ -149,9 +153,6 @@ write_log 14 "Service section not configured correctly! Missing 'param_enc'"
 [ -z "$param_opt" ] && $(echo "$update_url" | grep "\[PARAMOPT\]" >/dev/null 2>&1) && \
 write_log 14 "Service section not configured correctly! Missing 'param_opt'"
 }
-[ -n "$username" ] && urlencode URL_USER "$username"
-[ -n "$password" ] && urlencode URL_PASS "$password"
-[ -n "$param_enc" ] && urlencode URL_PENC "$param_enc"
 if [ "$ip_source" = "script" ]; then
 set -- $ip_script	#handling script with parameters, we need a trick
 [ -z "$1" ] && write_log 14 "No script defined to detect local IP!"

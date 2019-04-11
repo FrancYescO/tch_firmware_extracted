@@ -7,4 +7,8 @@ if [[ -f /lib/functions/reboot_reason.sh ]]; then
 	set_reboot_reason $(uci -p /var/state/ get system.warmboot.rebootreason)
 fi
 
-reboot
+if [ -z "$1" ]; then
+	reboot
+else
+	/sbin/reboot $1
+fi

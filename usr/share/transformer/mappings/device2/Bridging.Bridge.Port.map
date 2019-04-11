@@ -40,13 +40,11 @@ local Device_Bridging_Bridge_i_Port_i_ = {
         type = "string",
         max = "64",
       },
---[[ TODO
       LastChange = {
         access = "readOnly",
         activeNotify = "canDeny",
         type = "unsignedInt",
       },
---]]
       LowerLayers = {
         access = "readOnly",
         list = true,
@@ -72,6 +70,7 @@ local Device_Bridging_Bridge_i_Port_i_ = {
           "VLANUnawarePort",
         },
       },
+--]]
       DefaultUserPriority = {
         access = "readWrite",
         type = "unsignedInt",
@@ -81,9 +80,10 @@ local Device_Bridging_Bridge_i_Port_i_ = {
             max = "7",
           },
         },
+        default = "0",
       },
       PriorityRegeneration = {
-        access = "readWrite",
+        access = "readOnly", --readWrite currently not supported
         list = true,
         maxItems = "8",
         minItems = "8",
@@ -96,7 +96,6 @@ local Device_Bridging_Bridge_i_Port_i_ = {
         },
         default = "0,1,2,3,4,5,6,7",
       },
---]]
       PortState = {
         access = "readOnly",
         type = "string",
@@ -138,12 +137,12 @@ local Device_Bridging_Bridge_i_Port_i_ = {
         },
         default = "AdmitAll",
       },
---[[ TODO
       IngressFiltering = {
-        access = "readWrite",
+        access = "readOnly", -- readWrite currently not supported
         type = "boolean",
-        default = "false",
+        default = "0",
       },
+--[[ TODO
       ServiceAccessPrioritySelection = {
         access = "readWrite",
         type = "boolean",
@@ -163,12 +162,12 @@ local Device_Bridging_Bridge_i_Port_i_ = {
         },
         default = "0,1,2,3,4,5,6,7",
       },
-      PriorityTagging = {
-        access = "readWrite",
-        type = "boolean",
-        default = "false",
-      },
 --]]
+      PriorityTagging = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "boolean",
+        default = "0",
+      },
     }
   },
   aliasDefault = "Name",
@@ -176,10 +175,18 @@ local Device_Bridging_Bridge_i_Port_i_ = {
 
 local nwmodel = require "transformer.shared.models.device2.network"
 local BridgePort = nwmodel.register("BridgePort", Device_Bridging_Bridge_i_Port_i_.objectType.name)
+local posix = require("tch.posix")
+local clock_gettime = posix.clock_gettime
+local uci_helper = mapper("ucihelper")
+local getFromUci = uci_helper.get_from_uci
+local qosBinding = { config = "qos"}
+local configChanged
 local model
+local startTime = clock_gettime(posix.CLOCK_MONOTONIC)
 
 local nwCommon = mapper("nwcommon")
 local getIntfInfo = nwCommon.getIntfInfo
+local lastStateChangeTime = {}
 
 -- map for /sys/class/net/<iface>/operstate
 local statusMap = {
@@ -291,6 +298,23 @@ local function getPortState(mapping, param, key)
   return "Disabled"
 end
 
+local function getDefaultUserPriority(key, device)
+  local dev = device or model:get(key).device
+  if dev and dev ~= "" then
+    qosBinding.sectionname = dev
+    qosBinding.option = "pcp"
+    qosBinding.default = "0"
+    return getFromUci(qosBinding)
+  end
+  return "0"
+end
+
+local function getLastChange(key, device)
+  local dev = device or model:get(key).device
+  local lastChange = clock_gettime(posix.CLOCK_MONOTONIC) - (lastStateChangeTime[dev] or startTime)
+  return tostring(lastChange)
+end
+
 Device_Bridging_Bridge_i_Port_i_.get = {
   Enable = getPortEnable,
   Status = getPortStatus,
@@ -299,10 +323,19 @@ Device_Bridging_Bridge_i_Port_i_.get = {
   LowerLayers = getLowerLayers,
   PVID = getPortVid,
   AcceptableFrameTypes = getAcceptableFrameTypes,
-  PortState = getPortState
+  PortState = getPortState,
+  LastChange = function(mapping, param, key)
+    return getLastChange(key)
+  end,
+  DefaultUserPriority = function(mapping, param, key)
+    return getDefaultUserPriority(key)
+  end,
+  PriorityRegeneration = "0",
+  IngressFiltering = "0",
+  PriorityTagging = "0",
 }
 
-Device_Bridging_Bridge_i_Port_i_.__getall = function(mapping, key)
+Device_Bridging_Bridge_i_Port_i_.getall = function(mapping, key)
   local port = model:get(key)
   local allValues = {
     Enable = getPortEnable(mapping, nil, key),
@@ -313,9 +346,50 @@ Device_Bridging_Bridge_i_Port_i_.__getall = function(mapping, key)
     PVID = getPortVid(mapping, nil, key),
     AcceptableFrameTypes = getAcceptableFrameTypes(mapping, nil, key),
     PortState = getPortState(mapping, nil, key),
+    LastChange = getLastChange(key, port.device),
+    DefaultUserPriority = getDefaultUserPriority(key, port.device),
+    PriorityRegeneration = "0",
+    IngressFiltering = "0",
+    PriorityTagging = "0",
   }
   return allValues
 end
 
-register(Device_Bridging_Bridge_i_Port_i_)
+Device_Bridging_Bridge_i_Port_i_.set = {
+  DefaultUserPriority = function(mapping, param, value, key)
+    local dev = model:get(key).device
+    if dev and dev ~= "" then
+      qosBinding.sectionname = dev
+      qosBinding.option = "pcp"
+      uci_helper.set_on_uci(qosBinding, value, commitapply)
+      configChanged = true
+    end
+  end,
+}
 
+Device_Bridging_Bridge_i_Port_i_.commit = function()
+  if configChanged then
+    uci_helper.commit(qosBinding)
+    configChanged = false
+  end
+end
+
+Device_Bridging_Bridge_i_Port_i_.revert = function()
+  if configChanged then
+    uci_helper.revert(qosBinding)
+    configChanged = false
+  end
+end
+
+local function ubusEventTriggered(mapping, action, data)
+  if data.action == "up" or data.action == "down" then
+    lastStateChangeTime[data.interface] = clock_gettime(posix.CLOCK_MONOTONIC)
+  end
+end
+
+Device_Bridging_Bridge_i_Port_i_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, ubusEventTriggered, "network.link")
+end
+
+register(Device_Bridging_Bridge_i_Port_i_)

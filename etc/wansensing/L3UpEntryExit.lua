@@ -7,7 +7,7 @@ local M = {}
 ---
 -- Entry function called if a wansensing L3 state is entered.
 --
--- @function [parent=M] 
+-- @function [parent=M]
 -- @param #1 runtime table holding the wansensing context (async/ubus/uci/logger/scripthelper)
 -- @param #2 string specifying the sensed L2 type (see L2Main.lua example)
 -- @return #1 boolean indicates if the entry actions are executed/not executed
@@ -15,7 +15,7 @@ function M.entry(runtime, l2type)
     local scripthelpers = runtime.scripth
     local uci = runtime.uci
     local conn = runtime.ubus
-    
+
     if not uci or not conn then
       return false
     end
@@ -27,8 +27,8 @@ function M.entry(runtime, l2type)
     conn:call("network.interface.wwan", "down", { })
 
     x:set("cwmpd", "cwmpd_config", "interface", "wan")
-    x:commit("cwmpd") 
-    os.execute("/etc/init.d/cwmpd reload")  
+    x:commit("cwmpd")
+    os.execute("/etc/init.d/cwmpd reload")
     return true
 end
 
@@ -38,7 +38,7 @@ end
 ---
 -- Exit function called if a wansensing L3 state is exited.
 --
--- @function [parent=M] 
+-- @function [parent=M]
 -- @param #1 runtime table holding the wansensing context (async/ubus/uci/logger/scripthelper)
 -- @param #2 string specifying the sensed L2 type (see L2Main.lua example)
 -- @param #3 string specifying the next state
@@ -56,11 +56,11 @@ function M.exit(runtime, l2type, transition)
    logger:notice("WAN Sensing Enabling Mobile interface")
    x:set("network", "wwan", "auto", "1")
    x:commit("network")
-   conn:call("network.interface.wwan", "up", { }) 
-   
+   conn:call("network.interface.wwan", "up", { })
+
    x:set("cwmpd", "cwmpd_config", "interface", "wwan")
-   x:commit("cwmpd") 
-   os.execute("/etc/init.d/cwmpd reload")   
+   x:commit("cwmpd")
+   os.execute("/etc/init.d/cwmpd reload")
    return true
 end
 

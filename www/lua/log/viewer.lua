@@ -26,11 +26,14 @@ local function filter_logdata(rawlog, current_process, all_processes)
   local pattern = "([^%s]+%s+%d+ %d+:%d+:%d+) [^%s]+ ([^%s]+) ([^%s]+): ([^\n]+)"
 
   for date, facility, process, message in rawlog:gmatch(pattern) do
-    local process_name = process:match("[^%[]+")
+    local process_name = string.gsub(process, "%[%d+%]$", "")
+    if process_name == "" then
+        process_name = "others"
+    end
     if not current_process or process_name == current_process then
       logs[#logs+1] = { date, facility, process, message }
     end
-    if process_name and not process_included[process_name] then
+    if not process_included[process_name] then
       all_processes[#all_processes+1] = { process_name, process_name }
       process_included[process_name] = true
     end

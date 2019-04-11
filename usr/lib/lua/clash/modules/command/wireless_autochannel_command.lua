@@ -28,10 +28,18 @@ local cmd_assist = require("helper.command")
 local cmd_name = "wireless_autochannel"
 local usage_msg = [[
   Show the statistics of wireless channel.
+    -r (optional string) Radio interface, this can be radio_2G or radio_5G
+    --bss          Dump the bss info, this is a table indicating which IEEE standards are in use on which channel
     --bsslist      Dump the bss list, this is a list indicating the existing networks (SSID/BSSID) on all channels that the AP can scan
+    --chanim       Dump the chanim info, this is an overview per channel of various interference sources and medium access parameters as seen by the AP
+    --candidate    Dump the candidate list. The full list of candidate channels or channel sets is listed in combination with the channel
     --detail       Dump the detailed ACS configuration
     --scanhistory  Dump the historical overview of channel changes
     --scanreport   Dump the result of the most recent scan
+    --qtnreport    Dump Quantenna report
+    Examples:
+     wireless_autochannel -r radio_2G --bsslist
+     wireless_autochannel -r radio_5G --bsslist
 ]]
 
 local function wireless_autochannel_function(args)

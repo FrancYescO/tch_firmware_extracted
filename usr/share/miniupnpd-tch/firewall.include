@@ -11,10 +11,13 @@ iptables_insert_zone() {
     local ext_iface="$1"
 
     for ext_zone in $(fw3 -q network "$ext_iface"); do
-        iptables -t filter -D zone_${ext_zone}_forward -j MINIUPNPD  2>/dev/null
         iptables -t filter -I zone_${ext_zone}_forward -j MINIUPNPD
-        iptables -t nat -D zone_${ext_zone}_prerouting -j MINIUPNPD  2>/dev/null
-        iptables -t nat -I zone_${ext_zone}_prerouting -j MINIUPNPD    
+
+        # Find at which index is the first tcp or udp rule that does not specify a dport
+        local index=$(iptables -t nat -S zone_${ext_zone}_prerouting | \
+            awk '/ -p (tcp|udp) / && ! / --dport / { NR=NR-1; exit } END { print NR }')
+
+        iptables -t nat -I zone_${ext_zone}_prerouting ${index} -j MINIUPNPD
     done
 }
 
@@ -26,7 +29,6 @@ extiface_insert_zone() {
     iptables_insert_zone $ext_iface    
 }
 
-local ext_iface
 for ext_iface in $(uci -q get upnpd.config.external_iface); do
     iptables_insert_zone $ext_iface
 done

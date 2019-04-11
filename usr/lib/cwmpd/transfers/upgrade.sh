@@ -1,52 +1,27 @@
 #!/bin/sh
 
+. /lib/functions.sh
+
 SCRIPT_DIR=$(dirname $0)
-
 ERROR_FILE=$1
-
-
-do_upgrade()
-{
-  local url="$1"
-  local SWITCHOVER_TYPE="normal"
-  WAIT_FOR_SWITCHOVER_FILE="/usr/lib/cwmpd/transfers/cwmp_waitforswitchover"
-  rm -f $WAIT_FOR_SWITCHOVER_FILE
-  if [ -x /usr/bin/sysupgrade-safe ]; then
-    if ! [ -z "$(grep bank_2 /proc/mtd)" ]; then
-      $SCRIPT_DIR/rollback.sh record
-      if [ "$(uci get cwmpd.cwmpd_config.upgrade_switchovertype)" = "1" ]; then
-        SWITCHOVER_TYPE="delayed"
-      fi
-    else
-      WAIT_FOR_SWITCHOVER_FILE="/"
-    fi
-    if [ $SWITCHOVER_TYPE = "delayed" ]; then
-      /usr/bin/sysupgrade-safe -o "$url"
-    else
-    /usr/bin/lua /usr/lib/cwmpd/transfers/checkOngoingServices.lua
-      /usr/bin/sysupgrade-safe "$url"
-    fi
-
-    UERR=$?
-
-    if [ $UERR -eq 0 ]; then
-      if [ $SWITCHOVER_TYPE = "delayed" ]; then
-        touch $WAIT_FOR_SWITCHOVER_FILE
-      fi
-      exit 0    
-    else           
-      return $UERR
-    fi
-  else
-    echo "no sysupgrade-safe found"
-  fi
-}
-
 CONFIG=cwmp_transfer
+
 
 char_encoding()
 {
-  echo "$1" | sed -e 's/:/%3A/g' -e 's/\//%2F/g'  -e 's/?/%3F/g' -e 's/#/%23/g' -e 's/\[/%5B/g'  -e 's/\]/%5D/g'  -e 's/@/%40/g'  -e 's/!/%21/g'  -e 's/\$/%24/g'  -e 's/&/%26/g' -e 's/'\''/%27/g' -e 's/(/%28/g' -e 's/)/%29/g' -e 's/*/%2A/g' -e 's/+/%2B/g' -e 's/,/%2C/g' -e 's/;/%3B/g' -e 's/=/%3D/g'
+  lua <<EOF - $1
+local name = arg[1]
+local escapes = ":/?#[]@!$&'()*+;="
+local function escape_char(x)
+  if escapes:find(x, nil, true) then
+    return ("%%%02X"):format(x:byte(1))
+  else
+    return x
+  end
+end
+name =name:gsub(".", escape_char)
+io.write(name)
+EOF
 }
 
 get_url()
@@ -83,20 +58,6 @@ get_uci_id()
     id=
   fi
   echo $id
-}
-
-is_dual_bank()
-{
-  grep -c "\"bank_2\"" /proc/mtd >/dev/null
-}
-
-# store the expected active bank after the upgrade
-remember_bank()
-{
-  local id="$1"
-  if is_dual_bank && [ -f /proc/banktable/notbooted ] ; then
-    uci set $CONFIG.$id.bank=$(cat /proc/banktable/notbooted)
-  fi
 }
 
 get_started()
@@ -138,7 +99,6 @@ set_started()
     if [ ! -z $url ]; then
       uci set $CONFIG.$id.url="$url"
     fi
-    remember_bank $id
     uci commit
     return
   fi
@@ -160,40 +120,6 @@ set_error()
   uci commit $CONFIG
 }
 
-get_error()
-{
-  local cmdkey="$1"
-  local id=$(get_uci_id "$cmdkey")
-  local value=$(uci -q get $CONFIG.$id.error)
-  if [ -z $value ]; then
-    value="0"
-  fi
-  if is_dual_bank && [ -f /proc/banktable/active ]; then
-    local expected=$(uci get $CONFIG.$id.bank)
-    local active=$(cat /proc/banktable/active)
-    local booted=$(cat /proc/banktable/booted)
-    if [ -z $expected ]; then
-      # The previous firmware did not record the expected active bank so we
-      # are not able to check it. Assume it is correct.
-      expected=$active
-    fi
-    if [ "$expected" != "$active" ]; then
-      value="2,programming new firmware failed"
-    elif [ "$active" != "$booted" ]; then
-      value="3,starting new firmware failed"
-      # reset active bank to make future reboots predictable
-      # (the upgrade failed so we must keep on booting the current firmware)
-      cat /proc/banktable/booted >/proc/banktable/active
-    fi
-  fi
-  echo $value
-}
-
-platform_is_dualbank() {
-  grep bank_2 /proc/mtd >/dev/null
-  return $?
-}
-
 #sanity checks
 if [ "$TRANSFER_TYPE" != "download" ]; then
   echo "supports only download, not $TRANSFER_TYPE"
@@ -203,6 +129,16 @@ fi
 if [ -z $TRANSFER_URL ]; then
   echo "no URL specified"
   ubus send FaultMgmt.Event '{ "Source":"cwmpd", "EventType":"ACS provisioning", "ProbableCause":"Firmware upgrade error", "SpecificProblem":"no URL specified" }'
+
+  if [ -f  /var/state/cwmpd ]; then
+    local failure_count
+    config_load cwmpd
+    config_get failure_count cwmpd_config acs_upgrade_failures "0"
+    failure_count=$(( failure_count + 1 ))
+    sed -i "/cwmpd.cwmpd_config.acs_upgrade_failures/d" /var/state/cwmpd
+    uci -P /var/state set cwmpd.cwmpd_config.acs_upgrade_failures="${failure_count}"
+    uci -P /var/state commit cwmpd
+  fi
   exit 1
 fi
 
@@ -227,31 +163,37 @@ if [ "$TRANSFER_ACTION" = "start" ]; then
   if [ "$STARTED" != "yes" ]; then
     URL=$(get_url "$TRANSFER_URL" "$TRANSFER_USERNAME" "$TRANSFER_PASSWORD")
     set_started "$TRANSFER_ID" yes "$URL"
-    uci show $CONFIG
-
+    id=$(get_uci_id "$TRANSFER_ID")
     ubus send cwmpd.transfer '{ "session": "begins", "type": "upgrade" }'
-    do_upgrade "$URL"
-    #if do_upgrade returns, the upgrade failed, remember that
-    if [ $? -eq 1 ]; then
-      E="1,download upgrade image failed"
-    else
-      E="1,upgrade failed (not a valid signed rbi?)"
+
+    E="$(bli_process /usr/lib/sysupgrade-tch/retrieve_image.sh "$SCRIPT_DIR/handle_image.sh" "$URL" "$SCRIPT_DIR" "$CONFIG.$id" "$TRANSFER_ID")"
+    if [ -z "$E" ]; then
+      E=0
     fi
+
     set_error "$TRANSFER_ID" "$E"
     ubus send cwmpd.transfer '{ "session": "ends", "type": "upgrade" }'
-
-    # In case of single bank, reboot the board
-    platform_is_dualbank
-    SINGLE_BANK=$?
-    if [ $SINGLE_BANK == "1" ]; then
-      echo "Single bank board, rebooting system..."
-      reboot -f
-      sleep 5
-      echo b 2>/dev/null >/proc/sysrq-trigger
-    fi
   else
-    #retrieve error
-    E=$(get_error "$TRANSFER_ID")
+    id="$(get_uci_id "$TRANSFER_ID")"
+    if ! TARGET="$(uci get "$CONFIG.$id.target")"; then
+      TARGET=gateway
+    fi
+    if ! echo "$TARGET" | grep -Eqx '[A-Za-z0-9_-]+'; then
+      echo "Invalid target"
+      exit 1
+    fi
+
+    GET_ERROR_PATH="$SCRIPT_DIR/target/$TARGET/get_error"
+    if ! [ -x "$GET_ERROR_PATH" ]; then
+      echo "Missing check_error script"
+      exit 1
+    fi
+
+    STORED_ERROR="$(uci -q get "$CONFIG.$id.error")"
+    if ! E="$("$GET_ERROR_PATH" "${STORED_ERROR:-0}" "$SCRIPT_DIR" "$CONFIG.$id" "$TRANSFER_ID")"; then
+      echo "Unable to retrieve error"
+      exit 1
+    fi
   fi
   if [ "$E" != "0" ]; then
     local msg=$(echo $E | cut -d, -f2)
@@ -259,25 +201,50 @@ if [ "$TRANSFER_ACTION" = "start" ]; then
     if [ ! -z $ERROR_FILE ]; then
       echo $msg >$ERROR_FILE
     fi
+
+    if [ -f  /var/state/cwmpd ]; then
+      local failure_count
+      config_load cwmpd
+      config_get failure_count cwmpd_config acs_upgrade_failures "0"
+      failure_count=$(( failure_count + 1 ))
+      sed -i "/cwmpd.cwmpd_config.acs_upgrade_failures/d" /var/state/cwmpd
+      uci -P /var/state set cwmpd.cwmpd_config.acs_upgrade_failures="${failure_count}"
+      uci -P /var/state commit cwmpd
+    fi
+
     ubus send FaultMgmt.Event '{ "Source":"cwmpd", "EventType":"ACS provisioning", "ProbableCause":"Firmware upgrade error", "SpecificProblem":"'"$(echo $E | cut -d, -f2)"'", "AdditionalText":"URL='"$TRANSFER_URL"'"}'
     exit 1
   fi
   ubus send FaultMgmt.Event '{ "Source":"cwmpd", "EventType":"ACS provisioning", "ProbableCause":"Firmware upgrade success", "SpecificProblem":"", "AdditionalText":"URL='"$TRANSFER_URL"'"}'
+
+  if [ -f /var/state/cwmpd ]; then
+    local upgrade_time=$(date "+%FT%TZ")
+    sed -i "/cwmpd.cwmpd_config.acs_last_upgrade_time/d" /var/state/cwmpd
+    uci -P /var/state set cwmpd.cwmpd_config.acs_last_upgrade_time="${upgrade_time}"
+    uci -P /var/state commit cwmpd
+  fi
+
   exit 0
 fi
 
 if [ "$TRANSFER_ACTION" = "cleanup" ]; then
+  id=$(get_uci_id "$TRANSFER_ID")
+  if ! TARGET="$(uci get "$CONFIG.$id.target")"; then
+    TARGET=gateway
+  fi
+  if ! echo "$TARGET" | grep -Eqx '[A-Za-z0-9_-]+'; then
+    echo "Invalid target"
+    exit 1
+  fi
+
+  CLEANUP_PATH="$SCRIPT_DIR/target/$TARGET/cleanup"
+  if ! [ -x "$CLEANUP_PATH" ]; then
+    echo "Missing cleanup script"
+    exit 1
+  fi
+
   set_started "$TRANSFER_ID" no
-  # Remove RAW storage information if coming from legacy SW (transfer ID is hexadecimal)
-  if [ -f /proc/banktable/legacy_upgrade/key ]; then
-    [ "$TRANSFER_ID" == $(cat /proc/banktable/legacy_upgrade/key | hexdump -v -e '/1 "%02X"') ] && echo "1" > /proc/banktable/erase_upgrade_info
-  fi
-  # Upgrade finished succesfully, remove database and transfer information from passive bank (for dual bank platform)
-  if is_dual_bank; then
-    [ -f /overlay/$(cat /proc/banktable/notbooted 2>/dev/null)/etc/cwmpd.db ] && rm /overlay/$(cat /proc/banktable/notbooted)/etc/cwmpd.db
-    [ -f /overlay/$(cat /proc/banktable/notbooted 2>/dev/null)/etc/config/cwmp_transfer ] && rm /overlay/$(cat /proc/banktable/notbooted)/etc/config/cwmp_transfer
-  fi
-  exit 0
+  exec "$CLEANUP_PATH" "$SCRIPT_DIR" "$CONFIG.$id" "$TRANSFER_ID"
 fi
 
 echo "Unknown transfer action: $TRANSFER_ACTION"

@@ -41,10 +41,12 @@ local function get_ubus_device_info(msg, deviceName)
     end
   else
     msg["up"] = false
-    local file = io.open("/sys/class/net/" .. deviceName .. "/address", "r")
-    msg["macaddr"] = file:read("*l")
     msg["is_multicast"] = false
-    file:close()
+    local file = io.open("/sys/class/net/" .. deviceName .. "/address", "r")
+    if file then
+      msg["macaddr"] = file:read("*l")
+      file:close()
+    end
   end
 end
 

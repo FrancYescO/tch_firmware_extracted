@@ -19,6 +19,7 @@ local inet_pton = posix.inet_pton
 local inet_ntop = posix.inet_ntop
 local AF_INET = posix.AF_INET
 local AF_INET6 = posix.AF_INET6
+local inet = require("tch.inet")
 local foreach_on_uci = uci_helper.foreach_on_uci
 local io = require("io")
 local open = io.open
@@ -288,12 +289,10 @@ end
 local alias_binding={config="network",sectionname="",option=""}
 function M.is_alias(intf)
   alias_binding.sectionname=intf
-  alias_binding.option="ifname"
-  local ifname=uci_helper.get_from_uci(alias_binding)
-  alias_binding.option="device"
-  local device=uci_helper.get_from_uci(alias_binding)
-  local pat="^@"
-  if type(ifname)=='string' and type(device)=='string' and (match(device,pat) or match(ifname,pat)) then
+  alias_binding.option = "ifname"
+  alias_binding.state = false
+  local ifname = uci_helper.get_from_uci(alias_binding)
+  if type(ifname) == 'string' and match(ifname,"^@") then
     return true
   end
   return false
@@ -399,25 +398,27 @@ function M.mask2netmask(dotted)
 end
 
 -- Return number representing the IP address / netmask (first byte is first part ...)
-function M.ipv4ToNum(ipStr)
-  local rc = posix.inet_pton(AF_INET, ipStr)
-  if rc then
-    local b1, b2, b3, b4 = rc:byte(1, 4)
-    return (b1 * (256^3)) + (b2 * (256^2)) + (b3 * 256) + b4
-  end
+function M.ipv4ToNum(ipstr)
+    if ipstr then
+      local n = inet.ipv4ToNumber(ipstr)
+      return n
+    end
 end
 
 -- Return IP address / netmask representing the number.
-function M.numToIPv4(ip)
-  if ip > 0 then
-    local ret = bit.band(ip, 255)
-    local ip = bit.rshift(ip,8)
-    for i=1,3 do
-      ret = bit.band(ip,255) .. "." .. ret
-      ip = bit.rshift(ip,8)
+function M.numToIPv4(num)
+    if type(num) ~= "number" then
+        return nil, "Invalid Number"
     end
-    return ret
-  end
+    -- unbit
+    if num < 0 then
+      num = (2^32) + num
+    end
+    local ip = inet.numberToIpv4(num)
+    if not ip then
+        return nil, "Invalid Number"
+    end
+    return ip
 end
 
 -- Validate string is MAC
@@ -444,6 +445,19 @@ function M.get_dhcp_tag_value(passthru)
     passthru = sub(passthru,(2*len)+5)
   end
   return tagValues
+end
+
+-- Logic to retrieve the enterprise and its corresponding value of DHCP option 125
+-- passthru-> value fetched from ubus call
+function M.get_dhcp_enterprise_tag_value(passthru)
+  local enterpriseValues = {}
+  while passthru and sub(passthru,1,2) ~= "" do
+    local enterpriseNr = M.hex2Decimal(sub(passthru,1,8))
+    local len = M.hex2Decimal(sub(passthru,9,10))
+    enterpriseValues[enterpriseNr] = sub(passthru,11,(2*len)+10)
+    passthru = sub(passthru,(2*len)+11)
+  end
+  return enterpriseValues
 end
 
 function M.get_devices_for_lowerlayers()
@@ -530,22 +544,24 @@ function M.loadRoutes(onlyDefault)
   local fd = popen("ip -4 route show table all")
   if fd then
     for line in fd:lines() do
-      local fields = {}
-      fields.destip = line:match("^broadcast%s(%d%S+)") or line:match("^local%s(%d%S+)") or line:match("^(%S+)")
-      if fields.destip == "default" then
-        fields.destip = "0.0.0.0/0"
+      local route = {}
+      route.isLocal = line:match("^local")
+      route.destip = line:match("^broadcast%s(%d%S+)") or line:match("^local%s(%S+)") or line:match("^(%S+)")
+      if route.destip == "default" then
+        route.destip = "0.0.0.0/0"
       end
-      fields.gateway = line:match("via%s(%S+)") or "0.0.0.0"
-      fields.ifname = line:match("dev%s(%S+)")
-      fields.metric = line:match("metric%s+(%d+)%s$") or "0"
-      key = fields.destip .. fields.ifname
-      if onlyDefault and fields.destip == "0.0.0.0/0" then
-        defaultRoute = fields.ifname
+      route.gateway = line:match("via%s(%S+)") or "0.0.0.0"
+      route.ifname = line:match("dev%s(%S+)")
+      route.metric = line:match("metric%s+(%d+)%s$") or "0"
+      route.src = line:match("src%s(%S+)") or "0.0.0.0"
+      key = route.destip .. route.ifname
+      if onlyDefault and route.destip == "0.0.0.0/0" and not route.isLocal then
+        defaultRoute = route.ifname
         break
       end
-      if not keys[key] and fields.ifname ~= "lo" then
+      if not keys[key] and route.ifname ~= "lo" then
         keys[key] = true
-        routes[#routes+1] = fields
+        routes[#routes+1] = route
       end
     end
     fd:close()
@@ -642,8 +658,8 @@ end
 -- @return #boolean, returns true when baseip address is valid for device
 
 function M.isValidIPv4AddressForDevice(baseip, netmask)
-  baseip = baseip and M.ipv4ToNum(baseip)
-  netmask = netmask and M.ipv4ToNum(netmask)
+  baseip = baseip and castToUInt32(M.ipv4ToNum(baseip))
+  netmask = netmask and castToUInt32(M.ipv4ToNum(netmask))
   if not netmask then
     return nil, "Invalid SubnetMask"
   end

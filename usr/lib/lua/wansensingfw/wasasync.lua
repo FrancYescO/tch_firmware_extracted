@@ -61,6 +61,12 @@ function M.init (rt, event_cb)
          end
      end
 
+    events['bfdecho'] = function(msg)
+        if msg and msg.interface and msg.state then
+            local value = msg.state == "1" and "ok" or "nok"
+            cb('bfdecho_' .. msg.interface:gsub('[^%a%d_]','_') ..'_' .. value)
+        end
+    end
 
     conn:listen(events)
 

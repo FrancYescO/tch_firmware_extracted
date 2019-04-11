@@ -9,13 +9,14 @@ SERVICE_WRITE_PID=1
 SERVICE_DAEMONIZE=1
 #SERVICE_STOP_TIME=60
 export MMPBX_SO_DIR=/usr/lib/mmpbx
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${MMPBX_SO_DIR}
 APP=led-fw-interface.lua
 PID_FILE=/var/run/$APP.pid
 EXECUTE_LOCK=/tmp/.execute.lock
 QUEUE_FILE_LOCK=/tmp/.mmpbxd.queue.lock
 QUEUE_FILE=/tmp/mmpbx.queue
 DIAGNOSTICS_CONFIG=/tmp/mmpbx_dump
-POLLING_TIME=0
+CPU_TYPE=`uname -m`
 
 MMPBX_CHAIN="MMPBX"
 
@@ -27,25 +28,7 @@ do_firewall_stop() {
 }
 
 do_polling_start() {
-  i=1;
-  while [[ $i -le 5 ]]; do
-    sleep 2
-    do_polling="0"
-    ubus -t 2 call mmpbx.profile get >& /dev/null
-    if ! [ $? == "0" ] ; then
-      continue
-    fi
-    ubus -t 2 call mmpbx.device get >& /dev/null
-    if [ $? == "0" ] ; then
-      do_polling="1"
-      POLLING_TIME=`expr $i \* 2`
-      break
-    fi
-    ((i++))
-  done
-  if [ "$do_polling" == "1" ] ; then
     start-stop-daemon -S -x $APP -p $PID_FILE -m -b
-  fi
 }
 
 do_polling_stop() {
@@ -86,12 +69,12 @@ usb_interrupts_smp_affinity() {
 
 mmpbxd_start() {
   config_load "mmswitch"
-  config_get mmswitchRtPriority global rt_priority 75
+  config_get mmswitchRtPriority global rt_priority 76
   config_get mmswitchAvailable global ms_available 1
   config_get mmswitchWaitForThreads global wait_for_threads 1
 
   config_load "mmtonegen"
-  config_get mmtonegenRtPriority global rt_priority 75
+  config_get mmtonegenRtPriority global rt_priority 76
   config_get mmtonegenAvailable global tg_available 1
   config_get mmtonegenWaitForThreads global wait_for_threads 1
 
@@ -118,6 +101,9 @@ mmpbxd_start() {
   local radvisionTraceLevel
   local brcmTraceLevel
 
+  # check if dect emission is enabled / disabled and take appropriate action of back-up or restore if needed
+  [ -f $IPKG_INSTROOT/usr/lib/parameter_conversion/mmpbx_dectemission.sh ] && $IPKG_INSTROOT/usr/lib/parameter_conversion/mmpbx_dectemission.sh
+
   remove_modules_without_config
 
   config_load "env"
@@ -143,9 +129,12 @@ mmpbxd_start() {
   local mmdbd_args="-p $mmdbd_path"
   service_start /usr/bin/mmdbd $mmdbd_args
 
-  check_insert_module endpointdd.ko endpointdd
+  if [ "$CPU_TYPE" = "mips" ]; then
+    check_insert_module htsk.ko htsk
+  fi
   check_insert_module dsphal.ko dsphal
   check_insert_module slicslac.ko slicslac
+
   if [ $mmswitchAvailable -eq 1 ]
   then
     check_insert_module modmmswitch.ko modmmswitch
@@ -167,7 +156,7 @@ mmpbxd_start() {
         fi
       done
     #Voice socket TX thread
-    setrtprio mmswitchsock_w $mmswitchRtPriority
+    setrtprio mmswitchsock_w $mmswitchRtPriority > /dev/null
     while :
       do
         up=$(ps | grep mmswitchsock_r | grep -v grep)
@@ -176,7 +165,7 @@ mmpbxd_start() {
         fi
       done
     #Voice socket RX thread
-    setrtprio mmswitchsock_r $mmswitchRtPriority
+    setrtprio mmswitchsock_r $mmswitchRtPriority > /dev/null
     while :
       do
         up=$(ps | grep mmswitch_wq | grep -v grep)
@@ -185,7 +174,7 @@ mmpbxd_start() {
         fi
       done
     #Work Queue thread
-    setrtprio mmswitch_wq $mmswitchRtPriority
+    setrtprio mmswitch_wq $mmswitchRtPriority > /dev/null
   fi
 
   if [ $mmtonegenWaitForThreads -eq 1 ];
@@ -198,7 +187,7 @@ mmpbxd_start() {
         fi
       done
     #Voice tone generator thread
-    setrtprio mmtonegen $mmtonegenRtPriority
+    setrtprio mmtonegen $mmtonegenRtPriority > /dev/null
   fi
 
   ([ $traceLevel -lt 0 ] || [ $traceLevel -gt 4 ]) && logger -p $sysLogPriority "Invalid tracelevel: $traceLevel"
@@ -248,6 +237,8 @@ mmpbxd_start() {
     logger -p $sysLogPriority "the 2 values of max contact do not exist!"
   fi
 
+  # temporary workaround to avoid the GW crash due to OoM, by limiting stack size
+  ulimit -S -s 1024
   service_start /usr/bin/mmpbxd $args
 
   # for now prevent multiple instance by checking PID file
@@ -257,9 +248,7 @@ mmpbxd_start() {
 
   # Let mmpbx fully start, UBUS object may get publish and then destoryed,
   # if mmpbx self destruct, then UBUS command will catch these error.
-  if [[ $POLLING_TIME -lt 20 ]]; then
-    sleep `expr 20 - $POLLING_TIME`
-  fi
+  sleep 20
 
   do_cleanup="0"
   while :
@@ -288,74 +277,32 @@ mmpbxd_start() {
      uci -P /var/state set mmpbx.state="RUNNING"
   fi
 
-  #Check endpoint driver exists:
-  ls /lib/modules/*/endpointdd.ko > /dev/null 2>&1
+  #Check if dsphal driver exists (applicable to BRCM 5.02L0x delivery):
+  ls /lib/modules/*/dsphal.ko > /dev/null 2>&1
   if [ $? -eq "0" ] ; then
     #Check if endpoint driver is loaded:
-    lsmod |grep -w endpointdd > /dev/null 2>&1
+    lsmod |grep -w dsphal > /dev/null 2>&1
     if [ $? -eq "0" ] ; then
-      if [ "$(process_exists voice-HCAS)" = "1" ] ; then
-        if [ "$hcas_pri" != "" ] ; then
-          setrtprio voice-HCAS $hcas_pri
-        fi
-      fi
-
-      if [ "$(process_exists voice-HRTBEAT)" = "1" ] ; then
-        if [ "$hrtbeat_pri" != "" ] ; then
-          setrtprio voice-HRTBEAT $hrtbeat_pri
-        fi
-      fi
-
-      if [ "$(process_exists voice-HTSK)" = "1" ] ; then
-        if [ "$htsk_pri" != "" ] ; then
-          setrtprio voice-HTSK $htsk_pri
-        fi
-        dsp_mask=`setcpumask voice-HTSK | head -1 | cut -d " " -f6`
-        setcpumask voice-EPINIT $dsp_mask
-        setcpumask mmswitchsock_w $dsp_mask
-        setcpumask mmswitchsock_r $dsp_mask
-        setcpumask mmswitch_wq $dsp_mask
-        setcpumask mmtonegen $dsp_mask
-        #USB interrupts affect voice related interrupt process on same core, so set USB interrupts to other core.
-        usb_interrupts_smp_affinity $((${dsp_mask}^3))
-        #setting all mmpbx threads affinity as Voice-HTSK affinity
-        mmpbx_pid=$(ps | grep -e "[/]usr/bin/mmpbxd" | awk '{ print $1}')
-        mmpbx_pids=$(ls /proc/${mmpbx_pid}/task)
-        for pid in $mmpbx_pids
-        do
-        taskset -p $dsp_mask "$pid"
-        done
-      fi
-
-      if [ "$(process_exists voice-EPINIT)" = "1" ] ; then
-        if [ "$init_pri" != "" ] ; then
-          chrt -p -f $init_pri `pidof voice-EPINIT`
-        fi
-      fi
-
-      if [ "$(process_exists voice-VRGDISP)" = "1" ] ; then
-        if [ "$vrgdisp_pri" != "" ] ; then
-          setrtprio voice-VRGDISP $vrgdisp_pri
-        fi
-      fi
-
-      if [ "$(process_exists voice-ISTW)" = "1" ] ; then
-    if [ "$istw_pri" != "" ] ; then
-      setrtprio voice-ISTW $istw_pri
-    fi
-      fi
-
-      if [ "$(process_exists voice-aoRT)" = "1" ] ; then #Check endpoint kernel task start
-    if [ "$aort_pri" != "" ] ; then
-      setrtprio voice-aoRT $aort_pri
-    fi
-      fi
-
-      if [ "$(process_exists voice-PSTN)" = "1" ] ; then
-    if [ "$pstn_pri" != "" ] ; then
-      setrtprio voice-PSTN $pstn_pri
-    fi
-      fi
+       if [ "$CPU_TYPE" = "armv7l" ] || [ "$CPU_TYPE" = "aarch64" ]; then
+         dsp_mask=1
+       else
+         dsp_mask=2
+       fi
+       #setting all mmpbx threads affinity as dsp_mask affinity
+       mmpbx_pid=$(ps | grep -e "[/]usr/bin/mmpbxd" | awk '{ print $1}')
+       mmpbx_pids=$(ls /proc/${mmpbx_pid}/task) > /dev/null
+       for pid in $mmpbx_pids
+       do
+         taskset -p $dsp_mask "$pid" > /dev/null
+       done
+       setcpumask mmswitchsock_w $dsp_mask > /dev/null
+       setcpumask mmswitchsock_r $dsp_mask > /dev/null
+       setcpumask mmswitch_wq $dsp_mask > /dev/null
+       setcpumask mmtonegen $dsp_mask > /dev/null
+       #USB interrupts affect voice related interrupt process on same core, so set USB interrupts to other core.
+       usb_interrupts_smp_affinity $((${dsp_mask}^3))
+    else
+       logger -p $sysLogPriority "dsphal.ko is not loaded, Failed to set mmpbx processes affinities"
     fi
   fi
 
@@ -438,12 +385,9 @@ mmpbxd_stop() {
         count=$(( $count + 1 ))
     done
 
-    #Wait for the MMPBX and Endpoint Driver resources to be cleaned up properly.
-    check_remove_module modmmconnkernelbrcm
-    check_remove_module endpointdd
-    check_remove_module dsphal
     check_remove_module slicslac
     check_remove_module dect
+
     if [ $mmtonegenAvailable -eq 1 ];
     then
       check_remove_module modmmtonegen
@@ -563,7 +507,7 @@ check_insert_module(){
   ls /lib/modules/*/$ko > /dev/null 2>&1
   ret=$(echo $?)
   if [ $ret -eq "0" ]; then
-    insmod $mod
+    modprobe $mod
   fi
 }
 

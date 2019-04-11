@@ -163,7 +163,8 @@ local getFromUci = uciHelper.get_from_uci
 local setOnUci = uciHelper.set_on_uci
 local nwCommon = mapper("nwcommon")
 local dhcpBinding = {config = "dhcp"}
-local isConfigChanged = false
+local networkBinding = {config = "network"}
+local transactions = {}
 
 local function getUciParam(sectionName,option,default)
   dhcpBinding.sectionname = sectionName
@@ -175,11 +176,13 @@ local function getUciParam(sectionName,option,default)
   return uciHelper.getall_from_uci(dhcpBinding)
 end
 
-local function setUciParam(sectionName,option,value)
-  dhcpBinding.sectionname = sectionName
-  dhcpBinding.option = option
-  setOnUci(dhcpBinding, value, commitApply)
-  isConfigChanged = true
+local function setUciParam(uciBinding, sectionName, option, value)
+  local binding = {}
+  binding.config = uciBinding.config
+  binding.sectionname = sectionName
+  binding.option = option
+  setOnUci(binding, value, commitApply)
+  transactions[binding.config] = true
 end
 
 Device_RouterAdvertisement_InterfaceSetting_i_.entries = function()
@@ -313,8 +316,9 @@ end
 Device_RouterAdvertisement_InterfaceSetting_i_.set =  function(mapping, param, value, key)
 
   if param == "Enable" then
+    setUciParam(networkBinding, key, "ipv6", value)
     value = (value == "1") and "server" or "disabled"
-    setUciParam(key, "dhcpv6", value)
+    setUciParam(dhcpBinding, key, "ra", value)
   end
   if param == "Interface" then
     -- Interface is displayed in Device2 as path, but stored as UCI/UBUS interface in UCI, so convert it first
@@ -343,21 +347,21 @@ Device_RouterAdvertisement_InterfaceSetting_i_.set =  function(mapping, param, v
   if param == "AdvPreferredRouterFlag" then
     value = string.lower(value)
   end
-  setUciParam(key, paramMap[param], value)
+  setUciParam(dhcpBinding, key, paramMap[param], value)
 end
 
 Device_RouterAdvertisement_InterfaceSetting_i_.commit = function()
-  if isConfigChanged then
-    uciHelper.commit(dhcpBinding)
-    isConfigChanged = false
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
   end
+  transactions = {}
 end
 
 Device_RouterAdvertisement_InterfaceSetting_i_.revert = function()
-  if isConfigChanged then
-    uciHelper.revert(dhcpBinding)
-    isConfigChanged = false
+  for config in pairs(transactions) do
+    uciHelper.revert({config = config})
   end
+  transactions = {}
 end
 
 register(Device_RouterAdvertisement_InterfaceSetting_i_)

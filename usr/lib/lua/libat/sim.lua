@@ -1,13 +1,11 @@
-local string = string
+local bit = require("bit")
 local helper = require("mobiled.scripthelpers")
 
 local M = {}
 
 function M.get_state(device)
 	local ret, err, cme_err = device:send_singleline_command("AT+CPIN?", "+CPIN:")
-
 	local sim_state = ""
-
 	if err == "cme error" then
 		if cme_err == "sim failure" or cme_err == "sim not inserted" then
 			sim_state = "not_present"
@@ -17,8 +15,7 @@ function M.get_state(device)
 			sim_state = "error"
 		end
 	end
-
-	if type(ret) == "string" then
+	if ret then
 		if string.match(ret, "SIM PIN") then
 			sim_state = "locked"
 		elseif string.match(ret, "SIM PUK") then
@@ -27,14 +24,13 @@ function M.get_state(device)
 			sim_state = "ready"
 		end
 	end
-
 	return sim_state
 end
 
 function M.get_operator_name(device, plmn)
 	if not device.buffer.sim_info.operator_names then
 		local ret = device:send_multiline_command("AT+COPN", "+COPN:", 10000)
-		if type(ret) == "table" then
+		if ret then
 			device.buffer.sim_info.operator_names = {}
 			for _, line in pairs(ret) do
 				local num_plmn, name = string.match(line, '+COPN:%s?"(.-)","(.-)"')
@@ -80,7 +76,7 @@ end
 
 function M.get_preferred_plmn(device)
 	local ret = device:send_multiline_command("AT+CPOL?", "+CPOL:")
-	if type(ret) == "table" then
+	if ret then
 		local preferred_plmn = {}
 		for _, line in pairs(ret) do
 			local index, type, plmn = string.match(line, '+CPOL:%s?(%d+),(%d+),"(.-)"')
@@ -101,7 +97,7 @@ function M.get_imsi(device)
 	return nil
 end
 
-local function check_iccid(iccid)
+function M.check_iccid(iccid)
 	if iccid then
 		if tonumber(string.sub(iccid, 20, 20)) then
 			iccid = string.sub(iccid, 1, 20)
@@ -111,7 +107,7 @@ local function check_iccid(iccid)
 		if string.match(string.sub(iccid, 1, 2), "98") then
 			iccid = helper.swap(iccid)
 		end
-		if helper.isnumeric(iccid) then
+		if tonumber(iccid) then
 			return iccid
 		end
 	end
@@ -121,15 +117,15 @@ end
 function M.get_iccid(device)
 	local ret = device:send_singleline_command("AT+CRSM=176,12258", "+CRSM:")
 	if ret then
-		return check_iccid(string.match(ret, '+CRSM:%s?%d+,%d+,"(.-)"'))
+		return M.check_iccid(string.match(ret, '+CRSM:%s?%d+,%d+,"(.-)"'))
 	end
 	ret = device:send_singleline_command("AT+CCID", "+CCID:")
 	if ret then
-		return check_iccid(string.match(ret, '+CCID:%s?(%d+)'))
+		return M.check_iccid(string.match(ret, '+CCID:%s?(%d+)'))
 	end
 	ret = device:send_singleline_command("AT+ICCID", "+ICCID:")
 	if ret then
-		return check_iccid(string.match(ret, '+ICCID:%s?(%d+)'))
+		return M.check_iccid(string.match(ret, '+ICCID:%s?(%d+)'))
 	end
 	return nil
 end
@@ -152,53 +148,58 @@ function M.get_locking_facility(device, facility)
 	if ret then
 		local enabled = string.match(ret, "[0-1]")
 		if enabled then
-			if enabled == '1' then return true end
-			return false
+			return enabled == '1'
 		end
 	end
 	return nil
 end
 
-function M.unlock(device, pin_type, pin)
+function M.unlock(device, pin_type, pin) --luacheck: no unused args
 	local ret, err, cme_err = device:send_command('AT+CPIN="' .. pin .. '"', 2000)
 	if not ret then
 		if err == "cme error" then
 			if cme_err == "password wrong" then
 				return nil, "Wrong PIN code provided"
 			end
+		elseif err == "command pending" then
+			return nil, "Device busy, please try again later"
 		end
-		return nil
+		return nil, "Unlocking SIM failed"
 	end
 	return true
 end
 
-function M.unblock(device, pin_type, puk, newpin)
+function M.unblock(device, pin_type, puk, newpin) --luacheck: no unused args
 	local ret, err, cme_err = device:send_command('AT+CPIN="' .. puk .. '","' .. newpin .. '"', 2000)
 	if not ret then
 		if err == "cme error" then
 			if cme_err == "password wrong" then
 				return nil, "Wrong PUK code provided"
 			end
+		elseif err == "command pending" then
+			return nil, "Device busy, please try again later"
 		end
-		return nil
+		return nil, "Unblocking SIM failed"
 	end
 	return true
 end
 
-function M.change_pin(device, pin_type, pin, newpin)
+function M.change_pin(device, pin_type, pin, newpin) --luacheck: no unused args
 	local ret, err, cme_err = device:send_command('AT+CPWD="SC","' .. pin .. '","' .. newpin .. '"', 2000)
 	if not ret then
 		if err == "cme error" then
 			if cme_err == "password wrong" then
 				return nil, "Wrong PIN code provided"
 			end
+		elseif err == "command pending" then
+			return nil, "Device busy, please try again later"
 		end
-		return nil
+		return nil, "Changing PIN failed"
 	end
 	return true
 end
 
-function M.disable_pin(device, pin_type, pin)
+function M.disable_pin(device, pin_type, pin) --luacheck: no unused args
 	local enabled = M.get_locking_facility(device, "SC")
 	local ret, err, cme_err = device:send_command('AT+CLCK="SC",0,"' .. pin .. '"', 2000)
 	if not ret then
@@ -208,13 +209,15 @@ function M.disable_pin(device, pin_type, pin)
 			elseif not enabled then
 				return true
 			end
+		elseif err == "command pending" then
+			return nil, "Device busy, please try again later"
 		end
-		return nil
+		return nil, "Disabling PIN failed"
 	end
 	return true
 end
 
-function M.enable_pin(device, pin_type, pin)
+function M.enable_pin(device, pin_type, pin) --luacheck: no unused args
 	local enabled = M.get_locking_facility(device, "SC")
 	local ret, err, cme_err = device:send_command('AT+CLCK="SC",1,"' .. pin .. '"', 2000)
 	if not ret then
@@ -224,10 +227,97 @@ function M.enable_pin(device, pin_type, pin)
 			elseif enabled then
 				return true
 			end
+		elseif err == "command pending" then
+			return nil, "Device busy, please try again later"
 		end
-		return nil
+		return nil, "Enabling PIN failed"
 	end
 	return true
+end
+
+local function service_bit_is_set(data, service)
+	if data then
+		local position = math.floor((service - 1) / 8)
+		position = (position * 2) + 1
+		local byte = tonumber(string.sub(data, position, position+1), 16)
+		if byte then
+			if bit.band(byte, bit.lshift(1, (service - 1) % 8)) ~= 0 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function extract_apn(t, offset, length)
+	local end_index = offset+length
+	local chars = {}
+	while offset < end_index do
+		local label_length = t[offset]
+		offset = offset + 1
+		for label_index = 0, label_length-1, 1 do
+			table.insert(chars, string.char(t[offset+label_index]))
+		end
+		offset = offset + label_length
+		if offset < end_index then
+			table.insert(chars, '.')
+		end
+	end
+	return table.concat(chars)
+end
+
+local function parse_acl(data)
+	local access_control_list = {
+		use_network_provided_apn = false,
+		apn = {}
+	}
+	local bytes = {}
+	for i = 1, #data, 2 do
+		local byte = tonumber(data:sub(i, i + 1), 16)
+		table.insert(bytes, byte)
+	end
+	local index = 1
+	local num_apn = bytes[index]
+	index = index + 1
+	while #access_control_list.apn < num_apn and index < #bytes do
+		if bytes[index] ~= 0xdd then
+			return nil, "Invalid APN TLV tag"
+		end
+		index = index + 1
+		local apn_length = bytes[index]
+		index = index + 1
+		if apn_length == 0 then
+			access_control_list.use_network_provided_apn = true
+		else
+			table.insert(access_control_list.apn, extract_apn(bytes, index, apn_length))
+			index = index + apn_length
+		end
+	end
+	return access_control_list
+end
+
+function M.get_access_control_list(device)
+	-- Read EF_ust
+	local ust = device:send_singleline_command("AT+CRSM=176,28472,0,0,0", "+CRSM:")
+	if ust then
+		ust = ust:match('^+CRSM: 144,0,"(.-)"')
+		if service_bit_is_set(ust, 2) and (service_bit_is_set(ust, 6) or service_bit_is_set(ust, 35)) then
+			-- Read EF_est
+			local est = device:send_singleline_command("AT+CRSM=176,28502,0,0,0", "+CRSM:")
+			if est then
+				est = est:match('^+CRSM: 144,0,"(.-)"')
+				if service_bit_is_set(est, 3) then
+					-- Read ACL
+					local acl = device:send_singleline_command("AT+CRSM=176,28503,0,0,0", "+CRSM:")
+					if acl then
+						acl = acl:match('^+CRSM: 144,0,"(.-)"')
+						return parse_acl(acl)
+					end
+				end
+			end
+		end
+	end
+	return nil, "ACL unavailable"
 end
 
 return M

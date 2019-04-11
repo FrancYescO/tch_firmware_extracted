@@ -27,6 +27,8 @@ local session = ngx.ctx.session
 if session:hasAccess("/modals/device-modal.lp") then
   modalPath = "/modals/device-modal.lp"
   modal_link='class="modal-link" data-toggle="modal" data-remote="modals/device-modal.lp" data-id="device-modal"'
+elseif not session:isdefaultuser() then
+  return
 end
   ngx.print('\
 \
@@ -62,24 +64,18 @@ end
             format( N('<strong id = "Wifi_Devices" %1$s>%2$d Wi-Fi device</strong> connected',
                       '<strong id = "Wifi_Devices" %1$s>%2$d Wi-Fi devices</strong> connected', nWiFi),
                       modal_link, nWiFi),
---NG-89441            '</p>',
---NG-89441           '<p class="subinfos">',
---NG-89441            format( N('<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot device</strong> connected',
---NG-89441                     '<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot devices</strong> connected', nHot),
---NG-89441                     modal_link, nHot),
-           '</p>'
+            '</p>'
         )
---NG-89441,7725_upstep        if lfs.attributes("/etc/config/hotspot", "mode") == "file" then  ngx.print('                                     \
---NG-89441,7725_upstep           <p class="subinfos">                                                             \
---NG-89441,7725_upstep           '); 
---NG-89441,7725_upstep           ngx.print(format( N('<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot device</strong> connected',             
---NG-89441,7725_upstep                               '<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot devices</strong> connected', nHot),     
---NG-89441,7725_upstep                                modal_link, nHot))
---NG-89441,7725_upstep             ngx.print('\
---NG-89441,7725_upstep           </p>\
---NG-89441,7725_upstep      %>\
---NG-89441,7725_upstep
-        ngx.print('\
+        if lfs.attributes("/etc/config/hotspot", "mode") == "file" then  ngx.print('                                     \
+           <p class="subinfos">                                                             \
+           ');  
+           ngx.print(format( N('<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot device</strong> connected',             
+                               '<strong id = "Ethernet_Devices" %1$s>%2$d Hotspot devices</strong> connected', nHot),     
+                                modal_link, nHot))
+             ngx.print('\
+           </p>\
+      %>\
+        ');  end  ngx.print('\
     </div>\
   </div>\
 </div>\

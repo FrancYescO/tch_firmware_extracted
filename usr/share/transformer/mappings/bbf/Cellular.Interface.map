@@ -39,6 +39,13 @@ local obj = {
 				type = "string",
 				max = "64"
 			},
+			LowerLayers = {
+				access = "readOnly",
+				type = "string",
+				list = true,
+				max = "1024",
+				pathRef = true
+			},
 			Upstream = {
 				access = "readOnly",
 				type = "boolean",
@@ -177,6 +184,7 @@ local function getall(mapping, key)
 	local info = getUbusData(conn, "mobiled.device", "get", { imei = key })
 	local dev_idx = tonumber(info.dev_idx) or 1
 
+	data.LowerLayers = ""
 	data.Upstream = "1"
 	data.AvailableNetworks = ""
 	data.UpstreamMaxBitRate = ""
@@ -209,6 +217,12 @@ local function getall(mapping, key)
 		if type(info.plmn_info) == "table" then
 			data.NetworkInUse = info.plmn_info.mcc .. info.plmn_info.mnc
 		end
+
+		if type(info.connection_rate) == "table" then
+			data.UpstreamMaxBitRate = info.connection_rate.max_tx_rate or ""
+			data.DownstreamMaxBitRate = info.connection_rate.max_rx_rate or ""
+		end
+
 		info = getUbusData(conn, "mobiled.network", "sessions", { session_id = 0, dev_idx = dev_idx })
 		local sessionState = info.session_state
 
@@ -266,7 +280,7 @@ obj.commit = function()
   for config in pairs(transactions) do
     uci_helper.commit({config = config})
   end
-  transactions =  {}
+  transactions = {}
 end
 
 obj.revert = function()
@@ -280,7 +294,6 @@ obj.getall = getall
 obj.get = get
 local duplicator = mapper("multiroot").duplicate
 local duplicates = duplicator(obj, "#ROOT", {"InternetGatewayDevice.X_000E50_Cellular.Interface", "Device.Cellular.Interface"})
-
 for _, dupli in ipairs(duplicates) do
-  register(dupli)
+	register(dupli)
 end

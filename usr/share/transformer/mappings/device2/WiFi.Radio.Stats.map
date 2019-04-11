@@ -59,6 +59,50 @@ local Device_WiFi_Radio_i_Stats_ = {
         access = "readOnly",
         type = "unsignedInt",
       },
+      X_000E50_ChannelUtilization = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Percentage of time (normalized to 255), the AP sensed the medium was busy, as indicated by either the physical or virtual carrier sense (CS) mechanism",
+      },
+      X_000E50_ActivityFactor = {
+        access = "readOnly",
+        type = "int",
+        description = "Percentage of time that the radio was transmitting or receiving Wi-Fi packets to/from associated clients.",
+      },
+      X_000E50_FailedRetransCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The number of packets that were not transmitted successfully due to number of retransmission attempts exceeding an 802.11 retry limit.",
+      },
+      X_000E50_RetransCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The total number of inbound packets that contained errors preventing them from being delivered to a higher-layer protocol",
+      },
+      TotalChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      AutoStartupChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      AutoUserChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      AutoRefreshChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      AutoDynamicChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      AutoDFSChannelChangeCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
     }
   }
 }
@@ -82,11 +126,21 @@ end
 -- Returns Noise parameter value
 -- @function getChannelStats
 -- @param key #string containing the radio channel name
--- @param param #string containing the corresponding ubus option to be mapped for the parameter
--- @return #string contains the noise value for the given channel
-local function getChannelStats(key, param)
-  local channelStats = conn:call("wireless.radio.acs.channel_stats", "get", { name = key }) or {}
-  return channelStats[key] and channelStats[key][param] and tostring(channelStats[key][param]) or "0"
+local function getChannelStats(key)
+  local channelStats = conn:call("wireless.radio.acs.channel_stats", "get",  { name = key }) or {}
+  return channelStats[key] or "0"
+end
+
+local function getScanHistory(radio, reason, fromChannel)
+  local count = 0
+  local data = conn:call("wireless.radio.acs", "get", { name = radio }) or {}
+  local scanHistory = data[radio] and data[radio].scan_history or ""
+  for changeReason, channel in scanHistory:gmatch("[^;]+;[^;]+;([^;]+);([^;]+);[^;]+;[^;]+;[^;]+") do
+    if (changeReason == reason or not reason) and (fromChannel == channel or not fromChannel) then
+      count = count + 1
+    end
+  end
+  return tostring(count)
 end
 
 local statsEntries = {
@@ -99,16 +153,41 @@ local statsEntries = {
   DiscardPacketsSent = "tx_discards",
   DiscardPacketsReceived = "rx_discards",
   FCSErrorCount = "rx_bad_fcs",
-  PLCPErrorCount = "rx_bad_plcp"
+  PLCPErrorCount = "rx_bad_plcp",
+  X_000E50_FailedRetransCount = "tx_errors",
+  X_000E50_RetransCount = "rx_errors"
+}
+
+local channelStats = {
+  Noise = "noise",
+  X_000E50_ChannelUtilization = "medium_available"
 }
 
 Device_WiFi_Radio_i_Stats_.get = function(mapping, param, key)
   local field = statsEntries[param]
   if field then
-    return tostring(getRadioStats(key)[field]) or "0"
+    return getRadioStats(key)[field] and tostring(getRadioStats(key)[field]) or "0"
   end
-  if param == "Noise" then
-    return getChannelStats(key, "noise")
+  local channelField = channelStats[param]
+  if channelField then
+    return getChannelStats(key)[channelField] and tostring(getChannelStats(key)[channelField]) or "0"
+  end
+  if param == "X_000E50_ActivityFactor" then
+    local txtime = getChannelStats(key)["txtime"] and tonumber(getChannelStats(key)["txtime"]) or 0
+    local rx_inside_bss = getChannelStats(key)["rx_inside_bss"] and tonumber(getChannelStats(key)["rx_inside_bss"]) or 0
+    return tostring(txtime - rx_inside_bss)
+  elseif param == "TotalChannelChangeCount" then
+    return getScanHistory(key)
+  elseif param == "AutoStartupChannelChangeCount" then
+    return getScanHistory(key, "periodic", "0")
+  elseif param == "AutoUserChannelChangeCount" then
+    return getScanHistory(key, "forced")
+  elseif param == "AutoRefreshChannelChangeCount" then
+    return getScanHistory(key, "periodic")
+  elseif param == "AutoDynamicChannelChangeCount" then
+    return getScanHistory(key, "rescan")
+  elseif param == "AutoDFSChannelChangeCount" then
+    return getScanHistory(key, "radar")
   end
   return "0"
 end
@@ -117,7 +196,11 @@ Device_WiFi_Radio_i_Stats_.getall = function(mapping, key)
   local all = {}
   local data = getRadioStats(key)
   for param, field in pairs(statsEntries) do
-    all[param] = tostring(data[field]) or "0"
+    all[param] = data[field] and tostring(data[field]) or "0"
+  end
+  local channelData = getChannelStats(key)
+  for param, field in pairs(channelStats) do
+    all[param] = channelData[field] and tostring(channelData[field]) or "0"
   end
   return all
 end

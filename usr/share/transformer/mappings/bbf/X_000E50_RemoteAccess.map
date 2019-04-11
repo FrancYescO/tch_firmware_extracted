@@ -18,7 +18,7 @@ local Multi_Services_X_000E50_RemoteAccess_i_= {
           "Active",
           "Inactive"
         },
-        decription = "Current status of the remote assistant"
+        description = "Current status of the remote assistant"
       },
       URL = {
         access = "readOnly",
@@ -91,7 +91,7 @@ local srp = require("srp")
 local scp = require("transformer.shared.setClashPassword")
 local format, open, pairs, resolve = string.format, io.open, pairs, resolve
 local commitapply = commitapply
-
+local mobileconnection = require("transformer.shared.mobileconnection")
 local uci_helper = mapper("ucihelper")
 local isConfigChanged = false
 local webBinding = {config="web"}
@@ -390,11 +390,17 @@ Multi_Services_X_000E50_RemoteAccess_i_.set = {
     if intf == "" then
       intf = "wan"
     end
+    local ipv4_addr, ipv6_addr
     local v = get_ubus_interface_status(intf)
-    v = v and (v['ipv4-address'] or v['ipv6-address'])
-    v = v and v[1]
-    local wan_ip = (v and v['address']) or ""
-    if wan_ip == "" and value == "1" then
+    if v.proto == "mobiled" then
+      local data = mobileconnection.get_network_interface(intf)
+      ipv4_addr = data.ipv4_addr
+      ipv6_addr = data.ipv6_addr
+    else
+      ipv4_addr = v and v['ipv4-address'] and v['ipv4-address'][1] and v['ipv4-address'][1]['address']
+      ipv6_addr = v and v['ipv6-address'] and v['ipv6-address'][1] and v['ipv6-address'][1]['address']
+    end
+    if ipv4_addr == nil and ipv6_addr == nil and value == "1" then
       return nil, "Internet service is not available"
     else
       transaction[key]=transaction[key] or {}

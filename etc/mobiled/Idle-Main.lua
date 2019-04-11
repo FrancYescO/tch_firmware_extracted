@@ -15,7 +15,8 @@ M.SenseEventSet = {
 	"pco_update_received",
 	"qualtest_start",
 	"antenna_change_detected",
-	"sim_removed"
+	"sim_removed",
+	"sim_acl_changed"
 }
 
 function M.check(runtime, event, dev_idx)
@@ -31,22 +32,36 @@ function M.check(runtime, event, dev_idx)
 	if event.event == "timeout" or event.event == "network_deregistered" or event.event == "session_disconnected" then
 		-- Verify if everything is still in the state we left it
 		for _, session in pairs(device:get_data_sessions()) do
-			if session.activated then
-				if session.session_id == 0 then
-					local info = device:get_network_info()
-					if info and info.nas_state ~= "registered" then
-						return "RegisterNetwork"
-					end
-				end
-				local info = device:get_session_info(session.session_id)
-				if info then
-					if not session.optional and info.session_state ~= "connected" then
-						return "DataSessionSetup"
-					end
+			local profile = mobiled.get_profile(device, session.profile_id)
+			if not profile then
+				log:error("Failed to retrieve profile")
+				return "Idle"
+			end
+
+			if not mobiled.apn_is_allowed(device, profile.apn) then
+				session.allowed = false
+			else
+				session.allowed = true
+			end
+
+			if session.session_id == 0 then
+				local info = device:get_network_info()
+				if info and info.nas_state ~= "registered" and session.activated and session.allowed then
+					return "RegisterNetwork"
 				end
 			end
+
+			local info = device:get_session_info(session.session_id)
+			if info and (info.session_state ~= "connected" and not session.optional and not session.autoconnect and session.activated and session.allowed) or
+						(info.session_state ~= "disconnected" and (not session.activated or not session.allowed)) then
+				return "DataSessionSetup"
+			end
 		end
-	elseif event.event == "session_connected" or event.event == "session_teardown" or event.event == "session_setup" or event.event == "session_config_changed" then
+	elseif event.event == "session_connected" or
+			event.event == "session_teardown" or
+			event.event == "session_setup" or
+			event.event == "session_config_changed" or
+			event.event == "sim_acl_changed" then
 		return "DataSessionSetup"
 	elseif event.event == "device_disconnected" then
 		return "DeviceRemove"

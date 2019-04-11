@@ -26,6 +26,14 @@ ebt_broute() {
   do_cmd ebtables -t broute "$@"
 }
 
+ebt_broute_check() {
+  local chain="$1"
+  shift
+  # ebtables remove the first zero in the MAC address
+  local pattern=$(echo "$@" | sed 's/:0/:/g')
+  do_cmd ebtables -t broute -L ${chain} | grep -- "${pattern}" &> /dev/null
+}
+
 ebt_filter() {
   do_cmd ebtables -t filter "$@"
 }
@@ -204,7 +212,8 @@ enable_relay_dev() {
   # add mac address of relaying device to the list of bridge mac addresses
   local addr
   read addr < "/sys/class/net/${dev}/address"
-  if [ -n "$BRIDGE_MAC_ADDRESSES" ] && ! list_contains BRIDGE_MAC_ADDRESSES ${addr} ; then
+  if [ -n "$BRIDGE_MAC_ADDRESSES" ] && ! list_contains BRIDGE_MAC_ADDRESSES ${addr} || \
+      ! ebt_broute_check ppprelay_${bridge} -d ${addr} -j DROP; then
     append BRIDGE_MAC_ADDRESSES ${addr}
     ebt_broute -I ppprelay_${bridge} -d ${addr} -j DROP
   fi

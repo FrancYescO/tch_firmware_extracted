@@ -15,6 +15,10 @@ if session:hasAccess(modalPath) then
 local dyn_count = proxy.getPN("sys.class.iproutes.", true)
 dyn_count = dyn_count and #dyn_count or 0
 
+--IPv4 Static Routes
+local ipv4_count = proxy.getPN("uci.network.route.", true)
+ipv4_count = ipv4_count and #ipv4_count or 0
+
 --DNS
 
 function split(x,sep)
@@ -51,11 +55,20 @@ end
         <div class="content">\
             <p class="subinfos">\
             ');  
-            local modal_link=format("class=\"modal-link\" data-toggle=\"modal\" data-remote=\"%s\" data-id=\"device-modal\"",modalPath)
+            local modal_link=format('class="modal-link" data-toggle="modal" data-remote="%s" data-id="device-modal"',modalPath)
             ngx.print(
-            format( N('<strong %1$s>%2$d Route</strong>',
+            format( N('<strong id="iproutescard_noofroutes" %1$s>%2$d Route</strong>',
                       '<strong id="iproutescard_noofroutes" %1$s>%2$d Routes</strong> ', dyn_count),
                       modal_link, dyn_count))
+              ngx.print('\
+            </p>\
+            <p class="subinfos">\
+            ');  
+            local modal_link=format('class="modal-link" data-toggle="modal" data-remote="%s" data-id="device-modal"',modalPath)
+            ngx.print(
+            format( N('<strong id="iproutescard_noofipv4staticroutes" %1$s>%2$d IPv4 Static Route</strong>',
+                      '<strong id="iproutescard_noofipv4staticroutes" %1$s>%2$d IPv4 Static Routes</strong> ', ipv4_count),
+                      modal_link, ipv4_count))
               ngx.print('\
             </p>\
             <p class="subinfos">\

@@ -182,7 +182,8 @@ InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.get = {
     return value[4] or "0"
   end,
   RALifetime = function(mapping, param, key)
-    return getUciValue(dhcpBinding, "lan", "ra_lifetime", "0")
+    local raLifetime = getUciValue(dhcpBinding, "lan", "ra_lifetime", "0")
+    return tostring(tonumber(raLifetime) / 60)
   end,
   LeaseTime = function(mapping, param, key)
     local value =  getUciValue(dhcpBinding, "lan", "leasetime", "0")
@@ -221,7 +222,7 @@ InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.getall =
     ULAPrefix = value[1] or "",
     ULAAddress = configValues.ula_prefix or "",
     AddressingType = configValuesDhcp.ra_management == "0" and "stateless" or "stateful",
-    RALifetime = configValuesDhcp.ra_lifetime,
+    RALifetime = tostring(tonumber(configValuesDhcp.ra_lifetime) / 60),
     LeaseTime = time,
     DNSServers = dnsServer or "",
     IPv6PrefixID = prefixID or "",
@@ -243,7 +244,8 @@ InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.set = {
     transactions[dhcpBinding] = true
   end,
   RALifetime = function(mapping, param, value)
-    setUciValue(dhcpBinding, "lan", "ra_lifetime", value)
+    local converted_value = tonumber(value) * 60
+    setUciValue(dhcpBinding, "lan", "ra_lifetime", tostring(converted_value))
     transactions[dhcpBinding] = true
   end,
   LeaseTime = function(mapping, param, value)

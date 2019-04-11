@@ -3,6 +3,8 @@
 
 START=65
 
+. $IPKG_INSTROOT/usr/lib/qos/functions.sh
+
 exec_qos_mgr() {
   local action=$1
   local try=1 max_attempts=5
@@ -18,7 +20,9 @@ exec_qos_mgr() {
 
 start() {
   /usr/lib/qos/generate.sh firewall start | sh
-  exec_qos_mgr start
+  local action
+  qos_started && action=restart || action=start
+  exec_qos_mgr ${action}
 }
 
 stop() {
@@ -32,9 +36,9 @@ restart() {
 }
 
 reload() {
-  local action
   /usr/lib/qos/generate.sh firewall start | sh
-  iptables -t mangle -L QoS_FW -n >/dev/null 2>&1 && action=reload || action=restart
+  local action
+  qos_started && action=reload || action=restart
   exec_qos_mgr ${action}
 }
 

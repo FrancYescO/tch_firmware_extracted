@@ -81,6 +81,7 @@ local mapper, ipairs = mapper, ipairs
 local uci_helper = mapper("ucihelper")
 local binding={config="system", sectionname="@system[0]", option="", default="", extended=true}
 local inet = require "tch.inet"
+local network = require("transformer.shared.common.network")
 
 local options = {
   LogFilterIP = {"log_filter_ip", ""},
@@ -128,17 +129,19 @@ end
 
 local function validateLogIps(pname, value)
   if value ~= "" then
-    -- (1) Value must be an IPv4 address
-    if not inet.isValidIPv4(value) then
-      return false, "Not a valid IPv4 address for " .. pname
-    else
-      -- (2) LogFilterIP and LogIP must used mutually exclusive, i.e. only one of both may be set.
-      -- This is a measure to avoid duplicate syslog messages if both would be set.
-      if pname == "LogFilterIP" and uci_helper.get_from_uci(getBinding("LogIP")) ~= "" then
-        return false, "Cannot set LogFilterIP while LogIP is set"
-      elseif pname == "LogIP" and uci_helper.get_from_uci(getBinding("LogFilterIP")) ~= "" then
-        return false, "Cannot set LogIP while LogFilterIP is set"
-      end
+    -- Value must be an IPv4 address or dns name for LogFilterIP param.
+    -- Value must be an IPv4 address for LogIP param.
+    if pname == "LogFilterIP" and not (inet.isValidIPv4(value) or network.domainValidation(value)) then
+      return nil, "Not a valid IPv4 address or DNS name for " .. pname
+    elseif pname == "LogIP" and not inet.isValidIPv4(value) then
+      return nil, "Not a valid IPv4 address for " .. pname
+    end
+    -- LogFilterIP and LogIP must used mutually exclusive, i.e. only one of both may be set.
+    -- This is a measure to avoid duplicate syslog messages if both would be set.
+    if pname == "LogFilterIP" and uci_helper.get_from_uci(getBinding("LogIP")) ~= "" then
+      return nil, "Cannot set LogFilterIP while LogIP is set"
+    elseif pname == "LogIP" and uci_helper.get_from_uci(getBinding("LogFilterIP")) ~= "" then
+      return nil, "Cannot set LogIP while LogFilterIP is set"
     end
   end
   return true
@@ -162,7 +165,7 @@ Multi_X_000E50_Syslog_.set = function(mapping, pname, value)
     local logfilter = {}
     for v in value:gmatch("([^,]+)") do
       logfilter[#logfilter + 1] = v
-    end                                        
+    end
     value = logfilter
   end
   return uci_helper.set_on_uci(getBinding(pname), value, commitapply)

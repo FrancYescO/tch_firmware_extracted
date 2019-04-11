@@ -10,7 +10,7 @@ local Device_Services_X_BELGACOM_EnhancedWiFi_ = {
       Name = {
         access = "readWrite",
         type = "string",
-	default = "E-WiFi",
+	default = "Wave",
 	description = "Name of Enhanced WiFi service",
       },
       Enable = {
@@ -54,15 +54,13 @@ local envRipBinding = { config ="env", sectionname = "rip", option = "wifi_mac" 
 local wifiConductorBinding = { config = "wifi_conductor", sectionname = "global", option = "enabled" }
 local envBinding = { config = "env", sectionname = "var", option = "PXS_TV_MODE_REQ" }
 local wlanConfCommon = require("transformer.shared.WLANConfigurationCommon")
-local setOnUci = wlanConfCommon.setOnUci
-local getFromUci = wlanConfCommon.getFromUci
+local setOnWireless = wlanConfCommon.setOnWireless
+local getFromWireless = wlanConfCommon.getFromWireless
 local commit = wlanConfCommon.commit
 local revert = wlanConfCommon.revert
 local setBandSteerID = wlanConfCommon.setBandSteerID
-local enableBandSteer = wlanConfCommon.enableBandSteer
 local getAPFromIface = wlanConfCommon.getAPFromIface
 local configChanged
-local ubus = mapper("ubus").connect()
 
 local paramList = {
   Name = "name",
@@ -95,27 +93,30 @@ local eWiFiEnable = function(base_iface, base_ap, peer_iface, peer_ap)
     return nil,  "TV mode is Bridged so Enhanced-WiFi cannot be enabled."
   else
     -- Set the radio_2G ssid to radio_5G ssid: Device.WiFi.SSID.{i}.SSID
-    setOnUci(peer_iface, "ssid", getFromUci(base_iface, "ssid"), commitapply)
+    setOnWireless(peer_iface, "ssid", getFromWireless(base_iface, "ssid"), commitapply)
 
     -- Set the radio_2G wpa_psk_key to radio_5G wpa_psk_key: Device.WiFi.AccessPoint.{i}.Security.KeyPassphrase
-    setOnUci(peer_ap, "wpa_psk_key", getFromUci(base_ap, "wpa_psk_key"), commitapply)
+    setOnWireless(peer_ap, "wpa_psk_key", getFromWireless(base_ap, "wpa_psk_key"), commitapply)
 
     -- Set the radio_2G security_mode to radio_5G security_mode: Device.WiFi.AccessPoint.{i}.Security.ModeEnabled
-    setOnUci(peer_ap, "security_mode", getFromUci(base_ap, "security_mode"), commitapply)
+    setOnWireless(peer_ap, "security_mode", getFromWireless(base_ap, "security_mode"), commitapply)
 
     --Local band steering is disabled
     setBandSteerID(base_ap, peer_ap, "off", nil, commitapply)
 
     -- Set the radio_2G wps_state to radio_5G wps_state: Device.WiFi.AccessPoint.{i}.WPS.Enable
-    setOnUci(peer_ap, "wps_state", getFromUci(base_ap, "wps_state"), commitapply)
+    setOnWireless(peer_ap, "wps_state", getFromWireless(base_ap, "wps_state"), commitapply)
+
+    -- Set the radio_2G public to radio_5G public: Device.WiFi.AccessPoint.{i}.SSIDAdvertisementEnabled
+    setOnWireless(peer_ap, "public", getFromWireless(base_ap, "public"), commitapply)
 
     --Copy of the State of the 2.4 GHz to the 5.0 GHz
-    setOnUci(peer_iface, "state", getFromUci(base_iface, "state"), commitapply)
+    setOnWireless(peer_iface, "state", getFromWireless(base_iface, "state"), commitapply)
 
     --The MAC filter mode and list of the 2.4 GHz should be copied to the 5GHz.
-    setOnUci(peer_ap, "acl_mode", getFromUci(base_ap, "acl_mode"), commitapply)
-    setOnUci(peer_ap, "acl_accept_list", getFromUci(base_ap, "acl_accept_list"), commitapply)
-    setOnUci(peer_ap, "acl_deny_list", getFromUci(base_ap, "acl_deny_list"), commitapply)
+    setOnWireless(peer_ap, "acl_mode", getFromWireless(base_ap, "acl_mode"), commitapply)
+    setOnWireless(peer_ap, "acl_accept_list", getFromWireless(base_ap, "acl_accept_list"), commitapply)
+    setOnWireless(peer_ap, "acl_deny_list", getFromWireless(base_ap, "acl_deny_list"), commitapply)
 
   end
 end
@@ -126,7 +127,7 @@ local getStatus = function ()
   eWiFiBinding.option = 'enable'
   local eWiFiState = get_from_uci(eWiFiBinding)
   if eWiFiState == '0' then
-    return "Disable"
+    return "Disabled"
   elseif  wifiConductorState == '1' and eWiFiState == '1' then
     return "Enabled Conductor on"
   elseif wifiConductorState == '0' and eWiFiState == '1' then
@@ -184,9 +185,10 @@ Device_Services_X_BELGACOM_EnhancedWiFi_.set = function(mapping, param, value, k
       --Device.WiFi.SSID.5.SSID” is replaced by “WiFi-5.0-xxxx” where “xxxx” is the last four characters of the MAC address
       local wifi_mac = get_from_uci(envRipBinding)
       local ssid_5g = "WiFi-5.0-" .. string.gsub(wifi_mac:sub(13,17), ":", "")
-      setOnUci(peer_iface, "ssid", ssid_5g, commitapply)
-      setOnUci(peer_iface, "wpa_psk_key", getFromUci(base_ap, "wpa_psk_key"), commitapply)
-      setOnUci(peer_iface, "security_mode", getFromUci(base_ap, "security_mode"), commitapply)
+      setOnWireless(peer_iface, "ssid", ssid_5g, commitapply)
+      setOnWireless(peer_ap, "wpa_psk_key", getFromWireless(base_ap, "wpa_psk_key"), commitapply)
+      setOnWireless(peer_ap, "security_mode", getFromWireless(base_ap, "security_mode"), commitapply)
+      setOnWireless(peer_ap, "wps_state", getFromWireless(base_ap, "wps_state"), commitapply)
       --The Local band steering is disabled
       setBandSteerID(base_ap, peer_ap, "off", nil, commitapply)
     end
@@ -288,7 +290,6 @@ end
 Device_Services_X_BELGACOM_EnhancedWiFi_GUI_.commit = function()
   if configChanged then
     uciHelper.commit(eWiFiBinding)
-    commit()
     configChanged = false
   end
 end
@@ -296,7 +297,6 @@ end
 Device_Services_X_BELGACOM_EnhancedWiFi_GUI_.revert = function()
   if configChanged then
     uciHelper.revert(eWiFiBinding)
-    revert()
     configChanged = false
   end
 end

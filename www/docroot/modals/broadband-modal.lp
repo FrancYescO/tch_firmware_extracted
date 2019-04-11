@@ -1,4 +1,7 @@
 --pretranslated: do not change this file
+ 
+
+--pretranslated: do not change this file
 
 -- NG.... hide manual switching if wansensing is enabled
 --NG-100650 Set 4th Ethernet Port as WAN or LAN Port on GUI
@@ -16,123 +19,119 @@ local session = ngx.ctx.session
 
 local tech = false
 if session:getrole() == "admin" then
-	tech = true
+  tech = true
 end
 
 local bmh = require("broadbandmode_helper")
-
-local tabdata
-if bmh.broadBandDetails then
-  tabdata = dyntab_helper.process(bmh.broadBandDetails())
-else
-  tabdata = dyntab_helper.process(bmh)
-end
+local tabdata = dyntab_helper.process(bmh.broadBandDetails())
 
 local mode_current = tabdata.current.name
 local mode_options = tabdata.options
 
 local vB = post_helper.validateBoolean
-mapParam = { 
-				wsens = "uci.wansensing.global.enable",
-				iface = "uci.network.interface.@wan.ifname",
-				dsl_status = "sys.class.xdsl.@line0.Status",
-				sfp = "uci.env.rip.sfp",
-			}
-			
+mapParam = {
+  wsens = "uci.wansensing.global.enable",
+  iface = "uci.network.interface.@wan.ifname",
+  dsl_status = "sys.class.xdsl.@line0.Status",
+  sfp = "uci.env.rip.sfp"
+}
+
 content_helper.getExactContent(mapParam)
 
 local content, helpmsg
-
 if mapParam.sfp == "1" and mapParam.wsens == "1" then
-    mapParSFP = {
-	ethsfp = "uci.ethernet.globals.eth4lanwanmode"
-    }
-			
-    mapValSFP = {
-	ethsfp = vB
-    }
-    content, helpmsg = post_helper.handleQuery(mapParSFP, mapValSFP)
-end
-			
-    if not tabdata.current.ajax then
-    -- only display if not doing an ajax request
-	if tech and mapParam.sfp == "1" then
-		ngx.print(ui_helper.createHeader(T"Broadband", true, true)) 
-	elseif mapParam.wsens == "1" and (mapParam.dsl_status ~= "Up" or string.match(mapParam.iface,"eth4")) then
-		ngx.print(ui_helper.createHeader(T"Broadband", false, true)) 
-	else
-		ngx.print(ui_helper.createHeader(T"Broadband", true, true))
-	end
+  mapParSFP = {
+    ethsfp = "uci.ethernet.globals.eth4lanwanmode"
+  }
 
-ngx.print('\
+  mapValSFP = {
+    ethsfp = vB
+  }
+  content, helpmsg = post_helper.handleQuery(mapParSFP, mapValSFP)
+end
+
+
+  if not tabdata.current.ajax then
+    -- only display if not doing an ajax request
+    if tech and mapParam.sfp == "1" then
+      ngx.print(ui_helper.createHeader(T"Broadband", true, true))
+    elseif mapParam.wsens == "1" and (mapParam.dsl_status ~= "Up" or string.match(mapParam.iface,"eth4")) then
+      ngx.print(ui_helper.createHeader(T"Broadband", false, true))
+    else
+      ngx.print(ui_helper.createHeader(T"Broadband", true, true))
+    end
+  ngx.print('\
 <div class="modal-body update">\
 <form class="form-horizontal" method="post" action="modals/broadband-modal.lp">\
-')
+');  
 ngx.print(ui_helper.createMessages(message_helper.popMessages()))
-
-    if #bmh.broadBandDetails() > 1 then
+  ngx.print('\
+');  
+  if #bmh.broadBandDetails() > 1 then
     -- Only included if there are 2 or more connection modes
-	if mapParam.wsens == "0" then
-ngx.print('\
+    if mapParam.wsens == "0" then
+  ngx.print('\
+\
 <fieldset id="conn_mode" class="advanced hide">\
-<legend>');ngx.print(T"Broadband type");ngx.print('</legend>')
+<legend>');  ngx.print( T"Broadband type" ); ngx.print('</legend>\
+');  
+  local html = {}
 
-    local html = {}
-
-    local mode_attributes = {
-        radio = {
-            class = "inline"
-        },
-        input = {
-            class = "no-save",
-            ["data-for"] = "SWITCH_MODE",
-        }
+  local mode_attributes = {
+  radio = {
+    class = "inline"
+    },
+  input = {
+    class = "no-save",
+    ["data-for"] = "SWITCH_MODE",
     }
-    local mode_button = {
-        button = {
-            ["data-name"] = "action",
-            ["data-value"] = "SWITCH_MODE",
-        }
+  }
+  local mode_button = {
+  button = {
+    ["data-name"] = "action",
+    ["data-value"] = "SWITCH_MODE",
     }
+  }
+  html[#html+1] = ui_helper.createInputRadio(T"Mode", "newmode", mode_options, mode_current, mode_attributes)
+  html[#html+1] = ui_helper.createButton("", T"Switch connection mode", "icon-cog", mode_button)
 
-    html[#html+1] = ui_helper.createInputRadio(T"Mode", "newmode", mode_options, mode_current, mode_attributes)
-    html[#html+1] = ui_helper.createButton("", T"Switch connection mode", "icon-cog", mode_button)
-
-    ngx.print(html)
-ngx.print('\
+  ngx.print(html)
+  ngx.print('\
 </fieldset>\
-')
-
-
-end
-end
-
-if mapParam.sfp == "1" and mapParam.wsens == "1" then
-ngx.print('\
+\
+');  end   ngx.print('\
+');  end   ngx.print('\
+');  if mapParam.sfp == "1" and mapParam.wsens == "1" then   ngx.print('\
 <fieldset id="conn_mode" class="advanced hide">\
-<legend>');ngx.print(T"Set 4th Ethernet Port as WAN or as LAN");ngx.print('</legend>')
-
-	local adv = {
-					values = {
-                    on = "0",
-                    off = "1"
-                  }
-				}
-	local html = {}
-	html[#html + 1] = ui_helper.createSwitch(T"WAN-Mode", "ethsfp", content["ethsfp"], adv)
-	ngx.print(html)
-	ngx.print('\
+<legend>');  ngx.print(T"Set 4th Ethernet Port as WAN or as LAN"); ngx.print('</legend>\
+');  
+local adv = {
+  values = {
+    on = "0",
+    off = "1"
+  }
+}
+local html = {}
+html[#html + 1] = ui_helper.createSwitch(T"WAN-Mode", "ethsfp", content["ethsfp"], adv)
+ngx.print(html)
+  ngx.print('\
 </fieldset>\
-')
-end
-end
-    lp.setpath("/www/snippets/")
-    lp.include(tabdata.current.view)
-    if not tabdata.current.ajax then
+');  end   ngx.print('\
+');  end   ngx.print('\
+');  
+  lp.setpath("/www/snippets/")
+  lp.include(tabdata.current.view)
+  ngx.print('\
+');  
+  if not tabdata.current.ajax then
     -- only display if not doing an ajax request
-
-ngx.print('</form>\
+  ngx.print('\
+\
+</form>\
 </div>\
-')
-ngx.print(ui_helper.createFooter())
-end
+\
+');  ngx.print(ui_helper.createFooter())   ngx.print('\
+\
+');  end   ngx.print('\
+\
+'); 

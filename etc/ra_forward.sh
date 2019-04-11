@@ -23,12 +23,19 @@ else
   ACT="-D"
 fi
 
-local FWD_RULE="-t nat $ACT prerouting_rule -m tcp -p tcp --dst $WAN_IP --dport $WAN_PORT -j REDIRECT --to-ports $LAN_PORT"
-local FWD_NULL="-t nat $ACT prerouting_rule -p tcp --dst $WAN_IP --dport $LAN_PORT -j REDIRECT --to-port 65535"
-local ACCEPT_RULE="-t filter $ACT input_rule -p tcp --dst $WAN_IP --dport $LAN_PORT -j ACCEPT"
+if [ -n "$WAN_IP" ]; then
+  local FWD_RULE="-t nat $ACT prerouting_rule -m tcp -p tcp --dst $WAN_IP --dport $WAN_PORT -j REDIRECT --to-ports $LAN_PORT"
+  local FWD_NULL="-t nat $ACT prerouting_rule -p tcp --dst $WAN_IP --dport $LAN_PORT -j REDIRECT --to-port 65535"
+  local ACCEPT_RULE="-t filter $ACT input_rule -p tcp --dst $WAN_IP --dport $LAN_PORT -j ACCEPT"
 
-if [ "$LAN_PORT" != "$WAN_PORT" ]; then
-  apply "$FWD_RULE"
-  apply "$FWD_NULL"
+  if [ "$LAN_PORT" != "$WAN_PORT" ]; then
+    apply "$FWD_RULE"
+    apply "$FWD_NULL"
+  fi
+  apply "$ACCEPT_RULE"
 fi
-apply "$ACCEPT_RULE"
+if [ -d /etc/xinetd.d/ -a -n "$WAN_IPv6" ]; then
+  local ACCEPT_RULE6="-t filter $ACT input_rule -p tcp --dst $WAN_IPv6 --dport $WAN_PORT -j ACCEPT"
+  logger -t assist.$RA_NAME -- $ACCEPT_RULE6
+  ip6tables $ACCEPT_RULE6
+fi

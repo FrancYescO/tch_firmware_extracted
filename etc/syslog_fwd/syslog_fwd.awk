@@ -10,6 +10,7 @@ BEGIN {
 #	droplines=maxize*5
 	maxize*=1024
 	prefix=""
+	LEVEL=8
 
 	facility["kern"]=0
 	facility["user"]=1
@@ -50,6 +51,10 @@ BEGIN {
 	severity["debug"]=7
 	severity["none"]=8
 
+#get level from uci
+	cmd="uci get system.@system[0].filterloglevel 2>/dev/null"
+	cmd | getline LEVEL
+	close(cmd)
 
 	cmd="uci get system.@system[0].hostname"
 	cmd | getline HOST
@@ -62,10 +67,10 @@ BEGIN {
 	gsub(/:/,"-",MAC)
 	prefix=prefix"[MAC="MAC"]"
 
-	cmd="uci get env.rip.serial"
+	cmd="uci get env.var.serial"
 	cmd | getline SN
 	close(cmd)
-	prefix=prefix"[S/N=CP"SN"]"
+	prefix=prefix"[S/N="SN"]"
 	gsub(/ /,"",prefix)
 
 	cmd="uci get system.@system[0].log_prefix 2>/dev/null"
@@ -98,6 +103,8 @@ $0 ~ pattern && (!xpattern || $0 !~ xpattern) {
 	fac=pri[1]
 	sev=pri[2]
 	priority=facility[fac] * 8 + severity[sev]
+#skip line if severity too high (higher severity is less urgent), so not urgent enough
+ 	if (severity[sev] >= LEVEL) next
 	if (LOG_PREFIX != "")
 		sub(": ", ": "LOG_PREFIX" ")
 	line="<" priority ">" $0

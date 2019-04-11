@@ -3,6 +3,22 @@ local smm = require('ledframework.statemachine')
 local acm = require('ledframework.ledaction')
 local ptm = require('ledframework.patternaction')
 local ubus = require('ledframework.ubus')
+local uci = require('uci')
+local posix = require("tch.posix")
+local openlog = posix.openlog
+local syslog = posix.syslog
+
+local lcur=uci.cursor()
+local ledcfg='ledfw'
+lcur:load(ledcfg)
+local syslog_trace, err = lcur:get(ledcfg,'syslog','trace')
+lcur:close()
+
+syslog_trace = syslog_trace == '1'
+if not syslog_trace then
+    syslog=function() end
+end
+openlog("ledfw", posix.LOG_PID, posix.LOG_DAEMON)
 
 local M = {}
 
@@ -81,102 +97,124 @@ function M.start(ledconfig, patternconfig)
 
     end
 
+    local function findRelatedPatterns(led_statemachine)
+        local currentState = led_statemachine:getState()
+
+        if type(currentState)=="function" then
+             currentState=currentState()
+        end
+        return led_statemachine:getPatterns(currentState) or {}
+    end
+
+    local function getCurrentState(led_statemachine)
+        return led_statemachine:getState()
+    end
+
+    local function getCurrentAction(led_statemachine)
+        local currentAction = led_statemachine:getAction()
+
+        if type(currentAction)=="function" then
+            currentAction=currentAction()
+        end
+        return currentAction
+    end
+
+    local function getLastActiveAction(led_statemachine)
+        local currentAction = led_statemachine:getActiveAction()
+
+        if type(currentAction)=="function" then
+            currentAction=currentAction()
+        end
+        return currentAction
+    end
+
+    local lastActivePattern=nil
     ubus.start(function(event)
         -- Infobutton: if received state_on event, shut off LEDs, skip actions
         if event == 'infobutton_state_on' then
             suspend()
         elseif event == 'infobutton_state_off' then
             resume()
+        elseif event == 'led_brightness_changed' then
+            acm.updateBrightness()
         end
+        syslog(posix.LOG_DEBUG,'LED callback with event \''..(event or 'nil')..'\'')
 
         -- Pattern event comes
         for k in pairs(pts) do
-            if pts[k]:activate(event) then
+            if pts[k]:activate(event) then 
+                if lastActivePattern and lastActivePattern ~= k then pts[lastActivePattern]:setInactive() end 
+                syslog(posix.LOG_DEBUG,'LED pattern \''..k..'\' activate on event \''..(event or 'nil')..'\';Applying pattern actions')
+                lastActivePattern = k
                 pts[k]:applyAction(event)
                 for ledname, ledv in pairs(pts[k]:getLeds()) do
-                    local relatedPatterns = nil
-                    local currentState = sms[ledname]:getState()
-                    if type(currentState)=="function" then
-                       currentState=currentState()
+                    local currentAction = getLastActiveAction(sms[ledname])
+                    local relatedPatterns = findRelatedPatterns(sms[ledname])
+                    local pattern_found = false
+                    for key, pattern in pairs(relatedPatterns) do
+                        if k == pattern then
+                            pattern_found = true
+                            break
+                        end
                     end
-                    relatedPatterns = sms[ledname]:getPatterns(currentState)
-                    if relatedPatterns == nil then
-                        trs[ledname]:applyAction(currentState)
-                    else
-                        local pattern_found = false
-                        for key, pattern in pairs(relatedPatterns) do
-                            if k == pattern then
-                                pattern_found = true
-                            end
-                        end
-                        if pattern_found == false then
-                            trs[ledname]:applyAction(currentState)
-                        end
+                    if not pattern_found then
+                        syslog(posix.LOG_DEBUG,'LED no related pattern found for led \''..ledname..'\';Applying last active transition action: \''..(currentAction or 'nil')..'\'')
+                        trs[ledname]:applyAction(currentAction)
                     end
                 end
             elseif pts[k]:deactivate(event) then
+                if lastActivePattern == k then lastActivePattern=nil end 
+                syslog(posix.LOG_DEBUG,'LED pattern \''..k..'\' deactivate on event \''..(event or 'nil')..'\';Applying pattern actions')
+                pts[k]:applyAction(event)
                 for ledname, ledv in pairs(pts[k]:getLeds()) do
-                    trs[ledname]:applyAction(sms[ledname]:getState())
+                    local currentAction = getLastActiveAction(sms[ledname])
+                    syslog(posix.LOG_DEBUG,'LED pattern deactivate for led \''..ledname..'\';Applying last active transition action: \''..(currentAction or 'nil')..'\'')
+                    trs[ledname]:applyAction(currentAction)
                 end
             end
         end
         -- Individual LEDs event comes
         local refresh_needed = false
         for k in pairs(sms) do
-            if sms[k]:update(event) == true or infoButtonResuming == true then
-                if infoButtonState == false then
-                    local relatedPatterns = nil
-                    local currentState = sms[k]:getState()
-                    if type(currentState)=="function" then
-                       currentState=currentState()
+            if sms[k]:update(event) or infoButtonResuming then
+                if not infoButtonState then
+                    local currentAction = getCurrentAction(sms[k])
+                    local currentState = getCurrentState(sms[k])
+                    local relatedPatterns = findRelatedPatterns(sms[k])
+                    syslog(posix.LOG_DEBUG,'LED \''..k..'\' update on event \''..(event or 'nil')..'\'; State: \''..(currentState or 'nil')..'\', Action: \''..(currentAction or 'nil')..'\'')
+                    local applyaction = true
+                    for key, pattern in pairs(relatedPatterns) do
+                        if pts[pattern] and pts[pattern]:isActive() then
+                            pts[pattern]:restoreCurrentState()
+                            refresh_needed = true
+                            applyaction = false
+                        end
                     end
-                    relatedPatterns = sms[k]:getPatterns(currentState)
-                    if pts == nil
-                       or relatedPatterns == nil then
-                        trs[k]:applyAction(currentState)
-                    else
-                       local applyaction = true
-                       for key, pattern in pairs(relatedPatterns) do
-                           if pts[pattern] ~= nil and pts[pattern]:isActive() then
-                               pts[pattern]:restoreCurrentState()
-                               refresh_needed = true
-                               applyaction = false
-                           end
-                       end
-                       if applyaction == true then
-                              trs[k]:applyAction(currentState)
-                       end
+                    if applyaction then
+                        trs[k]:applyAction(currentAction)
                     end
                 end
             end
         end
-        if refresh_needed == true then
+        if refresh_needed then
             for k in pairs(sms) do
-                local relatedPatterns = nil
-                local currentState = sms[k]:getState()
-                if type(currentState)=="function" then
-                   currentState=currentState()
+                local currentAction = getCurrentAction(sms[k])
+                local applyaction = true
+                local relatedPatterns = findRelatedPatterns(sms[k])
+                for key, pattern in pairs(relatedPatterns) do
+                    if pts[pattern] and pts[pattern]:isActive() then
+                        applyaction = false
+                        break
+                    end
                 end
-                relatedPatterns = sms[k]:getPatterns(currentState)
-                if pts == nil
-                   or relatedPatterns == nil then
-                    trs[k]:applyAction(currentState)
-                else
-                   local applyaction = true
-                   for key, pattern in pairs(relatedPatterns) do
-                       if pts[pattern] ~= nil and pts[pattern]:isActive() then
-                           applyaction = false
-                       end
-                   end
-                   if applyaction == true then
-                          trs[k]:applyAction(currentState)
-                   end
+                if applyaction then
+                    trs[k]:applyAction(currentAction)
                 end
             end
         end
 
         -- Infobutton: after resuming done, recover it
-        if infoButtonResuming == true then
+        if infoButtonResuming then
             infoButtonResuming = false
         end
     end)

@@ -1,12 +1,12 @@
 <%
--- NG-78959
+-- NG-78959/TCOMITAGW-2084
+-- TCOMITAGW-2087
 local lfs = require("lfs")
 if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
   return
 end
 
 -- Enable localization
-
 gettext.textdomain('webui-voice')
 local tinsert, format = table.insert, string.format
 local datamodel = require ("datamodel")
@@ -53,10 +53,10 @@ if mmpbx_state == "1" then
         modalPath = "/modals/mmpbx-global-modal.lp"
     elseif session:hasAccess("/modals/mmpbx-dect-modal.lp") then
         modalPath = "/modals/mmpbx-dect-modal.lp"
-    elseif session:hasAccess("mmpbx-contacts-modal.lp") then
+    elseif session:hasAccess("/modals/mmpbx-contacts-modal.lp") then
         modalPath = "/modals/mmpbx-contacts-modal.lp"
-    elseif session:hasAccess("/modals/mmpbx-inoutgoingmap-modal.lp") then
-        modalPath = "/modals/mmpbx-inoutgoingmap-modal.lp"		
+    elseif session:hasAccess("/modals/mmpbx-inoutgoingmap-modal.lp") then 	-- NG-78959/TCOMITAGW-2084
+        modalPath = "/modals/mmpbx-inoutgoingmap-modal.lp"
     end
 elseif session:hasAccess("/modals/mmpbx-global-modal.lp") then
     modalPath = "/modals/mmpbx-global-modal.lp"

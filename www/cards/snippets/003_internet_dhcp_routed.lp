@@ -1,5 +1,7 @@
-<%
+--pretranslated: do not change this file
+ 
 -- Enable localization
+-- TCOMITAGW-2087; TCOMITAGW-2088
 gettext.textdomain('webui-core')
 
 local content_helper = require("web.content_helper")
@@ -121,13 +123,13 @@ if session:hasAccess("/modals/internet-modal.lp") then
     modalPath = "/modals/internet-modal.lp"
 end
 
-%>
-
-<%= ui_helper.createCardHeader(T"Internet Access", modalPath) %>
-<div class="content">
-  <%= ui_helper.createSimpleLight(nil, dhcp_state_map[dhcp_state], { light = { class = dhcp_light_map[dhcp_state], id = "Internet_DHCP_LED" }, span = {id = "Internet_DHCP_Status"} }) %>
-  <p class="subinfos">
-     <%if dhcp_state == "connected" then
+  ngx.print('\
+\
+');  ngx.print( ui_helper.createCardHeader(T"Internet Access", modalPath) ); ngx.print('\
+<div class="content">\
+  ');  ngx.print( ui_helper.createSimpleLight(nil, dhcp_state_map[dhcp_state], { light = { class = dhcp_light_map[dhcp_state], id = "Internet_DHCP_LED" }, span = {id = "Internet_DHCP_Status"} }) ); ngx.print('\
+  <p class="subinfos">\
+     ');  if dhcp_state == "connected" then
         if cs["ipaddr"] and cs["ipaddr"]:len() > 0 then
 	  ngx.print(format(T'WAN IP is <strong id ="wan_ip">%s</strong>', cs["ipaddr"]))
 	elseif cs["ip6addr"] and cs["ip6addr"]:len() > 0 then
@@ -136,6 +138,7 @@ end
 	if dhcp_state == "connected" and IPv6State ~= "disabled" then
           ngx.print(ui_helper.createSimpleLight(nil, ipv6_state_map[IPv6State] or T"Unknown", { light = { class = ipv6_light_map[IPv6State] or "red" } }))
 	end
-      end%>
-  </p>
-</div>
+      end  ngx.print('\
+  </p>\
+</div>\
+'); 

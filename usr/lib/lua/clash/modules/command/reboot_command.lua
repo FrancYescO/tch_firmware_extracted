@@ -46,7 +46,7 @@ local function reboot_function(args)
       print("Rebooting...")
     end
   elseif args.scheduled and validateTime(args.scheduled) then
-    local ok = proxy.set({ ["rpc.system.scheduledreboot"] = "1", ["rpc.system.reboottime"] = args.scheduled, ["rpc.system.scheduledrebootreason"] = "CLI" })
+    local ok = proxy.set({ ["rpc.system.scheduledreboot"] = args.scheduled, ["rpc.system.scheduledrebootreason"] = "CLI" })
     if not ok then
       return nil, "Invalid value"
     end

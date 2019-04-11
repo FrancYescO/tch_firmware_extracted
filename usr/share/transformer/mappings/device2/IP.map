@@ -41,12 +41,14 @@ local Device_IP_ = {
           "Error",
         },
       },
---[[ TODO
       ULAPrefix = {
         access = "readWrite",
         type = "string",
       },
---]]
+      X_000E50_ReleaseRenewWAN = {
+        access = "readWrite",
+        type = "boolean",
+      }
       -- InterfaceNumberOfEntries
       -- automatically created when Device.IP.Interface.{i}. is loaded
       -- ActivePortNumberOfEntries
@@ -58,6 +60,7 @@ local Device_IP_ = {
 local nwmodel = require "transformer.shared.models.device2.network"
 local uciHelper = mapper("ucihelper")
 local forEachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
 local setOnUci = uciHelper.set_on_uci
 local networkBinding = { config = "network" }
 local isConfigChanged
@@ -86,12 +89,20 @@ local function getIPv6Value(mapping)
   return value and value or "0"
 end
 
+local function getULAPrefix()
+  networkBinding.sectionname = "globals"
+  networkBinding.option = "ula_prefix"
+  return getFromUci(networkBinding)
+end
+
 Device_IP_.get = {
   IPv4Capable = "1", --Hardcoded to "1" ,since the device is ipv4 capable
   IPv4Enable  = "1", --Hardcoded to "1",since no support to disable/enable ipv4
   IPv4Status  = "Enabled",
   IPv6Capable = "1", --Hardcoded to "1" since the device is ipv6 capable.
   IPv6Enable  = getIPv6Value,
+  ULAPrefix = getULAPrefix,
+  X_000E50_ReleaseRenewWAN = "0",
   IPv6Status  = function(mapping)
     local v = getIPv6Value(mapping)
     return v ~= "0" and "Enabled" or "Disabled"
@@ -106,6 +117,12 @@ Device_IP_.set = {
     forEachOnUci(networkBinding, function(s)
       setUciParam(model:getBaseKey(s[".name"]), "ipv6", value)
     end)
+  end,
+  ULAPrefix = function(mapping, param, value)
+    setUciParam("globals", "ula_prefix", value)
+  end,
+  X_000E50_ReleaseRenewWAN = function(mapping, param, value)
+    commitapply:newset("Device.IP.X_000E50_ReleaseRenewWAN")
   end
 }
 

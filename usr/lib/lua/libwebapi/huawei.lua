@@ -2,7 +2,7 @@ local string, tonumber, type, table, pcall, pairs = string, tonumber, type, tabl
 
 local helper = require("mobiled.scripthelpers")
 local lom = require("lxp.lom")
-local cURL = require("cURL")
+local lcurl = require("lcurl")
 
 local runtime
 
@@ -35,7 +35,7 @@ end
 
 local function get_from_table(data, tag)
 	if type(data) ~= "table" then return nil end
-	for k, v in pairs(data) do
+	for _, v in pairs(data) do
 		if v.tag == tag then return v end
 	end
 	return nil
@@ -53,7 +53,7 @@ local function get_error(data)
 end
 
 local function curl_get(device, url, timeout)
-	local curl = cURL.easy_init()
+	local curl = lcurl.easy()
 	if device.web_info and device.web_info.cookie_store then
 		curl:setopt_share(device.web_info.cookie_store)
 	end
@@ -64,7 +64,8 @@ local function curl_get(device, url, timeout)
 	runtime.log:debug("GET: " .. url)
 
 	local t = {}
-	local result = pcall(curl.perform, curl, { writefunction = function(buf) table.insert(t, buf) end })
+	curl:setopt_writefunction(function(buf) table.insert(t, buf) end)
+	local result = pcall(curl.perform, curl)
 	if not result then return nil end
 	local data = table.concat(t, "")
 
@@ -93,7 +94,7 @@ end
 local function curl_post(device, raw_url, content, timeout)
 	local url = string.format(raw_url, device.web_info.ip)
 
-	local curl = cURL.easy_init()
+	local curl = lcurl.easy()
 	if device.web_info and device.web_info.cookie_store then
 		runtime.log:info("Reusing cookie store")
 		curl:setopt_share(device.web_info.cookie_store)
@@ -137,7 +138,9 @@ local function curl_post(device, raw_url, content, timeout)
 	curl:setopt_postfields(content)
 
 	local t = {}
-	local result = pcall(curl.perform, curl, { writefunction = function(buf) table.insert(t, buf) end })
+	curl:setopt_writefunction(function(buf) table.insert(t, buf) end)
+	local result = pcall(curl.perform, curl)
+
 	if not result then return nil end
 	local data = table.concat(t, "")
 	runtime.log:debug(data)
@@ -332,12 +335,12 @@ function Mapper:get_pin_info(device, info)
 	return nil, "Failed to get PIN info"
 end
 
-function Mapper:init_device(device, device_desc)
+function Mapper:init_device(device, device_desc) -- luacheck: no unused args
 	if device.web_info.ip then
 		device.web_info.uses_tokens = true
 		runtime.log:info("Using gateway IP " .. device.web_info.ip)
 
-		device.web_info.cookie_store = cURL.share_init()
+		device.web_info.cookie_store = lcurl.share_init()
 		device.web_info.cookie_store:setopt_share("COOKIE")
 
 		local retries = 5
@@ -378,23 +381,23 @@ local function do_pin_command(device, oper, pin, newpin, puk)
 	return ret, error
 end
 
-function Mapper:unlock_pin(device, pin_type, pin)
+function Mapper:unlock_pin(device, pin_type, pin) -- luacheck: no unused args
 	return do_pin_command(device, 0, pin, "", "")
 end
 
-function Mapper:unblock_pin(device, pin_type, puk, newpin)
+function Mapper:unblock_pin(device, pin_type, puk, newpin) -- luacheck: no unused args
 	return do_pin_command(device, 4, "", newpin, puk)
 end
 
-function Mapper:disable_pin(device, pin_type, pin)
+function Mapper:disable_pin(device, pin_type, pin) -- luacheck: no unused args
 	return do_pin_command(device, 2, pin, "", "")
 end
 
-function Mapper:enable_pin(device, pin_type, pin)
+function Mapper:enable_pin(device, pin_type, pin) -- luacheck: no unused args
 	return do_pin_command(device, 1, pin, "", "")
 end
 
-function Mapper:change_pin(device, pin_type, pin, newpin)
+function Mapper:change_pin(device, pin_type, pin, newpin) -- luacheck: no unused args
 	return do_pin_command(device, 3, pin, newpin, "")
 end
 
@@ -540,7 +543,7 @@ local function get_profiles(device)
 	return info
 end
 
-function Mapper:get_session_info(device, info, session_id)
+function Mapper:get_session_info(device, info, session_id) -- luacheck: no unused args
 	local success = false
 	local data, error = curl_get(device, string.format("http://%s/api/dialup/connection", device.web_info.ip))
 	if data then
@@ -594,7 +597,7 @@ function Mapper:get_session_info(device, info, session_id)
 	return nil, "Failed to get session info"
 end
 
-function Mapper:start_data_session(device, session_id, profile)
+function Mapper:start_data_session(device, session_id, profile) -- luacheck: no unused args
 	local content = '<?xml version="1.0" encoding="UTF-8"?>' ..
 					'<request>' ..
 						'<Action>1</Action>' ..
@@ -606,7 +609,7 @@ function Mapper:start_data_session(device, session_id, profile)
 	end
 end
 
-function Mapper:stop_data_session(device, session_id)
+function Mapper:stop_data_session(device, session_id) -- luacheck: no unused args
 	local content = '<?xml version="1.0" encoding="UTF-8"?>' ..
 					'<request>' ..
 						'<Action>0</Action>' ..
@@ -764,7 +767,7 @@ function Mapper:get_profile_info(device, info)
 	return true
 end
 
-function M.create(rt, pid)
+function M.create(rt, pid) -- luacheck: no unused args
 	runtime = rt
 
 	local mapper = {

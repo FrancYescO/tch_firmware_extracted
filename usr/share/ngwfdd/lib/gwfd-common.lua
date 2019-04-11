@@ -12,7 +12,7 @@ local common = {}
 
 local uci = require("uci")
 local ubus = require("ubus")
-local logger = require("transformer.logger")
+local logger = require("tch.logger")
 common.dkjson = require("dkjson")
 local tf_proxy
 local tf_uuid
@@ -258,24 +258,28 @@ function common.set(list)
   return set
 end
 
---- Write data (fed in table format) to the given file path.
+--- Write data (fed in table format) to the given FIFO file path (unbuffered, to ensure atomic write).
 -- The actual data is written in json encoding that also includes the fetched uptime.
 -- This is a blocking operation.
 --
 -- @param msg The data to be written - a table.
 -- @param fifo_file_path The file path to write the data to.
--- @return true          If the operation succeeded
+-- @return true          If the operation succeeded; false if message too long (then it is dropped)
 function common.write_msg_to_file(msg, fifo_file_path)
   if not valid_msg_file_to_write(msg, fifo_file_path) then
     error("Invalid input args", 2)
   end
 
-  local file = assert(io.open(fifo_file_path, "w"), "Could not write to FIFO file!")
   fix_special(msg)
   msg.uptime = common.get_uptime()
   local json = common.dkjson.encode(msg)
-  file:write(json)
-  file:write('\n')
+  if not json or #json >= 4094 then
+    return false
+  end
+  
+  local file = assert(io.open(fifo_file_path, "w"), "Could not write to FIFO file!")
+  file:setvbuf("no")
+  file:write(json..'\n')
   io.close(file)
 
   return true
@@ -403,8 +407,9 @@ function common.init(logger_name, logging_level, options)
   assert(l_level and (l_level >= 0), "Number is expected for logging level")
   assert(type(options) == "table", "Table is expected for options")
 
-  logger.init(l_level, false)
-  common.log = logger.new(logger_name, l_level)
+  logger.init(logger_name, l_level)
+  common.log = logger
+
   assert(common.log, "Could not create a logger")
 
   if next(options) then

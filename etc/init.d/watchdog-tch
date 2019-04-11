@@ -67,6 +67,8 @@ watchdog() {
 	json_init
 	[ -n "$wd_int"      ] && json_add_int frequency "${wd_int}"
 	[ -n "$wd_timeout"  ] && json_add_int timeout "${wd_timeout}"
+	json_add_boolean magicclose '0'
+	json_add_boolean stop '0'
 	json_close_object
 	RES=$([ -n "$(json_dump)" ] && ubus call system watchdog "$(json_dump)")
 	[ ${debug} -eq 1 ] && echo $RES
@@ -97,22 +99,32 @@ start_service() {
 	config_foreach watchdog watchdog
 	config_foreach filewatch filewatch
 
-	procd_open_instance
+	procd_open_instance system
 	procd_set_param command /usr/sbin/watchdog-tch -c $CONFIGFILE --foreground  $args
 	procd_set_param respawn 3600,60,0   # start max 60 sec, retry forever ,
 	procd_close_instance
 }
 
-shutdown() {
-	logger -t watchdog-tch "shutdown, stop this service"
-	stop
-	logger -t watchdog-tch "shutdown, then stop pinging the kernel watchdog"
+stop_service() {
+	local timeout="$2"
+	local magicclose="$3"
+
+	logger -t watchdog-tch "stop this service"
 	json_init
-	json_add_int timeout '180'
 	json_add_boolean stop '1'
+	[ -n "$timeout" ] && json_add_int timeout "${timeout}"
+	json_add_boolean magicclose "${magicclose:-1}"
 	json_close_object
 	RES=$([ -n "$(json_dump)" ] && ubus call system watchdog "$(json_dump)")
 	logger -t watchdog-tch "ubus response ${RES}"
+}
+
+shutdown() {
+	local timeout=180
+	local magicclose=0
+
+	logger -t watchdog-tch "shutdown, stop this service"
+	stop system $timeout $magicclose
 }
 
 reload_service() {

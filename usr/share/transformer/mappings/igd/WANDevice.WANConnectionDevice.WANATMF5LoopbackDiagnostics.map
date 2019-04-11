@@ -5,7 +5,7 @@ local WANATMF5LoopbackDiagnostics_ = {
   objectType = {
     name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANATMF5LoopbackDiagnostics.",
     access = "readOnly",
-    minEntries = 1,
+    minEntries = 0,
     maxEntries = 1,
     parameters = {
       DiagnosticsState = {
@@ -74,38 +74,33 @@ local WANATMF5LoopbackDiagnostics_ = {
   }
 }
 
+local common = mapper('nwcommon')
+local commitapply = commitapply
 local helper = require("transformer.shared.atmpinghelper")
 local xtmconnection = require("transformer.shared.models.igd.xtmconnection")
 local wandevice = require("transformer.shared.models.igd.wandevice")
 -- resolve static key(if any) to actual device key
 local resolve_key = xtmconnection.resolve_key
-
+local split_key = common.split_key
 helper.startup(commitapply)
 
-local WANATMF5LoopbackDiagnostics_defaultvalues = {
-  DiagnosticsState = "None",
-  NumberOfRepetitions = "1",
-  Timeout = "1",
-  SuccessCount = "0",
-  FailureCount = "0",
-  AverageResponseTime = "0",
-  MinimumResponseTime = "0",
-  MaximumResponseTime = "0",
-}
+WANATMF5LoopbackDiagnostics_.entries = function (mapping, parentKey)
+ local devtype = split_key(parentKey)
+  if devtype == "ATM" then
+    return { "1" }
+  end
+  return {}
+end
+
 
 WANATMF5LoopbackDiagnostics_.get = function(mapping, pname, key)
-  local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
-  if devtype == "ATM" then
-    return helper.get(devname, pname)
-  end
-  return WANATMF5LoopbackDiagnostics_defaultvalues[pname]
+  local _, devname = wandevice.getDevtypeAndName(resolve_key(key))
+  return helper.get(devname, pname)
 end
 
 WANATMF5LoopbackDiagnostics_.set = function(mapping, pname, pvalue, key)
-  local devtype, devname = wandevice.getDevtypeAndName(resolve_key(key))
-  if devtype == "ATM" then
-    return helper.set(devname, pname, pvalue, commitapply)
-  end
+  local _, devname = wandevice.getDevtypeAndName(resolve_key(key))
+  return helper.set(devname, pname, pvalue, commitapply)
 end
 
 WANATMF5LoopbackDiagnostics_.commit = helper.commit

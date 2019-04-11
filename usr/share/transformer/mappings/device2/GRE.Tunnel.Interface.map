@@ -91,7 +91,7 @@ do
   local uciHelper = mapper("ucihelper")
   local network = { config = "network" }
   local configChanged = false
-  
+
   function getUciValue(name, option, default, section_data)
     if section_data then
       return section_data[option] or default
@@ -109,19 +109,19 @@ do
     uciHelper.set_on_uci(network, value, commitapply)
     configChanged = true
   end
-  
+
   function getSection(name)
     network.sectionname = name
     return uciHelper.getall_from_uci(network) or {}
   end
-  
+
   function commit()
     if configChanged then
       uciHelper.commit(network)
     end
     configChanged = false
   end
-  
+
   function revert()
     if configChanged then
       uciHelper.revert(network)
@@ -201,6 +201,13 @@ local getter = {
   UseSequenceNumber = function(key, uci_section)
     return getUciValue(model:getUciKey(key), "oseqno", "0", uci_section)
   end,
+  X_0876FF_MSS = function(key, uci_section)
+    local mss = tonumber(getUciValue(model:getUciKey(key), "mtu", "1400", uci_section)) - 40
+    return tostring(mss)
+  end,
+  X_0876FF_LowerLayer = function(key)
+    return model:getLowerLayersResolved(key, resolve) or ""
+  end,
 }
 
 Device_GRE_Tunnel_i_Interface_i_.get = function(mapping, param, key)
@@ -228,6 +235,12 @@ Device_GRE_Tunnel_i_Interface_i_.set = {
   end,
   KeyIdentifier = function(mapping, param, value, key)
     setUciValue(model:getUciKey(key), "ikey", value)
+  end,
+  X_0876FF_MSS = function(mapping, param, value, key)
+    if value ~= "0" then
+      value = tostring(tonumber(value) + 40)
+      setUciValue(model:getUciKey(key), "mtu", value)
+    end
   end,
 }
 

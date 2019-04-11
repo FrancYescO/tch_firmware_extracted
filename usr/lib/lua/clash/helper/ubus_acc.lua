@@ -21,6 +21,8 @@ local allowed = {}
 --    `ubus list -v` lists each object's methods (get, reload, etc.),
 --    its output may be used to compile this list.
 allowed[ "hostmanager.device"           ] = { "get" }
+allowed[ "igmpproxy.interface"          ] = { "dump" }
+allowed[ "igmpproxy.stats"              ] = { "show" }
 allowed[ "mmdbd.calllog"                ] = { "list" }
 allowed[ "mmdbd.call.statistics"        ] = { "get", "reset" }
 allowed[ "mmpbx.call"                   ] = { "get" }
@@ -39,10 +41,12 @@ allowed[ "mobiled.sim"                  ] = { "get" }
 allowed[ "mobiled.sim.pin"              ] = { "unlock", "unblock", "change", "enable", "disable" }
 allowed[ "mobiled.sms"                  ] = { "get" }
 allowed[ "mobiled.platform"             ] = { "get", "capabilities" }
+allowed[ "network.neigh"                ] = { "cachedstatus" }
 allowed[ "wireless"                     ] = { "reload" }
 allowed[ "wireless.accesspoint.station" ] = { "get" }
 allowed[ "wireless.radio"               ] = { "get" }
 allowed[ "wireless.radio.acs"           ] = { "rescan" }
+allowed[ "dhcp"                         ] = { "ipv4leases", "ipv6leases" }
 
 return allowed
 

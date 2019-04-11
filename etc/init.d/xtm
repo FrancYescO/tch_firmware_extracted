@@ -6,9 +6,32 @@ START=18
 XTM_CFG_MAJOR=228
 DROP_POLICY_SUPPORT=$(xtmctl 2>&1 | grep addq | grep wred)
 
+#XTM_DEBUG=1
+
 app_cmd() {
-    #echo "app_cmd : xtmctl $@" 1>&2
-    xtmctl $@
+    [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] xtmctl $@" 1>&2
+    xtmctl "$@"
+}
+
+qos_cmd() {
+    [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] /usr/bin/qos -q $@" 1>&2
+    /usr/bin/qos -q "$@"
+}
+
+LIB_SETUPTM="setuptm"
+if lua -e "require('${LIB_SETUPTM}')" 2> /dev/null ; then
+  [ "${XTM_DEBUG}" = 1 ] && LIB_SETUPTM_DEBUG=true || LIB_SETUPTM_DEBUG=false
+  LIB_SETUPTM_INIT="local setuptm = require('${LIB_SETUPTM}') \
+                    setuptm.enable_logging(${LIB_SETUPTM_DEBUG}) \
+                    setuptm.enable_tmctl_logging(${LIB_SETUPTM_DEBUG})"
+fi
+
+setuptm_cmd() {
+  [ -n "${LIB_SETUPTM_INIT}" ] || return
+
+  [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] setuptm $@" 1>&2
+
+  lua -e "${LIB_SETUPTM_INIT} ; setuptm.$@"
 }
 
 find_tdte() { # tdname [index]
@@ -103,10 +126,10 @@ uci2tdte() { #  $1 = tdname $2 = servicecat   $3 = pcr    $4 = scr   $5 = mbs   
     [ "$#" -eq '6' ] || return 1
     local tdname=$1
     config_get servicecat "$tdname" servicecat
-    config_get pcr "$tdname" pcr
-    config_get scr "$tdname" scr
-    config_get mbs "$tdname" mbs
-    config_get mcr "$tdname" mcr
+    config_get pcr "$tdname" peak_cell_rate
+    config_get scr "$tdname" sustained_cell_rate
+    config_get mbs "$tdname" max_burst_size
+    config_get mcr "$tdname" min_cell_rate
     [ -n "$servicecat" ] || return 1
     eval "$2=$servicecat"
     eval "$3=$pcr"
@@ -201,8 +224,14 @@ get_deviceids () {
 # Retrieve all queue ids for a given ptm or atm device
 get_queueids() {
     local deviceid="$1"
+    local qid_offset
 
-    local qid_offset=`app_cmd operate conn --show | head -1 | sed 's/q_id.*//' | wc -c`
+    local xtm_version=`app_cmd 2>&1 | tail -c 4`
+    if echo "$xtm_version 2.3" | awk '{exit !($1 > $2)}'; then
+        qid_offset=`app_cmd operate conn --show | head -1 | sed 's/qId.*//' | wc -c`
+    else
+        qid_offset=`app_cmd operate conn --show | head -1 | sed 's/q_id.*//' | wc -c`
+    fi
     local ids=`app_cmd operate conn --show $deviceid | tail -n+2 | cut -b ${qid_offset}- | cut -d' ' -f 1`
 
     eval $2='$ids'
@@ -240,10 +269,39 @@ add_queue() {
 }
 
 # Configures QoS queues for an ATM or PTM device
-_device_set_qos() {
-    local deviceid="$1"
-    local classgroup="$2"
-    local mode="$3"
+configure_qos_dev() {
+    local interface="$1"
+    local deviceid="$2"
+    local devname="$3"
+    local mode="$4"
+
+    # Check if QoS for device is already configured (should never be the case)
+    [ -z "$(uci_get_state xtm "${devname}" QoS_classgroup)" ] || return
+
+    if [ -z "${interface}" ]; then
+        # Check if QoS config for device is present
+        config_get qos_device "${devname}" TYPE
+        [ "${qos_device}" = "device" ] || return 1
+        # Check if QoS config for device should be enabled
+        config_get_bool qos_enable "${devname}" enable 1
+        if [ "${qos_enable}" != "1" ]; then
+            uci_set_state xtm "${devname}" QoS_classgroup disabled # Keep status info for debug
+            return
+        fi
+    else
+        # Check whether this interface matches xtm device
+        network_get_physdev intf_dev "${interface}"
+        # strip vlan if present
+        intf_dev="$(echo "${intf_dev}" | sed -r 's/\.[0-9]+$//' | sed -r 's/\_v[0-9]+$//')"
+        [ "${intf_dev}" = "${devname}" ] || return
+
+        # Check if QoS config for interface is enabled and requires device QoS
+        config_get_bool qos_enable "${interface}" enabled 1
+        [ "${qos_enable}" = "1" ] || return
+    fi
+
+    config_get classgroup "${interface:-${devname}}" classgroup
+    [ -n "${classgroup}" ] || return
 
     config_get classes "$classgroup" classes
     [ -n "$classes" ] || return
@@ -263,9 +321,9 @@ _device_set_qos() {
         fi
         if [ "$mode" = "ptm" ]
         then
-            config_get mbr "${class}" mbr 0
-            config_get pbr "${class}" pbr 0
-            config_get mbs "${class}" mbs 0
+            config_get mbr "${class}" min_bit_rate 0
+            config_get pbr "${class}" max_bit_rate 0
+            config_get mbs "${class}" max_burst_size 0
             add_queue "${deviceid}" "${priority}" "${weight}" "${policy}" "${mbr}" "${pbr}" "${mbs}"
         else
             add_queue "${deviceid}" "${priority}" "${weight}" "${policy}"
@@ -273,44 +331,7 @@ _device_set_qos() {
     done
 
     # Prevent configuring this device multiple times
-    uci_set_state xtm state "${devname}_qos" enabled
-}
-
-configure_qos_dev() {
-    local interface="$1"
-    local deviceid="$2"
-    local devname="$3"
-    local mode="$4"
-
-    # Check if QoS for device is already configured (should never be the case)
-    [ -z "$(uci_get_state xtm state "${devname}_qos")" ] || return
-
-    if [ -z "${interface}" ]; then
-        # Check if QoS config for device is present
-        config_get qos_device "${devname}" TYPE
-        [ "${qos_device}" = "device" ] || return 1
-        # Check if QoS config for device should be enabled
-        config_get_bool qos_enable "${devname}" enable 1
-        if [ "${qos_enable}" != "1" ]; then
-            uci_set_state xtm state "${devname}_qos" disabled # Keep status info for debug
-            return
-        fi
-    else
-        # Check whether this interface matches xtm device
-        network_get_physdev intf_dev "${interface}"
-        # strip vlan if present
-        intf_dev="$(echo "${intf_dev}" | sed -r 's/\.[0-9]+$//' | sed -r 's/\_v[0-9]+$//')"
-        [ "${intf_dev}" = "${devname}" ] || return
-
-        # Check if QoS config for interface is enabled and requires device QoS
-        config_get_bool qos_enable "${interface}" enabled 1
-        [ "${qos_enable}" = "1" ] || return
-    fi
-
-    config_get classgroup "${interface:-${devname}}" classgroup
-    [ -n "${classgroup}" ] || return
-
-    _device_set_qos "${deviceid}" "${classgroup}" "${mode}"
+    uci_set_state xtm "${devname}" QoS_classgroup "${classgroup}"
 }
 
 # Configures queues for an ATM or PTM device
@@ -330,8 +351,9 @@ configure_queues() {
     # Restore loaded UCI config for XTM
     config_load xtm
 
-    # Check if QoS is configured for this device
-    [ "$(uci_get_state xtm state "${devname}_qos")" = "enabled" ] && return
+    # Check if QoS is configured for this device, else clear QoS state
+    [ "$(uci_get_state xtm "${devname}" QoS_classgroup disabled)" = "disabled" ] || return
+    uci_revert_state xtm "${devname}" QoS_classgroup
 
     # Create default queue, id 0
     if [ "$mode" = "ptm" ]
@@ -391,6 +413,7 @@ atm_start() {
     then
         echo "WARNING: Interface $devname was not created. Check your uci configuration."
     fi
+    qos_cmd device $devname
 }
 
 ptm_start() {
@@ -412,15 +435,16 @@ ptm_start() {
     then
         echo "WARNING: Interface $devname was not created. Check your uci configuration."
     fi
+    qos_cmd device $devname
 }
 
 xtm_configure_start() {
-    uci_set_state xtm state "" state
-
     config_load xtm
     config_foreach add_tdte trafficdesc
     config_foreach ptm_start ptmdevice start
     config_foreach atm_start atmdevice start
+
+    setuptm_cmd "reload('xtm')"
 }
 
 xtm_configure_stop() {
@@ -438,32 +462,56 @@ xtm_configure_stop() {
     done
     flush_tdte
 
-    uci_revert_state xtm state
+    uci_revert_state xtm
 }
 
 start() {
+    lock /var/lock/xtm.lock
+    if [ "$(uci_get_state xtm state status stopped)" = "started" ]; then
+       lock -u /var/lock/xtm.lock
+       return
+    fi
+
     if [ ! -c /dev/bcmxtmcfg0 ]; then
         mknod /dev/bcmxtmcfg0 c $XTM_CFG_MAJOR 0
     fi
 
-    if [ -e "/usr/bin/xdslctl1" ]; then
-      app_cmd start --bondingenable
+    if $(xdslctl info | grep -q "Showtime") || ([ -e "/usr/bin/xdslctl1" ] && $(xdslctl1 info | grep -q "Showtime")); then
+        xtm_configure_start
+        uci_revert_state xtm state status
+        uci_set_state xtm state status started
     else
-      app_cmd start
+        if [ -e "/usr/bin/xdslctl1" ]; then
+          app_cmd start --bondingenable
+        else
+          app_cmd start
+        fi
+
+        # Avoid starting multiple times as this adds additional queues.
+        app_cmd operate conn --show | grep enabled >/dev/null && exit
+
+        #enable the two ports and keep them enabled (like Broadcom does)
+        for portid in 1 2
+        do
+            app_cmd operate intf --state "$portid" enable
+        done
+        uci_set_state xtm state '' state
     fi
 
-    # Avoid starting multiple times as this adds additional queues.
-    app_cmd operate conn --show | grep enabled >/dev/null && exit
-
-    xtm_configure_start
-
-    #enable the two ports and keep them enabled (like Broadcom does)
-    for portid in 1 2
-    do
-        app_cmd operate intf --state "$portid" enable
-    done
+    lock -u /var/lock/xtm.lock
 }
 
 stop() {
+    lock /var/lock/xtm.lock
+    if [ "$(uci_get_state xtm state status stopped)" = "stopped" ]; then
+       lock -u /var/lock/xtm.lock
+       return
+    fi
+
     xtm_configure_stop
+    # xtm.state is deleted in xtm_configure_stop
+    uci_set_state xtm state '' state
+    uci_set_state xtm state status stopped
+
+    lock -u /var/lock/xtm.lock
 }
