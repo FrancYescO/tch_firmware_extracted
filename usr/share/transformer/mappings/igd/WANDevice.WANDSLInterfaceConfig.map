@@ -185,6 +185,7 @@ local InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_ = {
           "17a",
           "17b",
           "30a",
+          "35b",
           "",
         },
       },
@@ -597,7 +598,7 @@ local get_from_uci = ucihelper.get_from_uci
 local set_on_uci = ucihelper.set_on_uci
 local commit = ucihelper.commit
 local revert = ucihelper.revert
-
+local xdslBinding = {config = "xdsl"}
 local transactions = {}
 
 local empty_mt = { __index = function() return "" end }
@@ -728,6 +729,21 @@ local function getDSLStats(key, option)
   return "0"
 end
 
+local function getAllowedProfiles(profiles, key)
+  if profiles and profiles ~= "" then
+    local _, device = getDevtypeAndName(key)
+    xdslBinding.sectionname = device
+    xdslBinding.option = "profile"
+    local dslprofiles = ucihelper.get_from_uci(xdslBinding)
+    for _, v in ipairs(dslprofiles) do
+      if match(v, "BrcmPriv1") then
+        profiles = profiles .. ",35b"
+        break
+      end
+    end
+  end
+  return profiles or ""
+end
 
 local function getShapingRate(key)
     local _, devname = getDevtypeAndName(key)
@@ -785,7 +801,8 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.get = {
     return standards:gsub("T1_413", "T1.413")
   end,
   AllowedProfiles = function(mapping, param, key)
-    return xdslctl.infoValue("AllowedProfiles")
+    local profiles = xdslctl.infoValue("AllowedProfiles")
+    return getAllowedProfiles(profiles, key)
   end,
   CurrentProfile = function(mapping, param, key)
     local profile = xdslctl.infoValue("vdsl2profile")
@@ -1025,7 +1042,19 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.getall = function(mappi
   allvalues.X_0876FF_StandardSelected = mode or ""
   allvalues.PowerManagementState = xdslinfovalues["linkpowerstate"] or ""
   allvalues.StandardUsed = standards:gsub("T1_413", "T1.413") or ""
+  allvalues.LinkEncapsulationSupported = xdslinfovalues["LinkEncapsulationSupported"] or ""
+  allvalues.LinkEncapsulationRequested = xdslinfovalues["LinkEncapsulationRequested"] or ""
+  allvalues.LinkEncapsulationUsed = xdslinfovalues["LinkEncapsulationUsed"] or ""
   allvalues.StandardsSupported = standard:gsub("T1_413", "T1.413") or ""
+  allvalues.AllowedProfiles = getAllowedProfiles(xdslinfovalues["AllowedProfiles"], key) or ""
+  allvalues.CurrentProfile = xdslinfovalues["vdsl2profile"] ~= "N.A." and xdslinfovalues["vdsl2profile"] or ""
+  allvalues.UPBOKLE = xdslinfovalues["UPBOKLE"] or ""
+  allvalues.ActualInterleavingDelay = xdslinfovalues["ActualInterleavingDelay"] or ""
+  allvalues.ACTINP = xdslinfovalues["ACTINP"] or ""
+  allvalues.TRELLISds = xdslinfovalues["trellis"]["ds"] or ""
+  allvalues.TRELLISus = xdslinfovalues["trellis"]["us"] or ""
+  allvalues.SNRMpbus = xdslinfovalues["SNRMpb"]["us"] or ""
+  allvalues.SNRMpbds = xdslinfovalues["SNRMpb"]["ds"] or ""
   allvalues.LineEncoding = "DMT"
   allvalues.DataPath = "None"
   allvalues.InterleaveDepth="0"
@@ -1069,6 +1098,9 @@ InternetGatewayDevice_WANDevice_i_WANDSLInterfaceConfig_.getall = function(mappi
     end
   end
   allvalues.LineNumber = phonelinepairmapping[xdslctl.profileValue("phonelinepair")] or "0"
+  allvalues.X_0876FF_ProfileSelected = xdslinfovalues["vdsl2profile"] ~= "N.A." and xdslinfovalues["vdsl2profile"] or ""
+  allvalues.UpstreamAttenuation = times10(xdslinfovalues["attn"]["us"] or "0")
+  allvalues.DownstreamAttenuation = times10(xdslinfovalues["attn"]["ds"] or "0")
   allvalues.UpstreamCurrRate = xdslinfovalues["currentrate"]["us"] or "0"
   allvalues.DownstreamCurrRate = xdslinfovalues["currentrate"]["ds"] or "0"
   allvalues.UpstreamMaxRate = xdslinfovalues["maxrate"]["us"] or "0"

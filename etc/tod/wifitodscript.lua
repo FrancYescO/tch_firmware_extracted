@@ -135,15 +135,18 @@ local function execute_operation(operation, ap_name, ap_section, action_name, is
                 if value_in_wireless ~= value_to_operate then
                     logger:debug("values differ between wireless and to_operate: " .. value_in_wireless .. " and " .. value_to_operate)
                     cursor:set("wireless", ap_name, option, value_to_operate)
-					if option == "state" then
-						local radio_name = "radio_2G"
-						local wl_name = cursor:get("wireless", ap_name, "iface")
-						if string.match(wl_name, "wl1") then
-							radio_name = "radio_5G"
-						end
-						cursor:set("wireless", wl_name, option, value_to_operate)
-						cursor:set("wireless", radio_name, option, value_to_operate)
-					end
+                    if option == "state" then
+                      local radio_name = "radio_2G"
+                      local wl_name = cursor:get("wireless", ap_name, "iface")
+                      if string.match(wl_name, "wl1") then
+                        radio_name = "radio_5G"
+                      end
+                      cursor:set("wireless", wl_name, option, value_to_operate)
+                      cursor:set("wireless", radio_name, option, value_to_operate)
+                      if (ap_name == "ap0" or ap_name == "ap1") and value_to_operate == "0" then
+                        cursor:set("wireless", ap_name, "bandsteer_id", "off")
+                      end
+                end
                     need_to_reload = true
                 else
                     logger:debug("values are the same between wireless and to_operate: " .. value_in_wireless)

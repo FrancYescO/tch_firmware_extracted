@@ -30,6 +30,19 @@ Mapper.__index = Mapper
 function Mapper:configure_device(device, config)
 	-- Enable network registration and location information unsolicited Result code: +CEREG: <n>,<stat>[,<tac>,<rac_mme>,<ci>,<AcT>]
 	device:send_singleline_command("AT+CEREG=2", "+CEREG:")
+
+	-- Set the network selection mode.
+	local selected_radio = config.network.radio_pref[1] or {}
+	local mode = 2
+	if selected_radio.type == "gsm" then
+		mode = 3
+	elseif selected_radio.type == "umts" then
+		mode = 1
+	elseif selected_radio.type == "lte" then
+		mode = 5
+	end
+	device:send_command(string.format("AT+BMMOBAPREF=%d,0", mode))
+
 	return true
 end
 

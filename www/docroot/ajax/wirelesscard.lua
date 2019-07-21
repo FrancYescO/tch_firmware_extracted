@@ -5,11 +5,11 @@ local format, match, ngx = string.format, string.match, ngx
 local frequency = {}
 local json = require("dkjson")
 local wirelessSSID_helper = require("wirelessSSID_helper")
+local qtnMac = { mac = "uci.env.var.qtn_eth_mac" }
+content_helper.getExactContent(qtnMac)
 
 if ngx.req.get_uri_args().auto_update == "true" then
   local ssid_list = wirelessSSID_helper.getSSID()
-  local qtnMac = { mac = "uci.env.var.qtn_eth_mac" }
-  qtnAvail = content_helper.getExactContent(qtnMac)
   if qtnMac.mac ~= "" then
     ssidStatus = 0
     local device = "sys.proc.net.arp."
@@ -26,20 +26,11 @@ if ngx.req.get_uri_args().auto_update == "true" then
       local render = {}
       for i,v in pairs(ssid_list) do
         if i <= 4 then
-          status = "light off"
-          if(v.state == "1") then
-            status = "light green"
+          status = (v.state == "1") and "light green" or "light off"
+          if ssidStatus == 0 then
+            render[i] = {listatus = "light orange"}
           else
-            status = "light off"
-          end
-          render[i] = {listatus = status, ssid = v.ssid, radio = v.radio}
-          if(ssidStatus == 0) then
-            status = "light orange"
-            if render ~= '' then
-              render[i+1] = {listatus = status}
-            else
-              render[i] = {listatus = status}
-            end
+            render[i] = {listatus = status, ssid = v.ssid, radio = v.radio}
           end
         end
       end

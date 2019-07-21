@@ -11,6 +11,9 @@ local proxy = require("datamodel")
 local assistance = require("web.assistance")
 local assistant = assistance.getAssistant('remote')
 local message_helper = require("web.uimessage_helper")
+local currentuser = session:getrole()
+local json = require("dkjson")
+
 local cui = {
     nsplink = "uci.web.uiconfig.@uidefault.nsplink",
     advanced = "uci.web.uiconfig.@uidefault.alwaysadvanced",
@@ -71,6 +74,13 @@ function subtract2Minutes(myString)
     time_split_get = time_get[1] ..":".. time_get[2]..":"..time_get[3]
   end
   return time_split_get
+end
+
+if ngx.var.request_method == "GET" and ngx.req.get_uri_args().getSessionStatus == "true" then
+  ngx.header.content_type = "application/json"
+  local role = session:getrole()
+  ngx.print(json.encode({current_role = role}))
+  ngx.exit(ngx.OK)
 end
 
 if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "scheduleReboot" then
@@ -203,6 +213,7 @@ message_helper.popMessages()
 </body>\
 </html>\
 <script>\
+var current_role = \'');  ngx.print(currentuser); ngx.print('\';\
 var processMsg=\'');  ngx.print(T"Processing"); ngx.print('\';\
 var openMsg = \'');  ngx.print(T"Loading..."); ngx.print('\';\
 var waitMsg = \'');  ngx.print(T"Please wait..."); ngx.print('\';\
@@ -210,6 +221,11 @@ var loginMsg =\'');  ngx.print(T"Login Expired. Reloading."); ngx.print('\';\
 var okButton = \'');  ngx.print(T"Ok"); ngx.print('\';\
 var cancelButton = \'');  ngx.print(T"Cancel"); ngx.print('\';\
 var poperrorMsg = \'');  ngx.print(T"Same site cannot be added for multiple times"); ngx.print('\';\
+\
+if(window.sessionStorage.getItem("current_role") == null && current_role != "guest"){\
+  window.sessionStorage.setItem("current_role", current_role);\
+}\
+\
 function httpErrorMessage(err){\
     switch(err.status){\
         case 500:\

@@ -88,8 +88,8 @@ function Session:retrieve(key)
   return self.storage[key]
 end
 
-local function generateNewIdentity(session)
-  session.sessionid = generateRandom()
+local function generateNewIdentity(session, sessionID_req)
+  session.sessionid = sessionID_req or generateRandom()
   session.CSRFtoken = generateRandom()
 end
 
@@ -295,7 +295,7 @@ local function createProxy(session)
     return session:delUserFromManager(instancename)
   end
   local reloadAllUsers = function()
-      return session:reloadAllUsers()
+    return session:reloadAllUsers()
   end
   local changePassword = function(_, salt, verifier, cryptedpassword)
     return session:changePassword(salt, verifier, cryptedpassword)
@@ -336,9 +336,10 @@ local M = {}
 --    This is a table with the field 'server' and 'remote'.
 --    This should not change during a session.
 -- @param mgr        The session manager that creates the new session.
+-- @param sessionID_req a sessionID to use
 -- @return A new session is returned that is initiated with the default
 --         user and role.
-function M.new(sessionAddress, mgr)
+function M.new(sessionAddress, mgr, sessionID_req)
   local default_user = mgr.default_user
   ngx.log(ngx.WARN, "new session for ", default_user and default_user.name or "default user")
   local session = {
@@ -349,7 +350,7 @@ function M.new(sessionAddress, mgr)
     timestamp = clock_gettime(CLOCK_MONOTONIC),
     storage = {},
   }
-  generateNewIdentity(session)
+  generateNewIdentity(session, sessionID_req)
   setmetatable(session, Session)
   session.proxy = createProxy(session)
   return session

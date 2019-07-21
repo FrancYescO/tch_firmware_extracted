@@ -149,17 +149,6 @@ if dlna_available or samba_available then
 	content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
 end
 
-if ngx.var.request_method == "POST" and ngx.req.get_post_args().action == "SAVE" then
-  if ngx.req.get_post_args().cs_flag == "1"  then
-    ngx.header.content_type = "application/json"
-    ngx.print('{ "success":"true" }')
-    ngx.timer.at(0, function()
-      proxy.apply()
-    end)
-    ngx.exit(ngx.HTTP_OK)
-  end
-end
-
 -- usb Devices
 
 local usbdev_columms = {
@@ -531,6 +520,9 @@ $(document).on("click", "#save-config", function() {\
     $("#warning-msg").addClass("hide");\
     $("#reboot-warning-msg").addClass("hide");\
     $("#success-msg").addClass("hide");\
+    $("#modal-no-change").hide();\
+    $("#modal-changes").show();\
+    $("#popUp, .popUpBG").remove();\
     tch.showProgress("');  ngx.print(T'Rebooting...'); ngx.print('");\
   }\
   else {\
