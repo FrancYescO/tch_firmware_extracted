@@ -268,6 +268,25 @@ $("[name =\'devices_mac\']").change(function () {\
           $(this).replaceWith($(\'<input/>\',{\'type\':\'text\', \'id\':\'devices_mac\', \'name\':\'devices_mac\'}));\
     }\
 });\
+\
+function sitesEnabled() {\
+  if ($("#sites_enabled").val() == 0) {\
+    $(\'#URLfilter\').hide();\
+    $("[id=\'Add New Site\']").hide();\
+  } else {\
+    $(\'#URLfilter\').show();\
+    $("[id=\'Add New Site\']").show();\
+  }\
+}\
+\
+$(\'.switch\').change(function(){\
+  if ($("#sites_enabled").val() == 0) {\
+    sitesEnabled();\
+  }\
+});\
+\
+sitesEnabled();\
+\
 $("[name =\'device\']").change(function () {\
     if($("#device").val() == "all"){\
         $("[name =\'devices_mac\']").replaceWith($(\'<input/>\',{\'type\':\'text\', \'id\':\'devices_mac\', \'name\':\'devices_mac\'}));\

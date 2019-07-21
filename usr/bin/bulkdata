@@ -26,7 +26,6 @@ local tonumber = tonumber
 local time = os.time
 local date = os.date
 local open = io.open
-
 -- for content saving and transferring
 local path_retain = "/etc/bulkdata"
 local max_retain_failed_reports = 10
@@ -257,6 +256,8 @@ local function get_encoding_name(names, nameid, ids, param)
   for k,v in ipairs(ids) do
     if v:match("^%d+$") then
       insert(indexs, v)
+    elseif v:match("%.") then
+      insert(indexs,match(v,"(%w+)%.%w+"))
     end
   end
   if #indexs > 0 and indexs[1]:match("^%d+$") then
@@ -309,6 +310,8 @@ local function json_encode_content(profile)
         --save all references for checking
         if reference:sub(-1, -1) == "." then
           local part = gsub(reference, "%*", "([%%w_]+)")
+          part = gsub(part, "%.", "%%.")
+          part = part .. "*([%w_%.]*)"
           partial_pathset[#partial_pathset+1] = part
           names[part] = name
         else
@@ -350,8 +353,8 @@ local function json_encode_content(profile)
     end
     -- deal with partial path
     if not matched and #partial_pathset > 0 then
+      local temp_path  = format("%s%s", param.path, param.param)
       for _,p in ipairs(partial_pathset) do
-        local temp_path  = format("%s%s", param.path, param.param)
         local ids = { match(temp_path, p) }
         local ignore = false
         if #ids > 0 then

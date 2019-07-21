@@ -135,7 +135,7 @@ local outgoing_map_data, outgoing_map_allowed_indexes = content_helper.loadTable
 --POST for incoming & outgoing maps
 if ngx.req.get_method() == "POST" then
     local success = false
-    local post_args = ngx.req.get_post_args()
+    local post_args = ngx.req.get_post_args(1000)
 
     local vB = post_helper.validateBoolean
     local incoming_outgoing_map_valid = {}

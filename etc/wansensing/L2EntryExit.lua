@@ -30,6 +30,9 @@ function M.exit(runtime, l2type)
         logger:notice("State of SFP value "..l2type..isSFP)
         x:set("ethernet", "globals", "eth4lanwanmode", "1")
         x:commit("ethernet")
+        x:set("qos", "eth3", "classgroup", "TO_LAN")
+        x:commit("qos")
+        os.execute("/etc/init.d/qos reload")
         os.execute("/etc/init.d/ethernet reload")
       end
    end

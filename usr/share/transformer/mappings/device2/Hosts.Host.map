@@ -104,11 +104,13 @@ local function getLeaseTime(addr,hostData)
   local leaseTime = 0
   if addr.configuration == "dynamic" then
     local hostDetails = dhcp.getDhcpInfo(hostData["mac-address"])
-    if hostDetails.leasetime then
-      leaseTime = os.difftime(tonumber(hostDetails.leasetime), os.time())
-      if leaseTime < 0 then
-        leaseTime = 0
-      end
+    if hostDetails.leasetime and hostDetails.leasetime ~= 0 then
+      local remaining = hostDetails.leasetime or 0
+      local connected = hostData.connected_time or 0
+      local nRenew = math.ceil((os.time() - connected)/remaining) + 1
+      leaseTime = (connected + nRenew * remaining) - os.time()
+    elseif hostDetails.leasetime == 0 then
+      leaseTime = -1
     end
   end
   return tostring(leaseTime)
@@ -167,6 +169,23 @@ local function getLayer1Interface(ifName)
   return resolve("Device.WiFi.Radio.{i}.", wirelessDevice) or ""
 end
 
+-- Extender's MAC Address may differ in 'hostmanager.device' and 'wireless.accesspoint.station'
+local function modifyMAC(mac)
+  local firstOctets, lastOctet = mac:match("([%x%x%:]+)(%x%x)$")
+  if not firstOctets and not lastOctet then
+    firstOctets = (tonumber(mac, 16) - 1)
+    firstOctets = string.format("%02x", tonumber(firstOctets))
+    return firstOctets
+  else
+    lastOctet = (tonumber(lastOctet, 16) - 1) % 256
+    if lastOctet == 255 then
+      firstOctets = modifyMAC(string.sub(firstOctets, 1, #firstOctets - 1)).. ":"
+    end
+    lastOctet = string.format("%02x", tonumber(lastOctet))
+  end
+  return tostring(firstOctets .. lastOctet)
+end
+
 -- Function Description: To find the AP associated to a specific macaddr.
 -- Input  : macaddr <MAC Address of the connected device>
 -- Output : return AP or "" <AP to which the device is currently Associated>
@@ -175,15 +194,14 @@ local function getAP(macaddr)
   if macaddr then
     local data = conn:call("wireless.accesspoint.station", "get", { }) or {}
     for ap, mactable in pairs(data) do
-      mactable = mactable or {}
       for mac,sta in pairs(mactable) do
-        if mac == macaddr and sta.state and sta.state:match("Associated") then
-          return ap
+        if mac == macaddr or modifyMAC(mac) == macaddr and sta.state and sta.state:match("Associated") then
+          return ap, mac
         end
       end
     end
   end
-  return ""
+  return "", macaddr
 end
 
 local function getFriendlyName(hostData)
@@ -213,7 +231,7 @@ Device_Hosts_Host_i_.get = {
   end,
 
   AssociatedDevice = function(mapping,param,key)
-    local ap = getAP(key)
+    local ap, key = getAP(key)
     return (resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' , ap .. "|" .. key) or "")
   end,
 
@@ -257,14 +275,14 @@ Device_Hosts_Host_i_.get = {
 Device_Hosts_Host_i_.getall = function(mapping,key)
   local hostData, dev = network.getHostDataByMAC(key)
   local macAddress = key or ""
-  local ap = getAP(macAddress)
+  local ap, mac = getAP(macAddress)
   local addr = getPrimaryAddress(hostData)
   local friendlyName = getFriendlyName(hostData)
   return {
     Active = hostData.state == "connected" and "1" or "0",
     PhysAddress = macAddress,
     IPAddress = addr.address or "",
-    AssociatedDevice = resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' ,ap .. "|" .. macAddress) or "",
+    AssociatedDevice = resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' ,ap .. "|" .. mac) or "",
     HostName = hostData.hostname or "unknown-" .. macAddress,
     DHCPClient = resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..dev) or "",
     LeaseTimeRemaining = getLeaseTime(addr,hostData),

@@ -1,5 +1,6 @@
 local mapper = mapper
 local config_dhcp = "dhcp"
+local commitapply = commitapply
 
 -- uci.dhcp
 mapper("uci_1to1").registerConfigMap(config_dhcp)
@@ -14,7 +15,7 @@ local dhcp_dnsmasq = {
         "domainneeded", "ednspacket_max", "enable_tftp", "expandhosts", "filterwin2k", "fqdn",
         "leasefile", "local", "localise_queries", "logqueries", "nodaemon", "nohosts", "nonegcache", "noresolv",
         "nonwildcard", "port", "queryport", "readethers", "resolvfile", "strictorder",
-        "tftp_root", "rebind_protection", "rebind_localhost", "disabled", "addmac"
+        "tftp_root", "rebind_protection", "rebind_localhost", "disabled"
     },
     lists = {
         "addnhosts", "bogusnxdomain", "interface", "notinterface", "server","rebind_domain", "hostname"
@@ -22,6 +23,49 @@ local dhcp_dnsmasq = {
 }
 
 mapper("uci_1to1").registerNamedMultiMap(dhcp_dnsmasq)
+
+-- uci.dhcp.dnsmasq
+local uci_helper = mapper("ucihelper")
+local binding = { config = "dhcp" , sectionname = "dnsmasq" }
+local dns_addmac_ = {
+  objectType = {
+    name = "uci.dhcp.ednsOption.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      addMAC = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "1",
+          "0",
+          "text"
+        }
+      },
+    }
+  }
+}
+
+dns_addmac_.get = function(mapping, param, key)
+  binding.option = "addmac"
+  return uci_helper.get_from_uci(binding)
+end
+
+dns_addmac_.set = function(mapping, param, value, key)
+    binding.option = "addmac"
+    uci_helper.set_on_uci(binding,value)
+    binding.option = "cachesize"
+    if value == "1" or value == "text"  then
+        uci_helper.set_on_uci(binding, "0", commitapply)
+    elseif value == "0" then
+        uci_helper.set_on_uci(binding, "", commitapply)
+    end
+    uci_helper.commit(binding)
+end
+
+register(dns_addmac_)
+
 
 -- uci.dhcp.dhcp.{i}
 local dhcp_dhcp = {

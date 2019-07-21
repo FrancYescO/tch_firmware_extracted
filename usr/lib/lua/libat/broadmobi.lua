@@ -61,74 +61,76 @@ function Mapper:get_radio_signal_info(device, info)
 	-- The values returned by this command often seem wrong or incomplete.
 	-- Therefore they are only used if a value was not retrieved using
 	-- another command.
-	for _, cell_info in pairs(device:send_multiline_command("AT+BMTCELLINFO", "") or {}) do
-		local key, value = cell_info:match("^%s*(.-)%s*:%s*(.-)%s*$")
-		if key then
-			-- Sanitise the key by only keeping letters and digits as the module seems to be
-			-- inconsistent about the inclusion of underscores and spaces in the key names.
-			key = key:gsub("[^%w]", ""):lower()
+	for _, line in pairs(device:send_multiline_command("AT+BMTCELLINFO", "") or {}) do
+		for entry in line:gsub("^%+BMTCELLINFO:", ""):gmatch("[^,]+") do
+			local key, value = entry:match("^%s*(.-)%s*:%s*(.-)%s*$")
+			if key then
+				-- Sanitise the key by only keeping letters and digits as the module seems to be
+				-- inconsistent about the inclusion of underscores and spaces in the key names.
+				key = key:gsub("[^%w]", ""):lower()
 
-			if key == "cellid" then
-				if not info.cell_id then
-					local cell_id = tonumber(value)
-					if cell_id ~= 0 then
-						info.cell_id = cell_id
+				if key == "cellid" then
+					if not info.cell_id then
+						local cell_id = tonumber(value)
+						if cell_id ~= 0 then
+							info.cell_id = cell_id
+						end
 					end
-				end
-			elseif key == "pci" then
-				if not info.phy_cell_id then
-					local phy_cell_id = tonumber(value)
-					if phy_cell_id ~= 0 then
-						info.phy_cell_id = phy_cell_id
+				elseif key == "pci" then
+					if not info.phy_cell_id then
+						local phy_cell_id = tonumber(value)
+						if phy_cell_id ~= 0 then
+							info.phy_cell_id = phy_cell_id
+						end
 					end
-				end
-			elseif key == "lacid" then
-				-- Ignore
-			elseif key == "rssi" then
-				if not info.rssi then
-					info.rssi = tonumber(value)
-				end
-			elseif key == "rsrp" then
-				if not info.rsrp then
-					info.rsrp = tonumber(value)
-				end
-			elseif key == "rsrq" then
-				if not info.rsrq then
-					info.rsrq = tonumber(value)
-				end
-			elseif key == "sinr" then
-				if not info.sinr then
-					info.sinr = tonumber(value)
-				end
-			elseif key == "activeband" then
-				if not info.lte_band then
-					local lte_band = tonumber(value)
-					if lte_band ~= 0 then
-						info.lte_band = lte_band
+				elseif key == "lacid" then
+					-- Ignore
+				elseif key == "rssi" then
+					if not info.rssi then
+						info.rssi = tonumber(value)
 					end
-				end
-			elseif key == "activechannel" then
-				-- Ignore
-			elseif key == "earfcndl" or key == "earfcn" then
-				if not info.dl_earfcn then
-					local dl_earfcn = tonumber(value)
-					if dl_earfcn ~= 0 and dl_earfcn ~= 65535 then
-						info.dl_earfcn = dl_earfcn
+				elseif key == "rsrp" then
+					if not info.rsrp then
+						info.rsrp = tonumber(value)
 					end
-				end
-			elseif key == "earfcnul" then
-				if not info.ul_earfcn then
-					local ul_earfcn = tonumber(value)
-					if ul_earfcn ~= 0 and ul_earfcn ~= 65535 then
-						info.ul_earfcn = ul_earfcn
+				elseif key == "rsrq" then
+					if not info.rsrq then
+						info.rsrq = tonumber(value)
 					end
+				elseif key == "sinr" then
+					if not info.sinr then
+						info.sinr = tonumber(value)
+					end
+				elseif key == "activeband" or key == "actvieband" then
+					if not info.lte_band then
+						local lte_band = tonumber(value)
+						if lte_band ~= 0 then
+							info.lte_band = lte_band
+						end
+					end
+				elseif key == "activechannel" then
+					-- Ignore
+				elseif key == "earfcndl" or key == "earfcn" then
+					if not info.dl_earfcn then
+						local dl_earfcn = tonumber(value)
+						if dl_earfcn ~= 0 and dl_earfcn ~= 65535 then
+							info.dl_earfcn = dl_earfcn
+						end
+					end
+				elseif key == "earfcnul" then
+					if not info.ul_earfcn then
+						local ul_earfcn = tonumber(value)
+						if ul_earfcn ~= 0 and ul_earfcn ~= 65535 then
+							info.ul_earfcn = ul_earfcn
+						end
+					end
+				elseif key == "enodebid" then
+					-- Ignore
+				elseif key == "tac" then
+					-- Ignore
+				elseif key == "rrcstatus" then
+					-- Ignore
 				end
-			elseif key == "enodebid" then
-				-- Ignore
-			elseif key == "tac" then
-				-- Ignore
-			elseif key == "rrcstatus" then
-				-- Ignore
 			end
 		end
 	end

@@ -47,13 +47,15 @@ end  ngx.print('\
             $(".wifi-card strong").attr("style", "margin-left:26px;font-size:30px;").html("...");\
             clearInterval(refreshTimer);\
           }\
-          for (i = 0; i <=3 ; i++) {\
-            var status_light =  ((data[i].listatus == "light green" || data[i].listatus == "light off")) ? "<strong>"+data[i].ssid+"</strong>" : "<strong>Fetching 5GHz SSID </strong><br>Please wait";\
-            $("wificard_"+(i+1)).html("<div class=\'" + data[i].listatus + "\'></div><p class = \'wifi-card\'>"+status_light+"</p>");\
+          else {\
+            for (i = 0; i < data.length ; i++) {\
+              var status_light =  ((data[i].listatus == "light green" || data[i].listatus == "light off")) ? "<strong>"+data[i].ssid+"</strong>" : "<strong>Fetching 5GHz SSID </strong><br>Please wait";\
+              $("wificard_"+(i+1)).html("<div class=\'" + data[i].listatus + "\'></div><p class = \'wifi-card\'>"+status_light+"</p>");\
               clearInterval(refreshTimer);\
             }\
           }\
-         else {\
+        }\
+        else {\
           clearInterval(refreshTimer);\
         }\
       }, "json");\

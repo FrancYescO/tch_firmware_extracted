@@ -82,6 +82,23 @@ local isIntRemman = "0" -- Quantenna
 
 local stbLimit = false
 
+--Section to flush the tod config
+--When timer data is not defined in action section of tod config, then corresponding action, wifitod, and ap section will be deleted
+
+local tod_action_path = "uci.tod.action."
+local action_list = content_helper.convertResultToObject(tod_action_path, proxy.get(tod_action_path))
+
+for  _ , v in ipairs(action_list) do
+  if v["timers.@1.value"] == "" then
+    local param_index = v["paramindex"]:match("action(.+)")
+    if param_index then
+      proxy.del(format("uci.tod.action.@action%s.", param_index))
+      proxy.del(format("uci.tod.ap.@ap%s.", param_index))
+      proxy.del(format("uci.tod.wifitod.@wifitod%s.", param_index))
+    end
+  end
+end
+
 -- Return the acs data for selected radio to generate Analyzer graph
 local function getAcsData(cradio, delay)
 local json = require("dkjson")
@@ -799,10 +816,10 @@ end
 local bandsteerhelpmsg = {}
 local mapParams, mapValid = getParamsAndValidation()
 local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
-
 if ngx.req.get_method() == "POST" and ngx.req.get_post_args().action == "bs_check" then
   local postargs = ngx.req.get_post_args()
-  if content["ssid"] ~= postargs.ssidName or content["security"] ~= postargs.security or content["wpa_psk"] ~= postargs.wpa_psk or content["admin_state"] ~= postargs.admin_state then
+  local is_main = (postargs.apName and proxy.get("rpc.wireless.ap.@"..postargs.apName..".ap_isolation")[1].value == "0") and true or false
+  if is_main and (content["ssid"] ~= postargs.ssidName or content["security"] ~= postargs.security or content["wpa_psk"] ~= postargs.wpa_psk or content["admin_state"] ~= postargs.admin_state) then
     session:store("bs_check_action", "TRUE")
     proxy.set("uci.wireless.wifi-ap.@ap0.bandsteer_id", "off")
     proxy.set("uci.wireless.wifi-ap.@ap1.bandsteer_id", "off")
@@ -1866,6 +1883,9 @@ ngx.print(html)
         },{\
         name : "security",\
         value : $("#security").val()\
+        },{\
+        name : "apName",\
+        value : "');  ngx.print(curap); ngx.print('"\
         },{\
         name : "CSRFtoken",\
         value :$("meta[name=CSRFtoken]").attr("content")\

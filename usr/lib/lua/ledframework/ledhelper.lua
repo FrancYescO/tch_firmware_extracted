@@ -6,6 +6,7 @@ M.print=print
 local lfs = require("lfs")
 local open = io.open
 local ledPath = "/sys/class/leds/"
+local mptcp = lfs.attributes("/etc/init.d/moff", "mode") == "file" and "moff" or "mproxy"
 
 ---
 -- Get a LED maxinum brightness
@@ -296,7 +297,12 @@ end
 -- @param no parameters
 function M.is_MPTCP_enabled()
    local cursor = M.uci.cursor()
-   local enabled = cursor:get('mproxy', 'globals', 'enable')
+   local enabled
+   if mptcp == "moff"  then
+        enabled = cursor:get('moff', 'config', 'enable')
+   else
+        enabled = cursor:get('mproxy', 'globals', 'enable')
+   end
 
    cursor:close()
    return enabled == '1'
@@ -345,6 +351,18 @@ end
 function M.is_status_led_enabled()
    local cursor = M.uci.cursor()
    local enabled = cursor:get('ledfw', 'status_led', 'enable')
+
+   cursor:close()
+   return enabled == '1'
+end
+
+---
+-- Returns true if onboarding is enabled in UCI (for Wifi Services enabled devices), false otherwise
+-- @function [parent=#ledhelper] is_onboarding_enabled
+-- @param no parameters
+function M.is_onboarding_enabled()
+   local cursor = M.uci.cursor()
+   local enabled = cursor:get('ledfw', 'onboarding', 'enable')
 
    cursor:close()
    return enabled == '1'

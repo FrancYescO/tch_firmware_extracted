@@ -47,23 +47,9 @@ local function ipPresentation(ip)
     return isIPUnknown(ip) and "unknown" or ip
 end
 
-local function samePortRange(destPort, key, mapping)
-  local lanStart, lanEnd = destPort:match("(%d+):(%d+)")
-  if lanStart then
-    local wanPort = mapping.uciMap.get(mapping.uciMap, "src_dport", key)
-    local wanStart, wanEnd = wanPort:match("(%d+):(%d+)")
-    if wanStart == lanStart and wanEnd == lanEnd then
-      return lanStart
-    end
-  end
-  return destPort
-end
-
 mapping_portforward_rpc.get = function(mapping, param, key)
     local result, errmsg = mapping.uciMap.get(mapping.uciMap, param, key)
-    if param == "dest_port" then
-      result = samePortRange(result, key, mapping) or "0"
-    elseif param == "dest_ip" then
+    if param == "dest_ip" then
       result = ipPresentation(result)
     end
     return result, errmsg
@@ -72,7 +58,6 @@ end
 mapping_portforward_rpc.getall = function(mapping, key)
     local result, errmsg = mapping.uciMap.getall(mapping.uciMap, key)
     result.dest_ip = ipPresentation(result.dest_ip)
-    result.dest_port = samePortRange(result.dest_port, key, mapping) or "0"
     return result, errmsg
 end
 

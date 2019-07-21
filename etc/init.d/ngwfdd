@@ -12,6 +12,28 @@ start_service_instance() {
     procd_close_instance
 }
 
+set_url() {
+    local ACTION_DEFAULT=$(uci_get system @$1[0] action_default '')
+    local ACTION=$(uci_get system @$1[0] action '')
+
+    if [ -z "${ACTION_DEFAULT}" -a -n "${ACTION}" ]; then
+        uci_set system @$1[0] action_default ${ACTION}
+    fi
+    uci_set system @$1[0] url "$2"
+    uci_set system @$1[0] action upload
+    uci_commit system @$1[0]
+}
+
+restore_url() {
+    local ACTION_DEFAULT=$(uci_get system @$1[0] action_default '')
+    if [ -n "${ACTION_DEFAULT}" ]; then
+        uci_set system @$1[0] action ${ACTION_DEFAULT}
+        uci_set system @$1[0] action_default ''
+    fi
+    uci_set system @$1[0] url ''
+    uci_commit system @$1[0]
+}
+
 start_service() {
     . $IPKG_INSTROOT/lib/functions.sh
 
@@ -51,11 +73,8 @@ start_service() {
     config_get CORE_URL config core_url
     #If a coredump URL is set, we will overwrite the default system url
     if [ -n "${CORE_URL}" ]; then
-        uci_set system @coredump[0] url "${CORE_URL}"
-        uci_set system @coredump[0] action upload
-        uci_set system @kernel_crash[0] url "${CORE_URL}"
-        uci_set system @kernel_crash[0] action upload
-        uci_commit system @coredump[0]
+        set_url "coredump" "${CORE_URL}"
+        set_url "kernel_crash" "${CORE_URL}"
     fi
 
     config_get SERIAL_CFG config serial_nr
@@ -113,4 +132,7 @@ stop_service() {
         local FIFO_NAME="$(basename "${SERVICE}" .lua | cut -c5-)"
         rm -f "${FIFO_DIR}/${FIFO_NAME}"
     done
+    #Remove coredump URL and action
+    restore_url "coredump"
+    restore_url "kernel_crash"
 }

@@ -101,7 +101,7 @@ local range, helpmes
 if ngx.var.request_method == "POST" then
   local content = ngx.req.get_post_args()
   if content["action"]=="SAVE" then
-    range, helpmes = getValidateNumberInRange(2, 4095, content["intf_vlanid"])
+    range, helpmes = getValidateNumberInRange(2, 4094, content["intf_vlanid"])
     if role ~= "engineer" then
       content["auswahlliste"] = "devnot"
     end
@@ -151,6 +151,8 @@ if ngx.var.request_method == "POST" then
           proxy.set(path.."ifname", "")
         end
         if content["intf_vlanid"] then
+          difname = string.format("%s.%s",connection, content["intf_vlanid"])
+          vid = content["intf_vlanid"]
           proxy.set(pathifname, string.format("%s.%s",connection, content["intf_vlanid"]))
           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", string.format("%s.%s",connection, content["intf_vlanid"]))
         end

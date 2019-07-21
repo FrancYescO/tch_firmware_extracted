@@ -129,6 +129,8 @@ local ipPingHelper = require('transformer.shared.ippinghelper')
 local wanConn = require("transformer.shared.wanconnection")
 local activedevice = require 'transformer.shared.models.igd.activedevice'
 local network = require 'transformer.shared.common.network'
+local inet = require "tch.inet"
+local match = string.match
 
 -- Parameters that are applicable only for TR181: Device2
 local dev2OnlyParams = {
@@ -277,10 +279,14 @@ Multi_IP_Diagnostics_IPPing_.set = {
     return mapping._setInterface(mapping, param, value)
   end,
   Host = function(mapping, param, value)
-    if network.domainValidation(value) then
-      return SetOnIPPingHelper(mapping, param, value)
+    if value:match(':') and not(inet.isValidIPv6(value)) then
+      return nil, "Invalid IPv6 address"
+    elseif value:match('[a-zA-Z]') and not(value:match(':')) and not(network.domainValidation(value)) then
+      return nil, "Invalid Domain Name"
+    elseif not(value:match('[a-zA-Z]') or value:match(':')) and not(inet.isValidIPv4(value)) then
+      return nil, "Invalid IPv4 address"
     end
-    return nil, "Invalid value"
+    return SetOnIPPingHelper(mapping, param, value)
   end,
   NumberOfRepetitions = SetOnIPPingHelper,
   Timeout = SetOnIPPingHelper,

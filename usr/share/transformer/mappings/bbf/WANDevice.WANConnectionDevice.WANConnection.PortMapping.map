@@ -827,17 +827,11 @@ local function set_internal_port(value, key)
     return
   end
 
-  -- when external port is a range value, InternalPort is same with ExternalProt,
-  -- set a ranged InternalPort to uci/iptalbs
   -- when external port is a range value, InternalPort is not same with ExternalProt,
   -- keep InternalPort value and add backupRestorWarning as we lost InternalEndPort from Legathy.
-  local startRange,endRange = v:match("^(%d+)%:(%d+)$")
-  if endRange then
-    if value == startRange then
-       value = v
-    else
-       backupRestoreWarning()
-    end
+  local startRange, endRange = v:match("^(%d+)%:(%d+)$")
+  if endRange and value ~= startRange then
+    backupRestoreWarning()
   end
   if tonumber(value) == 0 then
     -- forward to the default, dest_port becomes empty
@@ -892,14 +886,11 @@ local function set_port_data(key, new_start, new_stop)
     local value_internal = getInternalPort(key)
     if (stop ~= "0") and (stop~=start) then
       value = string.format("%s:%s", start, stop)
-      if value_internal ~= "0" and value_internal == start then
-	value_internal  = value
-      elseif value_internal ~= "0" and value_internal ~= start then
+      if value_internal ~= "0" and value_internal ~= start then
         backupRestoreWarning()
       end
     end
     setOnRule(key, 'src_dport', value)
-    setOnRule(key, "dest_port", value_internal)
     local proto = getFromRule(key, "proto")
     keyInfo[key2sectionname[key]] = { proto = proto, startPort = value, endPort = value_internal ~= "0" and value_internal or value }
   end

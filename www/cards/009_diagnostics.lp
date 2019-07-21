@@ -33,11 +33,12 @@ end
     ');  
     local eth4_data = {
       eth4_status = "sys.eth.port.@eth4.status",
+      dsl_status = "sys.class.xdsl.@line0.Status"
     }
 
     if xdsl_exist == true then
       content_helper.getExactContent(eth4_data)
-      if (eth4_data["eth4_status"] == "up") then
+      if (eth4_data["dsl_status"] ~= "Up") and (eth4_data["eth4_status"] == "up") then
         ngx.print(ui_helper.createCardHeader(T"Diagnostics", "modals/diagnostics-ping-modal.lp"))
       else
         ngx.print(ui_helper.createCardHeader(T"Diagnostics", "modals/diagnostics-xdsl-modal.lp"))
@@ -50,7 +51,7 @@ end
       ngx.print('\
     <div class="content">\
      <table align="center" cellspacing="10%" cellpadding="10%" >\
-      <tr>');  if xdsl_exist and eth4_data["eth4_status"] ~= "up" then   ngx.print('\
+      <tr>');  if xdsl_exist and (eth4_data["eth4_status"] ~= "up" or eth4_data["dsl_status"] == "Up") then   ngx.print('\
       <td><div data-toggle="modal" data-remote="modals/diagnostics-xdsl-modal.lp" data-id="diagnostics-xdsl-modal"><img  href="#" rel="tooltip" data-original-title="XDSL" src="/img/bandwidth-px-png.png" alt="dsl"></div></td>');  elseif isGponBoard then  ngx.print('\
       <td><div data-toggle="modal" data-remote="modals/diagnostics-gpon-modal.lp" data-id="diagnostics-gpon-modal"><img  href="#" rel="tooltip" data-original-title="GPON" src="/img/bandwidth-px-png.png" alt="gpon"></div></td>\
     ');  end  ngx.print('\

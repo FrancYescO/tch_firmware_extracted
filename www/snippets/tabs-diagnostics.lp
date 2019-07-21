@@ -26,16 +26,17 @@ if is_gpon then
   }
 end
 
-local xdsl_exist = false
+local xdsl_exist = true
 
 if lfs.attributes("/etc/config/xdsl", "mode") == "file" then
   local eth4_data = {
     eth4_status = "sys.eth.port.@eth4.status",
-    eth4_operstate = "sys.class.net.@eth4.operstate"
+    eth4_operstate = "sys.class.net.@eth4.operstate",
+    dsl_status = "sys.class.xdsl.@line0.Status"
   }
   content_helper.getExactContent(eth4_data)
-  if eth4_data["eth4_status"] ~= "up" and eth4_data["eth4_operstate"] ~= "up" then
-    xdsl_exist = true
+  if eth4_data["eth4_status"] == "up" and eth4_data["eth4_operstate"] == "up" and eth4_data["dsl_status"] ~= "Up" then
+    xdsl_exist = false
   end
 end
 
