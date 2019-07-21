@@ -17,6 +17,7 @@ local content_helper = require("web.content_helper")
 local message_helper = require("web.uimessage_helper")
 local ajax_helper = require("web.ajax_helper")
 local get_usb_label = require("usbmap").get_usb_label
+local valStrLength = post_helper.getValidateStringLengthInRange
 
 local untaint = string.untaint
 local format, find, sub, match = string.format, string.find, string.sub, string.match
@@ -138,7 +139,7 @@ if ngx.req.get_method() == "POST" and ngx.req.get_post_args().action == "SAVE" t
      end
      if samba_available and tonumber(post_data["samba_filesharing"]) == 1 then
         mapValid.samba_name = valid_samba_dlna_string
-        mapValid.samba_workgroup = valid_samba_dlna_string
+        mapValid.samba_workgroup = valid_samba_dlna_string and valStrLength(1,16)
         mapValid.samba_description = valid_samba_dlna_string
      end
    content, helpmsg = post_helper.handleQuery(mapParams,mapValid)

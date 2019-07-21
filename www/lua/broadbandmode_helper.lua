@@ -14,6 +14,14 @@ local wansensing = proxy.get("uci.wansensing.global.enable")[1].value
 local session = ngx.ctx.session
 
 local M = {}
+
+
+function setLanRelay(dname)
+  proxy.del("uci.network.interface.@lan.pppoerelay.")
+  proxy.add("uci.network.interface.@lan.pppoerelay.")
+  proxy.set("uci.network.interface.@lan.pppoerelay.@1.value",dname)
+end
+
 function M.broadBandDetails()
 local tablecontent ={}
 tablecontent[#tablecontent + 1] = {
@@ -46,16 +54,16 @@ tablecontent[#tablecontent + 1] = {
            difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
            else
              proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+             setLanRelay("atmwan")
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+           setLanRelay("atmwan")
            proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
          end
        else
@@ -64,14 +72,14 @@ tablecontent[#tablecontent + 1] = {
            difname =  proxy.get("uci.network.device.@wanatmwan.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
            else
              proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+             setLanRelay("atmwan")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "atmwan")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "atmwan")
+           setLanRelay("atmwan")
          end
        end
        local ptmdev = proxy.get("uci.xtm.ptmdevice.")
@@ -111,16 +119,16 @@ tablecontent[#tablecontent + 1] =    {
            difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
            else
              proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+             setLanRelay("ptm0")
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+           setLanRelay("ptm0")
            proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
          end
        else
@@ -129,14 +137,14 @@ tablecontent[#tablecontent + 1] =    {
            difname =  proxy.get("uci.network.device.@wanptm0.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
            else
              proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+             setLanRelay("ptm0")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "ptm0")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "ptm0")
+           setLanRelay("ptm0")
          end
        end
        local ptmdev = proxy.get("uci.xtm.ptmdevice.")
@@ -185,16 +193,16 @@ tablecontent[#tablecontent + 1] = {
            difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
            else
              proxy.set("uci.network.interface.@wan.ifname", "eth4")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+             setLanRelay("eth4")
              proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "eth4")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           setLanRelay("eth4")
            proxy.set("uci.ethernet.globals.eth4lanwanmode", "0")
          end
        else
@@ -203,14 +211,14 @@ tablecontent[#tablecontent + 1] = {
            difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
            if difname ~= "" and difname ~= nil then
              proxy.set("uci.network.interface.@wan.ifname", dname)
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+             setLanRelay(dname)
            else
              proxy.set("uci.network.interface.@wan.ifname", "eth4")
-             proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+             setLanRelay("eth4")
            end
          else
            proxy.set("uci.network.interface.@wan.ifname", "eth4")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           setLanRelay("eth4")
          end
        end
      end
@@ -253,16 +261,16 @@ tablecontent[#tablecontent + 1] = {
          difname =  proxy.get("uci.network.device.@waneth4.ifname")[1].value
          if difname ~= "" and difname ~= nil then
            proxy.set("uci.network.interface.@wan.ifname", dname)
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+           setLanRelay(dname)
            proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
          else
            proxy.set("uci.network.interface.@wan.ifname", "eth4")
-           proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+           setLanRelay("eth4")
            proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
          end
        else
          proxy.set("uci.network.interface.@wan.ifname", "eth4")
-         proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", "eth4")
+         setLanRelay("eth4")
          proxy.set("uci.ethernet.globals.eth4lanwanmode", "1")
        end
      end

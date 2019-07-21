@@ -135,7 +135,7 @@ local configChanged = false
 
 local supportedModesMap = {
   ["none"]          = "None",
-  ["wep"]           = "None",  -- "wep" mode is not supported
+  ["wep"]           = "WEP-64",
   ["wpa2-psk"]      = "WPA2-Personal",
   ["wpa-wpa2-psk"]  = "WPA-WPA2-Personal",
   ["wpa2"]          = "WPA2-Enterprise",
@@ -188,9 +188,7 @@ local function getModesSupported(supportedModes, key)
   if supportedModes ~= "" then
     local modes = {}
     for mode in gmatch(supportedModes, "%S+") do
-      if mode ~= "wep" then  -- "wep" mode is not supported, so skipping if it is populated from UCI
         modes[#modes + 1] = supportedModesMap[mode]
-      end
     end
     return concat(modes, ",")
   end
@@ -285,6 +283,7 @@ Device_WiFi_AccessPoint_i_Security_.get = function(mapping, param, key)
   local isEnterpriseMode = false
   local uciSecurityValues = getUciValue(key)
   local modeName = uciSecurityValues["security_mode"] and supportedModesMap[uciSecurityValues["security_mode"]]
+  local WKey = ""
 
   if modeName then
     isEnterpriseMode = match(modeName, "Enterprise") and true or false
@@ -303,6 +302,11 @@ Device_WiFi_AccessPoint_i_Security_.get = function(mapping, param, key)
     return (isEnterpriseMode and getEnterpriseValues(key, param, enterpriseMap[param]) or "" )
   elseif param == "X_TELUS_DefaultKeyPassphrase" then
     return defaultPassphrase(key)
+  elseif param == "WEPKey" then
+    if match(uciSecurityValues["supported_security_modes"], "wep") then
+       WKey = uciSecurityValues["wep_key"]
+    end
+    return WKey
   end
 end
 
@@ -332,11 +336,15 @@ Device_WiFi_AccessPoint_i_Security_.getall = function(mapping, key)
       ipAddrSec = secValues["ip"]
     end
   end
+  local WKey = ""
+  if match(uciSecurityValues.supported_security_modes, "wep") then
+    WKey = uciSecurityValues["wep_key"]
+  end
 
   return {
     Reset = "0",
     ModeEnabled = supportedModesMap[modeEnabled] or "",
-    WEPKey = uciSecurityValues["wep_key"] or "",  -- "wep" mode is not supported. To be uncommented if "wep" mode support is requested.
+    WEPKey = WKey or "",  -- "wep" mode is not supported. To be uncommented if "wep" mode support is requested.
     PreSharedKey = uciSecurityValues["wpa_psk_key"] or "",
     KeyPassphrase = uciSecurityValues["wpa_psk_key"] or "",
     ModesSupported = getModesSupported(uciSecurityValues["supported_security_modes"], key),
@@ -503,13 +511,17 @@ Device_WiFi_AccessPoint_i_Security_.set = {
     return setRadiusSecret(key, "1", value)
   end,
   WEPKey =  function(_, _, value, key)
-	if #value ~= 5 and #value ~= 10 and #value ~= 13 and #value ~= 26 then
-		return nil, "Invalid length, a WEP key must be 5, 10, 13 or 26 characters long, length of 10 and 26 can only contain the letters A to F or digits"
-    end
-    if (#value == 10 or #value == 26) and (not value:match("^[%x]+$")) then
+    if match(getUciValue(key).supported_security_modes, "wep") then
+      if #value ~= 5 and #value ~= 10 and #value ~= 13 and #value ~= 26 then
+        return nil, "Invalid length, a WEP key must be 5, 10, 13 or 26 characters long, length of 10 and 26 can only contain the letters A to F or digits"
+      end
+      if (#value == 10 or #value == 26) and (not value:match("^[%x]+$")) then
         return nil, "A WEP key of length 10 or 26 can only contain the letters A to F or digits"
+      end
+    return setSecurityOption(key, "wep_key", value)
+    else
+        return nil, "WEP mode is not supported"
     end
-	return setSecurityOption(key, "wep_key", value)
   end
 }
 

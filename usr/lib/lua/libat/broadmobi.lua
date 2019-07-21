@@ -28,6 +28,8 @@ local Mapper = {}
 Mapper.__index = Mapper
 
 function Mapper:configure_device(device, config)
+	-- Enable network registration and location information unsolicited Result code: +CEREG: <n>,<stat>[,<tac>,<rac_mme>,<ci>,<AcT>]
+	device:send_singleline_command("AT+CEREG=2", "+CEREG:")
 	return true
 end
 
@@ -308,6 +310,14 @@ end
 
 function Mapper:unsolicited(device, data, sms_data)
 	return false
+end
+
+function Mapper:get_network_info(device, info)
+	-- +CEREG: <n>,<stat>[,<tac>,<rac_mme>,<ci>,<AcT>] where tac, rac_mme and ci are string data types and others are number format
+	local tac = send_and_parse_command(device, "AT+CEREG?", "+CEREG:", '^%s*%d,%d,"(.-)",".-",".-",%d$')
+	if tac then
+		info.tracking_area_code = tonumber(tac, 16)
+	end
 end
 
 local M = {}

@@ -434,6 +434,18 @@ function common.init(logger_name, logging_level, options)
   return common.log
 end
 
+local function seconds_to_milliseconds(sec)
+  return sec and (sec*1000)
+end
+
+function common.parse_args(args, default)
+  default = default or {}
+  return {
+    fifo = arg[1],
+    interval = seconds_to_milliseconds(tonumber(arg[2]) or default.interval)
+  }
+end
+
 --- Close and finalize the common gwfd library.
 function common.close()
   if common.ubus_conn then

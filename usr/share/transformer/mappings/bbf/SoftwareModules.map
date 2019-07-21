@@ -33,9 +33,48 @@ local Device_SoftwareModules_ = {
       -- automatically created when Device.SoftwareModules.DeploymentUnit.{i}. is loaded
       -- ExecutionUnitNumberOfEntries
       -- automatically created when Device.SoftwareModules.ExecutionUnit.{i}. is loaded
+      X_BELGACOM_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      },
+      X_000E50_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      }
     }
   }
 }
+
+do
+  local uci_helper = mapper("ucihelper")
+  local default_ee_binding={config="lcmd", sectionname="daemon_config", option="default_execution_environment"}
+
+  Device_SoftwareModules_.get = {
+    X_BELGACOM_DefaultExecutionEnvironment = function (mapping, paramname, key)
+      return uci_helper.get_from_uci(default_ee_binding)
+    end,
+    X_000E50_DefaultExecutionEnvironment = function (mapping, paramname, key)
+      return uci_helper.get_from_uci(default_ee_binding)
+    end,
+  }
+
+  Device_SoftwareModules_.set = {
+    X_BELGACOM_DefaultExecutionEnvironment = function (mapping, param, value)
+      uci_helper.set_on_uci(default_ee_binding, value, commitapply)
+    end,
+    X_000E50_DefaultExecutionEnvironment = function (mapping, param, value)
+      uci_helper.set_on_uci(default_ee_binding, value, commitapply)
+    end,
+  }
+
+  Device_SoftwareModules_.commit = function()
+    uci_helper.commit(default_ee_binding)
+  end
+
+  Device_SoftwareModules_.revert = function()
+    uci_helper.revert(default_ee_binding)
+  end
+end
 
 duplicate_and_register(Device_SoftwareModules_)
 -----------------------------------------------------------------------------------------

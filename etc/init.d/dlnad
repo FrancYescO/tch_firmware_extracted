@@ -14,7 +14,7 @@ MNT_FILE=/var/etc/mount_path.conf
 start_service()
 {
    config_load dlnad
-   local enabled mountpath manufacturer_url radiostations_enabled friendly_name uuid modelname interface
+   local enabled mountpath manufacturer_url radiostations_enabled friendly_name uuid modelname interface nonce_string
    local loglevel
    local iface
    config_get enabled config enabled
@@ -27,6 +27,7 @@ start_service()
    config_get modelname config model_name
    config_get interface config interface
    config_get loglevel log dlnad_logLevel
+   config_get nonce_string config nonce
 
    config_load env
    local board_name board_serial device_name
@@ -70,7 +71,7 @@ start_service()
        echo "uuid=$uuid" >> $CONF_FILE
        echo "loglevel=$loglevel" >> $CONF_FILE
      fi
-
+     [ ! -z "$nonce_string" ] && echo "nonce_string=$nonce_string" >> $CONF_FILE
      if grep -q mount_path $CONF_FILE; then
        echo $mountpath | sed "s:\/:\\\/:g" > $MNT_FILE
 
@@ -120,4 +121,14 @@ stop_service()
    if [ -f $MNT_FILE ]; then
      rm -f $CONF_FILE
    fi
+}
+
+boot()
+{
+  local random_nonce
+  random_nonce=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 11)
+  config load "dlnad"
+  uci set dlnad.config.nonce=$random_nonce
+  uci commit dlnad
+  restart
 }

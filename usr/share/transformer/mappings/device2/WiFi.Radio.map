@@ -1044,11 +1044,17 @@ local function getUbusData(ubusName, key)
   return data and data[key] or {}
 end
 
--- Function to match the Radio2G_Score and Radio5G_Score from the UBUS Call: " ubus call wireless.radio.acs get "
--- where, Radio2G_Score and Radio5G_Score is the Fifth Value of 'scan_report' tuple of the ubus call
+-- Function to match the Radio2G/Radio5G score for each channel from the UBUS Call: " ubus call wireless.radio.acs get "
+-- where, Radio2G/Radio5G channel score is the Fifth Value of each channel tuple
 -- Example of ubusStr : "05:15:28-31\/03\/2017;2;1;;13;1:0:3:0:-300;2:9:0:0:-400;3:1:0:0:-400;4:8:1:0:-600;5:6:0:0:-600;6:11:5:0:-600;7:4:0:0:-500;8:0:0:0:-500;9:0:0:0:-400;10:3:0:0:-400;11:9:4:0:-400;12:6:0:0:-400;13:0:0:0:-400;"
-local function getRadioScore(ubusStr)
-  return ubusStr:match("[^;]*;[^;]*;[^;]*;[^;]*;(%d*);") or ""
+local function getRadioScore(ubusStr, currChannel)
+  local scores = ubusStr:match("[^;]*;[^;]*;[^;]*;[^;]*;[^;]*;(.*)") or ""
+  for channel, score in scores:gmatch("([^:]+):[^:]+:[^:]+:[^:]+:([^:]+);") do
+    if channel == currChannel then
+      return score
+    end
+  end
+  return ""
 end
 
 local function getDutyCycle(ubusStr)
@@ -1157,7 +1163,8 @@ end
 Device_WiFi_Radio_i_Multi_i_.get = {
   Score = function(mappings, param, key)
     local scan = getUbusDataValue(key, "scan_report")
-    return getRadioScore(scan) or ""
+    local _, channel = split_key(key)
+    return getRadioScore(scan, channel) or ""
   end,
   WiFiNoiseLevel = function(mappings, param, key)
     local radioKey = split_key(key)
@@ -1204,7 +1211,7 @@ Device_WiFi_Radio_i_Multi_i_.getall = function(mapping, key)
   local minSignalStrength, maxSignalStrength, rssi = signalStrength(key)
   local wifiNoiseLevel, nonwifiNoiseLevel = getWiFiNoiseLevel(channel_stats, radioKey)
   return {
-    Score = getRadioScore(scan),
+    Score = getRadioScore(scan, channel),
     WiFiNoiseLevel = wifiNoiseLevel,
     NONWiFiNoiseLevel = nonwifiNoiseLevel,
     DutyCycle = getDutyCycle(scan),

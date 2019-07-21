@@ -1,10 +1,13 @@
 #! /usr/bin/env lua
 
--- file: mod_slabinfo.lua
-
-package.path = "/usr/share/ngwfdd/lib/?.lua;" .. package.path
-
-local gwfd = require("gwfd-common")
+local gwfd = require("gwfd.common")
+local fifo_file_path
+local interval
+do
+  local args = gwfd.parse_args(arg, {interval=300})
+  fifo_file_path = args.fifo
+  interval = args.interval
+end
 
 -- Uloop and logger
 
@@ -14,12 +17,6 @@ local uloop = require("uloop")
 
 local timer
 
--- Get interval from UCI
-local interval = (tonumber(gwfd.get_uci_param("ngwfdd.interval.slabinfo")) or 300) * 1000
-
--- Absolute path to the output fifo file
-
-local fifo_file_path = arg[1]
 local regex = "^([^%s]+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+:.*:%s+slabdata%s+%d+%s+(%d+)%s+%d+"
 
 local function send_slabinfo()

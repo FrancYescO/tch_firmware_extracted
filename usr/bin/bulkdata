@@ -583,6 +583,7 @@ local function do_update_crontab(profile)
 
   -- get reference time by seconds
   timeref.year, timeref.month, timeref.day, timeref.hour, timeref.min, timeref.sec = match(time_reference, pattern)
+  timeref.sec = 0
   local reference = time(timeref)
   -- add 1 seconds offset for current time to avoid transfer too fast to update next crontab task
   local current = time() + 1
@@ -687,11 +688,26 @@ local function main(args)
   if #args > 1 then
     local action = remove(args, 1)
     profiletimed = {}
+    local seconds = {}
+    local profiles = {}
+    local pattern = "^%d+%-%d+%-%d+T%d+:%d+:(%d+)Z$"
     for _,v in ipairs(args) do
-      local profile = cursor:get_all("bulkdata", v)
-      if profile then
-        actions[action](profile)
+      profiles[v] = cursor:get_all("bulkdata", v)
+      if profiles[v] and profiles[v].enabled ~= "0" then
+        insert(seconds, {v, tonumber(match(profiles[v].time_reference, pattern) or 0)})
       end
+    end
+    sort(seconds, function(a,b) return a[2]<b[2] end)
+    local presecond = 0
+    for _,v in ipairs(seconds) do
+      if action == "transfer" then
+        local delay = v[2]-presecond
+        presecond = v[2]
+        if delay > 0 then
+          os.execute("sleep " .. tostring(delay))
+        end
+      end
+      actions[action](profiles[v[1]])
     end
 
     -- according to update status to decide reconfiguration crontab or not

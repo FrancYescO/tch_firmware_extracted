@@ -867,6 +867,12 @@ local Multi_Services_VoiceService_i_VoiceProfile_i_SIP_ = {
                 default = "0",
                 description = "Enable/Disable the PreRegister functionality",
             },
+            X_000E50_IgnoreAssertedID = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Enable/Disable the use of values from the From header instead of the P-Asserted-Identity header for Calling Line Identity Presentation",
+            },
         }
     }
 }
@@ -938,6 +944,7 @@ local sip_net_map = {
         X_000E50_CallWaitingRejectResponse = "call_waiting_reject_response",
         X_000E50_NoAnswerResponse = "no_answer_response",
 	X_SessionExpires = "session_expires",
+        X_000E50_IgnoreAssertedID = "ignore_asserted_id",
         TimerH = function(object)
             local timer = ""
             local option = "timer_T1"
@@ -1106,7 +1113,21 @@ local set_sip_net_map = {
     TimerD = true,
     TimerF = true,
     TimerJ = true,
-    RegisterExpires = true,
+    RegisterExpires = function(binding, value)
+            local reg_expire = ""
+            local reg_expire_T_before = ""
+
+            binding.option = "reg_expire"
+            reg_expire = uci_helper.get_from_uci(binding)
+            uci_helper.set_on_uci(binding, value, commitapply)
+
+            binding.option = "reg_expire_T_before"
+            reg_expire_T_before = uci_helper.get_from_uci(binding)
+            if reg_expire_T_before ~= "" and reg_expire ~= "" then
+                   reg_expire_T_before = value - math.modf(value*(reg_expire-reg_expire_T_before)/reg_expire)
+                   uci_helper.set_on_uci(binding, reg_expire_T_before, commitapply)
+            end
+    end,
     RegisterRetryInterval = true,
     InviteExpires = true,
     X_000E50_401407Waiting = true,
@@ -1128,6 +1149,7 @@ local set_sip_net_map = {
     X_000E50_RegisterBackOffTimerMax = true,
     X_000E50_CallWaitingRejectResponse = true,
     X_000E50_NoAnswerResponse = true,
+    X_000E50_IgnoreAssertedID = true,
     DSCPMark = function(binding, value)
         setDSCPMark(binding, value, "control_qos_field", "control_qos_value")
     end,

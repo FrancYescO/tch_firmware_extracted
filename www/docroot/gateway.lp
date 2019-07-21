@@ -25,14 +25,6 @@ local current_year = (string.sub(year,1,4))
 
 if ngx.req.get_method() == "POST" then
   local post_args = ngx.req.get_post_args()
-  if post_args.passwordchange == "dontremind" then
-    local result = content_helper.getMatchedContent("uci.web.user.", {name = session:getusername()})
-    if result and #result > 0 then
-      if proxy.set(result[1].path .. "password_reminder", "0") then
-        proxy.apply()
-      end
-    end
-  end
   if post_args.do_signout then
     session:logout()
     -- Now we redirect to / until we find a better solution
@@ -177,13 +169,14 @@ message_helper.popMessages()
       if result and result[1].password_reminder ~= "0" then
         html = {}
         html[#html + 1] = '<div class="modal fade in" id="password_reminder">'
-        html[#html + 1] = ui_helper.createHeader(T"Change Password")
+        html[#html + 1] = ui_helper.createHeader(T"Login Password")
         html[#html + 1] = '<div class="modal-body update">'
         html[#html + 1] = '<form class="form-horizontal" method="post" action="gateway.lp">'
         html[#html + 1] = ui_helper.createSimpleInputHidden("CSRFtoken", session:getCSRFtoken())
+	html[#html + 1] = "<fieldset><legend>" .. T"Warning: current login password is the default one. It is strongly recommended to change it in order to enforce the security." .. "</legend>"
         html[#html + 1] = '<fieldset>'
         local attr = {radio = {style = "display: block"}}
-        html[#html + 1] = ui_helper.createInputRadio("", "passwordchange", {{"now", T"Now"},{"remindlater", T"Remind me later"},{"dontremind", T"Do not remind me again"}},nil,attr)
+        html[#html + 1] = ui_helper.createInputRadio("", "passwordchange", {{"now", T"Now"},{"remindlater", T"Remind me later"}},nil,attr)
         html[#html + 1] = '</fieldset>'
         html[#html + 1] = '</form>'
         html[#html + 1] = '</div>'
@@ -198,19 +191,6 @@ message_helper.popMessages()
                window.location = "/password.lp";\
             }else if(value == "remindlater"){\
                $("#password_reminder").modal(\'hide\');\
-            }else if(value == "dontremind"){\
-               var params = [];\
-               var target = $(".modal form").attr("action");\
-               params.push({\
-                 name : "action",\
-                 value : "SAVE"\
-               },\
-               {\
-                 name : "passwordchange",\
-                 value : value\
-               }, tch.elementCSRFtoken());\
-               $.post(target, params);\
-               $("#password_reminder").modal("hide");\
             }\
             return false;\
           });\
