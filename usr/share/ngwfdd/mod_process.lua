@@ -1,21 +1,20 @@
 #! /usr/bin/env lua
 
--- file: mod_process.lua
-
-package.path = "/usr/share/ngwfdd/lib/?.lua;" .. package.path
-
-local gwfd = require("gwfd-common")
+local gwfd = require("gwfd.common")
+local fifo_file_path
+local interval
+do
+  local args = gwfd.parse_args(arg, {interval=300})
+  fifo_file_path = args.fifo
+  interval = args.interval
+end
 local lfs = require("lfs")
 local uloop = require("uloop")
+local xpcall = require("tch.xpcall")
 
 -- Uloop timer and the required interval
 
 local timer
-
--- Get interval from UCI
-local interval = (tonumber(gwfd.get_uci_param("ngwfdd.interval.process")) or 300) * 1000
-
--- Absolute path to the output fifo file
 
 -- Internal cache
 
@@ -197,14 +196,6 @@ local function get_process_cmdline(info)
   info.cmdline = cmdline
 end
 
---[[
-local function print_err(status,err)
-  if not status then 
-     gwfd.errorhandler(err))
-  end
-end
---]]
-
 local function get_process_info()
   local pid_exp = "^[0-9]+$"
 
@@ -226,12 +217,14 @@ local function get_process_info()
 -- final: protect with 'xpcall()' and use ngwfdd error handler:
 --   Also other 'get_process_(info)' function calls could be protected in the same way.
 --   3 params 'xpcall(f,err,...)' does not work in current lua 5.1, so use 2 params 'xpcall(f,err)' :
-      xpcall(function() get_process_pss(info) end, gwfd.errorhandler)
- 
+--      xpcall(function() get_process_pss(info) end, gwfd.errorhandler)
+-- use lua-tch package 'xpcall(f,err,...)' implementation:
+      xpcall(get_process_pss, gwfd.errorhandler, info)
+
       get_process_name(info)
       get_process_cmdline(info)
 
-      gwfd.write_msg_to_file(info, arg[1])
+      gwfd.write_msg_to_file(info, fifo_file_path)
     end
   end
 

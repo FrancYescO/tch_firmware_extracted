@@ -47,6 +47,7 @@ allowed[ "wireless.accesspoint.station" ] = { "get" }
 allowed[ "wireless.radio"               ] = { "get" }
 allowed[ "wireless.radio.acs"           ] = { "rescan" }
 allowed[ "dhcp"                         ] = { "ipv4leases", "ipv6leases" }
+allowed[ "map_controller"               ] = { "dumpMapNetwork" }
 
 return allowed
 

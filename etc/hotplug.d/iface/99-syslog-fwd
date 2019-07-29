@@ -16,25 +16,26 @@ stop_fwd_process () {
 	[ "$slfwp" ] && kill -9 $slfwp
 	slfwp=''
 	tail_pid=$(ps | grep -v awk | awk -v pattn="(tail -[fF]|cat).*${log_filter_file}" '$0 ~ pattn {print $1}')
-	nc_pid=$(ps | grep -v awk | awk '/nc -vu/ {print $1}')
+	nc_pid=$(ps | grep -v awk | awk '/nc -vu? -p 51423/ {print $1}')
 	if [ -n "${tail_pid}" ] ; then kill -9 ${tail_pid} ; fi
 	if [ -n "${nc_pid}" ] ; then kill -9 ${nc_pid} ; fi
 }
 
 fwd_syslog_filt_msg_to_nc() {
-		local log_filter_ip log_port
 		local log_filter_ip=$(uci_get system @system[0] log_filter_ip)
 		local log_port=$(uci_get system @system[0] log_port)
+		local log_proto=$(uci_get system @system[0] log_proto)
 		[ -z "$log_port" ] && log_port=514
+		[ -z "$log_proto" ] && log_proto=udp
 
 		stop_fwd_process
 		if [ -r ${log_filter_file} -a "${log_filter_ip}" ] ; then
 #			echo "iface up; ${log_filter_file} readable; syslog_fwd running processes were (will be restarted): tail_pid='${tail_pid}', nc_pid='${nc_pid}'" >>/var/log/slfwd.txt
-				/etc/syslog_fwd/start_fwd_process ${log_filter_ip} ${log_port} ${log_filter_file}&
+				/etc/syslog_fwd/start_fwd_process ${log_filter_ip} ${log_port} ${log_filter_file} ${log_proto}&
 				slfwp=$!
 #				echo "fwdproc_bckgnd started; shell_pid exit_status background_pid : '$$' '$?' '$!'" >>/var/log/slfwd.err
 				tail_pid=$(ps | grep -v awk | awk -v pattn="(tail -[fF]|cat).*${log_filter_file}" '$0 ~ pattn {print $1}')
-				nc_pid=$(ps | grep -v awk | awk '/nc -vu/ {print $1}')
+				nc_pid=$(ps | grep -v awk | awk '/nc -vu? -p 51423/ {print $1}')
 				echo "syslog_fwd running processes: tail_pid='${tail_pid}', nc_pid='${nc_pid}'" >>/var/log/slfwd.err
 		fi
 }

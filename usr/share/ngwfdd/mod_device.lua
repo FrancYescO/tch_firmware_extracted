@@ -1,10 +1,14 @@
 #! /usr/bin/env lua
 
--- file: mod_device.lua
+local gwfd = require("gwfd.common")
+local fifo_file_path
+local interval
+do
+  local args = gwfd.parse_args(arg, {interval=3600})
+  fifo_file_path = args.fifo
+  interval = args.interval
+end
 
-package.path = "/usr/share/ngwfdd/lib/?.lua;" .. package.path
-
-local gwfd = require("gwfd-common")
 local uloop = require("uloop")
 
 -- Logger
@@ -14,11 +18,6 @@ local log
 -- Uloop timer
 
 local timer
-local interval = (tonumber(gwfd.get_uci_param("ngwfdd.interval.devices")) or 3600) * 1000
-
--- Absolute path to the output fifo file
-
-local fifo_file_path = arg[1]
 
 -- Needed UCI parameters to be collected
 

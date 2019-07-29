@@ -11,6 +11,9 @@ local proxy = require("datamodel")
 local assistance = require("web.assistance")
 local assistant = assistance.getAssistant('remote')
 local message_helper = require("web.uimessage_helper")
+local currentuser = session:getrole()
+local json = require("dkjson")
+
 local cui = {
     nsplink = "uci.web.uiconfig.@uidefault.nsplink",
     advanced = "uci.web.uiconfig.@uidefault.alwaysadvanced",
@@ -25,14 +28,6 @@ local current_year = (string.sub(year,1,4))
 
 if ngx.req.get_method() == "POST" then
   local post_args = ngx.req.get_post_args()
-  if post_args.passwordchange == "dontremind" then
-    local result = content_helper.getMatchedContent("uci.web.user.", {name = session:getusername()})
-    if result and #result > 0 then
-      if proxy.set(result[1].path .. "password_reminder", "0") then
-        proxy.apply()
-      end
-    end
-  end
   if post_args.do_signout then
     session:logout()
     -- Now we redirect to / until we find a better solution
@@ -79,6 +74,13 @@ function subtract2Minutes(myString)
     time_split_get = time_get[1] ..":".. time_get[2]..":"..time_get[3]
   end
   return time_split_get
+end
+
+if ngx.var.request_method == "GET" and ngx.req.get_uri_args().getSessionStatus == "true" then
+  ngx.header.content_type = "application/json"
+  local role = session:getrole()
+  ngx.print(json.encode({current_role = role}))
+  ngx.exit(ngx.OK)
 end
 
 if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "scheduleReboot" then
@@ -177,13 +179,14 @@ message_helper.popMessages()
       if result and result[1].password_reminder ~= "0" then
         html = {}
         html[#html + 1] = '<div class="modal fade in" id="password_reminder">'
-        html[#html + 1] = ui_helper.createHeader(T"Change Password")
+        html[#html + 1] = ui_helper.createHeader(T"Login Password")
         html[#html + 1] = '<div class="modal-body update">'
         html[#html + 1] = '<form class="form-horizontal" method="post" action="gateway.lp">'
         html[#html + 1] = ui_helper.createSimpleInputHidden("CSRFtoken", session:getCSRFtoken())
+	html[#html + 1] = "<fieldset><legend>" .. T"Warning: current login password is the default one. It is strongly recommended to change it in order to enforce the security." .. "</legend>"
         html[#html + 1] = '<fieldset>'
         local attr = {radio = {style = "display: block"}}
-        html[#html + 1] = ui_helper.createInputRadio("", "passwordchange", {{"now", T"Now"},{"remindlater", T"Remind me later"},{"dontremind", T"Do not remind me again"}},nil,attr)
+        html[#html + 1] = ui_helper.createInputRadio("", "passwordchange", {{"now", T"Now"},{"remindlater", T"Remind me later"}},nil,attr)
         html[#html + 1] = '</fieldset>'
         html[#html + 1] = '</form>'
         html[#html + 1] = '</div>'
@@ -198,19 +201,6 @@ message_helper.popMessages()
                window.location = "/password.lp";\
             }else if(value == "remindlater"){\
                $("#password_reminder").modal(\'hide\');\
-            }else if(value == "dontremind"){\
-               var params = [];\
-               var target = $(".modal form").attr("action");\
-               params.push({\
-                 name : "action",\
-                 value : "SAVE"\
-               },\
-               {\
-                 name : "passwordchange",\
-                 value : value\
-               }, tch.elementCSRFtoken());\
-               $.post(target, params);\
-               $("#password_reminder").modal("hide");\
             }\
             return false;\
           });\
@@ -223,6 +213,7 @@ message_helper.popMessages()
 </body>\
 </html>\
 <script>\
+var current_role = \'');  ngx.print(currentuser); ngx.print('\';\
 var processMsg=\'');  ngx.print(T"Processing"); ngx.print('\';\
 var openMsg = \'');  ngx.print(T"Loading..."); ngx.print('\';\
 var waitMsg = \'');  ngx.print(T"Please wait..."); ngx.print('\';\
@@ -230,6 +221,11 @@ var loginMsg =\'');  ngx.print(T"Login Expired. Reloading."); ngx.print('\';\
 var okButton = \'');  ngx.print(T"Ok"); ngx.print('\';\
 var cancelButton = \'');  ngx.print(T"Cancel"); ngx.print('\';\
 var poperrorMsg = \'');  ngx.print(T"Same site cannot be added for multiple times"); ngx.print('\';\
+\
+if(window.sessionStorage.getItem("current_role") == null && current_role != "guest"){\
+  window.sessionStorage.setItem("current_role", current_role);\
+}\
+\
 function httpErrorMessage(err){\
     switch(err.status){\
         case 500:\

@@ -457,13 +457,12 @@ setup_crossbar_lanwanswitch()
   config_get eth4lanwanmode globals eth4lanwanmode 0
   ret=`ethswctl -c lanwan -p 1 2>/dev/null | grep AN`
   if (([ "$ret" = "WAN" ]&&[ $eth4lanwanmode -eq 1 ]) || ([ "$ret" = "LAN" ]&&[ $eth4lanwanmode -eq 0 ])) ; then
-     # the 2nd parameter ethx is of no use if it's with port suffix
-     ethctl eth4 phy-power down port 10
+     [ "$ret" = "WAN" ] && ethctl eth4 phy-power down port 10 || ethctl eth3 phy-power down
      sleep 1
      /etc/init.d/swmdk stop
      exec_cmd ethswctl -c lanwan -p 1 -v $eth4lanwanmode
      /etc/init.d/swmdk start
-     ethctl eth4 phy-power up port 10
+     [ "$ret" = "WAN" ] && ethctl eth3 phy-power up || ethctl eth4 phy-power up port 10
   fi
 }
 

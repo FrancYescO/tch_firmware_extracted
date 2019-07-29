@@ -17,6 +17,7 @@ local content_helper = require("web.content_helper")
 local message_helper = require("web.uimessage_helper")
 local ajax_helper = require("web.ajax_helper")
 local get_usb_label = require("usbmap").get_usb_label
+local valStrLength = post_helper.getValidateStringLengthInRange
 
 local untaint = string.untaint
 local format, find, sub, match = string.format, string.find, string.sub, string.match
@@ -138,7 +139,7 @@ if ngx.req.get_method() == "POST" and ngx.req.get_post_args().action == "SAVE" t
      end
      if samba_available and tonumber(post_data["samba_filesharing"]) == 1 then
         mapValid.samba_name = valid_samba_dlna_string
-        mapValid.samba_workgroup = valid_samba_dlna_string
+        mapValid.samba_workgroup = valid_samba_dlna_string and valStrLength(1,16)
         mapValid.samba_description = valid_samba_dlna_string
      end
    content, helpmsg = post_helper.handleQuery(mapParams,mapValid)
@@ -146,17 +147,6 @@ end
 
 if dlna_available or samba_available then
 	content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
-end
-
-if ngx.var.request_method == "POST" and ngx.req.get_post_args().action == "SAVE" then
-  if ngx.req.get_post_args().cs_flag == "1"  then
-    ngx.header.content_type = "application/json"
-    ngx.print('{ "success":"true" }')
-    ngx.timer.at(0, function()
-      proxy.apply()
-    end)
-    ngx.exit(ngx.HTTP_OK)
-  end
 end
 
 -- usb Devices
@@ -530,6 +520,9 @@ $(document).on("click", "#save-config", function() {\
     $("#warning-msg").addClass("hide");\
     $("#reboot-warning-msg").addClass("hide");\
     $("#success-msg").addClass("hide");\
+    $("#modal-no-change").hide();\
+    $("#modal-changes").show();\
+    $("#popUp, .popUpBG").remove();\
     tch.showProgress("');  ngx.print(T'Rebooting...'); ngx.print('");\
   }\
   else {\

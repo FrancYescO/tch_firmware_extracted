@@ -14,11 +14,6 @@ local passwd_count_msg = format(T"You are trying to login with wrong password fo
 local timer_msg = format(T"Please wait %s seconds to enter new password", '<span id="timerSec"></span>')
 local json = require("dkjson")
 
-if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "getcsrf" then
-  ngx.print(ngx.ctx.session:getCSRFtoken())
-  ngx.exit(ngx.HTTP_OK)
-end
-
 if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "redirect" then
   local ipaddr = ""
   if ngx.req.get_uri_args().param == "system_reset" then
@@ -48,7 +43,6 @@ local function writeState(lastaccess)
 end
 
 if ngx.var.request_method == "GET" and ngx.req.get_uri_args().action == "lastaccess" then
-  ngx.print(ngx.ctx.session:getCSRFtoken())
   lastaccess.user = ngx.ctx.session:getusername()
   lastaccess.clientIp = ngx.var.remote_addr
   lastaccess.time = os.date("%T",os.time())
@@ -226,8 +220,9 @@ $(document).ready(\
       }\
       srp.error_message = function(err) {\
       if(err == 403){\
-        $.get("login.lp", {action:"getcsrf"}, function (data){\
-          $(\'meta[name=CSRFtoken]\').attr(\'content\', data);\
+        $.get("login.lp", function (data){\
+        var token = $(data).filter(\'meta[name="CSRFtoken"]\').attr(\'content\');\
+        $(\'meta[name=CSRFtoken]\').attr(\'content\', token);\
           if (!$("#loginfailure").is(":visible")) {\
             srp.identify("/authenticate", $("#srp_username")[0].value, password);\
           }\

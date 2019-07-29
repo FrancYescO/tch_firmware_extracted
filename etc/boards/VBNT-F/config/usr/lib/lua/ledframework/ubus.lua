@@ -89,6 +89,20 @@ function M.start(cb)
         end
     end
 
+    events['network.moff'] = function(msg)
+        if msg ~=nil and msg.state ~=nil then
+            if msg.state == "started" then
+               cb('mptcp_on')
+            elseif msg.state == "stopped" then
+               cb('mptcp_off')
+            elseif msg.state == "connected" then
+               cb('mptcp_RA_connected')
+            elseif msg.state == "disconnected" then
+               cb('mptcp_RA_disconnected')
+            end
+        end
+    end
+
     events['network.lte_backup'] = function(msg)
         if msg ~=nil and msg.state ~=nil then
             if msg.state == "enabled" then

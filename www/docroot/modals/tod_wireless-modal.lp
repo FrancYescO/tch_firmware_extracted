@@ -1,7 +1,6 @@
 --pretranslated: do not change this file
  
 -- Localization
--- NG-155433/GHG-3810 Wireless Control - Rule switches on all APs, also Guest APs
 gettext.textdomain('webui-core')
 
 local ui_helper = require("web.ui_helper")
@@ -23,10 +22,12 @@ local tod_columns = tod.columns
 local untaint_mt = require("web.taint").untaint_mt
 local session = ngx.ctx.session
 
+local validateTime = post_helper.validateTime
 local validDays = post_helper.getValidateInEnumSelect(tod.days)
 local validateBoolean = post_helper.validateBoolean
 local validMode = post_helper.getValidateInEnumSelect({{"on"}, {"off"}})
 local optionallyValidate = post_helper.getOptionalValidation
+local getRandomKey = post_helper.getRandomKey
 
 local ap_status_map = setmetatable({
   ["0"] = T"Off",
@@ -37,35 +38,6 @@ local tod_timer_path = "uci.tod.timer."
 local tod_action_path = "uci.tod.action."
 local tod_wifitod_path = "uci.tod.wifitod."
 local tod_ap_path = "uci.tod.ap."
-
-local function getRandomKey()
-  local bytes
-  local key = ("%02X"):rep(16)
-  local fd = io.open("/dev/urandom", "r")
-  if fd then
-    bytes = fd:read(16)
-    fd:close()
-  end
-  return key:format(bytes:byte(1, 16))
-end
-
-local function validateTime(value, object, key)
-    local timepattern = "^(%d+):(%d+)$"
-    local time = { match(value, timepattern) }
-    if #time == 2 then
-       local hour = tonumber(time[1])
-       local min = tonumber(time[2])
-       if hour < 0 or hour > 23 then
-          return nil, T"Invalid hour, must be between 0 and 23"
-       end
-       if min < 0 or min > 59 then
-          return nil, T"Invalid minutes, must be between 0 and 59"
-       end
-       return true
-    else
-       return nil, T"Invalid time (must be hh:mm)"
-    end
-end
 
 -- validates days (Mon...Sun)
 -- @param #table value have the value of corresponding key
@@ -84,7 +56,7 @@ end
 
 local tod_options = {
     tableid     = "tod",
-    basepath    = "uci.tod.action.",
+    basepath    = "uci.tod.wifitod.",
     createMsg   = T"Add New Rule",
     canAdd      = true,
     canDelete   = true,
@@ -144,6 +116,9 @@ end
 
 local function onAdd(success, content, onModify)
   local index = success:match("action(.+)")
+  if onModify then
+    index = success:match("wifitod(.+)")
+  end
   local setObject = {}
 
   if type(content.weekdays) ~= "table" then
@@ -167,26 +142,17 @@ local function onAdd(success, content, onModify)
     return nil
   end
 
-  content.weekdays = concat(content.weekdays, ",")
-
-  if onModify then
-    -- the action should be stopped first to restore the object setting before applying a new object value while in a active timeslot.
-    local currDay, currTime = parental_helper.getCurrentDayAndTime()
-    if content.enabled == "1" and match(content.weekdays, currDay) and currTime >= content.start_time and currTime <= content.stop_time then
-      proxy.set(format("%s@action%s.enabled", tod_action_path, index), "0")
-      proxy.apply()
-      -- action should be stopped and tod restart may take some time
-      ngx.sleep(2)
-    end
-  else
+  if not onModify then
     proxy.add(tod_action_path .. "@" .. success .. ".timers.")
     proxy.add(tod_timer_path, "timer"..index)
     proxy.add(tod_wifitod_path, "wifitod"..index)
     proxy.add(tod_wifitod_path .. "@wifitod"..index..".ap.")
-    proxy.add(tod_wifitod_path .. "@wifitod"..index..".ap.") -- custo NG-155433/GHG-3810
-    proxy.add(tod_ap_path, "ap0"..index)                     -- custo NG-155433/GHG-3810
-    proxy.add(tod_ap_path, "ap1"..index)                     -- custo NG-155433/GHG-3810
+    proxy.add(tod_wifitod_path .. "@wifitod"..index..".ap.")
+    proxy.add(tod_ap_path, "ap0"..index)
+    proxy.add(tod_ap_path, "ap1"..index)
   end
+
+  content.weekdays = concat(content.weekdays, ",")
 
   content.start_time = format("%s:%s", content.weekdays, content.start_time)
   content.stop_time = format("%s:%s", content.weekdays, content.stop_time)
@@ -198,32 +164,55 @@ local function onAdd(success, content, onModify)
 
   setObject[format("%s@timer%s.start_time", tod_timer_path, index)] = content.start_time
   setObject[format("%s@timer%s.stop_time", tod_timer_path, index)] = content.stop_time
+  setObject[format("%s@timer%s.name", tod_timer_path, index)] = "wifitod"
+  -- custo NG-155433/GHG-3810
+  setObject[format("%s@wifitod%s.ap.@1.value", tod_wifitod_path, index)] = "ap0"..index
+  setObject[format("%s@wifitod%s.ap.@2.value", tod_wifitod_path, index)] = "ap1"..index
+  setObject[format("%s@ap0%s.state", tod_ap_path, index)] = content.mode == "on" and "1" or "0"
+  setObject[format("%s@ap0%s.ap", tod_ap_path, index)] = "ap0"
+  setObject[format("%s@ap1%s.state", tod_ap_path, index)] = content.mode == "on" and "1" or "0"
+  setObject[format("%s@ap1%s.ap", tod_ap_path, index)] = "ap1"
 
-  setObject[format("%s@wifitod%s.ap.@1.value", tod_wifitod_path, index)] = "ap0"..index          -- custo NG-155433/GHG-3810
-  setObject[format("%s@wifitod%s.ap.@2.value", tod_wifitod_path, index)] = "ap1"..index          -- custo NG-155433/GHG-3810
-
-  setObject[format("%s@ap0%s.state", tod_ap_path, index)] = content.mode == "on" and "1" or "0"  -- custo NG-155433/GHG-3810
-  setObject[format("%s@ap0%s.ap", tod_ap_path, index)] = "ap0"                                   -- custo NG-155433/GHG-3810
-
-  setObject[format("%s@ap1%s.state", tod_ap_path, index)] = content.mode == "on" and "1" or "0"  -- custo NG-155433/GHG-3810
-  setObject[format("%s@ap1%s.ap", tod_ap_path, index)] = "ap1"                                   -- custo NG-155433/GHG-3810
   proxy.set(setObject)
-  proxy.apply()
-  return true
-end
-
-local function onModify(index, content)
-  onAdd(index, content, true)
   return true
 end
 
 local function onDelete(success)
-  local index = success:match("action(.+)")
-  proxy.del(format("uci.tod.ap.@ap0%s.", index))  -- custo NG-155433/GHG-3810
-  proxy.del(format("uci.tod.ap.@ap1%s.", index))  -- custo NG-155433/GHG-3810
+  local index = success:match("wifitod(.+)")
+  proxy.del(format("uci.tod.ap.@ap0%s.", index))
+  proxy.del(format("uci.tod.ap.@ap1%s.", index))
   proxy.del(format("uci.tod.action.@action%s.", index))
-  proxy.del(format("uci.tod.timer.@timer%s.", index))
   proxy.del(format("uci.tod.wifitod.@wifitod%s.", index))
+--As per the TOD functionality Ap state will revert only when the remaining configuration is present in the tod config.
+-- Only the timer list value defined in the action section has been modified as empty and the timer section has been deleted in the config.
+  proxy.set(format("%s@action%s.timers.@1.value", tod_action_path, index),"")
+  proxy.del(format("uci.tod.timer.@timer%s.", index))
+  return true
+end
+
+local function onModify(index, content)
+  local days = ""
+  if type(content.weekdays) == "table" then
+    for i, v in ipairs(content.weekdays) do
+      days = days..untaint(v)
+    end
+  else
+    days = untaint(content.weekdays)
+  end
+  local currDay, currTime = parental_helper.getCurrentDayAndTime()
+--Check whether the selected rule is enabled and it is in active timeslot.
+  if index ~= "" and content.enabled == "1" and match(days, currDay) and currTime >= content.start_time and currTime <= content.stop_time then
+    local new_index = proxy.add(tod_action_path, tod_options.objectName)
+    local success = onAdd(new_index, content)
+    if not success then
+      proxy.del(tod_action_path .. "@" .. tod_options.objectName .. ".")
+      tod_options.editing = -1
+    else
+      onDelete(index)
+    end
+  else
+    onAdd(index, content, true)
+  end
   proxy.apply()
   return true
 end
@@ -246,30 +235,68 @@ if ngx.var.request_method == "POST" then
       proxy.del(tod_action_path .. "@" .. tod_options.objectName .. ".")
       tod_options.editing = -1
     end
+    proxy.apply()
   elseif postargs.action == "TABLE-MODIFY" then
     onModify(current_index, postargs)
   elseif postargs.action == "TABLE-DELETE" then
     onDelete(current_index)
+    proxy.apply()
   end
 end
 
 local tod_data, tod_index = content_helper.loadTableData(tod_options.basepath, tod_columns)
+local action_list = content_helper.convertResultToObject(tod_action_path, proxy.get(tod_action_path))
+local ap_list = content_helper.convertResultToObject(tod_ap_path, proxy.get(tod_ap_path))
+
+local newlist_index = {}
+local dnd_val = 0
+for  i , v in ipairs(action_list) do
+  local param_index = v["paramindex"]:match("action(.+)")
+  dnd_val = v["paramindex"]:match("dnd(.+)") and dnd_val+1 or dnd_val
+  if param_index then
+    if v["timers.@1.value"] == "" then
+      newlist_index[#newlist_index + 1] = i-dnd_val
+    end
+  end
+end
+
+--Section to remove the TOD rule displaying in GUI which doesn't have timer section in config.
+
+for i = #newlist_index , 1 , -1 do
+  table.remove(tod_index, newlist_index[i])
+  table.remove(ap_list, newlist_index[i])
+  table.remove(tod_data, newlist_index[i])
+end
 
 local tablesessionindexes = tod_options.tableid .. ".allowedindexes"
 session:store(tablesessionindexes, tod_index)
 
-local action_list = content_helper.convertResultToObject(tod_action_path, proxy.get(tod_action_path))
 local timer_list = content_helper.convertResultToObject(tod_timer_path, proxy.get(tod_timer_path))
 local wifitod_list = content_helper.convertResultToObject(tod_wifitod_path, proxy.get(tod_wifitod_path))
-local ap_list = content_helper.convertResultToObject(tod_ap_path, proxy.get(tod_ap_path))
 local timer_data = {}
 
+--To filter out timer section created by WiFi Tod rule
+local wifitod_timer = {}
+for i, v in ipairs(timer_list) do
+  if timer_list[i].name == "" or timer_list[i].name == "wifitod" then
+    wifitod_timer[#wifitod_timer+1] = timer_list[i]
+  end
+end
+
+--To filter out action section created by ringing schedule rule
+local wifi_action = {}
+for i, v in ipairs(action_list) do
+  if action_list[i].script == "wifitodscript" then
+    wifi_action[#wifi_action+1] = action_list[i]
+  end
+end
+
 for i, v in ipairs(tod_data) do
-  v[1] = v[1] -- status
-  v[2] = "all" -- ap   custo NG-155433/GHG-3810
-  local days, start_time = timer_list[i].start_time:match("^(.-):(.+)$")
+  v[1] = wifi_action[i].enabled -- status
+  v[2] = "all" -- ap
+  local days, start_time = wifitod_timer[i].start_time:match("^(.-):(.+)$")
   v[3] = start_time -- start_time
-  v[4] = timer_list[i].stop_time:match("^.-:(.+)$") -- stop_time
+  v[4] = wifitod_timer[i].stop_time:match("^.-:(.+)$") -- stop_time
   v[5] = ap_status_map[ap_list[i].state] -- apState
   v[6] = {} -- days
   for day in gmatch(days, "[^,]+") do

@@ -26,6 +26,10 @@ local function setup_uci(savedir)
 	uci = moduci.cursor(CONF_DIR, savedir)
 end
 
+local function setup_uci_dir(config_dir)
+	uci = moduci.cursor(config_dir)
+end
+
 local current_line = 0
 local ispconfig = false
 
@@ -589,6 +593,16 @@ local function do_ispconfig()
     -- otherwise this command is a no-op
 end
 
+local function do_set_config_dir(args)
+    if #args~=1 then
+        error(errmsg("'config_dir' requires (exactly) one argument"))
+    end
+    if lfs.attributes(args[1], "mode") ~= "directory" then
+        error(errmsg("'config_dir' %s does not exist",args[1]))
+    end
+    setup_uci_dir(args[1])
+end
+
 -- for /etc/init.d/service calls we only allow at most one parameter which, if
 -- given, must be in the following table.
 local allowed_service_action = {
@@ -682,6 +696,7 @@ local cmdmap = {
     errorcode = do_errorcode;
     reboot = do_reboot,
     ispconfig = do_ispconfig,
+    config_dir = do_set_config_dir,
 
     -- we do not use a string key as we do not want to introduce an extra
     -- command

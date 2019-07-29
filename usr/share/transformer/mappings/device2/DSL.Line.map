@@ -715,6 +715,22 @@ local function getEnable(mapping, _, key)
   return uciHelper.get_from_uci(xdslBinding)
 end
 
+local function getAllowedProfiles(profiles, key)
+  if profiles and profiles ~= "" then
+    local device = getDevice(key)
+    xdslBinding.sectionname = device
+    xdslBinding.option = "profile"
+    local dslprofiles = uciHelper.get_from_uci(xdslBinding)
+    for _,v in ipairs(dslprofiles) do
+       if match(v, "BrcmPriv1") then
+         profiles = profiles .. ",35b"
+         break
+       end
+    end
+  end
+  return profiles or ""
+end
+
 local function getAttenuationValues(key)
   local mode = xdslctl.infoValue("mode",nil,nil, key)
   local upStream, downStream = "0", "0"
@@ -757,7 +773,8 @@ Device_DSL_Line_i_.get = {
     return phonelinepairmapping[xdslctl.profileValue("phonelinepair", nil, nil, xdslctlLineIdMap[key])]
   end,
   AllowedProfiles = function(mapping, param, key)
-    return xdslctl.infoValue("AllowedProfiles", nil, nil, xdslctlLineIdMap[key])
+    local profiles = xdslctl.infoValue("AllowedProfiles", nil, nil, xdslctlLineIdMap[key])
+    return getAllowedProfiles(profiles, key)
   end,
   CurrentProfile = function(mapping, param, key)
     local profile = xdslctl.infoValue("vdsl2profile", nil, nil, xdslctlLineIdMap[key])
@@ -909,7 +926,7 @@ Device_DSL_Line_i_.getall = function(mapping, key)
     FirmwareVersion = firmwareVersion,
     StandardsSupported = standardsSupported and standardsSupported:gsub("T1_413","T1.413") or "",
     StandardUsed = standardUsed and standardUsed:gsub("T1_413","T1.413") or "",
-    AllowedProfiles = xdslInfoValues["AllowedProfiles"] or "",
+    AllowedProfiles = getAllowedProfiles(xdslInfoValues["AllowedProfiles"], key) or "",
     CurrentProfile = xdslInfoValues["vdsl2profile"] ~= "N.A." and xdslInfoValues["vdsl2profile"] or "",
     LineNumber = phonelinepairmapping[xdslctl.profileValue("phonelinepair", nil, nil, xdslctlLineIdMap[key])] or "",
     UpstreamMaxBitRate = xdslInfoValues["maxrate"]["us"] or "0",

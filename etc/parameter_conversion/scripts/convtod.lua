@@ -53,6 +53,10 @@ oldConfig:foreach("tod", "action", function(s)
   newConfig:set("tod", newtimer, "timer")
   local start_time =  oldConfig:get("tod", timername, "start_time")
   local stop_time =  oldConfig:get("tod", timername, "stop_time")
+  local name = oldConfig:get("tod", timername, "name")
+  if name then
+    newConfig:set("tod", newtimer, "name", name)
+  end
   if s.timer then
     local days = oldConfig:get("tod", timername, "weekdays")
     days = table.concat(days,",")

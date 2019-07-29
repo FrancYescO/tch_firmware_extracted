@@ -129,10 +129,10 @@ mmpbxd_start() {
   local mmdbd_args="-p $mmdbd_path"
   service_start /usr/bin/mmdbd $mmdbd_args
 
+  check_insert_module dsphal.ko dsphal
   if [ "$CPU_TYPE" = "mips" ]; then
     check_insert_module htsk.ko htsk
   fi
-  check_insert_module dsphal.ko dsphal
   check_insert_module slicslac.ko slicslac
 
   if [ $mmswitchAvailable -eq 1 ]
@@ -156,7 +156,11 @@ mmpbxd_start() {
         fi
       done
     #Voice socket TX thread
-    setrtprio mmswitchsock_w $mmswitchRtPriority > /dev/null
+    if [ "$CPU_TYPE" = "mips" ]; then
+      setrtprio mmswitchsock_w 99 fifo > /dev/null
+    else
+      setrtprio mmswitchsock_w $mmswitchRtPriority > /dev/null
+    fi
     while :
       do
         up=$(ps | grep mmswitchsock_r | grep -v grep)
@@ -165,7 +169,11 @@ mmpbxd_start() {
         fi
       done
     #Voice socket RX thread
-    setrtprio mmswitchsock_r $mmswitchRtPriority > /dev/null
+    if [ "$CPU_TYPE" = "mips" ]; then
+      setrtprio mmswitchsock_r 99 fifo > /dev/null
+    else
+      setrtprio mmswitchsock_r $mmswitchRtPriority > /dev/null
+    fi
     while :
       do
         up=$(ps | grep mmswitch_wq | grep -v grep)
@@ -174,7 +182,11 @@ mmpbxd_start() {
         fi
       done
     #Work Queue thread
-    setrtprio mmswitch_wq $mmswitchRtPriority > /dev/null
+    if [ "$CPU_TYPE" = "mips" ]; then
+      setrtprio mmswitch_wq 99 fifo > /dev/null
+    else
+      setrtprio mmswitch_wq $mmswitchRtPriority > /dev/null
+    fi
   fi
 
   if [ $mmtonegenWaitForThreads -eq 1 ];
@@ -237,6 +249,10 @@ mmpbxd_start() {
     logger -p $sysLogPriority "the 2 values of max contact do not exist!"
   fi
 
+  if [ "$CPU_TYPE" = "mips" ]; then
+    setrtprio mmdbd 76 rr > /dev/null
+  fi
+
   # temporary workaround to avoid the GW crash due to OoM, by limiting stack size
   ulimit -S -s 1024
   service_start /usr/bin/mmpbxd $args
@@ -295,9 +311,11 @@ mmpbxd_start() {
        do
          taskset -p $dsp_mask "$pid" > /dev/null
        done
-       setcpumask mmswitchsock_w $dsp_mask > /dev/null
-       setcpumask mmswitchsock_r $dsp_mask > /dev/null
-       setcpumask mmswitch_wq $dsp_mask > /dev/null
+       if [ "$CPU_TYPE" = "armv7l" ] || [ "$CPU_TYPE" = "aarch64" ]; then
+           setcpumask mmswitchsock_w $dsp_mask > /dev/null
+           setcpumask mmswitchsock_r $dsp_mask > /dev/null
+           setcpumask mmswitch_wq $dsp_mask > /dev/null
+       fi
        setcpumask mmtonegen $dsp_mask > /dev/null
        #USB interrupts affect voice related interrupt process on same core, so set USB interrupts to other core.
        usb_interrupts_smp_affinity $((${dsp_mask}^3))
@@ -387,6 +405,9 @@ mmpbxd_stop() {
 
     check_remove_module slicslac
     check_remove_module dect
+    if [ "$CPU_TYPE" = "mips" ]; then
+      check_remove_module htsk
+    fi
 
     if [ $mmtonegenAvailable -eq 1 ];
     then

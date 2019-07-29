@@ -120,6 +120,17 @@ local Device_IP_Interface_i_ = {
         type = "unsignedInt",
         description = "Delegate a prefix of given length to the interface"
       },
+      X_000E50_DefaultRoute = {
+        access = "readWrite",
+        type = "boolean",
+        description = "The parameter defines whether to create a default route via the received gateway"
+      },
+      X_000E50_IPv4TableReference = {
+        access= "readWrite",
+        type = "string",
+        description = "The parameter assigns a routing table to the WAN interfaces for IPv4.",
+      }
+
 
          --IPv4AddressNumberOfEntries
          --automatically created when Device.IP.Interface.{i}.IPv4Address.{i}. is loaded
@@ -278,6 +289,27 @@ local function getIPv6DeviceValues(key)
   return {}
 end
 
+--- Returns  true if the value matches with the route table from the file "/etc/iproute2/rt_tables"
+local function isRouteTableEntry(name)
+  local routeTable = {}
+  local fd = open("/etc/iproute2/rt_tables")
+  if fd then
+    for line in fd:lines() do
+      local tableID, tableName = string.match(line, "^(%d+)%s+(%S+)")
+      if tableID and tableName then
+        routeTable[ #routeTable + 1 ] = tableName
+      end
+    end
+    fd:close()
+  end
+  for _,routeName in ipairs(routeTable) do
+    if routeName == name then
+      return true
+    end
+  end
+  return nil
+end
+
 -- check ifname for interface used, if it starts with @
 --   yes : points to other interface, read/write to/from interface pointed
 --   no : use same interface for read/write
@@ -371,6 +403,13 @@ Device_IP_Interface_i_.get = {
   X_000E50_IP6Assign = function(mapping, param, key)
     return getUciParam(key, "ip6assign", "0")
   end,
+  X_000E50_DefaultRoute = function(mapping, param, key)
+    return getUciParam(key, "defaultroute", "1")
+  end,
+  X_000E50_IPv4TableReference = function(mapping, param, key)
+    return getUciParam(key, "ip4table", "main")
+  end,
+
 }
 
 Device_IP_Interface_i_.getall = function(mapping, key)
@@ -393,6 +432,9 @@ Device_IP_Interface_i_.getall = function(mapping, key)
     LowerLayers = getLowerLayers(mapping,nil,key,interface,uciValues),
     Router = getRouterInstance(mapping,nil,key,uciValues),
     X_000E50_IP6Assign = uciValues.ip6assign or "0",
+    X_000E50_DefaultRoute = uciValues.defaultroute or "1",
+    X_000E50_IPv4TableReference = uciValues.ip4table or "main"
+
   }
 end
 
@@ -455,6 +497,16 @@ Device_IP_Interface_i_.set = {
       return nil, "Error setting X_000E50_IP6Assign. The protocol is not static."
     end
   end,
+  X_000E50_DefaultRoute = function(mapping, param, value, key)
+    setUciParam(model:getBaseKey(key), "defaultroute", value)
+  end,
+  X_000E50_IPv4TableReference = function(mapping, param, value, key)
+    if isRouteTableEntry(value) then
+      setUciParam(model:getBaseKey(key), "ip4table", value)
+    else
+      return nil, "Invalid value"
+    end
+  end
 }
 
 Device_IP_Interface_i_.commit = function()

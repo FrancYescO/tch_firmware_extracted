@@ -3,6 +3,7 @@ local ngx, tostring = ngx, tostring
 
 local dm = require("datamodel")
 local srp = require("srp")
+local digest = require("tch.crypto.digest")
 local check_host = require("web.check_host")
 
 local printf = require("web.web").printf
@@ -15,7 +16,6 @@ local posix = require("tch.posix")
 local clock_gettime = posix.clock_gettime
 local CLOCK_MONOTONIC = posix.CLOCK_MONOTONIC
 local Session = require("web.session")
-local wrongPassInfo = {}
 
 local SessionMgr = {}
 SessionMgr.__index = SessionMgr
@@ -138,7 +138,9 @@ end
 -- But at most one of those will belong to a session in the given
 -- session mgr
 local function getSessionIDForRequest(mgr)
-  local sessionID = untaint(get_cookies()["sessionID"])
+  local is_alt = false
+  local cookies = get_cookies()
+  local sessionID = untaint(cookies["sessionID"])
   if type(sessionID) == "table" then
     local found = false
     for _, ID in ipairs(sessionID) do
@@ -151,8 +153,15 @@ local function getSessionIDForRequest(mgr)
     if not found then
       sessionID = nil
     end
+  elseif not sessionID and mgr.alternate_sessionid then
+    sessionID = untaint(cookies[mgr.alternate_sessionid])
+    if type(sessionID)=="table" then
+      -- multiple alternates are not supported.
+      sessionID = nil
+    end
+    is_alt = true
   end
-  return sessionID
+  return sessionID, is_alt
 end
 
 
@@ -160,8 +169,10 @@ end
 -- @param mgr The session manager that needs to verify the session.
 -- @param remoteIP The IP address of the originator of the request.
 -- @return session and sessionID if valid session found, nil otherwise.
+--  in case no session is found it may return a sessionID if an alternate
+--  sessionID was found in the request.
 local function verifySession(mgr, remoteIP)
-  local sessionID = getSessionIDForRequest(mgr)
+  local sessionID, is_alt = getSessionIDForRequest(mgr)
   local session = sessionID and mgr.sessions[sessionID]
   if session then
     -- SessionID corresponds to a known session.
@@ -178,6 +189,7 @@ local function verifySession(mgr, remoteIP)
     end
     return session, sessionID
   end
+  return nil, is_alt and sessionID
 end
 
 --- Retrieve the real session given its proxy.
@@ -256,7 +268,7 @@ local function redirectIfNotAuthorized(mgr, session, sessionID)
     local cookie_header = untaint(ngx.var.http_cookie)
     if cookie_header then
       local updated
-      cookie_header, updated = gsub(cookie_header, "sessionID=%x+", new_session_cookie)
+      cookie_header, updated = gsub(cookie_header, "sessionID=[^;]+", new_session_cookie)
       if updated==0 then
         cookie_header = cookie_header .. "; " .. new_session_cookie
       end
@@ -277,7 +289,7 @@ local function getSessionAddress()
   }
 end
 
-local function newSession(mgr, address)
+local function newSession(mgr, sessionID_req, address)
   local session
   local sessionID
   if sessionLimitReached(mgr, address.remote) then
@@ -286,8 +298,9 @@ local function newSession(mgr, address)
   end
   -- Loop should only occur once and is here to avoid session ID clashes.
   while not sessionID or mgr.sessions[sessionID] do
-    session = Session.new(address, mgr)
+    session = Session.new(address, mgr, sessionID_req)
     sessionID = session.sessionid
+    sessionID_req = nil -- avoid an infinite loop
   end
   addSession(mgr, session, sessionID)
   -- Set the cookie.
@@ -311,7 +324,7 @@ end
 local function getSessionForRequest(mgr, address, noActivityUpdate)
   local session, sessionID = verifySession(mgr, address.remote)
   if not session then
-    session, sessionID = newSession(mgr, address)
+    session, sessionID = newSession(mgr, sessionID, address)
   elseif not noActivityUpdate then
     userActivityForSession(mgr, session)
   end
@@ -352,22 +365,65 @@ local function getUserForSession(mgr, username, session)
   return user
 end
 
+local verifier_pattern = ("%02X"):rep(256)
+local default_verifier = "B1A5292C1129550EEE511C6D5F22576AACB0EE643FFDEE8D9F0A0290C5AD349399D0001B1B8D46F67707528B80D158164D440CE06B2BF08E848300A37897A06CCCF901389D731AA61E69EAE421D5DA29A991D2E856B797FAFBB3EC03422FB3B6FF6122305BAD6048C53FACA10A5C523FA7A3C5C0C4CB4627656A30D9CFA39CB27FD30ACAEEFFB133C1AB1AEE744F2D86722244E07C73A61F9406CB79154C5EB545E9725DEA9BF4135EABA4E65794EE37031D85784E13DCAFA09B1B1CE9AC3DD0439C0133401B7A789EE313E945D70B734A4CDF59888327B158B98B59331B606B93A0D92EFD2637B03E22475BEE478BF74C1C5C9074E4B3CFB4131C9BC68E821E"
 
-local function getWrongPasswordInfo(username)
-  local info = wrongPassInfo[username]
+-- Returns an 'unknown user' for a given username. This is a dummy user with a predictable
+-- salt and a random verifier. This user will never be able to be verified.
+local function getUnknownUser(mgr, username)
+  local seed = mgr.salt_seed
+  local hmac = digest.hmac(digest.SHA256, seed..username, username)
+  local salt = string.sub(hmac, 1, 8)
+  local fd = io.open("/dev/urandom", "r")
+  local verifier = default_verifier
+  if fd then
+    local bytes = fd:read(256)
+    verifier =  verifier_pattern:format(bytes:byte(1,256))
+    fd:close()
+  end
+  local unknown_user = {
+    srp_salt = salt,
+    srp_verifier = verifier,
+  }
+  return unknown_user
+end
+
+local function getWrongPasswordInfo(mgr, username, session)
+  local remoteIP = session.remoteIP
+  local remoteIPInfo = mgr.wrongPassInfo[remoteIP]
+  if not remoteIPInfo then
+    -- First connection for this IP.
+    if #mgr.wrongPassInfo > 10 then
+      -- Over 10 different IPs have wrong password information, remove the oldest one.
+      local ip_to_remove = table.remove(mgr.wrongPassInfo, 1)
+      mgr.wrongPassInfo[ip_to_remove] = nil
+    end
+    mgr.wrongPassInfo[remoteIP] = {}
+    mgr.wrongPassInfo[#mgr.wrongPassInfo + 1] = remoteIP
+    remoteIPInfo = mgr.wrongPassInfo[remoteIP]
+  end
+  local info = remoteIPInfo[username]
   if not info then
+    -- First attempt with this username for the given IP
+    if #remoteIPInfo > 50 then
+      -- Over 50 different usernames have been tried from the given IP, remove the oldest one.
+      local username_to_remove = table.remove(remoteIPInfo, 1)
+      remoteIPInfo[username_to_remove] = nil
+    end
     info = {count = 0, lockTime = 0}
-    wrongPassInfo[username] = info
+    remoteIPInfo[username] = info
+    remoteIPInfo[#remoteIPInfo + 1] = username
   end
   return info
 end
 
 -- Store wrongEntryCount and locktime for entered user.
--- @param  mgr     : The session manager
--- @param  username : entered username
-local function incrementWrongPasswordCount(mgr, username)
+-- @param mgr      : The session manager
+-- @param username : entered username
+-- @param session  : The current session
+local function incrementWrongPasswordCount(mgr, username, session)
   local maxwrongattempt = tonumber(mgr.maxwrongattempt) or 15
-  local countInfo = getWrongPasswordInfo(username)
+  local countInfo = getWrongPasswordInfo(mgr, username, session)
   countInfo.count =  countInfo.count + 1
   if countInfo.count > maxwrongattempt then
     countInfo.count = maxwrongattempt
@@ -375,8 +431,21 @@ local function incrementWrongPasswordCount(mgr, username)
   countInfo.lockTime = clock_gettime(CLOCK_MONOTONIC)
 end
 
-local function clearWrongPasswordInfo(username)
-  wrongPassInfo[username] = nil
+local function clearWrongPasswordInfo(mgr, username, session)
+  local remoteIP = session.remoteIP
+  local remoteIPInfo = mgr.wrongPassInfo[remoteIP]
+  if remoteIPInfo then
+    local found
+    for index, user in ipairs(remoteIPInfo) do
+      if user == username then
+        found = index
+      end
+    end
+    if found then
+      table.remove(remoteIPInfo, found)
+      remoteIPInfo[username] = nil
+    end
+  end
 end
 
 local algorithms = {
@@ -392,24 +461,25 @@ local function backOffAlgorithm(backOffMethod)
   return algorithms[backOffMethod] or algorithms.exponential
 end
 
-local function getWaitTime(username, mgr)
-  local info = getWrongPasswordInfo(username)
+local function getWaitTime(mgr, username, session)
+  local info = getWrongPasswordInfo(mgr, username, session)
   return backOffAlgorithm(mgr.backOffMethod)(info.count, info.lockTime, clock_gettime(CLOCK_MONOTONIC), mgr.backOffRepeat)
 end
 
 -- Handle scenario where user refreshes browser, when wait popup
 -- displaying and user tries again with wrong password. In case this
 -- wait popup will appear with time remaining in previous try
--- @param mgr     : The session manager
+-- @param mgr      : The session manager
 -- @param username : entered username
-local function checkBruteForceWaitingTimeForUser(mgr, username)
+-- @param session  : The current session
+local function checkBruteForceWaitingTimeForUser(mgr, username, session)
   if mgr.bruteforce == "1" then
-    local info = getWrongPasswordInfo(username)
-     if info.count > 0 then
+    local info = getWrongPasswordInfo(mgr, username, session)
+    if info.count > 0 then
       if mgr.relaxfirstattempt == "1" and info.count == 1 then
         return
       end
-      local waitTime = getWaitTime(username, mgr)
+      local waitTime = getWaitTime(mgr, username, session)
       if waitTime > 0 then
         printf('{ "error": { "msg":"%s","waitTime":"%d","wrongCount":"%s" }}', "failed", waitTime, info.count)
         return true
@@ -423,19 +493,20 @@ end
 -- If the user enters wrong password for the first time, Wait popup will not appear.
 -- After every successive try WrongPasswordCount will increase, based
 -- on WrongPasswordCount waittime will increase exponentially.
--- @param  mgr     : The session manager
+-- @param mgr      : The session manager
 -- @param username : entered username
+-- @param session  : The current session
 -- @param errMsg   : Errmsg contains string "didn't match". when user try to login in multiple
 --                   tab/browser.when wait popup appearing in GUI
-local function preventBruteForce(mgr, username, errMsg)
+local function preventBruteForce(mgr, username, session, errMsg)
   if mgr.bruteforce == "1" then
-    incrementWrongPasswordCount(mgr, username)
-    local count = getWrongPasswordInfo(username).count or 0
+    incrementWrongPasswordCount(mgr, username, session)
+    local count = getWrongPasswordInfo(mgr, username, session).count or 0
     if count > 0 then
       if mgr.relaxfirstattempt == "1" and count == 1 then
         return
       end
-      local waitTime = getWaitTime(username, mgr)
+      local waitTime = getWaitTime(mgr, username, session)
       printf('{ "error": { "msg":"%s","waitTime":"%s","wrongCount":"%s" }}', errMsg or "failed", waitTime, count)
       return true
     end
@@ -486,22 +557,25 @@ function SessionMgr:handleAuth()
     -- authentication is started.
     session.changeAllowed = nil
     local user = getUserForSession(self, I, session)
+    local unknown_user = getUnknownUser(self, I)
     if not user then
-      -- TODO: shouldn't reveal that the username is unknown; instead
-      --       we should generate a fake salt and B and in the second
-      --       step simply report that authentication failed
-      ngx.log(ngx.ERR, string.format("Failed logon attempt for user %s", post_args.I))
-      ngx.print('{ "error":"failed" }')
-    else
-      if not checkBruteForceWaitingTimeForUser(self, I) then
-        -- return salt and B
-        local B
-        session.verifier, B = srp.Verifier(I, user.srp_salt, user.srp_verifier, A)
-        if not B then
-          ngx.print('{ "error":"invalid arguments" }')
-        else
-          printf('{ "s":"%s", "B":"%s" }', user.srp_salt, B)
-        end
+      user = unknown_user
+    end
+    -- TODO The next function call will add an entry to wrongPassInfo. This table entry is cleared on
+    -- successful login. Now that we allow unknown users to advance to the second step in SRP, an
+    -- entry for every unknown user will be added as well. It can however never be cleared, which would
+    -- allow an attacker to fill up the memory by simply continueing to send fake login attempts. We need to introduce
+    -- a new way to clear entries from the wrongPassInfo table.
+    -- TODO why is wrongPassInfo not linked to a specific session manager?? If we link it, we can use the cleanup function
+    -- to remove entries that have 'timed' out.
+    if not checkBruteForceWaitingTimeForUser(self, I, session) then
+      -- return salt and B
+      local B
+      session.verifier, B = srp.Verifier(I, user.srp_salt, user.srp_verifier, A)
+      if not B then
+        ngx.print('{ "error":"invalid arguments" }')
+      else
+        printf('{ "s":"%s", "B":"%s" }', user.srp_salt, B)
       end
     end
     ngx.exit(ngx.HTTP_OK)  -- doesn't return
@@ -523,11 +597,11 @@ function SessionMgr:handleAuth()
       if uri == self.passpath then
         session.changeAllowed = true
       end
-      clearWrongPasswordInfo(verifier:username())
+      clearWrongPasswordInfo(self, verifier:username(), session)
       -- now send our proof
       printf('{ "M":"%s" }', M2)
     else
-      if not preventBruteForce(self, verifier:username(), errmsg) then
+      if not preventBruteForce(self, verifier:username(), session, errmsg) then
         ngx.log(ngx.ERR, "Failed logon attempt for user " .. verifier:username())
         printf('{ "error":"%s" }', errmsg or "failed")
       end
@@ -725,6 +799,12 @@ local config_verifiers = {
   maxsessions_per_ip = function(self, _, value)
     self.maxsessions_per_ip = verify_sessionlimit_value(value, self.maxsessions_per_ip)
   end,
+  salt_seed = function(self, _, value)
+    -- The salt seed should be a hexadecimal string with length 8.
+    if value:match("^%x%x%x%x%x%x%x%x$") then
+      self.salt_seed = value
+    end
+  end,
 
   _default = function(self, key, value)
     -- Options that are not set in UCI result in empty string
@@ -797,6 +877,8 @@ function M.new(mgr_name, mgr_config, sessioncontrol)
       ruleset = {},
       maxsessions = 50,
       maxsessions_per_ip = 10,
+      salt_seed = "7BFA06F1",
+      wrongPassInfo = {},
     },
     SessionMgr)
   parse_mgr_config(new_mgr, mgr_config)

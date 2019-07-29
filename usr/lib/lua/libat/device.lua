@@ -27,6 +27,7 @@ local vid_mappings = {
 	["0f3d"] = "sierra",
 	["1199"] = "sierra",
 	["2001"] = { -- D-Link
+		["7e35"] = "broadmobi",
 		["7e3d"] = "broadmobi",
 		default  = "mediatek"
 	},

@@ -1,15 +1,12 @@
 #! /usr/bin/env lua
 
--- file: mod_voice.lua
-
-package.path = "/usr/share/ngwfdd/lib/?.lua;" .. package.path
-
-local gwfd = require("gwfd-common")
+local gwfd = require("gwfd.common")
+local fifo_file_path
+do
+  local args = gwfd.parse_args(arg)
+  fifo_file_path = args.fifo
+end
 local uloop = require("uloop")
-
--- Absolute path to the fifo file
-
-local fifo_file_path = arg[1]
 
 -- UBUS connection
 

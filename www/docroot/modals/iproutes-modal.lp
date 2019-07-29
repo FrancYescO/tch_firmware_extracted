@@ -180,8 +180,11 @@ local function validateDEST(value, object)
       localdevmask = "uci.network.interface.@" .. curintf .. ".netmask",
     }
     content_helper.getExactContent(contentdata)
+    if value == contentdata.localdevIP then
+      return nil, T"Cannot use the GW IP."
+    end
     if gwIP then
-      return gAV(gAV(post_helper.staticLeaseIPValidation, post_helper.validateQTN, post_helper.validateLXC), post_helper.reservedIPValidation)(value, contentdata)
+      return gAV(gAV(post_helper.advancedIPValidation, post_helper.validateQTN, post_helper.validateLXC), post_helper.reservedIPValidation)(value, contentdata)
     end
     return nil, T"Invalid IP address."
 end
@@ -190,7 +193,7 @@ local static_route_valid = {
     Destination = validateDEST,
     Mask = post_helper.validateIPv4Netmask,
     Gateway = validateGW,
-    Metric = post_helper.getValidateNumberInRange(1, 9999),
+    Metric = post_helper.getValidateNumberInRange(0, 9999),
     Interface = post_helper.getValidateInEnumSelect(wan_intfs),
 }
 

@@ -22,47 +22,52 @@ local optical = require('transformer.shared.optical')
 local match = string.match
 
 function M.check(runtime)
-	local scripthelpers = runtime.scripth
-	local conn = runtime.ubus
-	local logger = runtime.logger
-	local uci = runtime.uci
-	local mode = xdslctl.infoValue("tpstc")
-	if not uci then
-		return false
-	end
-   local x = uci.cursor()
-	-- check if wan ethernet port is up
-	if scripthelpers.l2HasCarrier("eth4") then
-				logger:notice("SFP connection: "..optical.getLinkStatus())
-				if optical.getLinkStatus() == "linkup" or optical.getWanType() == "SFP" then
-					logger:notice("SFP connected")
-					return "L3Sense", "SFP"
-				else
-					logger:notice("Ethernet wan connected")
-					return "L3Sense", "ETH"
-				end
-	else
-		-- check if xDSL is up
-		--local mode = xdslctl.infoValue("tpstc")
-		if mode then
-			if match(mode, "ATM") then
-			    return "L3Sense", "ADSL"
-			elseif match(mode, "PTM") then
-			    return "L3Sense", "VDSL"
-			end
-		end
-	end
-	--DR Section to check if wwan is enabled and if not enable it (covered config errors)
-   local mobile = x:get("network", "wwan", "auto")
-	logger:notice("WAN Sensing Mobile: "..mobile)
-
-	if mobile == "0" then
-		 logger:notice("WAN Sensing - Enabling Mobile interface")
-		 x:set("network", "wwan", "auto", "1")
-		 x:commit("network")
-		 conn:call("network.interface.wwan", "up", { })
-	end
-	return "L2Sense"
+  local scripthelpers = runtime.scripth
+  local conn = runtime.ubus
+  local logger = runtime.logger
+  local uci = runtime.uci
+  local mode = xdslctl.infoValue("tpstc")
+  local x = uci.cursor()
+  local s_variant = x:get("env", "var", "hardware_version") == "VBNT-S" and true or false
+  if not uci then
+    return false
+  end
+  -- check if xDSL is up
+  if s_variant and mode then
+    if match(mode, "ATM") then
+      return "L3Sense", "ADSL"
+    elseif match(mode, "PTM") then
+      return "L3Sense", "VDSL"
+    end
+  end
+  -- check if wan ethernet port is up
+  if scripthelpers.l2HasCarrier("eth4") then
+    logger:notice("SFP connection: "..optical.getLinkStatus())
+    if optical.getLinkStatus() == "linkup" or optical.getWanType() == "SFP" then
+	 logger:notice("SFP connected")
+	 return "L3Sense", "SFP"
+    else
+      logger:notice("Ethernet wan connected")
+      return "L3Sense", "ETH"
+    end
+  elseif not s_variant and mode then
+    if match(mode, "ATM") then
+      return "L3Sense", "ADSL"
+    elseif match(mode, "PTM") then
+      return "L3Sense", "VDSL"
+    end
+  end
+  --DR Section to check if wwan is enabled and if not enable it (covered config errors)
+  local mobile = x:get("network", "wwan", "auto")
+  logger:notice("WAN Sensing Mobile: "..mobile)
+  if mobile == "0" then
+    logger:notice("WAN Sensing - Enabling Mobile interface")
+    x:set("network", "wwan", "auto", "1")
+    x:commit("network")
+    conn:call("network.interface.wwan", "up", { })
+  end
+  return "L2Sense"
 end
 
 return M
+

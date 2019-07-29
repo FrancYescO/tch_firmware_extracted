@@ -25,10 +25,11 @@ log_filter_add() {
 logfilter_config() {
 	local cfg="$1"
 	IGNORECASE=''
-	local args log_filter_ip log_port log_type log_file log_filter log_filter_file
+	local args log_filter_ip log_port log_type log_file log_filter log_filter_file log_proto
 	config_get log_filter_ip "$cfg" log_filter_ip
 	config_get log_size $cfg log_size 0
 	config_get log_buffer_size $cfg log_buffer_size 0
+	config_get log_proto $cfg log_proto "udp"
 	[ $log_buffer_size -eq 0 -a $log_size -gt 0 ] && log_buffer_size=$log_size
 	[ $log_buffer_size -eq 0 ] && log_buffer_size=64
 	log_size=$log_buffer_size
@@ -45,7 +46,7 @@ logfilter_config() {
 	config_list_foreach "$cfg" log_filter log_filter_add
 	[ "${log_filter}" ] && log_filter="(${log_filter})"
 	[ "${log_xfilter}" ] && log_xfilter="(${log_xfilter})"
-	echo "syslog startup : filter:'${log_filter} ${log_xfilter}' filter_ip:'${log_filter_ip}' port:'${log_port}' type:'${log_type}' size:${log_size}kB file:'${log_file}' filter_file:'${log_filter_file}' IGNORECASE:'${IGNORECASE}'" >>/var/log/slfwd.txt
+	echo "syslog startup : filter:'${log_filter} ${log_xfilter}' filter_ip:'${log_filter_ip}' port:'${log_port}' protocol:'${log_proto}' type:'${log_type}' size:${log_size}kB file:'${log_file}' filter_file:'${log_filter_file}' IGNORECASE:'${IGNORECASE}'" >>/var/log/slfwd.txt
 	if [ "${log_filter}" -o "${log_xfilter}" ] ; then
 		uci set system.slff='log'
 		uci set system.slff.path="filter_file"

@@ -932,14 +932,16 @@ end
 local function getACSBssList(radio)
   local bssList = conn:call("wireless.radio.bsslist", "get", { name = radio }) or {}
   local bssData = ""
-  for mac, data in pairs(bssList[radio] or {}) do
-    -- all the colons are removed from the mac
-    local bssid = mac:gsub(":","") or ""
-    local bssInfo = string.format("%s:%s:%s:%s:%s:%s;", bssid, data.ssid or "", data.channel or "", data.rssi or "", data.sec or "", data.cap or "")
-    if ((#bssData + #bssInfo) <= 16*1024) then
-      bssData = bssData .. bssInfo
-    else
-      return bssData
+  if bssList then
+    for mac, data in pairs(bssList[radio] or {}) do
+      -- all the colons are removed from the mac
+      local bssid = mac:gsub(":","") or ""
+      local bssInfo = string.format("%s:%s:%s:%s:%s:%s;", bssid, data.ssid or "", data.channel or "", data.rssi or "", data.sec or "", data.cap or "")
+      if ((#bssData + #bssInfo) <= 16*1024) then
+        bssData = bssData .. bssInfo
+      else
+        return bssData
+      end
     end
   end
   return bssData

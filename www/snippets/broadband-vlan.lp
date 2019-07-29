@@ -48,6 +48,13 @@ function getValidateNumberInRange(min, max, value)
   return true
 end
 
+
+function setLanRelay(dname)
+  proxy.del("uci.network.interface.@lan.pppoerelay.")
+  proxy.add("uci.network.interface.@lan.pppoerelay.")
+  proxy.set("uci.network.interface.@lan.pppoerelay.@1.value",dname)
+end
+
 local pathifname = "uci.network.interface.@wan.ifname"
 local iface = proxy.get(pathifname)[1].value
 local connection = ""
@@ -101,7 +108,7 @@ local range, helpmes
 if ngx.var.request_method == "POST" then
   local content = ngx.req.get_post_args()
   if content["action"]=="SAVE" then
-    range, helpmes = getValidateNumberInRange(2, 4095, content["intf_vlanid"])
+    range, helpmes = getValidateNumberInRange(2, 4094, content["intf_vlanid"])
     if role ~= "engineer" then
       content["auswahlliste"] = "devnot"
     end
@@ -113,7 +120,7 @@ if ngx.var.request_method == "POST" then
            proxy.set(path.."vid", content["intf_vlanid"])
           end
           proxy.set(pathifname, dname)
-          proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+          setLanRelay(dname)
           proxy.set(path.."ifname", connection)
         else
           proxy.add("uci.network.device.", string.format("%s%s","wan",connection ))
@@ -125,7 +132,7 @@ if ngx.var.request_method == "POST" then
            proxy.set(path.."vid", content["intf_vlanid"])
           end
           proxy.set(pathifname, dname)
-          proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", dname)
+          setLanRelay(dname)
           proxy.set(path.."ifname", connection)
         end
         proxy.apply()
@@ -151,8 +158,10 @@ if ngx.var.request_method == "POST" then
           proxy.set(path.."ifname", "")
         end
         if content["intf_vlanid"] then
+          difname = string.format("%s.%s",connection, content["intf_vlanid"])
+          vid = content["intf_vlanid"]
           proxy.set(pathifname, string.format("%s.%s",connection, content["intf_vlanid"]))
-          proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", string.format("%s.%s",connection, content["intf_vlanid"]))
+          setLanRelay(string.format("%s.%s",connection, content["intf_vlanid"]))
         end
         proxy.apply()
       end
@@ -162,7 +171,7 @@ if ngx.var.request_method == "POST" then
         proxy.set(path.."ifname", "")
       end
       proxy.set(pathifname, connection)
-      proxy.set("uci.network.interface.@lan.pppoerelay.@1.value", connection)
+      setLanRelay(connection)
       proxy.apply()
       difname = ""
       message_helper.pushMessage(T"Changes saved successfully", "success")

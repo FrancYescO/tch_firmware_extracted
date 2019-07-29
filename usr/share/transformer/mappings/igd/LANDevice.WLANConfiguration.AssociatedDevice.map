@@ -293,10 +293,12 @@ local entriesAssociatedDevice = function(mapping, parentKey)
   local wdsDevices = conn:call("wireless.wds", "get", {}) or {}
   local ssidData = conn:call("wireless.ssid", "get", {}) or {}
   local iface = parentKey:gsub("_remote", "")
-  local macAddress = ssidData[iface] and ssidData[iface]['mac_address']
-  for wdsIdx, wdsDev in pairs(wdsDevices) do
-    if wdsDev['local_mac_address'] == macAddress and wdsDev['mac_address'] then
-      entries[#entries + 1] = parentKey .. "_" .. wdsIdx .. "_" .. wdsDev['mac_address']
+  local macAddress = ssidData and ssidData[iface] and ssidData[iface]['mac_address']
+  if macAddress and wdsDevices then
+    for wdsIdx, wdsDev in pairs(wdsDevices) do
+      if wdsDev['local_mac_address'] == macAddress and wdsDev['mac_address'] then
+        entries[#entries + 1] = parentKey .. "_" .. wdsIdx .. "_" .. wdsDev['mac_address']
+      end
     end
   end
   return entries

@@ -493,9 +493,10 @@ session:store("timer_data", timer_data)
         $("#stoptime").mobiscroll().time(opt);
     });
     $("#todStatus").val() == 0?$('#tod, #parent_switch, .btn-table-new').hide():$('#tod, #parent_switch, .btn-table-new').show();
+    $('.line-edit').hide();
 
     $('.switch').change(function(){
-        $("#todStatus").val() == 0?$('#tod, #parent_switch, .btn-table-new').hide():$('#tod, #parent_switch, .btn-table-new').show();
+        $("#todStatus").val() == 0?$('#tod, #parent_switch, .btn-table-new').hide():$('#tod, #parent_switch').show();
     });
     $(".btn-table-add, .btn-table-modify").click(function() {
         // ui_helper adds dummy hidden checkbox if no checkboxes are checked. we don't need that.

@@ -257,22 +257,20 @@ adapt_banner(){
 	local _warning_msg="WARNING: Development board (EFU tag present)"
 
 	[[ ! -f "$_banner" ]] && return
-	if [[ "$1" == "1" ]]; then # Add message to banner
-		if ! grep -q "$_warning_msg" "$_banner"; then
-			if grep -q . /proc/efu/allowed; then
-				echo -ne "\n\e[1;30m\e[43m" >> "$_banner"
-				echo " " | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
-				echo "$_warning_msg" | sed -e :a -e 's/^.\{1,49\}$/ & /;ta' >> "$_banner"
-				echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
-				echo "Features enabled:" | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
-				echo "$(cat /proc/efu/allowed)" | sed -e 's/^/   /' | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
-				echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
-				echo -ne "\e[0m" >> "$_banner"
-			fi
+	# Remove any previous message from banner
+	awk '/\x1B\[1;30m\x1B\[43m /{p=1}/\x1B\[0m /{p=0;next}!p' "$_banner" >> /tmp/banner
+	mv /tmp/banner "$_banner"
+	if [[ "$1" == "1" ]]; then # Add a new message to banner
+		if grep -q . /proc/efu/allowed; then
+			echo -ne "\n\e[1;30m\e[43m" >> "$_banner"
+			echo " " | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+			echo "$_warning_msg" | sed -e :a -e 's/^.\{1,49\}$/ & /;ta' >> "$_banner"
+			echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
+			echo "Features enabled:" | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+			echo "$(cat /proc/efu/allowed)" | sed -e 's/^/   /' | sed -e :a -e 's/^.\{1,49\}$/& /;ta' >> "$_banner"
+			echo " " | sed -e :a -e 's/^.\{1,49\}$/ &/;ta' >> "$_banner"
+			echo -ne "\e[0m " >> "$_banner"
 		fi
-	else # Remove message from banner
-		awk '/\x1B\[1;30m/{p=1}/\x1B\[0m/{p=0;next}!p&&NF' "$_banner" >> /tmp/banner
-		mv /tmp/banner "$_banner"
 	fi
 }
 

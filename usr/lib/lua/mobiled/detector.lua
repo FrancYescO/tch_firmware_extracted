@@ -57,6 +57,10 @@ local usb_descriptors = {
 		driver_combinations = {
 			{
 				"GobiSerial",
+				"Sierra_GobiNet"
+			},
+			{
+				"GobiSerial",
 				"GobiNet"
 			}
 		}
@@ -88,6 +92,18 @@ local usb_descriptors = {
 			{
 				"option",
 				"huawei_cdc_ncm"
+			},
+			{
+				"option",
+				"BroadMobi_GobiNet"
+			},
+			{
+				"option",
+				"Quectel_GobiNet"
+			},
+			{
+				"option",
+				"Sierra_GobiNet"
 			},
 			{
 				"option",
