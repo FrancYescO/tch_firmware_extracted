@@ -19,10 +19,19 @@ function M.exit(runtime, l2type)
    local uci = runtime.uci
    local conn = runtime.ubus
    local logger = runtime.logger
+   local scripthelpers = runtime.scripth   
    local x = uci.cursor()
    local isSFP = x:get("env","rip","sfp")
    local origL2 = x:get("wansensing", "global", "l2type")
+   local check_tmrval = tonumber(x:get("wansensing", "worker1", "toggle_time") or 30)
+   
+   -- For Worker: now the runtime function shall be stopped, and the Worker should not be in action
+   if runtime.timer_ppp_eth then
+      timer_ppp_eth = runtime.timer_ppp_eth
+      timer_ppp_eth:stop()
+   end
 
+ 
    -- do nothing if sensed l2type is not changed
    if isSFP == "1" and (l2type == "SFP" or l2type == "VDSL" or l2type == "ADSL") then
       local lanwanmode = x:get("ethernet", "globals", "eth4lanwanmode")
@@ -37,8 +46,19 @@ function M.exit(runtime, l2type)
       end
    end
    if origL2 == l2type then
+-- this will be hit, if L2 sensing is hit and we are again on the same one as befor   
+logger:notice("FRS OrigL2=L2: now activating the runtime function and the event for the worker") 
+logger:notice("FRS Timer-Interval: " .. check_tmrval)  
+
       -- Workaround for NG-xxxx (NG-52864)
       os.execute("/etc/init.d/pppoe-relay-tch reload")
+-- Calling the ethernet Worker, it shall only be called, in case we are on ETH-Mode and NOT on SFP-Mode
+		if l2type == "ETH" then
+logger:notice("FRS L2EntyExit -- starting Worker since in ETH Mode as before : ")	
+			timer_ppp_eth = scripthelpers.fire_timed_event("check_network_ethwan", check_tmrval, 1)
+-- since the called function (fire_timed_event) is doing at "timer:start()"	the worker will be activated
+ 			runtime.timer_ppp_eth = timer_ppp_eth
+		end
       return true
    end
 
@@ -66,6 +86,14 @@ function M.exit(runtime, l2type)
       end
       os.execute("ifdown wan; /etc/init.d/xtm reload")
 
+	  -- Calling the ethernet Worker,  it shall only be called, in case we are on ETH-Mode and NOT on SFP-Mode
+
+		if l2type == "ETH" then
+			timer_ppp_eth = scripthelpers.fire_timed_event("check_network_ethwan", check_tmrval, 1)
+logger:notice("FRS -- : now activating the runtime function and the event for the worker since change to ETH mpde has been done")
+-- since the called function (fire_timed_event) is doing at "timer:start()"	the worker will be activated
+			runtime.timer_ppp_eth = timer_ppp_eth
+		end
    elseif l2type == "VDSL" then
       -- 1 interface to route all services (services are NOT interface specific)
       devname = x:get("network", "wanptm0", "ifname") and "wanptm0" or "ptm0"

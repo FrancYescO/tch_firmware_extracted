@@ -6,6 +6,7 @@ gettext.textdomain('webui-core')
 local lfs = require("lfs")
 local ui_helper = require("web.ui_helper")
 local content_helper = require("web.content_helper")
+local proxy = require("datamodel")
 local find, upper = string.find, string.upper
 local checkgpon = require("checkgponboard_helper")
 local isGponBoard = checkgpon.isGPONBoard()
@@ -33,12 +34,17 @@ end
     ');  
     local eth4_data = {
       eth4_status = "sys.eth.port.@eth4.status",
-      dsl_status = "sys.class.xdsl.@line0.Status"
+      intf_name = "uci.network.interface.@wan.ifname"
     }
 
     if xdsl_exist == true then
       content_helper.getExactContent(eth4_data)
-      if (eth4_data["dsl_status"] ~= "Up") and (eth4_data["eth4_status"] == "up") then
+      local eth4Intf = string.match(eth4_data["intf_name"], "eth4") or ""
+      if eth4Intf == "" then
+        local dev_name = "uci.network.device.@"..eth4_data["intf_name"]..".ifname"
+        eth4Intf = proxy.get(dev_name) and proxy.get(dev_name)[1] and proxy.get(dev_name)[1].value or ""
+      end
+      if eth4Intf == "eth4" and eth4_data["eth4_status"] == "up" then
         ngx.print(ui_helper.createCardHeader(T"Diagnostics", "modals/diagnostics-ping-modal.lp"))
       else
         ngx.print(ui_helper.createCardHeader(T"Diagnostics", "modals/diagnostics-xdsl-modal.lp"))
@@ -51,7 +57,7 @@ end
       ngx.print('\
     <div class="content">\
      <table align="center" cellspacing="10%" cellpadding="10%" >\
-      <tr>');  if xdsl_exist and (eth4_data["eth4_status"] ~= "up" or eth4_data["dsl_status"] == "Up") then   ngx.print('\
+      <tr>');  if xdsl_exist and (eth4Intf ~= "eth4" and eth4_data["eth4_status"] ~= "up") then   ngx.print('\
       <td><div data-toggle="modal" data-remote="modals/diagnostics-xdsl-modal.lp" data-id="diagnostics-xdsl-modal"><img  href="#" rel="tooltip" data-original-title="XDSL" src="/img/bandwidth-px-png.png" alt="dsl"></div></td>');  elseif isGponBoard then  ngx.print('\
       <td><div data-toggle="modal" data-remote="modals/diagnostics-gpon-modal.lp" data-id="diagnostics-gpon-modal"><img  href="#" rel="tooltip" data-original-title="GPON" src="/img/bandwidth-px-png.png" alt="gpon"></div></td>\
     ');  end  ngx.print('\

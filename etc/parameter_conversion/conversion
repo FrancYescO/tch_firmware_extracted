@@ -7,7 +7,9 @@ copy_file /etc/config/cwmp_transfer
 inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
 
 uci_section cwmpd.@single_config.-ssl_certificate,ssl_privatekey,ssl_verifypeer,backoff_minwait,backoff_multiplier,connectionrequest_throttle_time,connectionrequest_throttle_number
-inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','ssl_verifypeer') if (v == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','/etc/ssl/d6d84089.0') end n:commit('cwmpd')\"
+# TCOMITAGW-2506: Part 7: CWMPD, due to usage of different ACS servers, also the Certificate to be used will be different, and therefor the orginal
+# inline_shell_cmd needs to be modified to take the the Senario in which we are into account
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','ssl_verifypeer') v1=o:get('env','custovar_sensing','Scenario') if (v == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','/etc/ssl/d6d84089.0') if (v1 == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','<tbd>') end end n:commit('cwmpd')\"
 inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','backoff_multiplier') if (v == '1320') then n:set('cwmpd','cwmpd_config','backoff_multiplier','2000') end n:commit('cwmpd')\"
 
 
@@ -306,8 +308,6 @@ inline_sh_cmd lua /etc/parameter_conversion/scripts/convshaping.lua
 
 uci_list web.default.users
 
-copy_file /etc/config/wansensing
-
 uci_set env.var.provisioning_code
 uci_set env.var.ppp_realm_ipv6
 uci_set env.var.ppp_realm_ipv4
@@ -332,3 +332,38 @@ inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:
 uci_section webservice.@user
 uci_set webservice.disabled.disallowed_paths
 uci_set webservice.disabled.allowed_commands
+
+
+# TCOMITAGW-2506 Update the conversion file
+# Part1 : new sessions will be introduced by upgrade automatically from the factory default file, but inline shall command needed to assure that the default value be there, since the line before would set it to NIL on first time introduced build
+# since no value assigned on old one and would add the content of the old one
+uci_set env.custovar_sensing.Scenario
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_sensing','Scenario') if (v == nil) then n:set('env','custovar_sensing','Scenario','0') end n:commit('env')\"
+uci_set env.custovar_network.LTE_Data
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','LTE_Data') if (v == nil) then n:set('env','custovar_network','LTE_Data','83') end n:commit('env')\"
+uci_set env.custovar_network.LTE_VoIP
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','LTE_VoIP') if (v == nil) then n:set('env','custovar_network','LTE_VoIP','84') end n:commit('env')\"
+uci_set env.custovar_network.Standard_EthData
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','Standard_EthData') if (v == nil) then n:set('env','custovar_network','Standard_EthData','835') end n:commit('env')\"
+uci set env.custovar_network.Standard_PTMData
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','Standard_PTMData') if (v == nil) then n:set('env','custovar_network','Standard_PTMData','835') end n:commit('env')\"
+
+# Part 5: MWAN: 
+uci_set mwan.if1_mwan.interface
+uci_set mwan.if1_e.dest_port
+uci_set mwan.if1_f.dest_port
+
+
+# Part 6: Wansensing: the copy file mentioned before has been removed and replaced with the following to assure also Worker to be included on first delivery 
+# and possible modifications of toggling time to be taken into account
+
+uci_section wansensing.global
+uci_section wansensing.@L2State id=name
+uci_section wansensing.@L3State id=name
+uci_section wansensing.worker1
+
+# Part 7: CWMPD, due to usage of different ACS servers, also the Certificate to be used will be different, and therefor the orginal
+# inline_shell_cmd needs to be modified to take the the Senario in which we are into account
+# see above in cwmpd section
+
+

@@ -515,15 +515,13 @@ $("#toggle-usb3").change(function() {\
 $(document).on("click", "#save-config", function() {\
   var form = $(".modal form");\
   var params = form.serializeArray();\
+  var usbToggle = false;\
   if (($("#cs-flag").val() === "1") && (usb3_support !== $("#toggle-usb3").val())) {\
+    usbToggle = true;\
     $("#rebooting-msg").removeClass("hide");\
     $("#warning-msg").addClass("hide");\
     $("#reboot-warning-msg").addClass("hide");\
     $("#success-msg").addClass("hide");\
-    $("#modal-no-change").hide();\
-    $("#modal-changes").show();\
-    $("#popUp, .popUpBG").remove();\
-    tch.showProgress("');  ngx.print(T'Rebooting...'); ngx.print('");\
   }\
   else {\
     $("#success-msg").removeClass("hide");\
@@ -542,9 +540,14 @@ $(document).on("click", "#save-config", function() {\
   $.post(\
     target,\
     params,\
-    wait_for_webserver_down,\
     "json"\
-  );\
+  ).done(function(data) {\
+      if (usbToggle){\
+        wait_for_webserver_down();\
+        tch.removeProgress();\
+        tch.showProgress(\'');  ngx.print( T"Rebooting..." ); ngx.print('\');\
+      }\
+  });\
   return false;\
 });\
 </script>\

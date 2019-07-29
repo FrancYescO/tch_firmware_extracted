@@ -8,11 +8,14 @@
 
 -- global functions used
 local mapper, register = mapper, register
+local open = io.open
 local string, table, pairs, tostring, error = string, table, pairs, tostring, error
 
 -- library helpers
 local fw_helper = require("transformer.shared.firewall_helper")
 local ubus_connect = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local get_from_uci = uciHelper.get_from_uci
 
 -- uci.firewall.userredirect.@
 local mapinfo_userredirect_uci = {
@@ -142,7 +145,13 @@ mapping_portforward_rpc.delete = function(mapping, key)
     -- update /var/state/firewall
     -- Notify redirecthelper that we deleted something.
     ubus_connect:call("redirecthelper", "delete", { section=key })
-
+    local portNum = get_from_uci({ config = "firewall", sectionname = key, option = "src_dport"}) or ""
+    local file_handler = open("/tmp/.port","w")
+    if file_handler then
+      file_handler:write(portNum)
+      file_handler:close()
+      commitapply:newset("deleteForwardedPorts")
+    end
     return mapping.uciMap.delete(mapping.uciMap, key)
 end
 

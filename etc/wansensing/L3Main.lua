@@ -14,6 +14,7 @@ M.SenseEventSet = {
     'network_device_eth4_down',
     'network_interface_wan_ifup',
     'network_interface_wan_ifdown',
+    'network_interface_voip_ifup',	
 }
 
 local xdslctl = require('transformer.shared.xdslctl')
@@ -37,7 +38,12 @@ function M.check(runtime, l2type, event)
   if not uci then
       return false
   end
-  if scripthelpers.checkIfInterfaceIsUp("wan") then
+  
+  logger:notice("WAN Sensing L3Main Checking")  
+-- for 2 Box solution with wan and voip interface, one needs to be up to taggle also the situation that propably one is doen due to DHCP-Swerver issue
+-- since in case of 1 Interface scenario the voip will be down anyhow and or statemen is suffienct  
+  if scripthelpers.checkIfInterfaceIsUp("wan") or scripthelpers.checkIfInterfaceIsUp("voip") then
+logger:notice("FRS L3Main -- One WAN Interface is up, go to L3UpSense")  
       return "L3UpSense"
   end
   local mode = xdslctl.infoValue("tpstc")

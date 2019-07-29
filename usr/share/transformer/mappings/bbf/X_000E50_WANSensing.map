@@ -185,8 +185,128 @@ Multi_X_000E50_WANSensing_.revert = function()
   transactions = {}
 end
 
+
+--Wansensing Worker Section
+
+local Multi_X_000E50_WANSensing_Worker_ = {
+			objectType = {
+				name = "#ROOT.X_000E50_WANSensing.Worker.{i}.",
+				access = "readOnly",
+				minEntries = 1,
+				maxEntries = math.huge,
+				--aliasParameter = "Alias",
+				parameters = {
+					Name = {
+						access = "readWrite",
+						type = "string",
+						},
+					Enable = {
+						access = "readWrite",
+						type = "boolean",
+						},
+					Toggle_Time = {
+						access = "readWrite",
+						type = "string",
+						},
+					Mains = {
+						access = "readWrite",
+						type = "string",
+						},
+				},
+			},
+		}
+		
+
+local worker_binding={config="wansensing", type = "worker", options={Name = "name", Enable = "enable", Toggle_Time = "toggle_time", Mains = "mains"}}
+local transactions = {}
+
+local function GetSetUCI(mapping, paramname, key, set, value)
+	local binding ={config = "wansensing"}
+	local result
+	binding.sectionname = key
+	binding.option = mapping.binding.options[paramname]
+	if set then
+		uci_helper.set_on_uci(binding, value, commitapply)
+		transactions[binding] = true
+	else
+		result = uci_helper.get_from_uci(binding)
+		return result or ""
+	end
+end
+
+
+--needed if mapping is wanted to be correct
+Multi_X_000E50_WANSensing_Worker_.binding = worker_binding
+
+--Needed always
+Multi_X_000E50_WANSensing_Worker_.entries=function()
+	local binding = {config = "wansensing"}
+  local entries = {}
+  binding.sectionname = "worker"
+  uci_helper.foreach_on_uci(binding, function(s)
+    entries[#entries + 1]  = s[".name"]
+  end)
+  return entries
+end
+
+Multi_X_000E50_WANSensing_Worker_.get={
+
+	Name = function(mapping, paramname, key)
+		return GetSetUCI(mapping, paramname, key, false)
+  end,
+	Enable = function(mapping, paramname, key)
+		return GetSetUCI(mapping, paramname, key, false)
+  end,
+	Toggle_Time = function(mapping, paramname, key)
+		return GetSetUCI(mapping, paramname, key, false)
+  end,
+	Mains = function(mapping, paramname, key)
+		return GetSetUCI(mapping, paramname, key, false)
+  end,	
+
+}
+
+Multi_X_000E50_WANSensing_Worker_.set={
+
+	Name = function(mapping, paramname, value, key)
+		GetSetUCI(mapping, paramname, key, true, value)
+	end,
+	Enable = function(mapping, paramname, value, key)
+		GetSetUCI(mapping, paramname, key, true, value)
+	end,
+	Toggle_Time = function(mapping, paramname, value, key)
+		GetSetUCI(mapping, paramname, key, true, value)
+	end,
+	Mains = function(mapping, paramname, value, key)
+		GetSetUCI(mapping, paramname, key, true, value)
+	end,
+
+}
+
+Multi_X_000E50_WANSensing_Worker_.commit=function()
+	for binding in pairs(transactions) do
+    uci_helper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_X_000E50_WANSensing_Worker_.revert = function()
+  for binding in pairs(transactions) do
+    uci_helper.revert(binding)
+  end
+  transactions = {}
+end
+
+
 local duplicator = mapper("multiroot").duplicate
-local duplicates = duplicator(Multi_X_000E50_WANSensing_, "#ROOT", {"InternetGatewayDevice", "Device.DeviceInfo.NetworkProperties"})
-for _, dupli in ipairs(duplicates) do
-  register(dupli)
+local Tab_to_reg = {
+	Multi_X_000E50_WANSensing_,
+	Multi_X_000E50_WANSensing_Worker_
+	}
+	
+for i,v in ipairs(Tab_to_reg) do
+	local duplicates = duplicator(v, "#ROOT", {"InternetGatewayDevice", "Device.DeviceInfo.NetworkProperties"})
+	for _, dupli in ipairs(duplicates) do
+		register(dupli)
+	end
 end

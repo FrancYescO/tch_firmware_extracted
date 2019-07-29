@@ -105,7 +105,7 @@ function M.read_traceroute_results(user, name)
    return M.read_trace_results(user, "/tmp/trace_".. user)
 -- if traceroute_results is not empty, we have cached results
   elseif (traceroute_results[user]) then
-    return traceroute_results[user], traceroute_totaltime[user]
+    return traceroute_results[user], traceroute_totaltime[user], traceroute_ipaddr_used[user]
   end
   return M.read_trace_results(user, "/tmp/traceroute_".. user)
 end

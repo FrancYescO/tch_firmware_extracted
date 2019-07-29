@@ -40,7 +40,6 @@ if ngx.var.request_method == "POST" then
         for _,v in ipairs(pathPCMA) do
             proxy.set(string.format("%sEnable",v),"1")
         end
-        proxy.apply()
     end
 end
 

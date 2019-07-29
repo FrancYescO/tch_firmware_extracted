@@ -3,7 +3,7 @@
 local Device_X_000E50_MWANHost_i_ = {
   objectType = {
     name = "Device.X_000E50_MWANHost.{i}.",
-    access = "readOnly",
+    access = "readWrite",
     minEntries = 0,
     maxEntries = math.huge,
     description = "List all MWAN hosts and configure MWAN policy of hosts",
@@ -17,12 +17,12 @@ local Device_X_000E50_MWANHost_i_ = {
         description = "MWAN policy, refer to one of the names in the policy section.",
       },
       Path = {
-        access = "readOnly",
+        access = "readWrite",
         type = "string",
         description = "Applications that are affected by the policy."
       },
       Arg = {
-        access = "readOnly",
+        access = "readWrite",
         type = "string",
         description = "Matches the part of the application's command line."
       }
@@ -37,6 +37,8 @@ local setOnUci = uciHelper.set_on_uci
 local forEachOnUci = uciHelper.foreach_on_uci
 local mwanBinding = { config = "mwan" }
 local configChanged
+local network = require("transformer.shared.common.network")
+local lfs = require("lfs")
 
 local function getUciValue(key, option, default)
   mwanBinding.sectionname = key
@@ -93,8 +95,33 @@ Device_X_000E50_MWANHost_i_.set = {
       return nil, "Invalid value"
     end
     setUciValue(key, "policy", value)
+  end,
+  Path = function(mapping, param, value, key)
+    if value and lfs.attributes(value, "mode") == "file" then
+      setUciValue(key, "path", value)
+    else
+      return nil, "Invalid value"
+    end
+  end,
+  Arg = function(mapping, param, value, key)
+    setUciValue(key, "arg", value)
   end
 }
+
+Device_X_000E50_MWANHost_i_.add = function(mapping)
+  local sectionName = network.getNewSection(mwanBinding.config, "host")
+  setUciValue(sectionName, nil, "host")
+  configChanged = true
+  return sectionName
+end
+
+Device_X_000E50_MWANHost_i_.delete = function(mapping, key)
+  mwanBinding.sectionname = key
+  mwanBinding.option = nil
+  uciHelper.delete_on_uci(mwanBinding, commitapply)
+  configChanged = true
+  return true
+end
 
 Device_X_000E50_MWANHost_i_.commit = function()
   if configChanged then

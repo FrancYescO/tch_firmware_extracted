@@ -406,7 +406,11 @@ local function update_ip_state(l3interface, mac, address, mode, action, conflict
 	ipentry.dhcp.state = "connected"
 	changed = true
 
-	if ipentry.state ~= "connected" then
+	-- This is a good indication that the device is online again, possibly connected with a different address
+	-- Probe all its connected & stalled addresses
+	probe_device_addresses(device)
+
+	if ipentry.state == "disconnected" then
 	  ubus_conn:call("network.neigh", "probe", {
 			      ["interface"]=l3interface,
 			      ["mac-address"]=mac,

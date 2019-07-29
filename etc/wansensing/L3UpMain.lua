@@ -8,10 +8,15 @@ local M = {}
 --       b) dslevents (xdsl_1(=idle)/xdsl_2/xdsl_3/xdsl_4/xdsl_5(=show time))
 --       c) network device state changes coded as 'network_device_xxx_yyy' (xxx = linux netdev, yyy = up/down)
 -- @SenseEventSet [parent=#M] #table SenseEventSet
+
+-- This Sensestate will only be reached, if the respective Interface is up, and it shall only check, if the 
+-- interfaces are still up and needs only to react on down events, in first instance of the Interface downs on L3
+-- or on the L2/L1 down events
+
 M.SenseEventSet = {
     'xdsl_0',
     'network_device_eth4_down',
-    'network_interface_wan_ifup',
+--    'network_interface_wan_ifup',
     'network_interface_wan_ifdown',
 }
 
@@ -43,9 +48,18 @@ function M.check(runtime, l2type, event)
   if not uci then
       return false
   end
-  if scripthelpers.checkIfInterfaceIsUp("wan") then
+  
+-- for 2 Box solution with wan and voip interface, one needs to be up to taggle also the situation that propably one is doen due to DHCP-Swerver issue
+-- since in case of 1 Interface scenario the voip will be down anyhow, "or" statemen is suffienct
+
+  if scripthelpers.checkIfInterfaceIsUp("wan") or scripthelpers.checkIfInterfaceIsUp("voip") then
+logger:notice("FRS L3UpMain -- One WAN Interface is up, do nothing") 
+ 
     return "L3UpSense"
   end
+  
+--This will only be triggered, if both Interfaces are down, 
+  
   local mode = xdslctl.infoValue("tpstc")
   if (not match(mode, "ATM")) and (not match(mode, "PTM")) and (not scripthelpers.l2HasCarrier("eth4")) then
     logger:notice("Changing to L2 Sense")

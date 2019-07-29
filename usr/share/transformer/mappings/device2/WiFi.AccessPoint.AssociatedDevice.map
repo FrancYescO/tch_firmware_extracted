@@ -227,16 +227,20 @@ local function getHostManagerData(hostData, option)
   return ""
 end
 
-local function getSNR(key)
+local function getNoise(key)
   local noiseValue
-  local rssi = getUbusValue(key, "rssi")
   local channelStats = conn:call("wireless.radio.acs.channel_stats", "get", {})
   if channelStats then
     for _, v in pairs(channelStats) do
       noiseValue = v.noise
     end
   end
-  local noise = noiseValue and noiseValue or "0"
+  return noiseValue and tostring(noiseValue) or "0"
+end
+
+local function getSNR(key)
+  local rssi = getUbusValue(key, "rssi")
+  local noise = getNoise(key)
   local SNRValue = tonumber(rssi)-tonumber(noise)
   return SNRValue and tostring(SNRValue) or "0"
 end
@@ -276,7 +280,7 @@ local getWifiStation = {
   end,
 
   Noise = function(mapping, param, key, parentKey)
-    return getAccessValues(key, "rssi", "")
+    return getNoise(key)
   end,
 
   AssociationTime = function(mapping, param, key, parentKey)
@@ -370,7 +374,7 @@ Device_WiFi_AccessPoint_i_AssociatedDevice_i_.getall = function(mapping, key, pa
   return {
     MACAddress = mac or "",
     OperatingStandard = accessValues.capabilities and accessValues.capabilities:match("802.11(%a+)") or "",
-    Noise = accessValues.rssi and tostring(accessValues.rssi) or "",
+    Noise = getNoise(key),
     AssociationTime = getAssociationTime(accessValues.last_assoc_timestamp),
     LastDataDownlinkRate = accessValues.tx_phy_rate and tostring(accessValues.tx_phy_rate) or "",
     LastDataUplinkRate = accessValues.rx_phy_rate and tostring(accessValues.rx_phy_rate) or "",
