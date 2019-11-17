@@ -1,0 +1,90 @@
+#!/usr/bin/env lua
+
+local uci = require("uci").cursor()
+local lfs = require "lfs"
+
+local function split_devices_option(sectionname)
+  local actual = uci:get("ngwfdd", sectionname, "devices")
+  if actual then
+    uci:set("ngwfdd", sectionname, "device", actual)
+    uci:set("ngwfdd", sectionname, "dev_connected", actual)
+    uci:delete("ngwfdd", sectionname, "devices")
+  end
+end
+
+-- in the "old" ngwfdd config there is a "devices" module that
+-- refers to both "device" and "dev_connected" collectors.
+-- In the current ngwfdd code this has been properly split.
+-- This function will remove the "devices" config and apply
+-- it to both "device" and "dev_connected"
+local function resolve_devices_confusion()
+  split_devices_option("enabled")
+  split_devices_option("interval")
+end
+
+local function collector_name(f)
+  return f:match("^mod_([^.]*)")
+end
+
+local function is_directory(path)
+  return lfs.attributes(path, "mode") == "directory"
+end
+
+local function list_collectors(dirname)
+  local collectors = {}
+  if is_directory(dirname) then
+    for d in lfs.dir(dirname) do
+      collectors[#collectors+1] = collector_name(d)
+    end
+  end
+  return collectors
+end
+
+local function append_to_lookup(lookup, list)
+  for _, v in ipairs(list) do
+    lookup[v] = true;
+  end
+end
+
+local collector_dirs = {
+  "/usr/share/ngwfdd",
+  "/opt/usr/share/ngwfdd",
+}
+
+local function find_installed_collectors()
+  local collectors = {}
+  for _, dirname in ipairs(collector_dirs) do
+    append_to_lookup(collectors, list_collectors(dirname))
+  end
+  return collectors
+end
+
+local function real_option(option_name)
+  return option_name:match("^%.")==nil
+end
+
+local function drop_uninstalled(sectionname, collectors)
+  local options = uci:get_all("ngwfdd", sectionname) or {}
+  for option in pairs(options) do
+    if real_option(option) and not collectors[option] then
+      uci:delete("ngwfdd", sectionname, option)
+    end
+  end
+end
+
+-- remove the config for collectors that are not installed.
+-- This prevents using stale config when the collector is installed
+-- through LCM.
+local function remove_config_for_uninstalled()
+  local installed = find_installed_collectors()
+  drop_uninstalled("enabled", installed)
+  drop_uninstalled("interval", installed)
+end
+
+local function main()
+  resolve_devices_confusion()
+  remove_config_for_uninstalled()
+  uci:commit("ngwfdd")
+end
+
+main()
