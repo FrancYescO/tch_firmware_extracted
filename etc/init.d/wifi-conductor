@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+. ${IPKG_INSTROOT}/lib/functions.sh
+
+service_triggers()
+{
+  procd_add_reload_trigger "wifi-conductor"
+}
+
+start_service()
+{
+  config_load wifi_conductor
+
+  config_get_bool enabled global enabled 0
+  [ $enabled -gt 0 ] || return 1
+
+  #Do not start if multiap conductor is enabled
+  config_get_bool enabled global multiap_enabled 0
+  [ $enabled -gt 0 ] && return 1
+
+  procd_open_instance wifi-conductor
+
+  #Set env
+  . /lib/wifi-conductor/wifi-conductor-uci-to-procd-env
+
+  procd_set_param command /usr/bin/wifi-conductor -d
+  procd_set_param respawn
+  procd_close_instance
+}
+
+reload_service()
+{
+  restart
+}
+
