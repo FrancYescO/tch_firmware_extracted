@@ -1,0 +1,21 @@
+#!/bin/sh
+
+rip_init() {
+   local p="/lib/modules/$(uname -r)"
+   insmod $p/tommath.ko
+   insmod $p/tomcrypt.ko
+   # for BRCM ARM and newer platforms, use the otp kernel module from BRCM
+   if [[ -f $p/otp.ko ]]; then
+	   insmod $p/otp.ko
+   fi
+   # for IPQ40xx, use the nvmem wrapper to retrieve the serial number as ChipID
+   if [[ -f $p/nvmem-wrapper.ko ]]; then
+	   insmod $p/nvmem-wrapper.ko
+   fi
+   insmod $p/platform-gpl.ko
+   insmod $p/platform.ko
+   insmod $p/ripdrv.ko
+}
+
+boot_hook_add preinit_main rip_init
+
