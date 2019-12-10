@@ -1,0 +1,180 @@
+#!/bin/sh
+############################################################################
+# this file will hold the whole configuration adapatation needed
+# for the POC of the 2 Box LTE solution in conjunction with WAN-Sensing
+############################################################################
+
+########################################################################
+# TCOMITAGW-2502: Create the addtional env-Variables
+######################################################################
+#Define the Custovariables to be used, if WAN Toggling shall be done with wansensing
+# Scenario: 0 Standard; 1: LTE 2 Box
+uci get env.custovar_sensing || uci set env.custovar_sensing=envvars
+uci set env.custovar_sensing.Scenario='0'
+
+
+#Define the Custovariables to be used for Network VID-Parameters
+# Especially the DATA-VIDs are relevant, since it is not planned to introduce a dedicated vlan device
+# but reuse the standard vlan device of Ethernet, and only change the VIDuci get env.custovar_sensing || uci set env.custovar_sensing=envvars
+uci get env.custovar_network || uci set env.custovar_network=envvars
+uci set env.custovar_network.LTE_Data='83'
+uci set env.custovar_network.LTE_VoIP='84'
+uci set env.custovar_network.Standard_EthData='835'
+uci set env.custovar_network.Standard_PTMData='835'
+
+uci commit env
+
+##################################################################
+# TCOMITAGW-2503: Create the Network Interface and its related parts
+#################################################################
+# Define the configuration for the additional Interface for VoIP
+#/*******************************************************************/
+#/		vlan device definition as				*/
+#/      eth4: voip
+#/*******************************************************************/
+uci set network.voipeth4=device
+uci set network.voipeth4.enabled='0'
+uci set network.voipeth4.type=8021q
+uci set network.voipeth4.name=voipeth4
+uci set network.voipeth4.macaddr=`uci get env.rip.wifi_mac`
+uci set network.voipeth4.ifname=eth4
+uci set network.voipeth4.vid=`uci get env.custovar_network.LTE_VoIP`
+uci set network.voipeth4.mtu=1400
+uci set network.voipeth4.ipv6=0
+
+# Define the VoIP Interface
+# Interface will be disabled in factory Default
+uci set network.voip=interface
+uci set network.voip.auto='0'
+uci set network.voip.proto=dhcp
+uci set network.voip.ifname='<set by script>'
+uci set network.voip.macaddr=`uci get env.rip.wifi_mac`
+uci set network.voip.ipv6='0'
+uci set network.voip.peerdns='1'
+uci set network.voip.reqopts='1 3 6 15 26 33 42 51 121 249'
+uci set network.voip.vendorid=`uci get env.var.prod_friendly_name`_`uci get env.var.serial`
+uci set network.voip.ip4table='voip'
+uci set network.voip.defaultroute='1'
+uci set network.voip.dnsset='voip'
+
+uci commit network
+
+#/*****************************************************
+#  DHCP-Part
+#/*****************************************************
+uci set dhcp.voip=dhcp
+uci set dhcp.voip.interface='voip'
+uci set dhcp.voip.ignore='1'
+uci set dhcp.voip6=dhcp
+uci set dhcp.voip6.interface='voip'
+uci set dhcp.voip6.ignore='1'
+
+uci commit dhcp
+
+
+#/**********************************************************
+#   Firewall Config for IPTv Interface	
+#/**********************************************************
+uci set firewall.z_if1=zone
+uci set firewall.z_if1.name='zoneif1'
+uci add_list firewall.z_if1.network='voip'
+uci set firewall.z_if1.input='DROP'
+uci set firewall.z_if1.output='ACCEPT'
+uci set firewall.z_if1.forward='DROP'
+uci set firewall.z_if1.masq='1'
+uci set firewall.z_if1.mtu_fix='1'
+uci set firewall.z_if1.wan='1'
+
+uci set firewall.for_if1=forwarding
+uci set firewall.for_if1.src='lan'
+uci set firewall.for_if1.dest='zoneif1'
+
+uci commit firewall
+
+##########################################################################################
+# TCOMITAGW-2504: enlarge the wansensing configuration to support additional worker
+#########################################################################################
+#***********************************************************************************
+#  Modifications of the Wansensing config PArameters
+#**********************************************************************************
+
+uci get wansensing.worker1 || uci set wansensing.worker1=worker
+uci set wansensing.worker1.toggle_time='30'
+uci set wansensing.worker1.enable='1'
+uci set wansensing.worker1.name='ethwan'
+uci set wansensing.worker1.mains='worker_ethwan'
+
+uci commit wansensing
+
+########################################################################
+# TCOMITAGW-2505:  Create the MWAN rules and Config
+#######################################################################
+#*******************************************************************************
+# Set the MWAN parameters for Service VoIP
+# The mwan will be predefined, and Wansesnsing will the respective 
+# Interface to be used, meaning also in standard mwan will be used but via wan interface
+# Mechanismn taken from Telenor Sweden case
+#***************************************************************************************
+uci set mwan.globals=globals
+
+uci set mwan.if1_mwan=policy
+# this will assure, that VoIP will use Standard WAN interface in normal condition
+# will be respectively modified by Wansesning 
+uci set mwan.if1_mwan.interface=wan
+
+uci set mwan.hostvoip=host
+uci set mwan.hostvoip.path='/usr/bin/mmpbxd'
+uci set mwan.hostvoip.policy='if1_mwan'
+
+#**********************************************************************************************
+# Set MWAN Parameters for VoIP traffic from LAN to also use the dedicated LTE Interface
+# rtp-Portrange (40000:65000) and SIP Port (5060) used as Criteria, taken from values from CPE
+# The values need to be discussed with TIM, since Dest_port matter of SIP-Server
+# DSCP based routing is not possible, would mean additional development, 
+#
+#********************************************************************************************
+
+uci set mwan.if1_e=rule
+uci set mwan.if1_e.policy=if1_mwan
+uci set mwan.if1_e.dest_port='40000:65000'
+
+uci set mwan.if1_f=rule
+uci set mwan.if1_f.policy=if1_mwan
+uci set mwan.if1_f.dest_port=5060
+
+
+uci commit mwan
+
+########################################################################
+#TCOMITAGW-2537: Improve Worker for Toggling the scenarios concerning CWMPD-Settings
+#######################################################################
+#*******************************************************************************
+# The factory Default values of the 2 Box Solution will be stared, so that they can be referenced by the worker
+# Also the respective factory default values will also be stored, but they will be retreived from the cwmpd config, to assure
+#    that correct values are stored and only once the changes need t be done
+#***************************************************************************************
+
+uci get cwmpd.operationalACS1 || uci set cwmpd.operationalACS1=operACS
+uci set cwmpd.operationalACS1.acs_url=`uci get cwmpd.cwmpd_config.acs_url`
+uci set cwmpd.operationalACS1.acs_user=`uci get cwmpd.cwmpd_config.acs_user`
+uci set cwmpd.operationalACS1.acs_pass=`uci get cwmpd.cwmpd_config.acs_pass`
+uci set cwmpd.operationalACS1.connectionrequest_username=`uci get cwmpd.cwmpd_config.connectionrequest_username`
+uci set cwmpd.operationalACS1.connectionrequest_password=`uci get cwmpd.cwmpd_config.connectionrequest_password`
+uci set cwmpd.operationalACS1.periodicinform_enable=`uci get cwmpd.cwmpd_config.periodicinform_enable`
+uci set cwmpd.operationalACS1.periodicinform_interval=`uci get cwmpd.cwmpd_config.periodicinform_interval`
+uci set cwmpd.operationalACS1.ssl_certificate=`uci get cwmpd.cwmpd_config.ssl_certificate`
+uci set cwmpd.operationalACS1.ssl_privatekey=`uci get cwmpd.cwmpd_config.ssl_privatekey`
+
+
+uci get cwmpd.operationalACS2 || uci set cwmpd.operationalACS2=operACS
+uci set cwmpd.operationalACS2.acs_url="https://fwa.cdp.tim.it/cwmpWeb/CPEMgt"
+uci set cwmpd.operationalACS2.acs_user="fwacpedefaultusr"
+uci set cwmpd.operationalACS2.acs_pass="fwacpedefaultpwd"
+uci set cwmpd.operationalACS2.connectionrequest_username="fwacpecrdefaultusr"
+uci set cwmpd.operationalACS2.connectionrequest_password="fwacpecrdefaultpwd"
+uci set cwmpd.operationalACS2.periodicinform_enable="1"
+uci set cwmpd.operationalACS2.periodicinform_interval="3600"
+uci set cwmpd.operationalACS2.ssl_certificate="/etc/ssl/653b494a.0"
+uci set cwmpd.operationalACS2.ssl_privatekey="/etc/ssl/AGprivkey.key"
+
+uci commit cwmpd
