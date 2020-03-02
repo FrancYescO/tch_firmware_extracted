@@ -1,0 +1,86 @@
+local lcm_package = {
+	objectType = {
+		name = 'rpc.lcmd.package.@.',
+		access = 'readWrite',
+		numEntriesParameter = "packageNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			description = {
+				access = "readOnly",
+				type = "string"
+			},
+			ID = {
+				access = "readOnly",
+				type = "string"
+			},
+			version = {
+				access = "readOnly",
+				type = "string"
+			},
+			name = {
+				access = "readOnly",
+				type = "string"
+			},
+			state = {
+				access = "readOnly",
+				type = "string"
+			},
+			errormsg = {
+				access = "readOnly",
+				type = "string"
+			}
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return nil, "Failed to connect to UBUS"
+end
+
+function lcm_package.getall(_, key)
+	local data = {}
+	setmetatable(data, { __index = function() return "" end })
+	local packages = conn:call("lcm", "list_packages", { properties = { ID = key } })
+	if packages and packages.packages then
+		for _, package in pairs(packages.packages) do
+			if package.ID == key then
+				for k in pairs(lcm_package.objectType.parameters) do
+					data[k] = package[k]
+				end
+				break
+			end
+		end
+	end
+	return data
+end
+
+function lcm_package.get(mapping, paramName, key)
+	return lcm_package.getall(mapping, key)[paramName]
+end
+
+local function pkg_entries()
+	local entries = {}
+	local packages = conn:call("lcm", "list_packages", {})
+	if not packages then
+		return entries
+	end
+	for _, pkg in ipairs(packages.packages) do
+		entries[#entries + 1] = pkg.ID
+	end
+	return entries
+end
+
+function lcm_package.delete(mapping, key)
+	return true
+end
+
+function lcm_package.add(mapping)
+end
+
+function lcm_package.entries()
+	return pkg_entries()
+end
+
+register(lcm_package)
