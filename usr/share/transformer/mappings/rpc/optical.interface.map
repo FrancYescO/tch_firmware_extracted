@@ -1,0 +1,201 @@
+local open, popen, string, register = io.open, io.popen, string, register
+local match, floor = string.match, math.floor
+local conn = mapper("ubus").connect()
+local log = require("transformer.logger").new("Optical.Interface.", 2)
+
+local Multi_Optical_Interface_i_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      OpticalSignalLevel = {
+        access = "readOnly",
+        type = "int",
+      },
+      TransmitOpticalLevel = {
+        access = "readOnly",
+        type = "int",
+      },
+    },
+  }
+}
+
+-- Currently by default single entry is formed
+Multi_Optical_Interface_i_.entries = function(mapping)
+  return { "1" }
+end
+
+--- Calls sfp_get.sh with the given option and returns the output
+-- @param option option to get corresponding statistics
+local function callSFP(option)
+  local cmd = popen("sfp_get.sh --"..option)
+  local output = cmd:read("*a")
+  cmd:close()
+  return output or ""
+end
+
+--- Fetches the stats value from the given output
+-- @output output of sfp_get.sh command
+-- @param the param for which the statistics value to be returned
+local function getStatsValue(output, param)
+  local value = match(output, param..":%s+(.-)%c") or "0"
+  value = value:gsub("dBm", "")
+  return value
+end
+
+--- Retrieves SFP flag which is bit 13
+-- @param num number that contains SFP flag
+local function readSFPFlag(num)
+  local sfpFlag
+  local bitPosition = 1
+  while num > 0 do
+    if bitPosition == 4 then -- bitPosition from the end
+      sfpFlag = floor(num%2)
+      break
+    end
+    num = floor(num/2)
+    bitPosition = bitPosition + 1
+  end
+  return sfpFlag
+end
+
+--- Checks if SFP mode is enabled
+local function isEnabled()
+  local file  = open("/proc/rip/0002", "rb" )
+  local bytes = {}
+  for n = 1, 2 do   -- first 2 bytes from file
+    local char = file:read(1)
+    local byte = string.byte(char)
+    bytes[#bytes+1] = byte
+  end
+  io.close(file)
+  -- reads bit 13 from the bytes
+  return readSFPFlag(bytes[2])
+end
+
+--- Retrieves optical interface status
+-- @param param name
+local function getStatus(param)
+  if isEnabled() == 1 then
+    local output = callSFP("state")
+    return match(output, "(%S+)") or ""
+  else
+    log:error("SFP mode is not enabled")
+    local ubus = conn:call("gpon.ploam", "state", { })
+    if ubus == nil then
+      log:error("Cannot retrieve gpon interface state")
+      return ""
+    end
+    local res = ubus[param]
+    return res and res or ""
+  end
+end
+
+Multi_Optical_Interface_i_.get = {
+  Status = function()
+    return getStatus("state")
+  end,
+  OpticalSignalLevel = function()
+    local output = callSFP("optical_info")
+    return getStatsValue(output, "Rx Power")
+  end,
+  TransmitOpticalLevel = function()
+    local output = callSFP("optical_info")
+    return getStatsValue(output, "Tx Power")
+  end,
+}
+
+Multi_Optical_Interface_i_.getall = function()
+  local output = callSFP("optical_info")
+  return {
+    Status = getStatus("state"),
+    OpticalSignalLevel = getStatsValue(output, "Rx Power"),
+    TransmitOpticalLevel = getStatsValue(output, "Tx Power"),
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Optical_Interface_i_, "#ROOT", { "rpc.optical.Interface.{i}.", "Device.Optical.Interface.{i}." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Optical_Interface_i_Stats_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ErrorsReceived = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      DiscardPacketsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      DiscardPacketsReceived = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    },
+  }
+}
+
+local statsEntries = {
+  BytesSent = "bytes_sent",
+  BytesReceived = "bytes_rec",
+  PacketsSent = "packets_sent",
+  PacketsReceived = "packets_rec",
+  ErrorsSent = "errors_sent",
+  ErrorsReceived = "errors_rec",
+  DiscardPacketsSent = "discardpackets_sent",
+  DiscardPacketsReceived = "discardpackets_rec",
+}
+
+Multi_Optical_Interface_i_Stats_.get = function(mapping, param)
+  local output = callSFP(statsEntries[param])
+  return getStatsValue(output, param)
+end
+
+Multi_Optical_Interface_i_Stats_.getall = function()
+  local sfpValues = {}
+  local output = callSFP("allstats")
+  for param in pairs(statsEntries) do
+    sfpValues[param] = getStatsValue(output, param)
+  end
+  return sfpValues
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_Optical_Interface_i_Stats_, "#ROOT", { "rpc.optical.Interface.{i}.Stats.", "Device.Optical.Interface.{i}.Stats." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
