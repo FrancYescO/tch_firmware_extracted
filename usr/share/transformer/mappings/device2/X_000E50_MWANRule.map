@@ -1,0 +1,169 @@
+-- Manually generated
+
+local Device_X_000E50_MWANRule_i_ = {
+  objectType = {
+    name = "Device.X_000E50_MWANRule.{i}.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "List the MWAN rules present and Configure MWAN policy of rules",
+    parameters = {
+      Policy = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.X_000E50_MWANPolicy.{i}.",
+        description = "Name of the mwan policy, refers to one of the names in the policy section.",
+      },
+      DestinationAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "Destination IP address of the MWAN rule",
+      },
+      Source = {
+        access = "readWrite",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        description = "Source Interface of the MWAN rule",
+      },
+			Name = {
+				access = "readWrite",
+				type = "string",
+				},
+			Dest_Port = {
+				access = "readWrite",
+				type = "string",
+				},
+    }
+  }
+}
+
+local commitapply, mapper, register, resolve = commitapply, mapper, register, resolve
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local mwanBinding = { config = "mwan" }
+local configChanged
+local network = require("transformer.shared.common.network")
+local inet = require("tch.inet")
+
+local function getUciValue(key, option, default)
+  mwanBinding.sectionname = key
+  mwanBinding.option = option
+  mwanBinding.default = default
+  return getFromUci(mwanBinding)
+end
+
+local function setUciValue(key, option, value)
+  mwanBinding.sectionname = key
+  mwanBinding.option = option
+  setOnUci(mwanBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_X_000E50_MWANRule_i_.entries = function()
+  local entries = {}
+  mwanBinding.sectionname = "rule"
+  forEachOnUci(mwanBinding, function(s)
+    entries[#entries + 1]  = s[".name"]
+  end)
+  return entries
+end
+
+Device_X_000E50_MWANRule_i_.get = {
+  Policy = function(mapping, param, key)
+    local policy = getUciValue(key, "policy")
+    return resolve("Device.X_000E50_MWANPolicy.{i}.", policy) or ""
+  end,
+  DestinationAddress = function(mapping, param, key)
+    return getUciValue(key, "dest_ip")
+  end,
+  Source = function(mapping, param, key)
+    local src = getUciValue(key, "src")
+    return src and resolve("Device.IP.Interface.{i}.", src) or ""
+  end,
+	Name = function(mapping, param, key)
+    local name = getUciValue(key, "name")
+    return name or ""
+  end,
+	Dest_Port = function(mapping, param, key)
+    local dest_port = getUciValue(key, "dest_port")
+    return dest_port or ""
+  end,
+}
+
+Device_X_000E50_MWANRule_i_.getall = function(mapping, key)
+  mwanBinding.sectionname = key
+  local allValues = uciHelper.getall_from_uci(mwanBinding)
+  return {
+    Policy = allValues.policy and resolve("Device.X_000E50_MWANPolicy.{i}.", allValues.policy) or "",
+    DestinationAddress = allValues.dest_ip or "",
+    Source = allValues.src and resolve("Device.IP.Interface.{i}.", allValues.src) or ""
+  }
+end
+
+Device_X_000E50_MWANRule_i_.set = {
+  Policy = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.X_000E50_MWANPolicy.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    setUciValue(key, "policy", value)
+  end,
+  DestinationAddress = function(mapping, param, value, key)
+    local rc, err = inet.isValidIPv4(value)
+    if not rc then
+      return nil, err
+    end
+    setUciValue(key, "dest_ip", value)
+  end,
+  Source = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.IP.Interface.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    setUciValue(key, "src", value)
+  end,
+	Name = function(mapping, param, value, key)
+    setUciValue(key, "name", value)
+  end,
+	Dest_Port = function(mapping, param, value, key)
+    setUciValue(key, "dest_port", value)
+  end,
+}
+
+Device_X_000E50_MWANRule_i_.add = function(mapping)
+  local sectionName = network.getNewSection(mwanBinding.config, "rule")
+  setUciValue(sectionName, nil, "rule")
+  configChanged = true
+  return sectionName
+end
+
+Device_X_000E50_MWANRule_i_.delete = function(mapping, key)
+  mwanBinding.sectionname = key
+  mwanBinding.option = nil
+  uciHelper.delete_on_uci(mwanBinding, commitapply)
+  configChanged = true
+  return true
+end
+
+Device_X_000E50_MWANRule_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(mwanBinding)
+    configChanged = false
+  end
+end
+
+Device_X_000E50_MWANRule_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(mwanBinding)
+    configChanged = false
+  end
+end
+
+register(Device_X_000E50_MWANRule_i_)
