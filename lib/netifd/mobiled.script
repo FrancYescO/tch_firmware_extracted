@@ -1,0 +1,566 @@
+#!/bin/sh
+
+[ "$#" -ne 5 ] && echo "usage: $0 <session_id> <dev_idx> <interface> <pdptype> <action>" && exit 1
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+. /lib/netifd/netifd-proto.sh
+
+LOGGER_TAG="mobiled-netifd"
+PPP_SUPPORT=0
+if [ -f "/lib/netifd/proto/ppp.sh" ]; then
+	export INCLUDE_ONLY="false"
+	. /lib/netifd/proto/ppp.sh
+	PPP_SUPPORT=1
+fi
+
+session_id="$1"
+dev_idx="$2"
+interface="$3"
+pdptype="$4"
+action="$5"
+
+config_load "network"
+
+config_get dns "${interface}" dns ''
+config_get metric "${interface}" metric '0'
+config_get_bool ipv6 "${interface}" ipv6 '1'
+config_get ip4table "${interface}" ip4table ''
+config_get ip6table "${interface}" ip6table ''
+config_get_bool peerdns "${interface}" peerdns '1'
+config_get_bool defaultroute "${interface}" defaultroute '1'
+
+config_get sendopts_v4 "${interface}" sendopts_v4 ''
+config_get sendopts_v6 "${interface}" sendopts_v6 ''
+config_get_bool extendprefix "${interface}" extendprefix '1'
+config_get reqopts_v4 "${interface}" reqopts_v4 '1 3 6 15 33 42 51 121 249'
+config_get reqopts_v6 "${interface}" reqopts_v6 '12 21 22 23 24 25 31 56 64 67 82 83'
+
+config_get iface_464xlat "${interface}" iface_464xlat ''
+
+config_get pppd_options "${interface}" pppd_options 'debug noaccomp nopcomp novj nobsdcomp noccp lock crtscts 115200 noauth'
+
+config_get bridge "${interface}" bridge ''
+config_get passthrough "${interface}" passthrough ''
+
+ubus_call() {
+	json_init
+	local _data
+	_data="$(ubus -S call "$1" "$2" "$3")"
+	[ $? -ne 0 ] || [ -z "$_data" ] && return 1
+	json_load "$_data"
+	return 0
+}
+
+check_and_remove() {
+	local interface="$1"
+	if ubus list "network.interface.${interface}" >/dev/null 2>&1; then
+		ifdown "$interface"
+		ubus call "network.interface.${interface}" remove
+	fi
+}
+
+#
+# Function calculates number of bit in a netmask
+#
+mask2cidr() {
+	nbits=0
+	IFS=.
+	for dec in $1 ; do
+	case $dec in
+		255) let nbits+=8;;
+		254) let nbits+=7;;
+		252) let nbits+=6;;
+		248) let nbits+=5;;
+		240) let nbits+=4;;
+		224) let nbits+=3;;
+		192) let nbits+=2;;
+		128) let nbits+=1;;
+		0);;
+		*) return
+	esac
+	done
+	echo "$nbits"
+}
+
+address_offset() {
+	local remaining_netmask="$1."
+	local remaining_address="$2."
+	local offset=0
+	local netmask_octet address_octet
+
+	while [ "$remaining_netmask" ]; do
+		netmask_octet="${remaining_netmask%%.*}"
+		remaining_netmask="${remaining_netmask#*.}"
+
+		address_octet="${remaining_address%%.*}"
+		remaining_address="${remaining_address#*.}"
+
+		offset="$((offset << 8 | (~netmask_octet & address_octet)))"
+	done
+
+	echo "$offset"
+}
+
+setup_ip_passthrough() {
+	if ! uci -q get "network.${passthrough}.ifname"; then
+		proto_notify_error "$interface" "INVALID_PASSTHROUGH_CONFIG"
+		exit 1
+	fi
+
+	json_select "$proto"
+	json_get_vars ifname ipv4_addr ipv4_gw ipv4_subnet ipv4_dns1 ipv4_dns2
+
+	proto_init_update "$ifname" 1
+	proto_add_ipv4_address "192.168.$((session_id+225)).1" "32"
+	if [ "$defaultroute" = "1" ]; then
+		proto_add_ipv4_route "0.0.0.0" 0 "0.0.0.0" "" "$metric"
+	fi
+	proto_send_update "$interface"
+
+	uci set "network.${passthrough}.proto=static"
+	uci set "network.${passthrough}.ipaddr=$ipv4_gw"
+	uci set "network.${passthrough}.netmask=$ipv4_subnet"
+	uci commit network
+	/etc/init.d/network reload
+
+	uci set "dhcp.${passthrough}=dhcp"
+	uci -q del "dhcp.${passthrough}.ignore"
+	uci set "dhcp.${passthrough}.leasetime=5m"
+	uci set "dhcp.${passthrough}.force=1"
+	uci set "dhcp.${passthrough}.interface=$passthrough"
+	uci -q del "dhcp.${passthrough}.dhcp_option"
+	uci add_list "dhcp.${passthrough}.dhcp_option=6,$ipv4_dns1${ipv4_dns2:+,$ipv4_dns2}"
+	uci set "dhcp.${passthrough}.start=$(address_offset "$ipv4_subnet" "$ipv4_addr")"
+	uci set "dhcp.${passthrough}.limit=0" # ODHCPD chooses and address in the range from start to start + limit inclusive
+	uci commit dhcp
+	/etc/init.d/dnsmasq reload
+}
+
+stop_ip_passthrough() {
+	uci set "network.${passthrough}.proto=none"
+	uci del "network.${passthrough}.ipaddr"
+	uci del "network.${passthrough}.netmask"
+	uci commit network
+	/etc/init.d/network reload
+
+	uci set "dhcp.${passthrough}.ignore=1"
+	uci commit dhcp
+	/etc/init.d/dnsmasq reload
+}
+
+setup_bridge() {
+	network_get_physdev bridge_device "$bridge"
+	if [ -n "${bridge_device}" ]; then
+		json_select "$proto"
+		local ifname
+		json_get_vars ifname
+		proto_init_update "$ifname" 1
+		proto_send_update "$interface"
+		brctl addif "${bridge_device}" "$ifname"
+	fi
+}
+
+configure_dynamic_interface() {
+	local interface="$1"
+	local parent_interface="$2"
+
+	# Add the dynamic interface to the same firewall zone as the parent interface.
+	local zone=0
+	local network
+	while network="$(uci -q get "firewall.@zone[$zone].network")"; do
+		if echo "$network" | grep -wq "$parent_interface"; then
+			if ! echo "$network" | grep -wq "$interface"; then
+				uci add_list "firewall.@zone[$zone].network=$interface" && uci commit
+				/etc/init.d/firewall enabled && /etc/init.d/firewall reload
+			fi
+			break
+		fi
+		let ++zone
+	done
+}
+
+create_dhcp_interface() {
+	local ip="$1"
+	local ifname="$2"
+
+	if ! ubus list "network.interface.${interface}_$ip" >/dev/null 2>&1; then
+		logger -t "$LOGGER_TAG" "Creating ${interface}_$ip interface on $ifname"
+
+		json_init
+		json_add_string name "${interface}_$ip"
+		json_add_string ifname "$ifname"
+
+		if [ "$ip" = "4" ]; then
+			json_add_string proto "dhcp"
+			[ -n "$ip4table" ] && json_add_string ip4table "$ip4table"
+		else
+			json_add_string proto "dhcpv6"
+			json_add_string extendprefix "$extendprefix"
+			[ -n "$ip6table" ] && json_add_string ip6table "$ip6table"
+			[ -n "$iface_464xlat" ] && json_add_boolean iface_464xlat "$iface_464xlat"
+		fi
+
+		[ -n "$dns" ] && json_add_string dns "$dns"
+		json_add_int metric "$metric"
+		json_add_boolean force_link 1
+		json_add_boolean peerdns "$peerdns"
+		json_add_boolean defaultroute "$defaultroute"
+
+		json_add_string reqopts "$(eval echo \$reqopts_v$ip)"
+
+		sendopts="$(eval echo \$sendopts_v$ip)"
+		[ -n "${sendopts}" ] && json_add_string sendopts "$sendopts"
+
+		uci_toggle_state "network" "${interface}_$ip" "" "interface"
+		ubus call network add_dynamic "$(json_dump)"
+		configure_dynamic_interface "${interface}_$ip" "$interface"
+	fi
+}
+
+create_dhcp_interfaces() {
+	local action="$1"
+
+	json_select "$proto"
+
+	local ifname pdptype
+	json_get_vars ifname pdptype
+
+	if [ -z "$ifname" ]; then
+		proto_notify_error "$interface" "NO_IFNAME"
+		exit 1
+	fi
+
+	if [ -d "/sys/class/net/$ifname" ]; then
+		ifconfig "$ifname" up
+	fi
+
+	local up=0
+	if [ "$action" = "connected" ]; then
+		up=1
+	fi
+
+	proto_init_update "$ifname" "$up"
+	proto_send_update "$interface"
+
+	if [ "$pdptype" != "ipv6" ]; then
+		create_dhcp_interface 4 "$ifname"
+	fi
+
+	if [ "$ipv6" = 1 ] && [ "$pdptype" != "ipv4" ]; then
+		create_dhcp_interface 6 "$ifname"
+	fi
+}
+
+#//////////////////////////////////////////////////
+# Data session setup
+#//////////////////////////////////////////////////
+if [ "$action" = "setup" ]; then
+	if [ -n "$bridge" ] || [ -n "$passthrough" ]; then
+		exit 1
+	fi
+
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		exit 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		exit 1
+	fi
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# PPP sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	if [ "$proto" = "ppp" ]; then
+		if [ $PPP_SUPPORT -ne 1 ]; then
+			proto_notify_error "$interface" "NO_PPP_SUPPORT"
+			exit 1
+		fi
+
+		check_and_remove "${interface}_ppp"
+
+		json_select "$proto"
+		json_get_vars username password authentication apn dial_string device pdptype
+		if [ -z "$device" ]; then
+			proto_notify_error "$interface" "NO_PPP_DEVICE"
+			exit 1
+		fi
+
+		json_init
+
+		json_add_string name "${interface}_ppp"
+		json_add_string ifname "@$interface"
+		json_add_string proto "ppp"
+
+		json_add_string dns "$dns"
+
+		if [ "$ipv6" = 1 ] && [ "$pdptype" != "ipv4" ]; then
+			json_add_string ipv6 "auto"
+		else
+			json_add_string ipv6 "0"
+		fi
+
+		json_add_int metric "$metric"
+		json_add_boolean peerdns "$peerdns"
+		[ -n "$ip4table" ] && json_add_string ip4table "$ip4table"
+		[ -n "$ip6table" ] && json_add_string ip6table "$ip6table"
+		json_add_boolean defaultroute "$defaultroute"
+
+		json_add_string device "$device"
+		json_add_string pppname "${interface}_ppp"
+		json_add_string pppd_options "$pppd_options $device"
+		if [ "$pdptype" = "ipv4" ]; then
+			PDPTYPE="IP"
+		elif [ "$pdptype" = "ipv6" ]; then
+			PDPTYPE="IPV6"
+		else
+			PDPTYPE="IPV4V6"
+		fi
+		json_add_string connect "${apn:+USE_APN='$apn' }DIAL_STRING='${dial_string:-*99***$((session_id+1))#}' USE_SESSION=$((session_id+1)) USE_PDPTYPE=$PDPTYPE /usr/sbin/chat -t5 -v -E -f /etc/chatscripts/mobiled.chat"
+
+		if [ "$authentication" != none ]; then
+			json_add_string username "$username"
+			json_add_string password "$password"
+		fi
+
+		uci_toggle_state "network" "${interface}_ppp" "" "interface"
+		ubus call network add_dynamic "$(json_dump)"
+		configure_dynamic_interface "${interface}_ppp" "$interface"
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# DHCP sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	elif [ "$proto" = "dhcp" ]; then
+		create_dhcp_interfaces "$action"
+	fi
+#//////////////////////////////////////////////////
+# Data session connected
+#//////////////////////////////////////////////////
+elif [ "$action" = "connected" ]; then
+	device=""
+	network_get_physdev device "$interface"
+	if [ -n "$device" ]; then
+		if ! ifconfig "$device" | grep -q "RUNNING"; then
+			logger -t "$LOGGER_TAG" "Fixup for \"$device\" not in RUNNING state"
+			ifconfig "$device" down
+			sleep 1
+			ifconfig "$device" up
+		fi
+	fi
+
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		exit 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		exit 1
+	fi
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# DHCP sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	if [ "$proto" = "dhcp" ]; then
+		if [ -n "$bridge" ]; then
+			setup_bridge
+		elif [ -n "$passthrough" ]; then
+			setup_ip_passthrough
+		else
+			create_dhcp_interfaces "$action"
+		fi
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# PPP sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	elif [ "$proto" = "ppp" ]; then
+		if [ -n "$bridge" ]; then
+			proto_notify_error "$interface" "BRIDGING_NOT_SUPPORTED"
+			exit 1
+		elif [ -n "$passthrough" ]; then
+			proto_notify_error "$interface" "IP_PASSTHROUGH_NOT_SUPPORTED"
+			exit 1
+		else
+			if [ $PPP_SUPPORT -ne 1 ]; then
+				proto_notify_error "$interface" "NO_PPP_SUPPORT"
+				exit 1
+			fi
+			proto_init_update "${interface}_ppp" 1
+			proto_send_update "$interface"
+		fi
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# Router sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	elif [ "$proto" = "router" ]; then
+		if [ -n "$bridge" ]; then
+			setup_bridge
+		elif [ -n "$passthrough" ]; then
+			setup_ip_passthrough
+		else
+			json_select "$proto"
+			json_get_vars ipv4_gw ipv4_dns1 ifname
+			if [ -z "$ifname" ]; then
+				proto_notify_error "$interface" "NO_IFNAME"
+				exit 1
+			fi
+
+			# Send an empty update to clear previous routes and DNS addresses
+			proto_init_update "$ifname" 1
+			proto_send_update "$interface"
+
+			proto_init_update "$ifname" 1
+			if [ "$defaultroute" = "1" ]; then
+				proto_add_ipv4_route "0.0.0.0" 0 "${ipv4_gw:-0.0.0.0}" "" "$metric"
+			fi
+			if [ -n "$ipv4_dns1" ]; then
+				proto_add_dns_server "$ipv4_dns1"
+			fi
+			proto_send_update "$interface"
+		fi
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# Static sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	elif [ "$proto" = "static" ]; then
+		if [ -n "$bridge" ]; then
+			proto_notify_error "$interface" "BRIDGING_NOT_SUPPORTED"
+			return 1
+		elif [ -n "$passthrough" ]; then
+			setup_ip_passthrough
+		else
+			json_select "$proto"
+			json_get_vars ifname ipv4_addr ipv4_gw ipv4_subnet ipv4_dns1 ipv4_dns2 ipv6_addr ipv6_gw ipv6_dns1 ipv6_dns2 ipv6_prefix ipv6_prefix_length
+			if [ -n "$ipv4_addr" ] || [ -n "$ipv6_addr" ]; then
+				ipv4_subnet_bits=$(mask2cidr "$ipv4_subnet")
+
+				# Send an empty update to clear previous routes and DNS addresses
+				proto_init_update "$ifname" 1
+				proto_send_update "$interface"
+
+				proto_init_update "$ifname" 1
+				if [ -n "$ipv4_addr" ] && [ -n "$ipv4_subnet_bits" ]; then
+					proto_add_ipv4_address "$ipv4_addr" "$ipv4_subnet_bits"
+				fi
+				if [ -n "$ipv4_dns1" ]; then
+					proto_add_dns_server "$ipv4_dns1"
+				fi
+				if [ -n "$ipv4_dns2" ]; then
+					proto_add_dns_server "$ipv4_dns2"
+				fi
+				if [ -n "$ipv6_gw" ]; then
+					proto_add_ipv6_route "$ipv6_gw" "128"
+				fi
+				if [ "$defaultroute" = "1" ]; then
+					proto_add_ipv4_route "0.0.0.0" 0 "${ipv4_gw:-0.0.0.0}" "" "$metric"
+					if [ -n "$ipv6_gw" ] && [ -n "$ipv6_addr" ] && [ -n "$ipv6_prefix_length" ]; then
+						proto_add_ipv6_route "::0" 0 "$ipv6_gw" "$metric" "" "${ipv6_addr}/${ipv6_prefix_length}"
+					fi
+				fi
+				if [ -n "$ipv6_addr" ]; then
+					proto_add_ipv6_address "$ipv6_addr" 128
+				fi
+				if [ -n "$ipv6_prefix" ] && [ -n "$ipv6_prefix_length" ]; then
+					proto_add_ipv6_prefix "$ipv6_prefix/$ipv6_prefix_length"
+				fi
+				if [ -n "$ipv6_dns1" ]; then
+					proto_add_dns_server "$ipv6_dns1"
+				fi
+				if [ -n "$ipv6_dns2" ]; then
+					proto_add_dns_server "$ipv6_dns2"
+				fi
+				logger -t "$LOGGER_TAG" "Update interface $interface ipv4_addr: $ipv4_addr ipv4_gw: $ipv4_gw ipv4_dns1: $ipv4_dns1 ipv4_dns2: $ipv4_dns2"
+				proto_send_update "$interface"
+			fi
+		fi
+	fi
+#//////////////////////////////////////////////////
+# Data session disconnected
+#//////////////////////////////////////////////////
+elif [ "$action" = "disconnected" ]; then
+	if [ -n "$passthrough" ]; then
+		stop_ip_passthrough
+	fi
+
+	# This can fail when a device is unplugged so not validating the output
+	if ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		json_get_vars ipv4 ipv6
+	fi
+
+	if [ "$ipv4" != 1 ]; then
+		check_and_remove "${interface}_4"
+	fi
+
+	if [ "$ipv6" != 1 ]; then
+		check_and_remove "${interface}_6"
+	fi
+
+	if [ "$ipv4" != 1 ] && [ "$ipv6" != 1 ]; then
+		# Bring down the top level interface
+		proto_init_update "*" 0
+		proto_send_update "$interface"
+	fi
+
+#//////////////////////////////////////////////////
+# Data session teardown
+#//////////////////////////////////////////////////
+elif [ "$action" = "teardown" ]; then
+	check_and_remove "${interface}_ppp"
+	check_and_remove "${interface}_4"
+	check_and_remove "${interface}_6"
+	proto_init_update "*" 0
+	proto_send_update "$interface"
+#//////////////////////////////////////////////////
+# Data session augment
+#//////////////////////////////////////////////////
+elif [ "$action" = "augment" ]; then
+	if [ -n "$bridge" ] || [ -n "$passthrough" ]; then
+		exit 1
+	fi
+
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		exit 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		exit 1
+	fi
+
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+# DHCP sub protocol
+#++++++++++++++++++++++++++++++++++++++++++++++++++
+	if [ "$proto" = "dhcp" ]; then
+		json_select "$proto"
+		json_get_vars ipv6_dns1 ipv6_dns2
+		if [ -n "$ipv6_dns1" ] || [ -n "$ipv6_dns2" ]; then
+			network_get_dnsserver current_dns "${interface}_6"
+
+			proto_init_update "${interface}_6" 1
+			proto_set_keep 1
+			send_update=0
+
+			if [ -n "$ipv6_dns1" ]; then
+				if ! echo "$current_dns" | grep -q "$ipv6_dns1"; then
+					proto_add_dns_server "$ipv6_dns1"
+					send_update=1
+				fi
+			fi
+			if [ -n "$ipv6_dns2" ]; then
+				if ! echo "$current_dns" | grep -q "$ipv6_dns2"; then
+					proto_add_dns_server "$ipv6_dns2"
+					send_update=1
+				fi
+			fi
+
+			if [ "$send_update" -eq 1 ]; then
+				proto_send_update "${interface}_6"
+			fi
+		fi
+	fi
+fi
+
+exit 0
