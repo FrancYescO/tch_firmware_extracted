@@ -1,0 +1,40 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2015 Technicolor Delivery Technologies, SAS
+
+START=50
+SERVICE_DAEMONIZE=1
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+get_device() {
+    network_get_device intf_dev "$1"
+    echo "$intf_dev"
+}
+
+start() {
+    config_load dhcprelay
+    config_get serverip config serverip
+    config_get serveriface config serveriface
+    config_get clientiface config clientiface
+    config_get_bool enabled config enabled
+
+    [ "$enabled" = 1 ] && {
+        [ -z "$clientiface" ] && {
+            logger -t dhcprelay "Starting: cannot start with clientiface empty"
+            exit 1
+        }
+        local serverdev=$(get_device $serveriface)
+        local clientdev=$(get_device $clientiface)
+        if network_is_up $serveriface; then
+            logger -t dhcprelay "Starting: relaying $clientdev ($clientiface) to $serverdev ($serveriface) with server $serverip"
+            service_start /usr/sbin/dhcprelay $clientdev $serverdev $serverip
+        else
+            logger -t dhcprelay "Not starting due to $serveriface not up"
+        fi
+    }
+}
+
+stop() {
+    logger -t dhcprelay "Stop"
+    service_stop /usr/sbin/dhcprelay
+}
