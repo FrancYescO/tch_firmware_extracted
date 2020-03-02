@@ -1,0 +1,33 @@
+#!/usr/bin/env lua
+local uci = require("uci")
+local cursor = uci.cursor(nil, "/var/state")
+local lfs = require("lfs")
+
+-- get scheduledreboot time from /var/state
+local givenTime = cursor:get("system", "scheduledreboot", "time")
+
+-- parse necessary values from givenTime for generating cron job, and store it in local variables
+local pattern = "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+local year, month, day, hour, minute = givenTime:match(pattern)
+
+if lfs.attributes("/etc/crontabs/root", "mode") == "file" then
+  -- Remove if any cron jobs related to scheduled reboot is present.
+  os.execute("crontab -c /etc/crontabs/ -l | grep -v '/usr/sbin/scheduledreboot' | crontab -c /etc/crontabs/ -")
+
+  -- Save the existing cron jobs if any to temp file /tmp/reboot
+  os.execute("crontab -c /etc/crontabs/ -l 2>/dev/null > /tmp/reboot")
+end
+
+-- Now append the given scheduled reboot job to the list of existing cron jobs
+local f = io.open("/tmp/reboot", "a")
+if not f then
+  error("could not append /tmp/reboot")
+end
+f:write(string.format('%d %d %d %d * test `/bin/date +%%Y` == %d && /usr/sbin/scheduledreboot\n', minute, hour, day, month, year))
+f:close()
+
+-- Set the cron job
+os.execute("crontab -c /etc/crontabs/ /tmp/reboot")
+
+-- Remove temp file /tmp/reboot
+os.remove("/tmp/reboot")
