@@ -1,0 +1,97 @@
+#!/bin/sh
+
+CTRLDIR=/var/rtfd
+
+usage() {
+	echo "Reset to factory default: Erase active configuration"
+	echo "$(basename $0) [--all | --soft] [--dry-run] [--cancel]"
+	echo "Option:"
+	echo "   --all   : Remove all configurations (by erasing user partition)"
+	echo "   --soft  : keep selected settings"
+	echo "   --dry-run : do not erase any mtd"
+	echo "   --fast,-f : skip execution of shutdown/kill scripts"
+	echo "   --cancel : turn a started rtfd into a reboot"
+}
+
+#utility to be configure /etc/init.d/rtd via the file in /var/rtfd/invoke
+# @param cmd
+trigger_rtfd() {
+    local CMD=''
+    case "$1" in
+	'--soft'|'--all'|'--default')
+	    CMD=${1}
+	    ;;
+	'*')
+	    echo "unknown type of rtfd: $1"
+	    exit 0
+	    ;;
+    esac
+    mkdir -p  "${CTRLDIR}"
+    echo "$CMD $FAST $DRYRUN" > "${CTRLDIR}/invoke"
+    [ -f /lib/functions/reboot_reason.sh ] && (. /lib/functions/reboot_reason.sh; set_reboot_reason RTFD )
+    if [ "${FAST}" = "--fast" ]; then
+	/etc/init.d/rtfd shutdown
+	/sbin/reboot -f
+    else
+
+	/sbin/reboot
+    fi
+}
+
+cancel() {
+    [ ! -d "${CTRLDIR}" ] && exit
+    rm -Rf "${CTRLDIR}"
+    logger -t rtfd "cancelling RTFD, reboot still scheduled"
+}
+
+prevent_mode_conflict() {
+    local current=$1
+    local prev=$2
+    if [ "${prev}" != '--default' -a "${prev}" != "${current}" ] ; then
+	echo '!!'
+	echo "ERROR: option ${current} conflicts with ${prev}"
+	echo '!!'
+	usage
+	exit 1
+    fi
+    return 0
+}
+
+# main dispatcher
+
+CMD='--default'
+DRYRUN=''
+FAST=''
+for arg in "$@"
+do
+    case "${arg}" in
+	'--soft')
+	    prevent_mode_conflict "${arg}" "${CMD}" && CMD="${arg}"
+	    ;;
+	'--all')
+	    prevent_mode_conflict "${arg}" "${CMD}" && CMD="${arg}"
+	    ;;
+	'--dry-run')
+	    DRYRUN="${arg}"
+	    ;;
+	'--cancel')
+	    cancel
+	    exit
+	    ;;
+	'--fast'|'-f')
+	    FAST='--fast'
+	    ;;
+	*)
+	    usage
+	    exit 1
+	    ;;
+    esac
+done
+
+if [ -n "${FAST} " ]; then
+    logger -t rtfd "call RTFD ${CMD} ${DRYRUN} ${FAST}"
+else
+    logger -t rtfd "scheduled RTFD ${CMD} ${DRYRUN} during reboot"
+fi
+
+trigger_rtfd "${CMD}"
