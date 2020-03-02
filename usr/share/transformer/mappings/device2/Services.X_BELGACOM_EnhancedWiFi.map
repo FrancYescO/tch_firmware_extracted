@@ -1,0 +1,165 @@
+-- Manually generated
+local Device_Services_X_BELGACOM_EnhancedWiFi_ = {
+  objectType = {
+    name = "Device.Services.X_BELGACOM_EnhancedWiFi.",
+    access = "readOnly",
+    description = "The top level object for the controls of the Enhanced Wi-Fi",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Name = {
+        access = "readWrite",
+        type = "string",
+	default = "E-WiFi",
+	description = "Name of Enhanced WiFi service",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable the service.",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Enabled Conductor on",
+          "Enabled Conductor off",
+          "Error",
+          "Disabled",
+        },
+	description = "The current operational state of Enahanced WiFi.",
+      },
+      SingleSSIDState = {
+        access = "readWrite",
+        type = "string",
+	enumeration = {
+          "None",
+          "Requested",
+	  "Completed",
+	  "Completed (5GHz present)",
+	  "Error",
+        },
+	default = "None",
+	description = "This parameter indicates the state of the script, handling the migration to SingleSSID.",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local wirelessBinding = { config = "wireless" }
+local eWiFiBinding = { config = "enhancedwifi", sectionname = "global" }
+local get_from_uci = uciHelper.get_from_uci
+local envRipBinding = { config ="env", sectionname = "rip", option = "wifi_mac" }
+local wifiConductorBinding = { config = "wifi_conductor", sectionname = "global", option = "enabled" }
+local wlanConfCommon = require("transformer.shared.WLANConfigurationCommon")
+local setOnUci = wlanConfCommon.setOnUci
+local getFromUci = wlanConfCommon.getFromUci
+local commit = wlanConfCommon.commit
+local revert = wlanConfCommon.revert
+local setBandSteerID = wlanConfCommon.setBandSteerID
+local enhancedwifi_enable = require("transformer.shared.enhancedwifi_enable")
+local configChanged
+local ubus = mapper("ubus").connect()
+
+local paramList = {
+  Name = "name",
+  Enable = "enable",
+}
+
+local getStatus = function ()
+  local wifiConductorState = get_from_uci(wifiConductorBinding)
+  eWiFiBinding.option = 'enable'
+  local eWiFiState = get_from_uci(eWiFiBinding)
+  if eWiFiState == '0' then
+    return "Disable"
+  elseif  wifiConductorState == '1' and eWiFiState == '1' then
+    return "Enabled Conductor on"
+  elseif wifiConductorState == '0' and eWiFiState == '1' then
+    return "Enabled Conductor off"
+  else
+    return "Error"
+  end
+end 
+
+Device_Services_X_BELGACOM_EnhancedWiFi_.get = function(mapping, param)
+  if param == "SingleSSIDState" then
+    eWiFiBinding.option = "single_ssid_state"
+    local value = get_from_uci(eWiFiBinding)
+    if value == "" then
+       return "None"
+    else
+       return value
+    end
+  elseif param == "Status" then
+    return getStatus()    
+  else
+    eWiFiBinding.option = paramList[param]
+    if eWiFiBinding.option then
+       return get_from_uci(eWiFiBinding) or ""
+    end
+  end
+end
+
+Device_Services_X_BELGACOM_EnhancedWiFi_.getall = function(mapping, key)
+  local uciValues = uciHelper.getall_from_uci(eWiFiBinding)
+  return {
+    Name = uciValues.name or "",
+    Enable = uciValues.enable or "",
+    Status = getStatus() or "",
+    SingleSSIDState = uciValues.single_ssid_state or "None",
+  }
+end
+
+Device_Services_X_BELGACOM_EnhancedWiFi_.set = function(mapping, param, value, key)
+  local base_iface, base_ap, peer_iface, peer_ap = enhancedwifi_enable.getBaseAndPeerInterfaceAndAp()
+
+  if not (base_iface and base_ap and peer_iface and peer_ap) then
+    return nil, "no peer found for the radio_2G"
+  end
+
+  if param == "Enable" then
+    if value == "1" then
+      enhancedwifi_enable.eWiFiEnable(base_iface, base_ap, peer_iface, peer_ap)
+
+    elseif value == "0" then
+      --Device.WiFi.SSID.5.SSID” is replaced by “WiFi-5.0-xxxx” where “xxxx” is the last four characters of the MAC address
+      local wifi_mac = get_from_uci(envRipBinding)
+      local ssid_5g = "WiFi-5.0-" .. string.gsub(wifi_mac:sub(13,17), ":", "")
+      setOnUci(peer_iface, "ssid", ssid_5g, commitapply)
+      --The Local band steering is disabled
+      setBandSteerID(base_ap, peer_ap, "off", nil, commitapply)
+    end
+  elseif param == "SingleSSIDState" then
+    if value == "Requested" then
+      --Wait for the end of communication and then run the ssid migration script
+      commitapply:newset("Device.Services.X_BELGACOM_EnhancedWiFi.SingleSSIDState")
+    else
+      return nil, "SingleSSIDState can only be set to Requested. "
+    end
+  end
+
+  if param ~="SingleSSIDState" then
+    eWiFiBinding.option = paramList[param]
+    uciHelper.set_on_uci(eWiFiBinding,value, commitapply)
+    configChanged = true
+  end
+end
+
+Device_Services_X_BELGACOM_EnhancedWiFi_.commit = function()
+  if configChanged then
+    uciHelper.commit(eWiFiBinding)
+    commit()
+    configChanged = false
+  end
+end
+
+Device_Services_X_BELGACOM_EnhancedWiFi_.revert = function()
+  if configChanged then
+    uciHelper.revert(eWiFiBinding)
+    revert()
+    configChanged = false
+  end
+end
+
+register(Device_Services_X_BELGACOM_EnhancedWiFi_)
