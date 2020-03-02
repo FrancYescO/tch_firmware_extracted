@@ -1,0 +1,78 @@
+local Multi_InternetGatewayDevice_Services_Client_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    description = "ONO-Wifi client service related parameters",
+    numEntriesParameter = "ClientsCounter",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MAC = {
+        access = "readOnly",
+        type = "string",
+        description = "MAC of the device currently connected to the public SSID(s) of the CPE (RO)",
+      },
+      SSID = {
+        access = "readOnly",
+        type = "string",
+        description = "SSID of the Client connected to the CPE. Values: SSID/EAPSSID",
+      },
+      SessionDuration = {
+        access = "readOnly",
+        type = "string",
+        description = "Duration in time (seconds) of the currently connected session",
+      }
+    }
+  }
+}
+
+local mapper, pairs = mapper, pairs
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local fon_helper = require('transformer.shared.fon_helper')
+local wirelessBinding = { config = "wireless" }
+local accpoints, assocTime = {}, {}
+
+Multi_InternetGatewayDevice_Services_Client_i_.entries = function(mapping, param, key)
+  local entries = {}
+  accpoints = {}
+  assocTime = {}
+  local ap = fon_helper.getAllAp()
+  local apDump = conn:call("wireless.accesspoint.station", "get", {})
+  for _, accpoint in pairs(ap) do
+    local apDetails = apDump[accpoint]
+    for macAddr, macDetails in pairs(apDetails) do
+      local state = macDetails.state
+      if state and (state:match("Authenticated") or state:match("Associated") or state:match("Authorized")) then
+        entries[#entries + 1] = macAddr
+        accpoints[macAddr] = accpoint
+        assocTime[macAddr] = macDetails.assoc_time
+      end
+    end
+  end
+  return entries
+end
+
+Multi_InternetGatewayDevice_Services_Client_i_.get = {
+  MAC = function(mapping, param, key)
+    return key or ""
+  end,
+  SSID = function(mapping, param, key)
+    wirelessBinding.sectionname = accpoints[key]
+    wirelessBinding.option = "iface"
+    local ifname = uciHelper.get_from_uci(wirelessBinding)
+    wirelessBinding.sectionname = ifname
+    wirelessBinding.option = "ssid"
+    local ssid = uciHelper.get_from_uci(wirelessBinding)
+    return ssid or ""
+  end,
+  SessionDuration = function(mapping, param, key)
+    return tostring(assocTime[key] or "")
+  end
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_InternetGatewayDevice_Services_Client_i_, "#ROOT", {"InternetGatewayDevice.Services.X_VFWifi.Client", "InternetGatewayDevice.Services.X_000E50_Wifi.Client"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
