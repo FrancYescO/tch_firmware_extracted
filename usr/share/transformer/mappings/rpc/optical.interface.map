@@ -1,0 +1,126 @@
+--NG-96253 GPON-Diagnostics/Network needs to be lifted to TI specific functionalities
+local open, popen, string, register = io.open, io.popen, string, register
+local match, floor = string.match, math.floor
+local conn = mapper("ubus").connect()
+--local log = require("transformer.logger").new("Optical.Interface.", 2)
+local sfp = require("transformer.shared.sfp")
+
+local Multi_Optical_Interface_i_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      OpticalSignalLevel = {
+        access = "readOnly",
+        type = "int",
+      },
+      TransmitOpticalLevel = {
+        access = "readOnly",
+        type = "int",
+      },
+    },
+  }
+}
+
+-- Currently by default single entry is formed
+Multi_Optical_Interface_i_.entries = function(mapping)
+  return { "1" }
+end
+
+Multi_Optical_Interface_i_.get = {
+  Status = function()
+    return sfp.getStatus()
+  end,
+  OpticalSignalLevel = function()
+    return sfp.getLevel("OpticalSignalLevel")
+  end,
+  TransmitOpticalLevel = function()
+    return sfp.getLevel("TransmitOpticalLevel")
+  end,
+}
+
+Multi_Optical_Interface_i_.getall = function()
+  return sfp.getOpticals()
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Optical_Interface_i_, "#ROOT", { "rpc.optical.Interface.{i}.", "Device.Optical.Interface.{i}." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Optical_Interface_i_Stats_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ErrorsReceived = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      DiscardPacketsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      DiscardPacketsReceived = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+	  reset = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    },
+  }
+}
+
+Multi_Optical_Interface_i_Stats_.get = function(mapping, param)
+	if param == "reset" then
+		return "0"
+	end
+  return sfp.getStats(param)
+end
+
+--[[Multi_Optical_Interface_i_Stats_.getall = function()
+  return sfp.getAllStats()
+end]]
+
+Multi_Optical_Interface_i_Stats_.set = function(mapping, paramName, paramValue, key)
+  if paramName == "reset" and paramValue == "1" then
+    return sfp.resetStatsGponSFP()
+  end
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_Optical_Interface_i_Stats_, "#ROOT", { "rpc.optical.Interface.{i}.Stats.", "Device.Optical.Interface.{i}.Stats." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

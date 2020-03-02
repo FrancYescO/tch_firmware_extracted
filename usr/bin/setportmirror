@@ -1,0 +1,37 @@
+#!/usr/bin/env lua
+local luabcm=require('luabcm')
+local setportmirror=luabcm.setportmirror
+local srcintf=arg[1]
+local dstintf=arg[2]
+local direction=arg[3]
+
+function print_usage()
+    print("usage: setportmirror srcintf [dstintf] [direction]")
+    print("arguments:")
+    print("   srcintf - monitored interface")
+    print("   dstintf - mirror interface (if empty, stops the mirroring active on srcintf")
+    print("   direction - direction of the mirrored traffic (possible values are 'in', 'out' or 'any')")
+end
+
+-- check input
+if srcintf == "" or srcintf == nil then
+    print_usage()
+    error("invalid srcintf")
+end
+if dstintf == nil then
+    dstintf = "";
+end
+if direction == "" or direction == nil then
+    direction = "any"
+elseif direction ~= "in" and direction ~= "out" and direction ~= "any" then
+    print_usage()
+    error("invalid direction")
+end
+
+-- setup port mirror
+if direction == "in" or direction == "any" then
+    setportmirror(srcintf,dstintf,0)
+end
+if direction == "out" or direction == "any" then
+    setportmirror(srcintf,dstintf,1)
+end
