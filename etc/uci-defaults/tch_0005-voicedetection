@@ -1,0 +1,71 @@
+#!/bin/sh
+
+touch /var/slicstate
+insmod endpointdd
+if [ -f /proc/voice/detectslic ]
+then
+    echo "this is a non voice platform "
+else
+    /usr/bin/mmdetectslic
+fi
+
+[ -f /proc/voice/detectslic ] && cat /proc/voice/detectslic  >> /var/slicstate
+
+rmmod endpointdd
+
+cat /var/slicstate  | grep "isVoiceOn:"
+if [ "$?" = 0 ]		#/var/slicstate is not empty
+then
+    cat /var/slicstate  | grep "isVoiceOn:1"
+    if [ "$?" = 0 ]
+    then
+        echo "This is a voice platform...."
+	fxoEpNumber=$(cat /var/slicstate  | grep "fxoEpNumber"|awk '{print $3}')
+	dectEpNumber=$(cat /var/slicstate  | grep "dectEpNumber"|awk '{print $3}')
+	if [ "$fxoEpNumber" = 0 ]
+	then
+	    rm $(find /usr/share/transformer -name '*fxo*')
+	    rm $(find /etc/config -name '*fxo*')
+	fi
+	if [ "$dectEpNumber" = 0 ]
+	then
+	    rm $(find /usr/share/transformer -name '*dect*')
+	    rm $(find /etc/config -name '*dect*')
+	fi
+	if [ -f /usr/lib/mmpbx/libmmpbxrvsipdev.so ]
+	then
+	    echo "sipDev supported in this platform...."
+	    sipDevSupported=1
+	else
+	    echo "sipDev not supported in this platform...."
+	    sipDevSupported=0
+	    rm $(find /usr/share/transformer -name '*sipdev*')
+	    rm $(find /etc/config -name '*sipdev*')
+	fi
+        if [ -f /usr/lib/mmpbx/libmmpbxrefdev.so ]
+        then
+            echo "refDev supported in this platform...."
+        else
+            echo "refDev not supported in this platform...."
+            rm $(find /etc/config -name '*refdev*')
+        fi
+	if [ "$dectEpNumber" = 0 ] || [ "$fxoEpNumber" = 0 ] || [ "$sipDevSupported" = 0 ]
+	then
+	    #call lua script for cleaning mmpbx file.
+	    echo "dectEpNumber=$dectEpNumber fxoEpNumber=$fxoEpNumber sipDevSupported=$sipDevSupported"
+	    /usr/bin/lua /usr/lib/lua/tch/mmpbxcustocleanup.lua $dectEpNumber $fxoEpNumber $sipDevSupported
+	fi
+        emission=$(uci get mmpbx.dectemission.state)
+	if [ "$emission" = 0 ]
+	then
+	    rm /etc/config/mmpbxbrcmdectdev
+	    /usr/bin/lua /usr/lib/lua/tch/mmpbxdect_backup.lua $emission
+	fi
+    else
+	echo "This is not a voice platform, do the clean up ..."
+	opkg remove --force-removal-of-dependent mmpbx
+	opkg remove --force-depends mappings-mmpbxd
+	rm $(find /etc/config -name '*mmpbx*')
+	rm $(find /etc/config -name mmdbd)
+    fi
+fi

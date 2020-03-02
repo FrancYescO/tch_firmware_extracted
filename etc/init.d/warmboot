@@ -1,0 +1,40 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+STOP=97
+
+. $IPKG_INSTROOT/lib/functions/reboot_reason.sh
+
+start() {
+    . $IPKG_INSTROOT//lib/config/uci.sh
+    uci_set_state system warmboot '' warmboot
+    uci_set_state system warmboot reboot $(cat /proc/prozone/reboot)
+# default : CRASH ; will be reset to PWR in case of power cycle
+    set_reboot_reason CRASH
+}
+
+stop() {
+# in case of 'reboot', set to CLI if no other then PWR reboot reason set
+    is_reboot_reason && set_reboot_reason CLI
+}
+
+boot() {
+    start
+    local rebootReason=$(uci_get_state system warmboot reboot)
+    local hw_reboot_count=$(uci_get system @system[0] hw_reboot_count 0)
+    local sw_reboot_count=$(uci_get system @system[0] sw_reboot_count 0)
+    # Reset the boot count in case of upgrade/rollback/switchover
+    if [ "$rebootReason" = "$UPGRADE" -o "$rebootReason" = "$ROLLBACK" -o "$rebootReason" = "$SWOVER" ]; then
+        hw_reboot_count="0"
+        sw_reboot_count="1"
+    # Incrementing the software boot count for each warm boot
+    elif [ "$rebootReason" = "$PWR" -a "$sw_reboot_count" = "0" ] || [ "$rebootReason" != "$PWR" ]; then
+        sw_reboot_count=$((sw_reboot_count + 1))
+    # Incrementing the hardware boot count for each cold boot (PWR)
+    elif [ "$rebootReason" = "$PWR" ]; then
+        hw_reboot_count=$((hw_reboot_count + 1))
+    fi
+    uci_set system @system[0] hw_reboot_count $hw_reboot_count
+    uci_set system @system[0] sw_reboot_count $sw_reboot_count
+    uci_commit
+}
