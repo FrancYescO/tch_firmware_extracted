@@ -1,0 +1,558 @@
+-- Manually generated
+local Multi_X_000E50_SpeedService_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_SpeedService.",
+    access = "readOnly",
+    description = "To start the speed service measurement, to retrieve the ongoing status and to abort the test when needed",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Requested",
+          "Complete",
+          "Abort",
+          "None",
+          "Error",
+        },
+        default = "None",
+        description = "To start the measurement if 'Requested' and obtain the status from the ubus and set 'Abort' to stop the speed test",
+      },
+      Mode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "send",
+          "bw",
+        },
+      default = "bw",
+        description = "Mode to be set/get for the measured broadcom speed test"
+      },
+      Direction = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "upstream",
+          "downstream",
+        },
+        default = "upstream",
+        description = "Direction to be set/get for the measured broadcom speed test"
+      },
+      ServerIPAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "Server IP address for the connected broadcom speed test"
+      },
+      TCPPort = {
+        access = "readWrite",
+        type = "string",
+        description = "TCP port for the connected broadcom speed test"
+      },
+      StepDuration = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Duration for the connected broadcom speed test"
+      },
+      StartingBwKbps = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Rate for the connected broadcom speed test"
+      },
+      PacketLength = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Packet length for the connected broadcom speed test"
+      },
+      Algorithm = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "RxRate",
+          "Binary",
+          "Fast",
+          "Ramp",
+        },
+        default = "RxRate",
+        description = "Algorithm used for the connected broadcom speed test"
+      },
+      MaxSteps = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1",
+        min = "1",
+        description = "Maximum steps measured for the specified algorithm. Algorithm : ramp,bin,fast",
+      },
+      LatencyTolerancePercentage = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+        description = "Latency tolerance measured for the specified algorithm. Algorithm : ramp,bin,fast",
+      },
+      AcceptablePercentageLoss = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+        description = "Accepted percentage loss measured for the specified algorithm. Used for Algorithm : bin",
+      },
+      ResultCount = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+        description = "To display and store the result in the Broadcom Speed Service config",
+      },
+    }
+  }
+}
+
+local os, commitapply, mapper, pairs, tonumber = os, commitapply, mapper, pairs, tonumber
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local deleteOnUci = uciHelper.delete_on_uci
+local renameOnUci = uciHelper.rename_on_uci
+local ubus = mapper("ubus").connect()
+local bssBinding = { config = "bcm_spdsvc" }
+local configChanged = false
+local format = string.format
+local ubusCount = false
+local setResultValue = {}
+
+local inet = require("tch.inet")
+local isValidIPv4Address = inet.isValidIPv4
+
+local function getSpdsvcUci(option, default)
+  bssBinding.sectionname = "default_measurement"
+  bssBinding.option = option
+  bssBinding.default = default
+  return getFromUci(bssBinding)
+end
+
+local function setSpdsvcUci(option, value)
+  bssBinding.sectionname = "default_measurement"
+  bssBinding.option = option
+  setOnUci(bssBinding, value, commitapply)
+  configChanged = true
+end
+
+local direction = {
+  upstream = "us",
+  downstream = "ds",
+}
+
+local getAlgo = {
+  rxrate = "RxRate",
+  ramp = "Ramp",
+  bin = "Binary",
+  fast = "Fast",
+}
+
+local function getAlgorithm()
+  local algoSelected = getSpdsvcUci("algo", "rxrate")
+  return getAlgo[algoSelected] or ""
+end
+
+local function getMaxSteps()
+  local algo = getSpdsvcUci("algo")
+  if algo == "rxrate" then
+    return "2"
+  end
+  return getSpdsvcUci("maxsteps")
+end
+
+local function getLatencyTolerance()
+  local algo = getSpdsvcUci("algo")
+  if algo == "rxrate" then
+    return "0"
+  end
+  return getSpdsvcUci("latencytolerance", "0")
+end
+
+local function getAcceptablePercentageLoss()
+  local algo = getSpdsvcUci("algo")
+  if algo == "bin" then
+    return getSpdsvcUci("loss")
+  end
+  return "0"
+end
+
+local function getServerIPAddress()
+  return getSpdsvcUci("server")
+end
+
+local function getUciAlgorithm()
+  return getSpdsvcUci("algo")
+end
+
+local function getMode()
+  return getSpdsvcUci("mode").."_"..getSpdsvcUci("direction")
+end
+
+local function getServerPort()
+  return getSpdsvcUci("port")
+end
+
+local function getRate()
+  return getSpdsvcUci("rate") or 1200000
+end
+
+local function getPacketLength()
+  return getSpdsvcUci("packetlength") or 1472
+end
+
+local function getDuration()
+  return getSpdsvcUci("duration") or 1000
+end
+
+local function rxrateOption()
+  local rateValue = {}
+  rateValue.server_addr = getServerIPAddress()
+  rateValue.mode = getMode()
+  rateValue.server_port = getServerPort()
+  rateValue.rate = tonumber(getRate())
+  rateValue.packet_length = tonumber(getPacketLength())
+  rateValue.algo = getUciAlgorithm()
+  rateValue.duration = tonumber(getDuration())
+  return rateValue or {}
+end
+
+local function rampOption()
+  local rateValue = rxrateOption()
+  rateValue.max_steps = tonumber(getMaxSteps())
+  rateValue.latency_tolerance = tonumber(getLatencyTolerance())
+  return rateValue or {}
+end
+
+local function binOption()
+  local rateValue = rxrateOption()
+  rateValue.max_steps = tonumber(getMaxSteps())
+  rateValue.latency_tolerance = tonumber(getLatencyTolerance())
+  rateValue.loss = tonumber(getAcceptablePercentageLoss())
+  return rateValue or {}
+end
+
+local function algoSpecificParam(algo)
+  local measure
+  if algo == "rxrate" then
+    measure = rxrateOption()
+  elseif algo == "bin" then
+    measure = binOption()
+  else
+    measure = rampOption()
+  end
+  return measure or {}
+end
+
+local setAlgorithm = {
+  RxRate = "rxrate",
+  Ramp = "ramp",
+  Binary = "bin",
+  Fast = "fast",
+}
+
+local function statusUbus()
+  local stat = ubus:call("bcm_spdsvc", "status", {}) or {}
+  return stat.status
+end
+
+local function resultUbus()
+  return ubus:call("bcm_spdsvc", "result", {}) or {}
+end
+
+local function measureUbus()
+  local algo = getUciAlgorithm()
+  return ubus:call("bcm_spdsvc", "measure", algoSpecificParam(algo))
+end
+
+local function getDirection()
+  local dir = getSpdsvcUci("direction")
+  if dir == "ds" then
+    return "downstream"
+  end
+  return "upstream"
+end
+
+Multi_X_000E50_SpeedService_.get = {
+  DiagnosticsState = function(mapping, param)
+    return getSpdsvcUci("state", "None")
+  end,
+  Mode = function(mapping, param)
+    return getSpdsvcUci("mode", "bw")
+  end,
+  Direction = function(mapping, param)
+    return getDirection()
+  end,
+  ServerIPAddress = function(mapping, param)
+    return getServerIPAddress()
+  end,
+  TCPPort = function(mapping, param)
+    return getServerPort()
+  end,
+  StepDuration = function(mapping, param)
+    return getDuration()
+  end,
+  StartingBwKbps = function(mapping, param)
+    return getRate()
+  end,
+  PacketLength = function(mapping, param)
+    return getPacketLength()
+  end,
+  Algorithm = function(mapping, param)
+    return getAlgorithm()
+  end,
+  MaxSteps = function(mapping, param)
+    return getMaxSteps()
+  end,
+  LatencyTolerancePercentage = function(mapping, param)
+    return getLatencyTolerance()
+  end,
+  AcceptablePercentageLoss = function(mapping, param)
+    return getAcceptablePercentageLoss()
+  end,
+  ResultCount = function(mapping, param)
+    return getSpdsvcUci("resultcount", "3")
+  end,
+}
+
+Multi_X_000E50_SpeedService_.getall = function(mapping)
+  bssBinding.sectionname = "default_measurement"
+  local allValues = getAllFromUci(bssBinding)
+  return {
+    DiagnosticsState = allValues.state or "None",
+    Mode = allValues.mode or "bw",
+    Direction = getDirection() or "upstream",
+    ServerIPAddress = getServerIPAddress() or "",
+    TCPPort = getServerPort() or "",
+    StepDuration = getDuration() or "",
+    StartingBwKbps = getRate() or "1200000",
+    PacketLength = getPacketLength() or "1472",
+    Algorithm = getAlgorithm() or "",
+    MaxSteps = getMaxSteps() or "",
+    LatencyTolerancePercentage = getLatencyTolerance() or "",
+    AcceptablePercentageLoss = getAcceptablePercentageLoss() or "",
+    ResultCount = allValues.resultcount or "3",
+  }
+end
+
+local allowedValues = {
+  ["Requested"] = true,
+  ["Abort"] = true
+}
+
+local function setAbortValue()
+  ubus:call("bcm_spdsvc", "abort", {})
+  return setSpdsvcUci("state", "None")
+end
+
+local function getCount()
+  local count = 0
+  bssBinding.sectionname = "result"
+  forEachOnUci(bssBinding, function(s)
+    if s[".name"] then
+      count = count + 1
+    end
+  end)
+  return count
+end
+
+local function addResultSection()
+  local resultCount = getCount()
+  resultCount = resultCount + 1
+  bssBinding.sectionname = "result_"..tostring(resultCount)
+  bssBinding.option = nil
+  setOnUci(bssBinding, "result", commitapply)
+  setResultValue = resultUbus()
+  if setResultValue then
+    setResultValue.runtime = os.time()
+    setResultValue.direction = getDirection()
+  end
+  for k, v in pairs(setResultValue) do
+    bssBinding.sectionname = "result_"..tostring(resultCount)
+    bssBinding.option = k
+    setOnUci(bssBinding, v, commitapply)
+  end
+  configChanged = true
+end
+
+local function getStatusValue()
+  local value
+  local status = statusUbus()
+  if status == "running" then
+    value = "Requested"
+  elseif status == "failed" then
+    value = "Error"
+  elseif status == "completed" then
+    value = "Complete"
+  else
+    value = "None"
+  end
+  return value
+end
+
+local function deleteResultSection()
+  bssBinding.sectionname = "result_1"
+  bssBinding.option = nil
+  deleteOnUci(bssBinding, commitapply)
+  configChanged = true
+end
+
+local function renameResultSection()
+  local minCount = 1
+  local maxCount = getCount()
+  for i = minCount, maxCount do
+    bssBinding.sectionname = "result_"..minCount + 1
+    bssBinding.option = nil
+    renameOnUci(bssBinding, "result_"..minCount, commitapply)
+    minCount = minCount + 1
+  end
+  configChanged = true
+end
+
+local function addLastSection()
+  local maxCount = getSpdsvcUci("resultcount")
+  bssBinding.sectionname = "result_"..maxCount
+  bssBinding.option = nil
+  setOnUci(bssBinding, "result", commitapply)
+  bssBinding.sectionname = "result_"..maxCount
+  setResultValue = resultUbus()
+  if setResultValue then
+    setResultValue.runtime = os.time()
+    setResultValue.direction = getDirection()
+  end
+  for k, v in pairs(setResultValue) do
+    bssBinding.sectionname = "result_"..maxCount
+    bssBinding.option = k
+    setOnUci(bssBinding, v, commitapply)
+  end
+  configChanged = true
+end
+
+local function addResultValue()
+  local count = getCount()
+  bssBinding.sectionname = "result"
+  local maxCount = getSpdsvcUci("resultcount")
+  if count < tonumber(maxCount) then
+    addResultSection()
+  elseif count == tonumber(maxCount) then
+    deleteResultSection()
+    renameResultSection()
+    if tonumber(maxCount) ~= 0 then
+      addLastSection()
+    end
+  else -- If count > maxCount
+    local deleteCount = count - tonumber(maxCount)
+    local minCount = 0
+    for i = minCount, deleteCount do
+      deleteResultSection()
+      renameResultSection()
+      minCount = minCount + 1
+    end
+    if tonumber(maxCount) ~= 0 then
+      addLastSection()
+    end
+  end
+end
+
+local function setDiagnosticState(mapping, param, value)
+  if not allowedValues[value] then
+    return nil, "Invalid value"
+  end
+  if value == "Requested" then
+    ubusCount = false
+    measureUbus()
+  elseif value == "Abort" then
+    setAbortValue()
+  end
+  local val = getStatusValue()
+  local result = resultUbus()
+  setSpdsvcUci("state", val)
+  if result.error == "result unavailable" or val == "None" then
+    return false
+  end
+end
+
+Multi_X_000E50_SpeedService_.set = {
+  DiagnosticsState = setDiagnosticState,
+  Mode = function(mapping, param, value)
+    setSpdsvcUci("mode", value)
+  end,
+  Direction = function(mapping, param, value)
+    setSpdsvcUci("direction", direction[value])
+  end,
+  ServerIPAddress = function(mapping, param, value)
+    if value == "" or isValidIPv4Address(value) then
+      return setSpdsvcUci("server", value)
+    end
+    return nil, format("%s is not a valid IPv4 Address", value)
+  end,
+  TCPPort = function(mapping, param, value)
+    setSpdsvcUci("port", value)
+  end,
+  StepDuration = function(mapping, param, value)
+    setSpdsvcUci("duration", value)
+  end,
+  StartingBwKbps = function(mapping, param, value)
+    setSpdsvcUci("rate", value)
+  end,
+  PacketLength = function(mapping, param, value)
+    setSpdsvcUci("packetlength", value)
+  end,
+  Algorithm = function(mapping, param, value)
+    setSpdsvcUci("algo", setAlgorithm[value])
+  end,
+  MaxSteps = function(mapping, param, value)
+    setSpdsvcUci("maxsteps", value)
+  end,
+  LatencyTolerancePercentage = function(mapping, param, value)
+    setSpdsvcUci("latencytolerance", value)
+  end,
+  AcceptablePercentageLoss = function(mapping, param, value)
+    setSpdsvcUci("loss", value)
+  end,
+  ResultCount = function(mapping, param, value)
+    setSpdsvcUci("resultcount", value)
+  end,
+}
+
+local function setUbusEvent(mapping, action, data)
+  if data.status == "completed" then
+    setSpdsvcUci("state", "Complete")
+    if ubusCount == false then
+       addResultValue()
+       ubusCount = true
+     end
+  elseif data.status == "failed" then
+    setSpdsvcUci("state", "Error")
+  end
+  if data.status == "completed" or data.status == "failed" then
+    uciHelper.commit(bssBinding)
+  end
+end
+
+Multi_X_000E50_SpeedService_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, setUbusEvent, "bcm_spdsvc")
+end
+
+Multi_X_000E50_SpeedService_.commit = function()
+  if configChanged == true then
+    uciHelper.commit(bssBinding)
+    configChanged = false
+  end
+end
+
+Multi_X_000E50_SpeedService_.revert = function()
+  if configChanged == true then
+    uciHelper.revert(bssBinding)
+    configChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_SpeedService_, "#ROOT", { "Device", "InternetGatewayDevice", "rpc" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

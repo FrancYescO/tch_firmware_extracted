@@ -1,0 +1,63 @@
+#!/bin/sh                                 
+
+. /lib/functions.sh
+
+uci_revert_state dhcp6c state
+uci_set_state dhcp6c state "" dhcp6c_state
+uci_set_state dhcp6c state domain_name_servers "$new_domain_name_servers"
+uci_set_state dhcp6c state domain_name "$new_domain_name"                    
+uci_set_state dhcp6c state ntp_servers "$new_ntp_servers"                    
+uci_set_state dhcp6c state sip_server_address "$new_sip_servers"             
+uci_set_state dhcp6c state sip_server_domain_name "$new_sip_name"            
+uci_set_state dhcp6c state nis_server_address "$new_nis_servers"
+uci_set_state dhcp6c state nis_domain_name "$new_nis_name"
+uci_set_state dhcp6c state nisp_server_address "$new_nisp_servers"
+uci_set_state dhcp6c state nisp_domain_name "$new_nisp_name"
+uci_set_state dhcp6c state bcmcs_server_address "$new_bcmcs_servers"
+uci_set_state dhcp6c state bcmcs_server_domain_name "$new_bcmcs_name"
+
+#First 64 bits are taken from interface address
+#Last 64 bits can be used to define the range
+dhcp6start="::10:1"
+dhcp6end="::10:ffff"
+leasetime="12h"
+
+# WIDE Client and Dnsmasq integration
+waitforip(){
+        i=1
+        ip6addr=""
+        logger "WIDE DHCPv6 lease renewed, checking ip6 address"
+	sleep 1
+        ip6addr=`ifconfig br-lan | grep "inet6 addr: 2001" | cut -d" " -f 13`
+        logger "IP6 address is: $ip6addr"
+        lastip=`cat /tmp/lastip`
+        if [ "$ip6addr" != "$lastip" -a -n "$ip6addr" ]; then
+                logger "IP address changed, reconfiguring dnsmasq..."
+                echo $ip6addr > /tmp/lastip
+                ip6addrsingle=`echo $ip6addr | cut -d/ -f1`
+                ip6addrmask=`echo $ip6addr | cut -d/ -f2`
+                ip6dhcp=`echo $ip6addrsingle | cut -f1-4 -d:`
+                if [ 64 != $ip6addrmask ]; then
+                        #echo "IPv6 address prefix on br-lan MUST be equal to 64, is $ip6addrmask" > /dev/kmsg
+                        logger -s "IPv6 address prefix on br-lan MUST be equal to 64, is $ip6addrmask"
+                        exit 1
+                fi
+                if [ -f /etc/dnsmasq.backup ]; then
+                        cp /etc/dnsmasq.backup /etc/dnsmasq.conf
+                else
+                        cp /etc/dnsmasq.conf /etc/dnsmasq.backup
+                fi
+                #now we have a clean file and a backup
+
+                echo "dhcp-range=$ip6dhcp$dhcp6start, $ip6dhcp$dhcp6end, 64, $leasetime" >> /etc/dnsmasq.conf
+                #echo "enable-ra" >> /etc/dnsmasq.conf
+                echo "log-dhcp" >> /etc/dnsmasq.conf
+                #restarting dnsmasq
+                sleep 1
+                logger "Restarting dnsmasq..."
+                /etc/init.d/dnsmasq restart
+        fi
+}
+
+waitforip &
+
