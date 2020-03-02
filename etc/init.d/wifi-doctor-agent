@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+. /lib/functions.sh
+
+service_triggers()
+{
+  procd_add_reload_trigger "wifi_doctor_agent"
+}
+
+start_service()
+{
+  local config_wd="wifi_doctor_agent"
+  local UUID
+  config_load $config_wd
+  config_get UUID config uuid
+  if [ "${UUID}" == "" ] ; then
+    logger -t $config_wd "No UUID was found, Generating new uuid"
+    uci_set $config_wd config uuid "$(cat /proc/sys/kernel/random/uuid)"
+    uci_commit $config_wd config
+  fi
+  config_get_bool enabled config enabled 0
+  [ ${enabled} -gt 0 ] || return 1
+  procd_open_instance wifi-doctor-agent
+  procd_set_param command /usr/bin/wifi-doctor-agent
+  procd_set_param respawn
+  procd_close_instance
+}
+
+reload_service()
+{
+  restart
+}

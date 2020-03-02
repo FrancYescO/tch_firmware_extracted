@@ -1,0 +1,168 @@
+local Multi_Services_X_000E50_WiFiAgent = {
+  objectType = {
+    name = "#ROOT_WiFiAgent.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Manage Wi-Fi services like Doctor and Conductor",
+    parameters = {
+      DoctorEnable = {
+        description = "Enable or disable Wi-Fi Doctor services",
+        access = "readWrite",
+        type = "boolean",
+      },
+      ConductorEnable = {
+        description = "Enable or disable Wi-Fi Conductor services",
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        description = "The current operational state of the Wi-Fi services agent",
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "On",
+          "Off",
+          "Error",
+        },
+      },
+      AuthURL = {
+        description = "URL of the server to authenticate against",
+        access = "readWrite",
+        type = "string",
+      },
+      AuthPasswd = {
+        description = "Password to use when authenticating against the server in AuthURL",
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      OnBoardingStart = {
+        description = "Initiate the onboarding flow for this device",
+        access = "readWrite",
+        type = "boolean",
+      }
+    }
+  }
+}
+
+local commitapply, mapper = commitapply, mapper
+local uci_helper = mapper("ucihelper")
+local ubus = mapper("ubus").connect()
+local lfs = require("lfs")
+local transactions = {}
+local binding_doctor = { config = "wifi_doctor_agent" }
+local binding_conductor = { config = "wifi_conductor" }
+
+local function get_uci_value(binding, section, param, default)
+  binding.sectionname = section
+  binding.option = param
+  binding.default = default
+  return uci_helper.get_from_uci(binding)
+end
+
+local function set_uci_value(binding, section, param, value)
+  binding.sectionname = section
+  binding.option = param
+  uci_helper.set_on_uci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+local function get_agent_oper_state()
+  local wda_service = ubus:call("service", "list", { name = "wifi-doctor-agent" })
+  wda_service = wda_service["wifi-doctor-agent"]
+  if not wda_service or not wda_service.instances then
+    return false
+  end
+  wda_service = wda_service.instances["wifi-doctor-agent"]
+  if not wda_service then
+    return false
+  end
+  return wda_service.running
+end
+
+local function getStatus()
+  local agent_oper_state = get_agent_oper_state()
+  local agent_admin_state = get_uci_value(binding_doctor, "config", "enabled")
+  if agent_admin_state == "1" then
+    if agent_oper_state then
+      return "On"
+    end
+    return "Error"
+  else
+    if agent_oper_state then
+      return "Error"
+    end
+    return "Off"
+  end
+end
+
+Multi_Services_X_000E50_WiFiAgent.get = {
+  DoctorEnable = function()
+    return get_uci_value(binding_doctor, "config", "enabled", "0")
+  end,
+  ConductorEnable = function()
+    return get_uci_value(binding_conductor, "global", "enabled", "0")
+  end,
+  Status = getStatus,
+  AuthURL = function()
+    return get_uci_value(binding_doctor, "as_config", "url", "")
+  end,
+  AuthPasswd = function()
+    return get_uci_value(binding_doctor, "as_config", "passwd", "")
+  end,
+  OnBoardingStart = "0"
+}
+
+Multi_Services_X_000E50_WiFiAgent.set = {
+  DoctorEnable = function(_, _, value)
+    set_uci_value(binding_doctor, "config", "enabled", value)
+  end,
+  ConductorEnable = function(_, _, value)
+    set_uci_value(binding_conductor, "global", "enabled", value)
+  end,
+  AuthURL = function(_, _, value)
+    set_uci_value(binding_doctor, "as_config", "url", value)
+  end,
+  AuthPasswd = function(_, _, value)
+    set_uci_value(binding_doctor, "as_config", "passwd", value)
+  end,
+  OnBoardingStart = function(_, _, value)
+    if value == "1" then
+      ubus:send("button", {wps = "pressed"})
+    end
+  end,
+}
+
+Multi_Services_X_000E50_WiFiAgent.commit = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uci_helper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_Services_X_000E50_WiFiAgent.revert = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uci_helper.revert(binding)
+  end
+  transactions = {}
+end
+
+if not lfs.attributes("/usr/bin/wifi-conductor", "ino") then
+  -- no conductor so remove its related parameter(s) and code
+  Multi_Services_X_000E50_WiFiAgent.objectType.parameters.ConductorEnable = nil
+  Multi_Services_X_000E50_WiFiAgent.get.ConductorEnable = nil
+  Multi_Services_X_000E50_WiFiAgent.set.ConductorEnable = nil
+  binding_conductor = nil
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_WiFiAgent, "#ROOT",
+  { "InternetGatewayDevice.Services.X_000E50", "Device.Services.X_000E50", "Device.Services.X_BELGACOM" })
+for _, dupli in ipairs(duplicates) do
+    register(dupli)
+end
