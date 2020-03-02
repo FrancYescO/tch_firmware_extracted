@@ -1,0 +1,42 @@
+local sys_proc_ = {
+  objectType = {
+    name = "sys.proc.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      CPUUsage = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "100",
+          },
+        },
+      },
+    },
+  }
+}
+
+local function getCPUUsage()
+  local data = io.popen("top -b -n1")
+  local usageValue
+  if data then
+    for line in data:lines() do
+      usageValue =  line:match("^CPU:%s*(%d+)%%")
+      if usageValue then
+        break
+      end
+    end
+    data:close()
+  end
+  return usageValue or "0"
+end
+
+sys_proc_.get = {
+  CPUUsage = function()
+    return getCPUUsage()
+  end
+}
+
+register(sys_proc_)
