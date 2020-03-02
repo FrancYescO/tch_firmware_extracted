@@ -1,0 +1,601 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+EXTRA_COMMANDS="softswitch"
+
+#ETHERNET_DEBUG=1
+
+LIB_SETUPTM="setuptm"
+if lua -e "require('${LIB_SETUPTM}')" 2> /dev/null ; then
+  [ "${ETHERNET_DEBUG}" = 1 ] && LIB_SETUPTM_DEBUG=true || LIB_SETUPTM_DEBUG=false
+  LIB_SETUPTM_INIT="local setuptm = require('${LIB_SETUPTM}') \
+                    setuptm.enable_logging(${LIB_SETUPTM_DEBUG}) \
+                    setuptm.enable_tmctl_logging(${LIB_SETUPTM_DEBUG})"
+fi
+
+setuptm_cmd() {
+  [ -n "${LIB_SETUPTM}" ] || return
+
+  [ "${ETHERNET_DEBUG}" != 1 ] || echo "[cmd] setuptm $@" 1>&2
+
+  lua -e "${LIB_SETUPTM_INIT} ; setuptm.$@"
+}
+
+exec_cmd() {
+    if [ "${ETHERNET_DEBUG}" = 1 ]; then
+      echo "[cmd] $@" 1>&2
+      "$@"
+    else
+      "$@" > /dev/null
+    fi
+}
+
+setup_flowcache() {
+  local fcctl_bin="/usr/bin/fcctl"
+
+  [ -x "${fcctl_bin}" ] || return
+  config_get_bool mcastlearn globals multicastlearning '1'
+  exec_cmd "${fcctl_bin}" config --mcast-learn ${mcastlearn}
+}
+
+is_single_fap() {
+  if [ ! -z IS_SINGLE_FAP ] ; then
+    [ -x "/usr/bin/fapctl" ] && [ "$(ethctl tx_iudma 2>&1 | awk '{print $NF}')" == "1" ] && IS_SINGLE_FAP=1 || IS_SINGLE_FAP=0
+  fi
+  [ "${IS_SINGLE_FAP}" = "1" ]
+}
+
+is_dual_fap() {
+  if [ ! -z IS_DUAL_FAP ] ; then
+    [ -x "/usr/bin/fapctl" ] && [ "$(ethctl tx_iudma 2>&1 | awk '{print $NF}')" == "2" ] && IS_DUAL_FAP=1 || IS_DUAL_FAP=0
+  fi
+  [ "${IS_DUAL_FAP}" = "1" ]
+}
+
+scan_switch_port_nbr() {
+  local nbrswitchunits=$(seq 0 1)
+  local nbrswitchports=$(seq 0 7)
+  for i in $nbrswitchunits ; do
+    for j in $nbrswitchports ; do
+      local match=$(ethswctl getifname $i $j 2>/dev/null | sed -n 's/.* unit \([0-9]\+\) port \([0-9]\+\) is \(eth[0-9]\)/\1 \2 \3/p')
+      [ -z "${match}" ] && continue
+      local unit=${match%% *}
+      match=${match#* }
+      [ -z "${match}" -o "$unit" != "$i" ] && continue
+      local port=${match%% *}
+      local ifname=${match#* }
+      [ -z "${ifname}" -o "$port" != "$j" ] && continue
+      eval SWITCH_UNIT_${ifname}=${unit}
+      eval SWITCH_PORT_${ifname}=${port}
+    done
+  done
+}
+
+uci2power() {
+    case "$1" in
+        0) echo "down";;
+        1) echo "up" ;;
+        *) echo "Invalid UCI power option: $1" 1>&2; echo "up" ;;
+    esac
+}
+
+uci2duplex() {
+    case "$1" in
+        half) echo "HD";;
+        full) echo "FD" ;;
+        *) echo "Invalid UCI duplex option: $1" 1>&2; echo "HD" ;;
+    esac
+}
+
+uci2mediatype() {
+    case "$1" in
+        10) echo "$1"`uci2duplex $2`;;
+        100) echo "$1"`uci2duplex $2`;;
+        auto) echo "auto";;
+        auto-nowirespeed) echo "auto";;
+        *) "Invalid UCI speed option: $1" 1>&2; echo "auto";;
+    esac
+}
+
+uci2wirespeed() {
+    case "$1" in
+        10) echo "disable";;
+        100) echo "disable";;
+        auto) echo "enable";;
+        auto-nowirespeed) echo "disable";;
+        *) "Invalid UCI speed option: $1" 1>&2; echo "auto";;
+    esac
+}
+
+setup_interface() {
+    local IF="$1"
+    local MODE="$2"
+
+    local subport_suffix=""
+    if ([ "$IF" == "eth4" ] && (ethctl $IF media-type 2>&1 | grep -q 'Interface eth4 has sub ports')); then
+        subport_suffix="port 10"
+    fi
+    # verify this phy can be configured
+    ethctl $IF media-type $subport_suffix &>/dev/null || return
+
+    config_get enable "$IF" enable 1
+    if [ "$(uci2power $enable)" = "up" ]; then
+      config_get speed "$IF" speed auto
+      config_get duplex "$IF" duplex full
+      config_get pauseenable "$IF" pauseenable 0
+
+      local bcm_mediatype="$(uci2mediatype $speed $duplex)"
+      local bcm_wirespeed="$(uci2wirespeed $speed)"
+      # If we are just reloading, skip re-setting auto, since this causes link-down/up
+      if !([ "$MODE" == "reload" ] && [ "$bcm_mediatype" == "auto" ] && (ethctl $IF media-type $subport_suffix 2>&1 | grep -qi 'Auto-negotiation.* enabled')); then
+        exec_cmd ethctl $IF media-type "$bcm_mediatype" $subport_suffix
+      fi
+      if !([ "$MODE" == "reload" ] && [ "$bcm_wirespeed" == "enable" ] && (ethctl $IF ethernet@wirespeed show $subport_suffix 2>&1 | grep -q 'ethernet@wirespeed is enabled')); then
+        exec_cmd ethctl $IF ethernet@wirespeed "$bcm_wirespeed" $subport_suffix
+      fi
+      # If we are just reloading, skip re-setting phy-power state, since this causes link-down/up on internal fast ethernet PHYs
+      if !([ "$MODE" == "reload" ] && (ethctl $IF media-type $subport_suffix 2>&1 | grep -qi 'Link is up')); then
+        phypower_intf "$IF" up
+      fi
+
+      # configure pause TX/RX direction
+      if ([ "$pauseenable" == "1" ] && !(ethswctl -c pause -i $IF 2>&1 | grep -q 'Both Tx and Rx Pause Enabled')); then
+          ethswctl -c pause -i $IF -v 2
+      elif ([ "$pauseenable" == "0" ] && !(ethswctl -c pause -i $IF 2>&1 | grep -q 'Pause Disabled')); then
+          ethswctl -c pause -i $IF -v 0
+      fi
+    else
+      phypower_intf "$IF" down
+    fi
+}
+
+#--- Helper function which configures the mapping from switch port (lan/wan) to switch queue on IMP.
+#--- For single FAP boards, all ports will be linked towards queue 0 till 3 according to switch classification
+#--- For dual FAP boards, the wan port will be linked towards queue 1 (downstream FAP), and the lan ports will
+#--- linked towards queue 0 (upstream FAP)
+#-- @param wanstr The wan ethernet netdevice
+setup_rx_queue_mapping() {
+    local intf="$1"
+
+    eval local unit=\$SWITCH_UNIT_$intf
+    eval local port=\$SWITCH_PORT_$intf
+    if [ -z "$unit" -o -z "$port" ] ; then
+      echo "No mapping to switch port found for $intf"
+      return
+    fi
+
+    local wan
+    config_get_bool wan $intf wan '0'
+
+    local switchprio=$(seq 0 7)
+    if is_dual_fap ; then
+        if [ $wan -eq 1 ] ; then
+            #DUAL FAP + WAN ==> switch queue 1
+            for i in $switchprio ; do
+                exec_cmd ethswctl -c cosq -n $unit -p $port -q $i -v 1
+            done
+        else
+            #DUAL FAP + LAN ==> switch queue 0
+            for i in $switchprio ; do
+                exec_cmd ethswctl -c cosq -n $unit -p $port -q $i -v 0
+            done
+        fi
+    else
+        #SINGLE FAP + NO FAP ==> switch queue according to switch classification (queue = prio/2)
+        for i in $switchprio ; do
+            exec_cmd ethswctl -c cosq -n $unit -p $port -q $i -v $(( $i / 2 ))
+        done
+    fi
+}
+
+handle_device_for_switchqos(){
+    local dev="$1"
+
+    # Map device to switch port number
+    eval local unit=\$SWITCH_UNIT_$dev
+    eval local port=\$SWITCH_PORT_$dev
+    if [ -z "$unit" -o -z "$port" ] ; then
+      echo "No mapping to switch port found for $dev"
+      return
+    fi
+
+    config_load qos
+    # Check if QoS config for device is available
+    # ethswctl cosqpriomethod values :
+    #   0=PortBasedQoS (seems not doing much)
+    #   1=MACBasedQoS (used for 'disabled')
+    #   2=802.1PQoS
+    #   3=DiffServeQoS
+    config_get qos_device "$dev" TYPE
+    if [ "$qos_device" != "device" ] ; then
+        exec_cmd ethswctl -c cosqpriomethod -n $unit -p $port -v 1
+        config_load ethernet
+        return
+    fi
+    # Check if QoS config for device should be enabled
+    config_get_bool qos_enable $dev enable 1
+    if [ "$qos_enable" != "1" ]; then
+        exec_cmd ethswctl -c cosqpriomethod -n $unit -p $port -v 1
+        config_load ethernet
+        return
+    fi
+    # Method of classification on switch
+    local classification
+    config_get classification $dev switchclassification 'none'
+    if [ "$classification" == "dscp" ]; then
+        exec_cmd ethswctl -c cosqpriomethod -n $unit -p $port -v 3
+    elif [ "$classification" == "pcp" ]; then
+        exec_cmd ethswctl -c cosqpriomethod -n $unit -p $port -v 2
+    #elif [ "$classification" == "high" ]; then
+    #    #TODO: ethswctl for enabling dscp and pcp classification on a port (CSP932727)
+    #    exec_cmd ethswctl -c cosqpriomethod -p $port -v ???
+    else
+        exec_cmd ethswctl -c cosqpriomethod -n $unit -p $port -v 1
+    fi
+    config_load ethernet
+    return
+}
+
+dscp2switchprio_default(){
+    local dscp="$1"
+    local prio="0"
+    if [ "$dscp" -le 7 ]; then
+        prio="2"
+    elif [ "$dscp" -le 15 ] ; then
+        prio="3"
+    elif [ "$dscp" -le 23 ] ; then
+        prio="4"
+    elif [ "$dscp" -le 31 ] ; then
+        prio="5"
+    elif [ "$dscp" -le 39 ] ; then
+        prio="6"
+    else
+        prio="7"
+    fi
+    echo "$prio"
+}
+
+pcp2switchprio_default(){
+    local pcp="$1"
+    local prio="0"
+    if [ "$pcp" -le 0 ]; then
+        prio="2"
+    elif [ "$pcp" -le 1 ] ; then
+        prio="0"
+    elif [ "$pcp" -le 2 ] ; then
+        prio="1"
+    elif [ "$pcp" -le 3 ] ; then
+        prio="3"
+    elif [ "$pcp" -le 4 ] ; then
+        prio="4"
+    elif [ "$pcp" -le 5 ] ; then
+        prio="5"
+    else
+        prio="7"
+    fi
+    echo "$prio"
+}
+
+handle_switch_priomappings(){
+    local dev="$1"
+    # Configure mapping from DSCP values to internal switch priority
+    config_load network
+    config_get dscp2prio $dev qosdscp2priomap
+    if [ "$dscp2prio" == "" ]; then
+        echo "Switch $dev: Applying default DSCP to prio mapping"
+        for dscp in $(seq 0 63)
+        do
+            prio=$(dscp2switchprio_default $dscp)
+            #echo "Switch $dev will map DSCP $dscp to prio $prio (default)"
+            exec_cmd ethswctl -c dscp2prio -v $dscp -q $prio
+        done
+    else
+        config_load qos
+        for dscp in $(seq 0 63)
+        do
+            config_get prio $dscp2prio "dscp$dscp"
+            if [ "$prio" == "" ]; then
+                prio=$(dscp2switchprio_default $dscp)
+                echo "No mapping found for DSCP$dscp in $dscp2prio, using prio $prio"
+            fi
+            #echo "Switch $dev will map DSCP $dscp to prio $prio"
+            exec_cmd ethswctl -c dscp2prio -v $dscp -q $prio
+        done
+    fi
+
+    # Configure mapping from PCP values to internal switch priority
+    config_load network
+    config_get pcp2prio $dev qospcp2priomap
+    if [ "$pcp2prio" == "" ]; then
+        echo "Switch $dev: Applying default PCP to prio mapping"
+        for pcp in $(seq 0 7)
+        do
+            prio=$(pcp2switchprio_default $pcp)
+            #echo "Switch $dev will map PCP $pcp to prio $prio (default)"
+            exec_cmd ethswctl -c pcp2prio -v $pcp -q $prio
+        done
+    else
+        config_load qos
+        for pcp in $(seq 0 7)
+        do
+            config_get prio $pcp2prio "pcp$pcp"
+            if [ "$prio" == "" ]; then
+                prio=$(pcp2switchprio_default $pcp)
+                echo "No mapping found for PCP$pcp in $pcp2prio, using prio $prio"
+            fi
+            #echo "Switch $dev will map PCP $pcp to prio $prio"
+            exec_cmd ethswctl -c pcp2prio -v $pcp -q $prio
+        done
+    fi
+
+}
+
+setup_qosscheduling(){
+    local classgroup
+    local classes
+    local priority
+    local weight
+    local policy
+    local startqueue
+    local policynum
+    local weights_0
+    local weights_1
+    local weights_2
+    local weights_3
+    local weight_indexed
+
+    policynum="0"
+    startqueue="0"
+    weights_0="0"
+    weights_1="0"
+    weights_2="0"
+    weights_3="0"
+
+    # When FAP is available on a platform, we keep the default SP scheduling. Selecting a different
+    # scheduling algorithm will mess up the output of FAP Traffic Manager
+    if [ ! -x "/usr/bin/fapctl" ]; then
+      config_get classgroup lan classgroup ""
+      if [ "$classgroup" != "" ]; then
+        config_get classes $classgroup classes ""
+        config_get policy "$classgroup" policy "wrr"
+
+        if ([ "$policy" != "sp" ] && [ "$policy" != "wrr" ] && [ "$policy" != "sp_wrr" ]); then
+            echo "Invalid scheduling algorithm"
+        fi
+
+        if [ "$policy" = "wrr" ]; then
+            policynum="1"
+        fi
+
+        if [ "$policy" = "sp_wrr" ]; then
+           policynum="2"
+        fi
+
+        for class in $classes; do
+            config_get priority "$class" priority "0"
+            config_get weight "$class" weight "0"
+            if ([ "$weight" -ne "0" ] && [ "$policy" != "sp" ] && [ "$priority" -lt 4 ]); then
+                eval weights_$priority=$weight
+            else
+                if ([ "$policy" = "sp" ] && [ "$weight" -ne "0" ] || [ "$priority" -gt 3 ]); then
+                  echo "Invalid switch scheduling values"
+                fi
+            fi
+        done
+        if [ "$policy" = "sp_wrr" ]; then
+          for index in 0 1 2 3
+            do
+              case $index in
+                  0)
+                  weights_indexed=$weights_0
+                  ;;
+                  1)
+                  weights_indexed=$weights_1
+                  ;;
+                  2)
+                  weights_indexed=$weights_2
+                  ;;
+                  3)
+                  weights_indexed=$weights_3
+                  ;;
+              esac
+              if [ "$weights_indexed" -eq "0" ]; then
+                 if [ "$startqueue" -eq "0" ]; then
+                    startqueue=$index
+                 fi
+                 eval weights_$index="1"
+              fi
+           done
+           exec_cmd ethswctl -c cosqsched -v $policynum -t $startqueue -x $weights_0 -y $weights_1 -z $weights_2 -w $weights_3
+        else
+          if  [ "$policy" = "sp" ]; then
+             #This is due to the bcm code if weight are not specified or 0 then the f... code does not work
+             exec_cmd ethswctl -c cosqsched -v $policynum -x 1 -y 1 -z 1 -w 1
+          else
+             exec_cmd ethswctl -c cosqsched -v $policynum -x $weights_0 -y $weights_1 -z $weights_2 -w $weights_3
+          fi
+        fi
+      fi
+    fi
+
+    # For dual FAP platform the switch needs to configured in a different way
+    # (port based qos, which is not done here).
+    if ! is_dual_fap ; then
+
+      # Enable classification based on dscp/pcp/high for all ethernet ports
+      config_load ethernet
+      config_foreach handle_device_for_switchqos port
+
+      config_load network
+      config_foreach handle_switch_priomappings switch
+
+      # Map all switch queues on IMP to a single RX DMA channel
+      for q in $(seq 0 3)
+      do
+          exec_cmd mdkshell qos qtodma $q 0
+      done
+    fi
+}
+
+update_softswitch_port()
+{
+  local intf=$1
+  local softswitch=$2
+
+  local state
+  [ $softswitch -eq 1 ] && state=enable || state=disable
+
+  exec_cmd ethswctl -c softswitch -i $intf -o $state
+}
+
+setup_crossbar_lanwanswitch()
+{
+# Switch GPHY4/eth4 between WAN and LAN mode, only support CPU with 5x3 crossbar, like 963138
+# The interface name of LAN mode GPHY4 can be eth3/5/6/7, configured in boardparm
+  local ret
+  local eth4lanwanmode
+  config_get eth4lanwanmode globals eth4lanwanmode 0
+  ret=`ethswctl -c lanwan -p 1 2>/dev/null | grep AN`
+  if (([ "$ret" = "WAN" ]&&[ $eth4lanwanmode -eq 1 ]) || ([ "$ret" = "LAN" ]&&[ $eth4lanwanmode -eq 0 ])) ; then
+     # the 2nd parameter ethx is of no use if it's with port suffix
+     ethctl eth4 phy-power down port 10
+     sleep 1
+     /etc/init.d/swmdk stop
+     exec_cmd ethswctl -c lanwan -p 1 -v $eth4lanwanmode
+     /etc/init.d/swmdk start
+     ethctl eth4 phy-power up port 10
+  fi
+}
+
+handle_LanWanMux()
+{
+  local mux_file="/proc/LanWanMux"
+  if [ -f "$mux_file" ]; then
+     local mux=$(cat $mux_file 2>/dev/null)
+     if [ "$mux" = WAN ] || [ "$mux" = LAN ]; then
+        local section_eth3="eth3"
+        local section_eth4="eth4"
+        local enable_eth3
+        local enable_eth4
+        config_get enable_eth3 $section_eth3 enable ""
+        config_get enable_eth4 $section_eth4 enable ""
+
+        if ([ "$enable_eth3" = "1" ]&&[ "$enable_eth4" = "0" ]); then
+            echo LAN > /proc/LanWanMux
+        fi
+        if ([ "$enable_eth3" = "0" ]&&[ "$enable_eth4" = "1" ]); then
+            echo WAN > /proc/LanWanMux
+        fi
+        if ([ "$enable_eth3" = "1" ]&&[ "$enable_eth4" = "1" ]); then
+            echo "Currently eth3 eth4 use one physical port, cannot enable together"
+        fi
+     fi
+  fi
+}
+
+get_all_l2_interfaces() {
+    local intf
+    cd /sys/class/net/
+    for intf in eth[0-9] moca[0-9]; do
+      [ -d $intf ] || continue
+      echo -n " $intf"
+    done
+}
+
+setup_wan_ports() {
+    local intf
+    config_load ethernet
+    for intf in $(get_all_l2_interfaces); do
+      local wan
+      config_get_bool wan $intf wan '0'
+
+      if [ $wan -eq 1 ] ; then
+        exec_cmd ethswctl -c wan -i $intf -o enable &
+      fi
+    done
+
+    wait
+}
+
+setup() {
+    local MODE=$1
+    local intf
+
+    scan_switch_port_nbr
+
+    # From 5.02 onwards, WAN ports need to be selected before configuring queues (e.g. in setuprunner)
+    setup_wan_ports
+
+    # setupfapbcmtm is used for fap platform such as 63168/6362 AND for non-fap platform such as 63381
+    if [ -x "/usr/bin/setupfapbcmtm" ] ; then
+      setupfapbcmtm wan
+      setupfapbcmtm lan
+    # setuprunner is used for runner platform such as 63138/6838
+    elif [ -x "/usr/bin/setuprunner" ] ; then
+      [ -x "/bin/wanconf" ] || exec_cmd ethswctl -c quemap -v '0xff' -q '0x76543210'  # another Broadcom hack for 63xx since 5.02 (CS5582276)
+      setuprunner wan
+      setuprunner lan
+    fi
+    # setuptm is generic for FAP and RUNNER
+    setuptm_cmd "reload('ethernet')"
+
+    if is_single_fap ; then
+      config_load qos
+      setup_qosscheduling
+    fi
+
+    config_load ethernet
+    setup_flowcache
+    if [ "$MODE" != "boot" ]; then
+       setup_crossbar_lanwanswitch
+    fi
+
+    . /lib/functions/phypower.sh  #required for setup_interface()
+    for intf in $(get_all_l2_interfaces); do
+      [ -x "/usr/bin/setupfapbcmtm" ] && setup_rx_queue_mapping $intf &
+      config_get_bool wan $intf wan '0'
+      if [ "$wan" -eq 0 ]; then
+        if [ "$MODE" == "boot" ] ; then
+          softswitch=1
+        else
+          config_get_bool softswitch $intf softswitch '0'
+        fi
+        update_softswitch_port $intf $softswitch &
+      fi
+      setup_interface $intf $MODE &
+    done
+
+    handle_LanWanMux
+
+    wait
+}
+
+boot()
+{
+    # Same as start, except all interfaces will be isolated
+    setup boot
+}
+
+start() {
+    # Just set all variables; this will cause link-down/up on all interfaces
+    setup start
+}
+
+softswitch() {
+    # Configure all interfaces soft switch flag
+    config_load ethernet
+    cd /sys/class/net/
+    for intf in eth[0-9] moca[0-9]; do
+      [ -d $intf ] || continue
+      config_get_bool wan $intf wan '0'
+      [ "$wan" -eq 0 ] || continue
+      config_get_bool softswitch $intf softswitch '0'
+      update_softswitch_port $intf $softswitch
+    done
+}
+
+reload() {
+    # Avoid link-down/up if possible
+    setup reload
+}
+
