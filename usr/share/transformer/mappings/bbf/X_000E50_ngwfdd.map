@@ -1,0 +1,249 @@
+--Manually generated
+local Multi_X_000E50_ngwfdd_= {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "The data model of the native gateway field diagnostics daemon",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable the daemon",
+      },
+      Tag = {
+        access = "readWrite",
+        type = "string",
+        max = "32",
+        description = "Specifies a tag to annotate the collected data with. This tag can then be used in search queries on the field diagnostics",
+      },
+      BaseURL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "The remote end-point to send the collected data to",
+      },
+      CoredumpURL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "URL where to send core dumps to. If not set then core dumps will not be uploaded",
+      },
+      FlushInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "900",
+        description = "Indicates how frequent the daemon sends data to the remote back-end",
+      },
+      FlushSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "30",
+        description = "The maximum number of messages the daemon reads from the fifo files before sending them towards the back-end",
+      },
+      CpustatsInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "600",
+        description = "Time interval in seconds between data points acquired by mod_cpustats.lua",
+      },
+      MeminfoInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "300",
+        description = "Time interval in seconds between data points acquired by mod_meminfo.lua",
+      },
+      SlabinfoInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "300",
+        description = "Time interval in seconds between data points acquired by mod_slabinfo.lua",
+      },
+      ProcessInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "300",
+        description = "Time interval in seconds between data points acquired by mod_process.lua",
+      },
+      LteInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "300",
+        description = "Time interval in seconds between data points acquired by mod_lte.lua",
+      },
+      DslInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "300",
+        description = "Time interval in seconds between data points acquired by mod_dsl.lua",
+      },
+      WanInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1800",
+        description = "Time interval in seconds between data points acquired by mod_wan.lua",
+      },
+      VideoInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1800",
+        description = "Time interval in seconds between data points acquired by mod_video.lua",
+      },
+      ConntrackInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1800",
+        description = "Time interval in seconds between data points acquired by mod_conntrack.lua",
+      },
+      DeviceInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "3600",
+        description = "Time interval in seconds between data points acquired by /usr/share/ngwfdd/modules mod_device.lua and mod_dev_connected.lua",
+      },
+      DevconnectedInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "3600",
+        description = "Time interval in seconds between data points acquired by mod_dev_connected.lua",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local binding={config="ngwfdd", sectionname="config"}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+local paramMap = {
+  ["Enable"] = "enable",
+  ["Tag"] = "tag",
+  ["BaseURL"] = "base_url",
+  ["CoredumpURL"] = "core_url",
+  ["FlushInterval"] = "flush_interval",
+  ["FlushSize"] = "flush_size",
+  ["CpustatsInterval"] = "cpustats",
+  ["MeminfoInterval"] = "meminfo",
+  ["SlabinfoInterval"] = "slabinfo",
+  ["ProcessInterval"] = "process",
+  ["LteInterval"] = "lte",
+  ["DslInterval"] = "dsl",
+  ["WanInterval"] = "wan",
+  ["VideoInterval"] = "video",
+  ["ConntrackInterval"] = "conntrack",
+  ["DeviceInterval"] = "device",
+  ["DevconnectedInterval"] = "dev_connected",
+}
+
+local uciDefaults = {
+  ["Enable"] = "0",
+  ["FlushInterval"] = "900",
+  ["FlushSize"] = "30",
+  ["CpustatsInterval"] = "600",
+  ["MeminfoInterval"] = "300",
+  ["SlabinfoInterval"] = "300",
+  ["ProcessInterval"] = "300",
+  ["LteInterval"] = "300",
+  ["DslInterval"] = "1800",
+  ["WanInterval"] = "1800",
+  ["VideoInterval"] = "1800",
+  ["ConntrackInterval"] = "1800",
+  ["DeviceInterval"] = "3600",
+  ["DevconnectedInterval"] = "3600",
+}
+
+local function getUciParam(mapping, param)
+  if param:match("Interval") and param ~= "FlushInterval" then
+    binding.sectionname = "interval"
+  else
+    binding.sectionname = "config"
+  end
+  binding.default = uciDefaults[param]
+  binding.option = paramMap[param]
+  return uci_helper.get_from_uci(binding)
+end
+
+Multi_X_000E50_ngwfdd_.get = getUciParam
+
+Multi_X_000E50_ngwfdd_.getall = function(mapping)
+  binding.sectionname = "config"
+  local allValues = uci_helper.getall_from_uci(binding)
+  binding.sectionname = "interval"
+  local allIntervalValues = uci_helper.getall_from_uci(binding)
+  return {
+    Enable = allValues.enable or uciDefaults["Enable"],
+    Tag = allValues.tag or "",
+    BaseURL = allValues.base_url or "",
+    CoredumpURL = allValues.core_url or "",
+    FlushInterval = allValues.flush_interval or uciDefaults["FlushInterval"],
+    FlushSize = allValues.flush_size or uciDefaults["FlushSize"],
+    CpustatsInterval =  allIntervalValues.cpustats or uciDefaults["CpustatsInterval"],
+    MeminfoInterval = allIntervalValues.meminfo or uciDefaults["MeminfoInterval"],
+    SlabinfoInterval = allIntervalValues.slabinfo or uciDefaults["SlabinfoInterval"],
+    ProcessInterval = allIntervalValues.process or uciDefaults["ProcessInterval"],
+    LteInterval = allIntervalValues.lte or uciDefaults["LteInterval"],
+    DslInterval = allIntervalValues.dsl or uciDefaults["DslInterval"],
+    WanInterval = allIntervalValues.wan or uciDefaults["WanInterval"],
+    VideoInterval = allIntervalValues.video or uciDefaults["VideoInterval"],
+    ConntrackInterval = allIntervalValues.conntrack or uciDefaults["ConntrackInterval"],
+    DeviceInterval = allIntervalValues.device or uciDefaults["DeviceInterval"],
+    DevconnectedInterval = allIntervalValues.dev_connected or uciDefaults["DevconnectedInterval"],
+  }
+end
+
+local setSomething
+
+local function setUciParam(mapping, param, value)
+  if param:match("Interval") and param ~= "FlushInterval" then
+    binding.sectionname = "interval"
+  else
+    binding.sectionname = "config"
+  end
+  binding.option = paramMap[param]
+  uci_helper.set_on_uci(binding, value, commitapply)
+  setSomething = true
+end
+
+Multi_X_000E50_ngwfdd_.set = setUciParam
+
+Multi_X_000E50_ngwfdd_.commit = function()
+  if setSomething then
+    uci_helper.commit(binding)
+    setSomething = nil
+  end
+end
+
+Multi_X_000E50_ngwfdd_.revert = function()
+  if setSomething then
+    uci_helper.revert(binding)
+    setSomething = nil
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_ngwfdd_, "#ROOT", {"InternetGatewayDevice.Services.X_000E50_ngwfdd.", "Device.Services.X_000E50_ngwfdd.", "Device.Services.X_BELGACOM_ngwfdd."})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match("^InternetGatewayDevice.") or dupli.objectType.name:match("Device.Services.X_000E50_ngwfdd.") then
+    dupli.objectType.parameters["FlushSize"] = nil
+    dupli.objectType.parameters["CpustatsInterval"] = nil
+    dupli.objectType.parameters["MeminfoInterval"] = nil
+    dupli.objectType.parameters["SlabinfoInterval"] = nil
+    dupli.objectType.parameters["ProcessInterval"] = nil
+    dupli.objectType.parameters["LteInterval"] = nil
+    dupli.objectType.parameters["DslInterval"] = nil
+    dupli.objectType.parameters["WanInterval"] = nil
+    dupli.objectType.parameters["VideoInterval"] = nil
+    dupli.objectType.parameters["ConntrackInterval"] = nil
+    dupli.objectType.parameters["DeviceInterval"] = nil
+    dupli.objectType.parameters["DevconnectedInterval"] = nil
+  end
+  register(dupli)
+end
+

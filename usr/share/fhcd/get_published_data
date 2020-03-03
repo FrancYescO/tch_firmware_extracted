@@ -1,0 +1,208 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+. /lib/functions.sh
+
+map_ucitojson_acl_mode()
+{
+	case "$1" in
+	disabled)
+		echo "disable"
+		;;
+	unlock)
+		echo "deny"
+		;;
+	lock|register)
+		echo "allow"
+		;;
+	*)
+		echo "disable"
+		;;
+	esac
+}
+
+json_add_string_list()
+{
+	while [ $# -gt 0 ]; do
+		json_add_string "" "$1"
+		shift
+	done
+}
+
+get_nodeinfo()
+{
+	config_load "env"
+	config_get manufacturer var company_name "Technicolor"
+	config_get model var prod_friendly_name ""
+	config_get serial var serial ""
+	json_init
+	json_add_string manufacturer "${manufacturer}"
+	json_add_string model "${model}"
+	json_add_string serial "${serial}"
+	json_dump
+}
+
+get_nodeconfig()
+{
+	config_load "fhcd"
+	config_get publish_wifi_mac_acl TLV_NodeConfig publish_wifi_mac_acl "1"
+
+	config_load "wireless"
+
+	load_aps()
+	{
+		local wi_ap=$1
+		config_get wpa_psk_key "$wi_ap" wpa_psk_key
+		config_get security_mode "$wi_ap" security_mode
+		config_get iface "$wi_ap" iface
+		if [ "$iface" = "$2" ]; then
+			if [ "$publish_wifi_mac_acl" = "1" ]; then
+				config_get acl_mode "$wi_ap" acl_mode "disabled"
+				config_get acl_accept_list "$wi_ap" acl_accept_list
+				config_get acl_deny_list "$wi_ap" acl_deny_list
+				json_add_string "macfilter" $(map_ucitojson_acl_mode "$acl_mode")
+				json_add_array "maclist"
+				case "$acl_mode" in
+				unlock)
+					json_add_string_list $acl_deny_list
+					;;
+				lock|register)
+					json_add_string_list $acl_accept_list
+					;;
+				*)
+					;;
+				esac
+				json_close_array
+			fi
+			json_add_object "encryption"
+			json_add_string "key" "$wpa_psk_key"
+			json_add_string "protocol" "${security_mode}"
+			json_close_object
+		fi
+	}
+
+	load_devices()
+	{
+		local devname=$1
+		config_get channel "$devname" channel
+		config_get state "$devname" state
+		json_add_object
+		json_add_string "name" "$devname"
+		if [ "$state" = "1" ]; then
+			json_add_boolean "disabled" false
+		else
+			json_add_boolean "disabled" true
+		fi
+		json_add_string "channel" "$channel"
+		json_close_object
+	}
+
+	load_interfaces()
+	{
+		local wi_interface=$1
+		if [ "${wi_interface}" = "wl0" ] || [ "${wi_interface}" = "wl1" ]; then
+			config_get mode "$wi_interface" mode
+			config_get ssid "$wi_interface" ssid
+			config_get radio "$wi_interface" device
+			json_add_object
+			json_add_string "name" "$wi_interface"
+			json_add_string "type" "wireless"
+			json_add_object "wireless"
+			config_foreach load_aps "wifi-ap" "${wi_interface}"
+			json_add_string "mode" "$mode"
+			json_add_string "ssid" "$ssid"
+			json_add_string "radio" "$radio"
+			json_close_object
+			json_close_object
+		fi
+	}
+
+	json_init
+	json_add_array "radios"
+	config_foreach load_devices "wifi-device"
+	json_close_array
+	json_add_array "interfaces"
+	config_foreach load_interfaces "wifi-iface"
+	json_close_array
+	json_dump
+}
+
+check_wifi_iface()
+{
+	local type=""
+	local sectionname="$1"
+	local ifname="$2"
+	local mode=$(config_get "$sectionname" mode)
+	local radio=$(config_get "$sectionname" device)
+	local band=${radio##radio_}
+	local mac
+	if [ "$sectionname" = "$ifname" ]; then
+		type="wifi"
+		mac=$(ip link show $ifname | awk '/ether/ { print $2 }')
+	else
+		local _json_no_warning=1
+		local radio_ifname
+		local ubus_output=$(ubus -S call wireless.radio.remote get '{"name":"'"$radio"'"}')
+		[ -z "$ubus_output" ] && return
+		# make sure the parsing is separate from output
+		json_set_namespace "input"
+		json_load "$ubus_output"
+		json_select "$radio"
+		[ $? -eq 0 ] || return
+		json_get_var radio_ifname ifname
+		[ "$ifname" = "$radio_ifname" ] || return
+		type="wifi"
+		json_get_var mac macaddr # this is the remote side's MAC!
+	fi
+	[ -n "$type" ] && {
+		json_set_namespace "output"
+		json_add_string name "$ifname"
+		json_add_string type "$type"
+		json_add_string mode "$mode"
+		json_add_string band "$band"
+		json_add_string mac  "$mac"
+		json_dump
+		exit 0
+	}
+}
+
+get_endpointinfo()
+{
+	local ifname="$1"
+	local type=""
+	local mac
+	local speed
+
+	json_set_namespace "output"
+	json_init
+	config_load wireless
+	config_foreach check_wifi_iface wifi-iface "$ifname"
+	# if we get here it's not a wifi interface; perhaps it's eth?
+	[ -n "$(uci -q get ethernet.${ifname})" ] && {
+		type="eth"
+		mac=$(ip link show $ifname | awk '/ether/ { print $2 }')
+		speed=$(cat /sys/class/net/${ifname}/speed 2>/dev/null)
+	}
+	# ensure we're in the right JSON namespace; might have
+	# changed in the config_foreach
+	json_set_namespace "output"
+	json_add_string name "$ifname"
+	[ -n "$type" ] && {
+		json_add_string type "$type"
+		json_add_string mac  "$mac"
+		[ -n "$speed" ] && { json_add_string speed "$speed"; }
+	}
+	json_dump
+}
+
+case "$1" in
+	"NodeInfo")
+		get_nodeinfo
+		;;
+	"NodeConfig")
+		get_nodeconfig
+		;;
+	"EndpointInfo")
+		get_endpointinfo "$2"
+		;;
+esac
