@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+
+START=05
+
+boot() {
+  mkdir -p /var/run
+  mkdir -p /var/tmp
+  write_libopenssl_status
+  write_libcurl_status
+}
+
+write_libopenssl_status() {
+  [ ! -f /usr/lib/opkg/info/libopenssl.control ] && return
+  [ -n "$(grep "Package: libopenssl" /usr/lib/opkg/status)" ] && return
+
+  echo "" >> /usr/lib/opkg/status
+  while read -r line
+  do
+    case ${line%%*:} in
+      Package*)
+        echo $line >> /usr/lib/opkg/status
+        ;;
+      Version*)
+        echo $line >> /usr/lib/opkg/status
+        ;;
+      Depends*)
+        echo $line >> /usr/lib/opkg/status
+        echo "Status: install user installed" >> /usr/lib/opkg/status
+        ;;
+      Architecture*)
+        echo $line >> /usr/lib/opkg/status
+        time=$(grep "Installed-Time" /usr/lib/opkg/status -m 1)
+        echo "${time}" >> /usr/lib/opkg/status
+        echo "Auto-Installed: yes" >> /usr/lib/opkg/status
+        ;;
+    esac
+  done < /usr/lib/opkg/info/libopenssl.control
+}
+
+write_libcurl_status() {
+  [ ! -f /usr/lib/opkg/info/libcurl.control ] && return
+  [ -n "$(grep "Package: libcurl" /usr/lib/opkg/status)" ] && return
+
+  echo "" >> /usr/lib/opkg/status
+  while read -r line
+  do
+    case ${line%%*:} in
+      Package*)
+        echo $line >> /usr/lib/opkg/status
+        ;;
+      Version*)
+        echo $line >> /usr/lib/opkg/status
+        ;;
+      Depends*)
+        echo $line >> /usr/lib/opkg/status
+        echo "Status: install user installed" >> /usr/lib/opkg/status
+        ;;
+      Architecture*)
+        echo $line >> /usr/lib/opkg/status
+        time=$(grep "Installed-Time" /usr/lib/opkg/status -m 1)
+        echo "${time}" >> /usr/lib/opkg/status
+        echo "Auto-Installed: yes" >> /usr/lib/opkg/status
+        ;;
+    esac
+  done < /usr/lib/opkg/info/libcurl.control
+}
+

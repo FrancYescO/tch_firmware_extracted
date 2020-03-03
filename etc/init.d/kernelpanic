@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+
+START=65
+
+get_value() {
+  echo `cat /proc/prozone/panic |grep -m 1 -i "$1" | cut -d"]" -f 2- | sed -e "s/^ *//g"`
+}
+
+start() {
+  local up=$(ps | grep /usr/bin/faultmgmt.lua | grep -v grep)
+  if [ "$up" == "" ] ; then
+    logger -t faultmgmt_kernelpanic "Fault management process isn't running"
+    return 0
+  fi
+
+  local datamodel
+  config_load "faultmgmt"
+  config_get datamodel global datamodel "InternetGatewayDevice"
+
+  #Call for generating valid key in transformer.db
+  transformer-cli get $datamodel.FaultMgmt.ExpeditedEvent. 2>/dev/null
+  transformer-cli get $datamodel.FaultMgmt.QueuedEvent. 2>/dev/null
+
+  #Generate Kernel Alarm when fault management start
+  #In the general, only one Oops or Panic in the panic recorder
+  #for avoiding some abnormal state, add "-m 1" parameter in the grep command
+  local last_id
+  config_get last_id global last_kernel_alarm ""
+  local panic_id=`cat /proc/prozone/panic | grep -m 1 -inoE "\-\-\[ end trace [0-9a-f]{16} \]\-\-" | grep -ioE "[0-9a-f]{16}"`
+  if [ -n "${panic_id}" ] && [ "$panic_id" != "$last_id" ]; then
+
+    local cause=`cat /proc/prozone/panic | grep -m 1 -io "Oops\|Panic"`
+    if [ -n "${cause}" ]; then
+      local f=$(echo $cause | cut -c1 | tr [a-z] [A-Z])
+      local s=$(echo $cause | cut -c2- | tr [A-Z] [a-z])
+      cause="Kernel $f$s"
+      local additional_text=$(get_value "Oops\|Panic")
+      local info_cpu=$(get_value "CPU:")
+      local info_pc=$(get_value "PC is at")
+      local info_lr=$(get_value "LR is at")
+      [ -n "${info_cpu}" ] && additional_info="${info_cpu},"
+      [ -n "${info_pc}" ] && additional_info="${additional_info}${info_pc},"
+      [ -n "${info_lr}" ] && additional_info="${additional_info}${info_lr}"
+      local ubusCommand="ubus send \"FaultMgmt.Event\" '{\"Source\":\"Kernel\", \"EventType\":\"CPE kernel\", \"ProbableCause\":\"$cause\", \"SpecificProblem\":\"\", \"AdditionalText\":\"$additional_text\", \"AdditionalInformation\":\"$additional_info\"}'"
+      eval $ubusCommand
+      logger -t faultmgmt "Kernel panic is sent out by ubus"
+      uci_set faultmgmt global last_kernel_alarm "$panic_id"
+      uci_commit faultmgmt
+    fi
+  fi
+}
