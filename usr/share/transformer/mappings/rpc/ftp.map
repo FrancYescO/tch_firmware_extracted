@@ -1,0 +1,46 @@
+local ftp_ = {
+  objectType = {
+    name = "rpc.ftp.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        password = {
+            access = "readWrite",
+            type = "password",
+        },
+    },
+  }
+}
+
+local get = {
+    password = function(mapping, param)
+        return "******"
+    end
+}
+
+local filename = "/tmp/ftppw"
+local function ftppw(pw)
+  local fd = io.open(filename, "w+")
+    if fd then
+      fd:write("guest:" .. pw)
+      fd:close()
+      return true
+    end
+    return nil
+end
+
+local set = {
+    password = function(mapping, paramName, paramValue, key)
+      if ftppw(paramValue) then
+        os.execute("cat " .. filename .. " | chpasswd -m")
+        os.remove(filename)
+      end
+    end
+}
+
+ftp_.get = get
+ftp_.set = set
+
+register(ftp_)
+

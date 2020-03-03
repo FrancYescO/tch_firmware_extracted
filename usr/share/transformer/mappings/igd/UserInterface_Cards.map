@@ -1,0 +1,117 @@
+
+local Cards_i = {
+  objectType = {
+    name = "InternetGatewayDevice.UserInterface.X_000E50_Cards.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string"
+      },
+      Roles = {
+        access = "readWrite",
+        type = "string"
+      },
+      HideOnNoAccess = {
+        access = "readWrite",
+        type = "boolean"
+      },
+    },
+  },
+}
+
+local concat = table.concat
+local uci = mapper "ucihelper"
+
+
+local webconfig = {config="web"}
+local card_hide = {config="web", option="hide", default="1"}
+local card_modal = {config="web", option="modal"}
+local rule_roles = {config="web", option="roles", sectiontype="rule"}
+
+function Cards_i.entries()
+  local entries = {}
+  local rules = {}
+  -- load the config
+  webconfig.sectionname = 'rule'
+  uci.foreach_on_uci(webconfig, function(rule)
+    rules[rule['.name']] = true --just need to know if it's present
+  end)
+  -- only include the cards that refer to a valid modal
+  -- and are not anonymous
+  webconfig.sectionname = 'card'
+  uci.foreach_on_uci(webconfig, function(card)
+    if not card['.anonymous'] and rules[card.modal] then
+      entries[#entries+1] = card['.name']
+    end
+  end)
+  webconfig.sectionname = nil
+
+  return entries
+end
+
+Cards_i.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Roles = function(mapping, param, key)
+    card_modal.sectionname = key
+    local modal = uci.get_from_uci(card_modal)
+    rule_roles.sectionname = modal
+    local roles = uci.get_from_uci(rule_roles)
+    if roles~='' then
+      return concat(roles, ", ")
+    end
+    return ""
+  end,
+  HideOnNoAccess = function(mapping, param, key)
+    card_hide.sectionname = key
+    local value = uci.get_from_uci(card_hide)
+    return (value~="0") and "1" or "0"
+  end,
+}
+
+local config_updated
+
+Cards_i.set = {
+  Roles = function(mapping, param, value, key)
+    local roles = {}
+    -- split csv list value into idividual values in a table
+    for v in value:gmatch("([^,%s]+)") do
+      roles[#roles+1] = v
+    end
+    card_modal.sectionname = key
+    rule_roles.sectionname = uci.get_from_uci(card_modal)
+    uci.set_on_uci(rule_roles, roles, commitapply)
+    config_updated = true
+  end,
+  HideOnNoAccess = function(mapping, param, value, key)
+    card_hide.sectionname = key
+    uci.set_on_uci(card_hide, value, commitapply)
+    config_updated = true
+  end,
+}
+
+local function commit_or_revert(commit)
+  if config_updated then
+    if commit then
+      uci.commit(webconfig)
+    else
+      uci.revert(webconfig)
+    end
+  end
+  config_updated = false
+  return true
+end
+
+Cards_i.commit = function()
+  return commit_or_revert(true)
+end
+
+Cards_i.revert = function()
+  return commit_or_revert(false)
+end
+
+register(Cards_i)

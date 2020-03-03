@@ -1,0 +1,277 @@
+#Internal Classification Labels
+config label 'dscp_Zero'
+	option dscp '0'
+
+config label 'Normal'
+	option trafficid '1'
+
+config label 'FON'
+	option trafficid '2'
+
+config label 'LoT'
+	option trafficid '2'
+
+config label 'User'
+	option trafficid '3'
+
+config label 'Video'
+	option trafficid '4'
+
+config label 'DNS'
+	option trafficid '5'
+
+config label 'Management'
+	option trafficid '6'
+
+config label 'Voice'
+	option trafficid '8'
+
+config label 'DNSGW'
+	option trafficid '7'
+
+config label 'DHCP'
+	option trafficid '7'
+
+config label 'PPP'
+	option trafficid '9'
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'W_Q0'
+	option priority '0'
+	option weight '10'
+
+config class 'W_Q1'
+	list trafficid '2'
+	option priority '0'
+	option weight '10'
+
+config class 'W_Q2'
+	list trafficid '3'
+	list trafficid '4'
+	option priority '0'
+	option weight '30'
+
+config class 'W_Q3'
+	list trafficid '6'
+	option priority '0'
+	option weight '50'
+
+config class 'W_Q4'
+	list trafficid '5'
+	option priority '1'
+
+config class 'W_Q5'
+	option priority '2'
+
+config class 'W_Q6'
+	list trafficid '8'
+	option priority '3'
+
+config class 'W_Q7'
+	list trafficid '7'
+	list trafficid '9'
+	option priority '4'
+
+#TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '4'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '5'
+	list trafficid '6'
+	list trafficid '7'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '8'
+	option priority '3'
+
+#TO_WLAN
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '4'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '5'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '6'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+        option default 'W_Q0'
+	option policy 'wfq'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+        option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+        option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+# Since QoSv2.1 it's preferred to set classgroup on device level
+config device 'atm_8_35'
+	option classgroup 'TO_WAN'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+
+config device 'eth0'
+	option classgroup 'TO_LAN'
+
+config device 'eth1'
+	option classgroup 'TO_LAN'
+
+config device 'eth2'
+	option classgroup 'TO_LAN'
+
+config device 'eth3'
+	option classgroup 'TO_LAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+config device 'wl1'
+	option classgroup 'TO_WLAN'
+
+#QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+#IMPORTANT NOTE: Make sure that the order in which the rules are defined is from Lowest Priority to Highest Priority!
+
+config reclassify
+	option target 'dscp_Zero'
+	list srcif 'lan'
+	list srcif 'Guest1'
+	list srcif 'Guest1_5GHz'
+	list srcif 'fonopen'
+	list dstif 'wan'
+	list dstif 'wan6'
+
+config reclassify
+	option target 'dscp_Zero'
+	list dscp '!EF'
+	list dstif 'wan'
+	list dstif 'wan6'
+
+config classify
+	option target 'FON'
+	option proto 'udp'
+	option dstports '1701'
+
+config classify
+	option target 'LoT'
+	option dstports '50001'
+	option proto 'udp'
+	
+config classify
+	option target 'User'
+	option proto 'tcp'
+	option dstports '25,109,110,143,220,587,993,995,1723,1935,3074,3658,8080,2195'
+
+config classify
+	option target 'User'
+	option proto 'tcp'
+	list srcif 'lan'
+	list srcif 'Guest1'
+	list srcif 'Guest1_5GHz'
+	option dstports '443,80'
+
+config classify
+	option target 'User'
+	option proto 'ah'
+
+config classify
+	option target 'User'
+	option proto 'udp'
+	option dstports '123'
+
+config classify
+	option target 'Video'
+	option proto 'tcp'
+	option dstports '554'
+
+config classify
+	option target 'Video'
+	option proto 'igmp'
+
+config classify
+	option target 'DNS'
+    option dstports '53'
+    option proto 'udp'
+
+config classify
+	option target 'DNS'
+    option dstports '53'
+    option proto 'tcp'
+
+config classify
+	option target 'Management'
+	option proto 'icmp'
+
+config classify
+	option target 'Management'
+	option proto 'gre'
+
+config classify
+	option target 'Management'
+	option proto 'esp'
+
+config classify
+	option target 'Management'
+	option proto 'udp'
+	option dstports '7547,51007,500,4500'
+
+config classify
+	option target 'Management'
+	option dstports '7547,51007'
+	option proto 'tcp'
+
+config classify
+	option target 'Management'
+	option dstports '443,80'
+	list srcif 'loopback'
+	option proto 'tcp'
+
+config classify
+	option target 'Voice'
+	list srcif 'loopback'
+	list dscp 'EF'
+
+config host
+	option target 'DNSGW'
+	option path '/usr/bin/dnsget'
+
+config classify
+	option target 'DHCP'
+	option proto 'udp'
+	option dstports '67,68,546,547'

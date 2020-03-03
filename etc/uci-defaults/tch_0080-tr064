@@ -1,0 +1,32 @@
+#!/bin/sh
+
+
+generate_password(){
+	
+	local modem_access_code
+	local password
+	modem_access_code="$(uci get env.rip.modem_access_code)"
+	password="$(/usr/sbin/computeHA1 -u dslf-reset -r minitr064d -p "$modem_access_code")"
+	echo "$password"
+	uci set minitr064d.password.dslfreset="$password"
+}
+
+#Populate modelNumber
+uci set minitr064d.config.model_number="$(uci get env.var.prod_number)"
+
+#Populate serialNumber
+uci set minitr064d.config.serial_number="$(uci get env.rip.serial)"
+
+#Populate friendlyName
+uci set minitr064d.config.friendly_name="$(uci get env.var.prod_friendly_name) ($(uci get env.rip.serial))"
+
+#Populate manufacturer
+uci set minitr064d.config.manufacturer_name="$(uci get env.var.company_name)"
+
+#Populate model_name
+uci set minitr064d.config.model_name="$(uci get env.var.prod_name)"
+
+generate_password
+
+uci commit
+

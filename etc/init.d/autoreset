@@ -1,0 +1,26 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+USE_PROCD=1
+
+always_reset () {
+  local cfg="$1"
+  config_get value "$cfg" value
+  config_get path "$cfg" path
+  config_get dir "$cfg" dir
+
+  if [ -n "$path" ]; then
+    if [ -n "$dir" ]; then
+        uci -c $dir set $path=$value
+        uci -c $dir commit
+    else
+        uci set $path=$value
+        uci commit
+    fi
+  fi
+}
+
+start_service() {
+    config_load autoreset
+    config_foreach always_reset always
+}
