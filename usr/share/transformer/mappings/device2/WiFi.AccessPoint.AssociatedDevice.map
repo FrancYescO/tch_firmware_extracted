@@ -1,0 +1,392 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_WiFi_AccessPoint_i_AssociatedDevice_i_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "AssociatedDeviceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+
+      OperatingStandard = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "a",
+          "b",
+          "g",
+          "n",
+          "ac",
+        },
+      },
+
+      AuthenticationState = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "boolean",
+      },
+      LastDataDownlinkRate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1000",
+            max = "600000",
+          },
+        },
+      },
+      LastDataUplinkRate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1000",
+            max = "600000",
+          },
+        },
+      },
+      SignalStrength = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-200",
+            max = "0",
+          },
+        },
+      },
+      Retransmissions = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      X_000E50_Reassociation = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        description = "Incremental number of client association to the AP",
+      },
+      X_FASTWEB_Reassociation = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        description = "Incremental number of client association to the AP",
+      },
+      X_000E50_LastDisconnectionReason = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        description = "Reason of last disconnection",
+      },
+      X_FASTWEB_LastDisconnectionReason = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        description = "Reason of last disconnection",
+      },
+      X_AssociatedDeviceIPAddress = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        description = "The IP address of an associated device",
+      },
+      X_HostName = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        description = "Hostname of the associated device",
+      },
+    }
+  }
+}
+
+local pairs, register, tostring, mapper = pairs, register, tostring, mapper
+local conn = mapper("ubus").connect()
+local common = mapper("nwcommon")
+local network = require("transformer.shared.common.network")
+local splitKey = common.split_key
+
+local function entriesWifiStation(mapping, parentkey)
+  local result = conn:call("wireless.accesspoint.station", "get", { name = parentkey })
+  if result == nil or result[parentkey] == nil then
+    return {}
+  end
+
+  local stations = {}
+  for mac,sta in pairs(result[parentkey]) do
+    if sta["state"]:match("Associated") then
+      stations[#stations+1] = parentkey .. "|" .. mac
+    end
+  end
+  return stations
+end
+
+-- Function to get the value for Reassociation and LastDisconnectionReason params
+local function getUbusValue(apKey, apValue)
+  local parentKey, mac = splitKey(apKey)
+  local data = network.getAccessPointStationInfo(parentKey)[mac] or {}
+  for key, value in pairs(data) do
+    if key == apValue then
+      return value and tostring(value) or ""
+    end
+  end
+  return ""
+end
+
+local function getHostManagerData(hostData, option)
+  if hostData then
+    for _, device in pairs(hostData) do
+      if device and device[option] then
+        if type(device[option]) == "table" then
+          for _, dev in pairs(device[option]) do
+            if dev.address then
+              return dev.address
+            end
+          end
+          return ""
+        end
+        return type(device[option]) == "string" and device[option] or ""
+      end
+    end
+  end
+  return ""
+end
+
+local getWifiStation = {
+  MACAddress = function(mapping, param, key, parentkey)
+    local _, mac = splitKey(key)
+    return mac
+  end,
+
+  OperatingStandard = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.capabilities and accessValues.capabilities:match("802.11(%a+)") or ""
+  end,
+
+  LastDataDownlinkRate = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.tx_phy_rate and tostring(accessValues.tx_phy_rate) or ""
+  end,
+
+  LastDataUplinkRate = function(mapping,param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.rx_phy_rate and tostring(accessValues.rx_phy_rate) or ""
+  end,
+
+  AuthenticationState = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    if accessValues.state and accessValues.state:match("Authenticated") then
+      return '1'
+    else
+      return '0'
+    end
+  end,
+
+  SignalStrength = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.rssi and tostring(accessValues.rssi) or ""
+  end,
+
+  Retransmissions = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.av_txbw_used and tostring(accessValues.av_txbw_used) or "0"
+  end,
+
+  Active = function(mapping, param, key, parentKey)
+    local _, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    if accessValues.state and accessValues.state:match("Authorized") or accessValues.state:match("Associated") then
+      return '1'
+    else
+      return '0'
+    end
+  end,
+
+  X_000E50_Reassociation = function(mapping, param, key)
+    return getUbusValue(key, "num_associations") or ""
+  end,
+
+  X_000E50_LastDisconnectionReason = function(mapping, param, key)
+    return getUbusValue(key, "last_disconnect_reason") or ""
+  end,
+
+  X_AssociatedDeviceIPAddress = function(mapping, param, key)
+    local _, mac = splitKey(key)
+    local hostData = conn:call("hostmanager.device", "get", {["mac-address"] = mac })
+    return getHostManagerData(hostData, "ipv4")
+  end,
+
+  X_HostName = function(mapping, param, key)
+    local _, mac = splitKey(key)
+    local hostData = conn:call("hostmanager.device", "get", {["mac-address"] = mac })
+    return getHostManagerData(hostData, "hostname")
+  end,
+}
+
+Device_WiFi_AccessPoint_i_AssociatedDevice_i_.entries = entriesWifiStation
+Device_WiFi_AccessPoint_i_AssociatedDevice_i_.get = getWifiStation
+
+getWifiStation.X_FASTWEB_Reassociation = getWifiStation.X_000E50_Reassociation
+getWifiStation.X_FASTWEB_LastDisconnectionReason = getWifiStation.X_000E50_LastDisconnectionReason
+
+Device_WiFi_AccessPoint_i_AssociatedDevice_i_.getall = function(mapping, key, parentKey)
+  local _, mac = splitKey(key)
+  local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+  local reAssociation = getUbusValue(key, "num_associations") or ""
+  local lastDisconnectionReason = getUbusValue(key, "last_disconnect_reason") or ""
+  local hostData = conn:call("hostmanager.device", "get", {["mac-address"] = mac })
+  return {
+    MACAddress =  mac or "",
+    OperatingStandard = accessValues.capabilities and accessValues.capabilities:match("802.11(%a+)") or "",
+    LastDataDownlinkRate = accessValues.tx_phy_rate and tostring(accessValues.tx_phy_rate) or "",
+    LastDataUplinkRate = accessValues.rx_phy_rate and tostring(accessValues.rx_phy_rate) or "",
+    AuthenticationState = accessValues.state and accessValues.state:match("Authenticated") and "1" or "0",
+    SignalStrength = accessValues.rssi and tostring(accessValues.rssi) or "",
+    Retransmissions = accessValues.av_txbw_used and tostring(accessValues.av_txbw_used) or "0",
+    Active = accessValues.state and (accessValues.state:match("Authorized") or accessValues.state:match("Associated")) and "1" or "0",
+    X_000E50_Reassociation = reAssociation,
+    X_FASTWEB_Reassociation = reAssociation,
+    X_000E50_LastDisconnectionReason = lastDisconnectionReason,
+    X_FASTWEB_LastDisconnectionReason = lastDisconnectionReason,
+    X_AssociatedDeviceIPAddress = getHostManagerData(hostData, "ipv4"),
+    X_HostName = getHostManagerData(hostData, "hostname"),
+  }
+end
+
+register(Device_WiFi_AccessPoint_i_AssociatedDevice_i_)
+
+local Device_WiFi_AccessPoint_i_AssociatedDevice_i_Stats_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      RetransCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      FailedRetransCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      RetryCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      MultipleRetryCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+Device_WiFi_AccessPoint_i_AssociatedDevice_i_Stats_.get = {
+  BytesSent = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.tx_bytes and tostring(accessValues.tx_bytes) or "0"
+  end,
+
+  BytesReceived = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.rx_bytes and tostring(accessValues.rx_bytes) or "0"
+  end,
+
+  PacketsSent = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.tx_packets and tostring(accessValues.tx_packets) or "0"
+  end,
+
+  PacketsReceived = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.rx_packets and tostring(accessValues.rx_packets) or "0"
+  end,
+
+  ErrorsSent = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.tx_noack_failures and tostring(accessValues.tx_noack_failures) or "0"
+  end,
+
+  RetransCount = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.tx_noack_failures and tostring(accessValues.tx_noack_failures) or "0"
+  end,
+
+  FailedRetransCount = function(mapping, param, key)
+    local parentKey, mac = splitKey(key)
+    local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+    return accessValues.rx_sec_failures and tostring(accessValues.rx_sec_failures) or "0"
+  end,
+
+  RetryCount = "0",
+
+  MultipleRetryCount = "0",
+}
+
+Device_WiFi_AccessPoint_i_AssociatedDevice_i_Stats_.getall = function(mapping, key)
+  local parentKey, mac = splitKey(key)
+  local accessValues = network.getAccessPointStationInfo(parentKey)[mac] or {}
+  return {
+    BytesSent          = accessValues.tx_bytes and tostring(accessValues.tx_bytes) or "0",
+    BytesReceived      = accessValues.rx_bytes and tostring(accessValues.rx_bytes) or "0",
+    PacketsSent        = accessValues.tx_packets and tostring(accessValues.tx_packets) or "0",
+    PacketsReceived    = accessValues.rx_packets and tostring(accessValues.rx_packets) or "0",
+    ErrorsSent         = accessValues.tx_noack_failures and tostring(accessValues.tx_noack_failures) or "0",
+    RetransCount       = accessValues.tx_noack_failures and tostring(accessValues.tx_noack_failures) or "0",
+    FailedRetransCount = accessValues.rx_sec_failures and tostring(accessValues.rx_sec_failures) or "0",
+    RetryCount         = "0",
+    MultipleRetryCount = "0",
+  }
+end
+
+register(Device_WiFi_AccessPoint_i_AssociatedDevice_i_Stats_)

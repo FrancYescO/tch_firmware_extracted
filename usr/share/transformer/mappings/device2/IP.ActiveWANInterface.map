@@ -1,0 +1,64 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_IP_XTELSTRAIP_ = {
+  objectType = {
+    name = "Device.IP.X_TELSTRA_IP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ActiveWANInterface = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "ADSL IPoE",
+          "ADSL PPPoE",
+          "None",
+          "VDSL",
+          "Ethernet",
+          "LTE",
+        },
+        default = "Unknown",
+      },
+    },
+  },
+}
+
+local mapper, string = mapper, string
+local match = string.match
+local ubusConnection = mapper("ubus").connect()
+
+local function getActiveWANInterface()
+  local ubusStatus = ubusConnection:call("network.interface.wwan", "status", {})
+  if ubusStatus and ubusStatus["up"] then
+    return "LTE"
+  end
+  ubusStatus = ubusConnection:call("network.interface.wan", "status", {})
+  if ubusStatus and ubusStatus["up"] then
+    if ubusStatus["device"]:match("^eth") then
+	  return "Ethernet"
+	elseif ubusStatus["device"]:match("^ptm") then
+	  return "VDSL"
+	elseif ubusStatus["device"]:match("^atm") then
+	  if ubusStatus["proto"]:match("^ppp") then
+	    return "ADSL PPPoE"
+	  else
+	    return "ADSL IPoE"
+	  end
+	end
+  else
+    return "None"
+  end
+end
+
+Device_IP_XTELSTRAIP_.get = {
+  ActiveWANInterface = getActiveWANInterface
+}
+
+Device_IP_XTELSTRAIP_.getall = function()
+  return {
+    ActiveWANInterface = getActiveWANInterface()
+  }
+end
+
+register(Device_IP_XTELSTRAIP_)

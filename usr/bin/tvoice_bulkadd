@@ -1,0 +1,37 @@
+#!/usr/bin/env lua
+
+local conn = require("ubus").connect()
+local json = require("dkjson")
+
+local filename = "/tmp/bulkadd"
+local fd = io.open(filename, "r")
+local lines = ""
+local firstname, lastname, homenumber, mobilenumber, worknumber
+if fd then
+    local entries = {}
+    lines = fd:read("*a")
+
+    local obj, pos, err = lines and json.decode(lines, 1, nil)
+    for _, v in pairs(obj and obj["contacts"] or {}) do
+        firstname = v.FirstName or ""
+        lastname = v.LastName or ""
+        homenumber = v.HomeNumber and tostring(v.HomeNumber) or ""
+        mobilenumber = v.MobileNumber and tostring(v.MobileNumber) or ""
+        worknumber = v.WorkNumber and tostring(v.WorkNumber) or ""
+
+        local Numbers = {}
+        if homenumber ~= "" then
+            Numbers[#Numbers + 1] = {Number = homenumber, TypeID = "0"}
+        end
+        if mobilenumber ~= "" then
+            Numbers[#Numbers + 1 ] = {Number = mobilenumber, TypeID = "1"}
+        end
+        if worknumber ~= "" then
+            Numbers[#Numbers + 1 ] = {Number = worknumber, TypeID = "2"}
+        end
+        entries[#entries+1] = {FirstName = firstname, LastName = lastname, Numbers = Numbers}
+    end
+    conn:call("mmdbd.phonebook", "create", {contacts = entries})
+    os.remove(filename)
+    fd:close()
+end
