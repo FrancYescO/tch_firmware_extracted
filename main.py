@@ -15,11 +15,15 @@ except AssertionError:
 	sys.exit(1)
 
 osck_list = {
+	"DANT-7":b'\xA5\x68\xCB\xE5\x70\x60\xA8\xF6\xE5\xEC\xA4\xE5\xC8\xCB\x7C\xEB\x09\xFC\xE0\xA0\xD1\x20\x20\xF4\xB2\x58\x40\x4B\x04\x92\x70\x53',
+	"GANT-1":b'\x03\x73\x85\x33\x14\xB4\x86\xE3\x35\xE4\x64\xB3\x87\x2E\x56\x39\x66\x34\xDF\xD5\xB6\xDB\x9B\xD0\x3A\x3D\xFA\xDE\x0E\x37\x14\x6D',
 	"VANT-6":b'\x54\x62\x59\xAF\xD4\xE8\x5A\xA6\xFF\xCE\x35\x8C\xE0\xA9\x34\x52\xE2\x5A\x84\x81\x38\xA6\x7C\x14\x2E\x42\xFE\xC7\x9F\x4F\x37\x84',
 	"VANT-9":b'\x89\xBC\xC0\x9E\xAB\xE2\x1F\xA7\x38\xE6\x2E\x6D\x91\x1F\xA8\x0C\xAF\x09\x12\x33\xEC\xCF\xF8\x84\x42\xFA\xA5\xD7\xAF\x65\x1A\x30',
 	"VANT-F":b'\x7F\xA2\xFD\xF4\xD4\xDC\x31\xBF\x66\xF9\x1D\xDA\x9A\x3E\x87\x77\xB7\xD7\xD2\xEC\x6E\x8D\xB1\x92\x6C\x08\x31\xCA\x2A\x27\x9F\xDB',
 	"VANT-R":b'\x39\x5A\x2C\x3E\x26\x18\xCF\x47\x7A\xA9\xAD\x68\x6F\xB0\x01\xF8\x6B\x06\xFC\x34\x75\xFA\x7F\x28\x35\x89\x01\x7D\x70\xDB\xA0\xBE',
+	"VANT-W":b'\x44\x63\xC4\xC3\x3F\xE7\x88\xB3\xCD\x2B\xD4\x08\x70\x6B\xDF\x07\x79\x9D\x48\x73\xA7\xD5\x0D\x65\xDB\x20\x5C\xF6\x5E\x34\xF8\x7E',
 	"VANT-Y":b'\x8E\x07\x11\x1F\x18\x86\x41\x94\x8E\x84\x50\x6D\xB6\x52\x70\xBD\x26\x59\x5A\xD4\x13\x27\x23\x5A\x53\x99\x8D\xB0\x68\xDC\x38\x33',
+	"VBNT-1":b'\xC6\x16\x69\xDB\x31\x7E\x14\xBB\x28\xF1\x80\xE8\xB2\xB2\xF7\x8E\xD4\xF6\x54\xDE\x4D\x2E\x53\x06\x9C\x87\xB5\x5C\xED\x84\x0A\x16',
 	"VBNT-F":b'\xFC\xD9\xBE\x1D\x6D\x8E\xA6\x59\x68\xE7\x7A\x89\xB8\xAF\xCA\x98\xA1\x46\x7F\xEE\xE8\x7A\x87\xBD\x27\x6C\x91\xDD\x94\xD4\x1D\x59',
 	"VBNT-H":b'\x7E\xA0\xFF\xCC\xE7\xB0\x79\xAC\x08\x79\x2A\x7C\x78\x99\xAE\xC9\x0D\x01\x3B\xA2\x57\x4A\x41\x46\x55\x02\xE6\x2B\x9E\xBD\x55\x88',
 	"VBNT-J":b'\x22\x2C\x4D\xC4\xA9\xDF\x95\x2B\x02\xD5\xA4\x89\xA1\x12\xCF\x5E\x29\xAA\xED\xF8\x6A\xDB\x63\x44\x10\xD6\x72\x1F\x15\xF4\x51\xE4',
@@ -30,60 +34,64 @@ osck_list = {
 	"VBNT-V":b'\x7B\xFF\xB7\xEB\xBE\x41\x6D\x38\x07\x87\x12\xEC\x5A\xC5\xDE\xF6\xE4\xE5\x0E\xE5\x88\x48\xD6\xF2\xC0\x72\xDF\x6E\x0C\x6C\xEF\xE7',
 	"VBNT-Z":b'\xBA\x6B\x79\xCA\xAC\xF7\xA7\x40\xAC\xF3\x66\xAB\x11\xDA\xAA\x3E\x48\x25\x2B\xD9\x72\x05\xAC\x6D\x07\xC5\x58\xCD\xDA\x5E\xD7\xCC',
 	"VCNT-A":b'\xAD\x8A\x87\xE2\x9B\xE6\xB6\xED\x72\xF5\x75\xC1\xC8\x0B\xBD\x63\x8E\x7C\xE9\x5E\x5B\xF9\x82\x41\x45\xFD\x7D\x04\x2C\xDA\x2D\x79',
-	"VDNT-O":b'\xEF\xA9\x26\x8D\x14\x55\xDF\x20\xE8\xF7\x30\x84\xE5\xD6\x7F\x3D\x3B\x91\x96\x16\x80\xE5\x47\x32\x17\x8B\xD7\xEC\x5D\x94\xAA\xC3',
+	"VDNT-O":b'\x7C\xDC\x61\x99\x3A\x2F\xAE\xF6\x40\x33\x70\x55\x15\xAF\xE8\xB1\x52\xFB\x4B\x1A\xF0\xB1\x29\xF7\xE9\x1C\x63\xC5\xD3\xFE\xB6\x99',
 	"VDNT-W":b'\xAA\x72\x20\xBC\x88\x32\x9A\xCF\x74\xA0\x42\xB4\xD4\x5B\x07\xB1\x65\x61\x5B\x10\x91\x6C\xF4\x0B\x0B\xCC\x86\x08\xBE\x9E\x1D\x60',
 }
 
 def decrypt( file ):
+	try:
+		datafile = open( file, "rb")
+		globalheader = datafile.read(0x144)
+		board_name = struct.unpack_from(">6s", globalheader, 0x13c)[0].decode('ascii')
+		if board_name in osck_list:
+			osck=osck_list[board_name]
+		else:
+			print("No OSCK for board: "+board_name)
+			exit(1)
+		payloadstart = struct.unpack_from(">H", globalheader, 0x2A)[0]
+		datafile.seek(payloadstart)
+		data = datafile.read()
+		
+		while True:
+			payloadtype = data[0]
+			if payloadtype == 0xB0: # in chiaro
+				data = data[1+4+1:]
+				break
+			elif payloadtype == 0xB8: # sha256
+				data = data[1+4+1+4+32:]
+			elif payloadtype == 0xB4: # zip
+				data = zlib.decompress(data[1+4+1+4:])
+			elif payloadtype == 0xB7: # aes256
+				data = data[1+4+1+4:]
+				iv = data[:16]
+				keydata = data[16:64]
+				backend = default_backend()
+				cipher = Cipher(algorithms.AES(osck), modes.CBC(iv), backend=backend)
+				decryptor = cipher.decryptor()
+				keydata = decryptor.update(keydata) + decryptor.finalize()
+				key = keydata[:-keydata[-1]]
+				iv = data[64:80]
+				cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
+				decryptor = cipher.decryptor()
+				data = decryptor.update(data[80:]) + decryptor.finalize()
+				data = data[:-data[-1]]
+		
+		output_name = file[:(file.find("rbi"))]+"bin" #rimuove estensione rbi
+		output_file = open(output_name,"w+b") #crea il bin
+		output_file.write(data) #Scrive i dati
 	
-	datafile = open( file, "rb")
-	globalheader = datafile.read(0x144)
-	board_name = struct.unpack_from(">6s", globalheader, 0x13c)[0].decode('ascii')
-	if board_name in osck_list:
-		osck=osck_list[board_name]
-	else:
-		print("No OSCK for board: "+board_name)
-		exit(1)
-	payloadstart = struct.unpack_from(">H", globalheader, 0x2A)[0]
-	datafile.seek(payloadstart)
-	data = datafile.read()
-	
-	while True:
-		payloadtype = data[0]
-		if payloadtype == 0xB0: # in chiaro
-			data = data[1+4+1:]
-			break
-		elif payloadtype == 0xB8: # sha256
-			data = data[1+4+1+4+32:]
-		elif payloadtype == 0xB4: # zip
-			data = zlib.decompress(data[1+4+1+4:])
-		elif payloadtype == 0xB7: # aes256
-			data = data[1+4+1+4:]
-			iv = data[:16]
-			keydata = data[16:64]
-			backend = default_backend()
-			cipher = Cipher(algorithms.AES(osck), modes.CBC(iv), backend=backend)
-			decryptor = cipher.decryptor()
-			keydata = decryptor.update(keydata) + decryptor.finalize()
-			key = keydata[:-keydata[-1]]
-			iv = data[64:80]
-			cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
-			decryptor = cipher.decryptor()
-			data = decryptor.update(data[80:]) + decryptor.finalize()
-			data = data[:-data[-1]]
-	
-	output_name = file[:(file.find("rbi"))]+"bin" #rimuove estensione rbi
-	output_file = open(output_name,"w+b") #crea il bin
-	output_file.write(data) #Scrive i dati
-	
-	print("Decrypted:",output_name)
-	return output_name
+		print("Decrypted:",output_name)
+		return output_name
+	except Exception as e:
+		print("Decrypting Failed: "+str(e))
 
 		
 os.chdir("./")
 for file in glob.glob("*.rbi"):
 	print("Decrypting %s..."%file)
 	dec_filename=decrypt(file)
+	if not dec_filename:
+		continue
 	print("Binwalking %s..."%dec_filename)
 	path_to_push=''
 	for module in binwalk.scan(dec_filename, signature=True, extract=True, quiet=True):
