@@ -1,0 +1,631 @@
+--------------------------------------------------
+-- rpc.network.interface_lan.@.                  ---
+--------------------------------------------------
+local network_interface_lan_ = {
+  objectType = {
+    name = "rpc.network.interface_lan.@.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      alias = {
+        access = "readWrite",
+        type = "string",
+      },
+      type = {
+        access = "readOnly",
+        type = "string",
+      },
+      ports = {
+        access = "readOnly",
+        type = "string",
+      },
+      ipaddr = {
+        access = "readWrite",
+        type = "string",
+      },
+      netmask = {
+        access = "readWrite",
+        type = "string",
+      },
+      nat_enable = {
+        access = "readWrite",
+        type = "string",
+      },
+      igmp_snooping = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    },
+  },
+}
+
+local uci_helper = mapper("ucihelper")
+local common = mapper("nwcommon")
+local findLanWanInterfaces = common.findLanWanInterfaces
+local interface2zone = common.interface2zone
+local get_lower_layers = common.get_lower_layers
+local bit = require("bit")
+local string = string
+local match, format, gsub = string.match, string.format, string.gsub
+local concat, remove, sort = table.concat, table.remove, table.sort
+
+local transactions = {}
+
+local network_binding = { config = "network" }
+local wl_binding = { config = "wireless" }
+local firewall_binding = { config = "firewall" }
+local dhcp_binding = { config = "dhcp" }
+local default_lan = "lan"
+
+local isLan
+local function get_isLan()
+    if isLan then
+        return isLan
+    end
+    local isLan = {}
+    local lans = findLanWanInterfaces(false)
+    for _,v in ipairs(lans) do
+        isLan[v] = true
+    end
+    return isLan
+end
+
+local function getEntriesInterfaceLan(bridge_only)
+    return function()
+        local interface_lans = {}
+        network_binding.sectionname = "interface"
+        network_binding.option = nil
+        local isLan = get_isLan()
+
+        uci_helper.foreach_on_uci(network_binding, function(s)
+        -- iterate over the interfaces
+            if (bridge_only and s.type == 'bridge' or not bridge_only) and s.proto == "static" and isLan[s['.name']] then
+                interface_lans[#interface_lans+1]= s['.name']
+            end
+        end)
+
+        return interface_lans
+    end
+end
+
+local function get_ports(mapping, param, key)
+    local ll_intfs = get_lower_layers(key)
+    return concat(ll_intfs, ",")
+end
+
+local function uci_get_value(default)
+    return function(mapping, param, key)
+        network_binding.sectionname = key
+        network_binding.option = param
+        network_binding.default = default
+        return uci_helper.get_from_uci(network_binding)
+    end
+end
+
+local function get_alias(mapping, param, key)
+    network_binding.sectionname = key
+    network_binding.option = param
+    network_binding.default = key
+    return uci_helper.get_from_uci(network_binding)
+end
+
+-- convert 255.255.255.0 to /24
+local ipmatch = "(%d+)%.(%d+)%.(%d+)%.(%d+)"
+local function netmask2mask(ipstr)
+    local result = 0
+    local ipblocks = { match(ipstr, ipmatch) }
+    if #ipblocks < 4 then
+        return 0
+    end
+
+    local ones = 0
+    local expecting = 0
+    for _,v in ipairs(ipblocks) do
+        if v == "255" then
+            ones = ones + 8
+        else
+            for i = 0, 7 do
+                local bitmask = bit.lshift(1, i)
+                local result = bit.band(v, bitmask)
+                if result == 0 then
+                    if expecting ~= 0 then
+                        return 0
+                    end
+                else
+                    if expecting == 0 then
+                        expecting = 1
+                    end
+                    ones = ones + 1
+                end
+            end
+            break
+        end
+    end
+    return ones
+end
+
+local wan_zone_map
+local function get_wan_zone_map()
+    if not wan_zone_map then
+        wan_zone_map = {}
+        firewall_binding.sectionname = "zone"
+        firewall_binding.option = nil
+        uci_helper.foreach_on_uci(firewall_binding, function(s)
+            if s.wan == "1" and s.name then
+                wan_zone_map[s.name] = s[".name"]
+            end
+        end)
+    end
+    return wan_zone_map
+end
+
+local function get_wan_zone_name(lan)
+    local wan_zone_map = get_wan_zone_map()
+    local wan_zone_name
+    local lan_zone = interface2zone(lan)
+    if lan_zone.name then
+        firewall_binding.sectionname = "forwarding"
+        firewall_binding.option = nil
+        uci_helper.foreach_on_uci(firewall_binding, function(s)
+            if s.src == lan_zone.name and s.dest and wan_zone_map[s.dest] then
+                wan_zone_name = s.dest
+                return false
+            end
+        end)
+    end
+    return wan_zone_name
+end
+
+local function get_uci_subnet(key)
+    network_binding.sectionname = key
+    network_binding.option = "ipaddr"
+    local ipaddr = uci_helper.get_from_uci(network_binding)
+    network_binding.option = "netmask"
+    local netmask = uci_helper.get_from_uci(network_binding)
+    local mask = netmask2mask(netmask)
+    return format("%s/%d", ipaddr, mask)
+end
+
+local function get_masq_src_info(key)
+    local wan_zone_name = get_wan_zone_name(key)
+    if wan_zone_name then
+        local wan_zone_map = get_wan_zone_map()
+        local zone_section = wan_zone_map[wan_zone_name]
+        firewall_binding.sectionname = zone_section
+        firewall_binding.option = "masq_src"
+        local masq_src = uci_helper.get_from_uci(firewall_binding)
+        if masq_src == "" then
+            -- firewall wan zone is still in old format, need convert it to fit biz static ip format
+            masq_src = {}
+            masq_src[#masq_src+1]  = get_uci_subnet("lan")
+            masq_src[#masq_src+1]  = get_uci_subnet("Guest1")
+            uci_helper.set_on_uci(firewall_binding, masq_src, commitapply)
+            uci_helper.commit(firewall_binding)
+        end
+        return masq_src, zone_section
+    end
+end
+
+local function get_subnet_info_from_masq_src(masq_src, key)
+    local subnet = get_uci_subnet(key)
+    for k,v in ipairs(masq_src) do
+        if subnet == v then
+            return k, v
+        end
+    end
+    return nil, subnet
+end
+
+local function get_nat_enable(mapping, param, key)
+    local masq_src, _ = get_masq_src_info(key)
+    if type(masq_src) == "table" then
+        return get_subnet_info_from_masq_src(masq_src, key) and "1" or "0"
+    end
+    return "0"
+end
+
+local function set_masq_src(action, new_ipaddr, new_mask, key)
+    local masq_src, section = get_masq_src_info(key)
+    local value_changed
+    if type(masq_src) == "table" then
+        local index, subnet = get_subnet_info_from_masq_src(masq_src, key)
+        if index then
+            if action == "nat_disable" then
+                remove(masq_src, index)
+                value_changed = true
+            elseif action == "update" then
+                local ipaddr, mask = match(subnet, "(.*)/(%d+)")
+                if new_ipaddr then
+                    ipaddr = new_ipaddr
+                end
+                if new_mask then
+                    mask = new_mask
+                end
+                local new_subnet = format("%s/%s", ipaddr, mask)
+                masq_src[index] = new_subnet
+                value_changed = true
+            end
+        elseif action == "nat_enable" then
+            masq_src[#masq_src+1] = subnet
+            value_changed = true
+        end
+    elseif masq_src == "" then
+        if action == "nat_enable" then
+            masq_src = { get_uci_subnet(key) }
+            value_changed = true
+        end
+    else
+        return nil, "wan zone does not exist"
+    end
+    if value_changed then
+       firewall_binding.sectionname = section
+       firewall_binding.option = "masq_src"
+       uci_helper.set_on_uci(firewall_binding, masq_src, commitapply)
+       transactions[firewall_binding.config] = true
+    end
+end
+
+local function set_network_uci_value(mapping, param, value, key)
+    network_binding.sectionname = key
+    network_binding.option = param
+    uci_helper.set_on_uci(network_binding, value, commitapply)
+    transactions[network_binding.config] = true
+end
+
+local function set_wl_uci_value(param, value, key)
+    wl_binding.sectionname = key
+    wl_binding.option = param
+    uci_helper.set_on_uci(wl_binding, value, commitapply)
+    transactions[wl_binding.config] = true
+end
+
+local function add_interface_lan(mapping)
+    network_binding.sectionname = "interface"
+    network_binding.option = nil
+    local isLan = get_isLan()
+    local new_interface_lan
+    uci_helper.foreach_on_uci(network_binding, function(s)
+        if not s.proto and isLan[s[".name"]] then
+            set_network_uci_value(mapping, "proto", "static", s[".name"])
+            new_interface_lan = s[".name"]
+            return false
+        end
+    end)
+    if new_interface_lan then
+        return new_interface_lan
+    else
+         return nil, "Maximum lan interfaces have been reached"
+    end
+end
+
+local function del_forwarding(key)
+    local wan_zone_map = get_wan_zone_map()
+    local to_be_del = {}
+    local lan_zone = interface2zone(key)
+    if lan_zone.name then
+        firewall_binding.sectionname = "forwarding"
+        firewall_binding.option = nil
+        uci_helper.foreach_on_uci(firewall_binding, function(s)
+            if s.dest == lan_zone.name or (s.src == lan_zone.name and not (s.dest and wan_zone_map[s.dest])) then
+                to_be_del[#to_be_del+1] = s[".name"]
+            end
+        end)
+    end
+    for _,v in ipairs(to_be_del) do
+        firewall_binding.sectionname = v
+        uci_helper.delete_on_uci(firewall_binding, commitapply)
+        transactions[firewall_binding.config] = true
+    end
+end
+
+local function get_dnsmasq_info()
+    local sectionname, interfaces
+    dhcp_binding.sectionname = "dnsmasq"
+    dhcp_binding.option = nil
+    uci_helper.foreach_on_uci(dhcp_binding, function(s)
+        sectionname = s[".name"]
+        interfaces = s["interface"]
+        return false
+    end)
+    return sectionname, interfaces
+end
+
+local function del_dhcp_interface(key)
+    local sectionname, interfaces = get_dnsmasq_info()
+    dhcp_binding.sectionname = sectionname
+    if type(interfaces) == 'table' then
+        for k,v in ipairs(interfaces) do
+            if key == v then
+                remove(interfaces, k)
+                break
+            end
+        end
+        dhcp_binding.option = "interface"
+        uci_helper.set_on_uci(dhcp_binding, interfaces, commitapply)
+        transactions[dhcp_binding.config] = true
+    end
+end
+
+local options_to_del = {"ifname", "ipaddr", "netmask", "proto", "igmp_snooping", "alias"}
+
+local function del_interface_lan(mapping, key)
+    -- remove interface from the dhcp config
+    del_dhcp_interface(key)
+    -- remove related lan interface forwarding rules
+    del_forwarding(key)
+    -- move the port to the default lan interface
+    local ll_intfs = get_lower_layers(key)
+    local eth_ports, wl_ports = {}, {}
+    for _,v in ipairs(ll_intfs) do
+        if match(v, "^eth%d") then
+            eth_ports[v] = true
+        elseif match(v, "^wl%d") then
+            wl_ports[v] = true
+        end
+    end
+    -- hardcode 'lan' temperorily until better solution
+    ll_intfs = get_lower_layers(default_lan)
+    for k,v in ipairs(ll_intfs) do
+        if match(v, "^eth%d$") then
+            eth_ports[v] = true
+        elseif match(v, "^wl%d$") and wl_ports[v] then
+            wl_ports[v] = nil
+        end
+    end
+
+    for k,_ in pairs(wl_ports) do
+        set_wl_uci_value("network", default_lan, k)
+    end
+
+    local value = {}
+    for k,_ in pairs(eth_ports) do
+        value[#value+1] = k
+    end
+    sort(value)
+    value = concat(value, " ")
+    set_network_uci_value(mapping, "ifname", value, default_lan)
+    set_masq_src("nat_disable", nil, nil, key)
+    network_binding.sectionname = key
+    for _,v in ipairs(options_to_del) do
+        network_binding.option = v
+        uci_helper.set_on_uci(network_binding, "", commitapply)
+    end
+    network_binding.option = "auto"
+    uci_helper.set_on_uci(network_binding, "0", commitapply)
+    transactions[network_binding.config] = true
+    return true
+end
+
+network_interface_lan_.entries = getEntriesInterfaceLan()
+network_interface_lan_.get = {
+    alias = get_alias,
+    type = uci_get_value(),
+    ports = get_ports,
+    ipaddr = uci_get_value(),
+    netmask = uci_get_value(),
+    nat_enable = get_nat_enable,
+    igmp_snooping = uci_get_value("1"),
+}
+
+network_interface_lan_.set = {
+    alias = set_network_uci_value,
+    ipaddr = function(mapping, param, value, key)
+        local ipblocks = { match(value, ipmatch) }
+        if #ipblocks ~= 4 then
+            return nil, "invalid ip address"
+        end
+
+        local ok, msg = set_masq_src("update", value, nil, key)
+        if msg then
+            return ok, msg
+        end
+        set_network_uci_value(mapping, param, value, key)
+    end,
+    netmask = function(mapping, param, value, key)
+        local mask = netmask2mask(value)
+        if mask < 8 or mask > 32 then
+            return nil, "invalid network mask"
+        end
+        local ok, msg = set_masq_src("update", nil, tostring(mask), key)
+        if msg then
+            return ok, msg
+        end
+        set_network_uci_value(mapping, param, value, key)
+    end,
+    nat_enable = function(mapping, param, value, key)
+        if value == "0" then
+            set_masq_src("nat_disable", nil, nil, key)
+        else
+            set_masq_src("nat_enable", nil, nil, key)
+        end
+    end,
+    igmp_snooping = set_network_uci_value,
+}
+
+network_interface_lan_.add = add_interface_lan
+network_interface_lan_.delete = del_interface_lan
+
+local function commit()
+    local binding = {}
+    for config,_ in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+local function revert()
+    local binding = {}
+    for config,_ in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+network_interface_lan_.commit = commit
+network_interface_lan_.revert = revert
+
+register(network_interface_lan_)
+
+--------------------------------------------------
+-- rpc.network.bridge_port.@.                  ---
+--------------------------------------------------
+local network_bridge_port_ = {
+  objectType = {
+    name = "rpc.network.bridge_port.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      bridge = {
+        access = "readWrite",
+        type = "string",
+      },
+    },
+  },
+}
+
+local eth_binding = { config = "ethernet", sectionname = "port" }
+local function entriesPorts(mapping)
+    local ports = {}
+    uci_helper.foreach_on_uci(eth_binding, function(s)
+        if not s.wan or s.wan == "0" then
+            ports[#ports+1] = s[".name"]
+        end
+    end)
+
+    wl_binding.sectionname = "wifi-iface"
+    wl_binding.option = "network"
+    uci_helper.foreach_on_uci(wl_binding, function(s)
+        if match(s[".name"], "wl%d$") then
+            ports[#ports+1] = s[".name"]
+        end
+    end)
+
+    return ports
+end
+
+local function get_bridge_info(key)
+    local bridge, ports, port_index
+    network_binding.sectionname = "interface"
+    network_binding.option = nil
+    local isLan = get_isLan()
+
+    uci_helper.foreach_on_uci(network_binding, function(s)
+        -- iterate over the interfaces
+        if s.type == "bridge" and s.auto ~= "0" and isLan[s['.name']] then
+            local ll_intfs = get_lower_layers(s['.name'])
+            for k,v in ipairs(ll_intfs) do
+                if key == v then
+                    bridge = s['.name']
+                    ports = ll_intfs
+                    port_index = k
+                    return false
+                end
+            end
+        end
+    end)
+    return bridge, ports, port_index
+end
+
+local function remove_wl(ports)
+    local new_ports = {}
+    for k,v in ipairs(ports) do
+        if not match(v, "^wl%d$") then
+            new_ports[#new_ports+1] = v
+        end
+    end
+    return new_ports
+end
+
+local function add_dhcp_interface(key)
+    local sectionname, interfaces = get_dnsmasq_info()
+    local changed
+    if type(interfaces) == 'table' then
+        local found
+        for k,v in ipairs(interfaces) do
+            if key == v then
+                found = key
+                break
+            end
+        end
+        if not found then
+            interfaces[#interfaces + 1] = key
+            changed = true
+        end
+    elseif not interfaces then
+        interfaces = { key }
+        changed = true
+    end
+
+    if changed then
+        dhcp_binding.sectionname = sectionname
+        dhcp_binding.option = "interface"
+        uci_helper.set_on_uci(dhcp_binding, interfaces, commitapply)
+        transactions[dhcp_binding.config] = true
+    end
+end
+
+local function set_bridge_for_port(value, key)
+    local bridge, ports, port_index = get_bridge_info(key)
+    if bridge ~= value then
+        if bridge then
+            remove(ports, port_index)
+            if match(key, "^eth%d") then
+                local new_ports = remove_wl(ports)
+                set_network_uci_value(mapping, "ifname", concat(new_ports, " "), bridge)
+            end
+            if #ports == 0 then
+                set_network_uci_value(mapping, "auto", "0", bridge)
+                del_dhcp_interface(bridge)
+            end
+        end
+        if value ~= "" then
+            if match(key, "^eth%d") then
+                local ll_intfs = get_lower_layers(value)
+                local new_ports = remove_wl(ll_intfs)
+                new_ports[#new_ports+1] = key
+                sort(new_ports)
+                set_network_uci_value(mapping, "ifname", concat(new_ports, " "), value)
+            elseif match(key, "^wl%d") then
+                set_wl_uci_value("network", value, key)
+            end
+            set_network_uci_value(mapping, "auto", "1", value)
+            add_dhcp_interface(value)
+        end
+    end
+end
+
+network_bridge_port_.entries = entriesPorts
+network_bridge_port_.get = {
+    bridge = function(mapping, param, key)
+        local value, _, _ = get_bridge_info(key)
+        return value or ""
+    end,
+}
+
+network_bridge_port_.set = {
+    bridge = function(mapping, param, value, key)
+        if value ~= "" then
+            local found
+            local get_bridges = getEntriesInterfaceLan(true)
+            local all_bridges = get_bridges()
+            for _,v in ipairs(all_bridges) do
+                if v == value then
+                    found = true
+                end
+            end
+            if not found then
+                return nil, "invalid bridge"
+            end
+        end
+        set_bridge_for_port(value, key)
+    end
+}
+
+network_bridge_port_.commit = commit
+network_bridge_port_.revert = revert
+
+register(network_bridge_port_)

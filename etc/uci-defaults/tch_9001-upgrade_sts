@@ -1,0 +1,128 @@
+#!/bin/sh
+strindex() { 
+  x="${1%%$2*}"
+  [[ "$x" = "$1" ]] && echo -1 || echo "${#x}"
+}
+vlan_ppp_vid=$(uci get network.vlan_ppp.vid)
+if [ ! $vlan_ppp_vid ] || [ $vlan_ppp_vid == "10" ]; then
+  # Only change the VLAN ID for VDSL if it was 10 before the upgrade
+  uci set network.vlan_ppp.vid='2'
+fi
+uci commit network
+#qos rules with helpers should be reclassify instead of classify
+count=0
+while [ `$(printf "uci get qos.@classify[%d]" $count)` ]; do
+  if [ `$(printf "uci get qos.@classify[%d].helper" $count)` ]; then
+    reclassifyname='qos.re'`$(printf "uci show qos.@classify[%d].helper" $count)|sed 's|.*\.\(.*\)\..*|\1|'`
+    classifytarget=`$(printf "uci get qos.@classify[%d].target" $count)`
+    classifyhelper=`$(printf "uci get qos.@classify[%d].helper" $count)`
+    uci set $reclassifyname=reclassify
+    uci set qos.@reclassify[-1].target=$classifytarget
+    uci set qos.@reclassify[-1].helper=$classifyhelper
+    `$(printf "uci del qos.@classify[%d]" $count)`
+  else
+    count=`expr $count + 1`
+  fi
+done
+count=0
+pcp5=-1
+while [ `$(printf "uci get qos.@reclassify[%d]" $count)` ]; do
+  if [ `$(printf "uci get qos.@reclassify[%d].target" $count)` == "CWMP" ]; then
+    if [ "`$(printf "uci get qos.@reclassify[%d].dstports" $count)`" ]; then
+      dstport=`$(printf "uci get qos.@reclassify[%d].dstports" $count)`
+      if [ $(strindex "$dstport" "7547") -eq -1 ]; then
+        uci add_list qos.@reclassify[$count].dstports=7547
+      fi
+      if [ $(strindex "$dstport" "8881") -eq -1 ]; then
+        uci add_list qos.@reclassify[$count].dstports=8881
+      fi
+      if [ $(strindex "$dstport" "8882") -eq -1 ]; then
+        uci add_list qos.@reclassify[$count].dstports=8882
+      fi
+    fi
+  fi
+  if [ `$(printf "uci get qos.@reclassify[%d].target" $count)` == "pcp_5" ]; then
+    pcp5=count
+  fi
+  count=`expr $count + 1`
+done
+variant=$(uci get -q env.var.iinet_variant)
+if [ -n "$variant" ] && [ $variant == "novas" ]; then
+  if [ $pcp5 == -1 ]; then
+    uci add qos reclassify
+    uci rename qos.@reclassify[-1]=reclassify_25
+    uci set qos.reclassify_25.target="pcp_5"
+    uci set qos.reclassify_25.srcif="loopback"
+    uci set qos.reclassify_25.proto="icmp"
+    uci set qos.reclassify_25.dscp="EF"
+    uci set qos.Voice.pcp='5'
+    uci set mmpbx.codec_filter_audio_generic_g722.allow='0'
+    uci set mmpbx.service_conference.provisioned='0'
+    uci set mmpbx.service_hold.provisioned='0'
+    uci set mmpbx.service_transfer.provisioned='0'
+    uci set mmpbx.service_mwi_sip_profile_0.provisioned='0'
+    uci set mmpbx.service_mwi_sip_profile_1.provisioned='0'
+    uci set firewall.siphelper.intf='loopback'
+    profile0=$(uci get mmpbxrvsipnet.sip_profile_0.enabled)
+    if [ "$profile0" == "1" ] ; then
+      uci set mmpbxrvsipnet.sip_net.isp='Other'
+      uci set env.var.provisioning_code='Other'
+    else
+      uci set mmpbxrvsipnet.sip_net.domain_name='uni-v1.tpg.com.au'
+      uci set mmpbxrvsipnet.sip_net.primary_proxy='uni-v1.tpg.com.au'
+      uci set mmpbxrvsipnet.sip_net.primary_registrar='uni-v1.tpg.com.au'
+      ssid_prefix=$(uci get env.var.ssid_prefix)
+      uci set mmpbxrvsipnet.sip_net.isp=$ssid_prefix
+      uci set env.var.provisioning_code=$ssid_prefix
+    fi
+    uci commit env
+    uci commit mmpbx
+    uci commit firewall
+    uci commit mmpbxrvsipnet
+  fi
+else
+  if [ $pcp5 != -1 ]; then
+    uci del qos.@reclassify[$pcp5]
+    uci del -q qos.Voice.pcp
+    uci set mmpbx.codec_filter_audio_generic_g722.allow='1'
+    uci set mmpbx.service_conference.provisioned='1'
+    uci set mmpbx.service_hold.provisioned='1'
+    uci set mmpbx.service_transfer.provisioned='1'
+    uci set mmpbx.service_mwi_sip_profile_0.provisioned='1'
+    uci set mmpbx.service_mwi_sip_profile_1.provisioned='1'
+    uci del firewall.siphelper.intf
+    profile0=$(uci get mmpbxrvsipnet.sip_profile_0.enabled)
+    domainname=$(uci get mmpbxrvsipnet.sip_net.domain_name)
+    provisioningcode=$(uci get env.var.provisioning_code)
+    ssid_prefix=$(uci get env.var.ssid_prefix)
+    if [ "$profile0" == "0" ] || [ domainname == 'uni-v1.tpg.com.au' ]; then
+      if [ $(uci get env.rip.sw_flag) = "F2" ]; then
+        uci set mmpbxrvsipnet.sip_net.isp='Internode'
+        uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.internode.on.net'
+        uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.internode.on.net'
+        uci set mmpbxrvsipnet.sip_net.domain_name='sip.internode.on.net'
+      else
+        uci set mmpbxrvsipnet.sip_net.isp='iiNet'
+        uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.nsw.iinet.net.au'
+        uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.nsw.iinet.net.au'
+        uci set mmpbxrvsipnet.sip_net.domain_name='iinetphone.iinet.net.au'
+      fi
+      if [ "$provisioningcode" == $ssid_prefix ] || [ "$provisioningcode" == "Other" ]; then
+        uci set env.var.provisioning_code="TG789vac v3"
+      fi
+    fi
+    uci commit env
+    uci commit mmpbx
+    uci commit firewall
+    uci commit mmpbxrvsipnet
+  fi
+fi
+if [ `uci get qos.atm_ppp` ]; then
+  uci del qos.atm_ppp
+  uci del qos.atm_ipoe
+  uci set qos.wan='interface'
+  uci set qos.wan.classgroup='TO_WAN'
+  uci set qos.wan.enable='1'
+fi
+uci commit qos
+exit 0

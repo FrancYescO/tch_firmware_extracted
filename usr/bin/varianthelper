@@ -1,0 +1,85 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+uci set env.var.provisioning_code='iiNet'
+#uci set env.var.prod_friendly_name=`uci get env.var.prod_friendly_name |cut -d ' ' -f 2-3|sed s/' '//g`
+
+uci -q delete network.wan
+uci set network.wan=interface
+uci set network.wan.ipv6=1
+uci set network.wan.proto=pppoe
+uci set network.wan.metric=10
+uci set network.wan.keepalive=4,20
+uci set network.wan.username=tpg_acs@tpg_acs
+uci set network.wan.password=tpg_acs
+uci set network.wan.ifname='vlan_hfc'
+uci set network.wan.defaultroute='1'
+
+uci set network.ppp.username=tpg_acs@tpg_acs
+uci set network.ppp.password=tpg_acs
+
+uci set network.pppv.auto=0
+uci set network.pppv.ifname=''
+
+uci set network.ipoe.metric=150
+uci set network.ipoe.ip4table='rt_vlan6'
+uci set network.ipoe.ifname='vlan_hfc'
+
+uci set cwmpd.cwmpd_config.connectionrequest_username=`uci get env.rip.factory_id``uci get env.rip.serial`
+uci set cwmpd.cwmpd_config.connectionrequest_password='TPGCPEpass'
+uci set cwmpd.cwmpd_config.acs_url='https://technicolor-fttnacs.tpg.com.au:7547/acs/'
+uci set cwmpd.cwmpd_config.acs_user='TPGACSuser'
+uci set cwmpd.cwmpd_config.acs_pass='TPGACSpass'
+uci set cwmpd.cwmpd_config.periodicinform_interval='86400'
+uci set cwmpd.cwmpd_config.use_dhcp='0'
+uci set cwmpd.cwmpd_config.enforce_https='1'
+uci set cwmpd.cwmpd_config.namespace_version=''
+
+uci set qos.Voice.pcp='5'
+uci set qos.classify_21.dstports='7546,7547,30005'
+uci set qos.reclassify_24.dstports='7547'
+
+uci -q delete qos.reclassify_25
+uci set qos.reclassify_25=reclassify
+uci set qos.reclassify_25.target='pcp_5'
+uci add_list qos.reclassify_25.srcif='loopback'
+uci set qos.reclassify_25.proto='icmp'
+uci add_list qos.reclassify_25.dscp='EF'
+
+uci set mmpbxrvsipnet.sip_net.domain_name='uni-v1.tpg.com.au'
+uci set mmpbxrvsipnet.sip_net.primary_proxy='uni-v1.tpg.com.au'
+uci set mmpbxrvsipnet.sip_net.primary_registrar='uni-v1.tpg.com.au'
+uci set mmpbxrvsipnet.sip_net.cancel_invite_timer=''
+uci set mmpbxrvsipnet.sip_net.primary_proxy_port='5060'
+uci set mmpbxrvsipnet.sip_net.secondary_proxy_port='5060'
+
+uci set mmpbx.service_conference.provisioned='0'
+uci set mmpbx.service_hold.provisioned='0'
+uci set mmpbx.service_mwi_sip_profile_0.provisioned='0'
+uci set mmpbx.service_mwi_sip_profile_1.provisioned='0'
+uci set mmpbx.service_transfer.provisioned='0'
+uci set mmpbx.codec_filter_audio_generic_g722.allow='0'
+
+uci -q del_list transformer.@main[0].ignore_patterns='QueueManagement%.Classification%.'
+uci -q del_list transformer.@main[0].ignore_patterns='DeviceInfo%.ProcessStatus%.'
+uci -q del_list transformer.@main[0].ignore_patterns='%.NumberingPlan%.PrefixInfo%.'
+uci -q del_list transformer.@main[0].ignore_patterns='DeviceInfo%.ProcessStatus%.Process%.'
+uci -q del_list transformer.@main[0].ignore_patterns='Layer3Forwarding%.'
+uci -q del_list transformer.@main[0].ignore_patterns='QueueManagement%.'
+uci -q del_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.LANEthernetInterfaceConfig%.'
+uci -q del_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.WLANConfiguration%.'
+uci -q del_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.LANHostConfigManagement%.'
+uci -q del_list transformer.@main[0].vendor_patterns='X_TPG_'
+uci add_list transformer.@main[0].ignore_patterns='QueueManagement%.Classification%.'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.ProcessStatus%.'
+uci add_list transformer.@main[0].ignore_patterns='%.NumberingPlan%.PrefixInfo%.'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.ProcessStatus%.Process%.'
+uci add_list transformer.@main[0].ignore_patterns='Layer3Forwarding%.'
+uci add_list transformer.@main[0].ignore_patterns='QueueManagement%.'
+uci add_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.LANEthernetInterfaceConfig%.'
+uci add_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.WLANConfiguration%.'
+uci add_list transformer.@main[0].ignore_patterns='LANDevice%.{i}%.LANHostConfigManagement%.'
+uci add_list transformer.@main[0].vendor_patterns='X_TPG_'
+
+uci commit

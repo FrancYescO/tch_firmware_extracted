@@ -1,0 +1,41 @@
+#!/bin/sh
+
+if [ ! -f /etc/config/transformer ]; then
+	touch /etc/config/transformer
+fi
+
+uci show transformer.@main[0] >/dev/null 2>/dev/null
+if [ $? -ne 0 ]; then
+	uci add transformer main
+fi
+
+uci add_list transformer.@main[0].ignore_patterns='^Device%.'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.SoftwareBank%.'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.NewSoftwareBank$'
+uci add_list transformer.@main[0].ignore_patterns='X_000E50_EnableIPv6$'
+uci add_list transformer.@main[0].ignore_patterns='%.NumberingPlan%.PrefixInfo%.'
+uci add_list transformer.@main[0].ignore_patterns='Services%.VoiceService%.{i}%.VoiceProfile%.{i}%.NumberingPlan%.PrefixInfo%.'
+uci add_list transformer.@main[0].vendor_patterns='X_TPG_'
+
+uci commit transformer
+
+rm -rf /usr/share/transformer/mappings/bbf/VoiceService.VoiceProfile.Tone.map
+rm -rf /usr/share/transformer/mappings/bbf/VoiceService.Handset.map
+rm -rf /usr/share/transformer/mappings/bbf/LANDevice.LANHPNAInterfaceConfig*
+rm -rf /usr/share/transformer/mappings/bbf/QueueManagement*
+rm -rf /usr/share/transformer/mappings/bbf/Layer3Forwarding.map
+rm -rf /usr/share/transformer/mappings/bbf/DeviceInfo.ProcessStatus.map
+rm -rf /usr/share/transformer/mappings/bbf/X_000E50_BondingDevice.map
+rm -rf /usr/share/transformer/mappings/bbf/X_000E50_Iperf.map
+rm -rf /usr/share/transformer/mappings/bbf/X_000E50_AccessControl*
+rm -rf /usr/share/transformer/mappings/bbf/leds.map
+
+rm -rf /usr/share/transformer/mappings/igd/DeviceInfo.X_0876FF_LED.map
+rm -rf /usr/share/transformer/mappings/igd/LANInterfaces.LANUSBInterfaceConfig*
+rm -rf /usr/share/transformer/mappings/igd/LANDevice.LANHostConfigManagement*
+rm -rf /usr/share/transformer/mappings/igd/LANDevice.LANHostConfigManagement*
+
+rm -rf /usr/share/transformer/mappings/uci/mmpbxbrcmdectdev.map
+rm -rf /usr/share/transformer/mappings/uci/mmpbxrvsipdev.map
+
+rm -rf /usr/share/transformer/mappings/rpc/system.battery.map

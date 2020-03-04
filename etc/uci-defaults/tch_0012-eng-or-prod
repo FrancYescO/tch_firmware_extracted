@@ -1,0 +1,27 @@
+#!/bin/sh
+
+#Assume that Build is originally a Prod build
+#Add CLASH user
+#Enable Dropbear on LAN
+local confVersionSuffix=$(uci get env.var.CONF_VERSION | sed -n 's/.*\(-.\)$/\1/p')
+if [ $confVersionSuffix ] && ( [ $confVersionSuffix == "-O" ]  || [ $confVersionSuffix == "-T" ] ); then
+  uci -q del_list clash.engineer.ssh_interface='lan'
+  uci add_list clash.engineer.ssh_interface='lan'
+  uci commit clash
+
+  uci set dropbear.lan.enable="1"
+  uci set dropbear.lan.PasswordAuth='on'
+  uci commit dropbear  
+else
+  uci delete clash.engineer
+  uci commit clash
+  sed -i 's|::askconsole:/bin/login|#::askconsole:/bin/login|' /etc/inittab
+fi
+if [ $confVersionSuffix ] && [ $confVersionSuffix == "-T" ]; then
+  sed -i 's|root:x:0:0:root:/root:/bin/restricted_shell|root:x:0:0:root:/root:/bin/ash|' /etc/passwd
+  uci set dropbear.lan.RootLogin='1'
+  uci set dropbear.lan.RootPasswordAuth='on'
+  uci commit dropbear
+else
+  sed -i '/== TCH Development/d' /etc/dropbear/authorized_keys
+fi

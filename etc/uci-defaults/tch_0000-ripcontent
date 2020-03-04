@@ -1,0 +1,190 @@
+#!/bin/sh
+usage()
+{
+cat << EOF
+usage: $0 options
+
+This script copies the public r/o RIP values in a UCI file.
+
+OPTIONS:
+   -h      Show this message
+   -b      Base path to use to create the UCI config (defaults to /etc/config)
+   -r      Base path to use for the RIP files (defaults to /proc/rip)
+   -v      Verbose mode
+EOF
+}
+
+# Assumption is that $1 is the binary file to read the mac address from
+hex2macaddress()
+{
+START=$(hexdump -n 1 -v -e '/1 "%02X"' $1)
+END=$(hexdump -s 1 -n 5 -v -e '/1 ":%02X"' $1)
+echo "$START$END"
+}
+
+# Assumption is that $1 is the binary file to read and $2 is the length to read
+hex2ascii()
+{
+echo $(hexdump -n $2 -v -e '/1 "%02X"' $1)
+}
+
+# Assumption is that $1 is the entry number in rip and $2 is the param to write to in UCI
+mac2uci()
+{
+if [ -f "$RIPPATH/$1" ]; then
+    # The /proc/rip/ filesystem does not behave as regular files
+    # Cannot do random read on them. So first copy the file to a tmp file
+    # then run hexdump on it
+    cp $RIPPATH/$1 $TMPFILE
+    write2uci $2 $(hex2macaddress $TMPFILE)
+    rm $TMPFILE
+fi
+}
+
+# Assumption is that $1 is the entry number, $2 its length, $3 the param to write to in UCI
+hex2uci()
+{
+if [ -f "$RIPPATH/$1" ]; then
+    # See explanation for cp in previous function
+    cp $RIPPATH/$1 $TMPFILE
+    write2uci $3 $(hex2ascii $TMPFILE $2)
+    rm $TMPFILE
+fi
+}
+
+getsfp()
+{
+    echo $(hexdump -C -n $2 $1 | awk 'NR==1{print $2}' | cut -c 1)
+}
+
+# Assumption is that $1 is the entry number, $2 its length, $3 the param to write to in UCI
+sfp2uci()
+{
+if [ -f "$RIPPATH/$1" ]; then
+    # See explanation for cp in previous function
+    cp $RIPPATH/$1 $TMPFILE
+    SFP=$(getsfp $TMPFILE $2)
+    if [ $SFP -eq "2" ]; then
+        write2uci $3 1
+    else
+        write2uci $3 0
+    fi
+    rm $TMPFILE
+fi
+}
+
+# Assumption is that $1 is the entry number, $2  the param to write to in UCI
+ascii2uci()
+{
+if [ -f "$RIPPATH/$1" ]; then
+    write2uci $2 $(tr -d '\n' < $RIPPATH/$1)
+fi
+}
+
+# Assumption is that $1 is the path to write to, $2 is the value
+write2uci()
+{
+    [ "$VERBOSE" -eq "1" ] && echo Setting $1 to $2
+    [ "$PRETEND" -eq "0" ] && [ -n "$2" ] && uci set $1=$2
+}
+
+TMPFILE='/tmp/ripimport-tmp'
+RIPPATH='/proc/rip'
+BASEPATH='/etc/config'
+VERBOSE=0
+PRETEND=0
+
+while getopts “hr:pv” OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+	 b)
+             BASEPATH=$OPTARG
+	     ;;
+         r)
+             RIPPATH=$OPTARG
+             ;;
+	 v)
+	     VERBOSE=1
+	     ;;
+         p)
+             PRETEND=1
+	     echo Pretending...
+             ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+if [ ! -d "$RIPPATH" ]; then
+    echo RIP directory does not exist, aborting
+    exit
+fi
+
+if [ "$PRETEND" -eq "0" ]; then
+	# Make sure the directory containing the UCI state exists
+	mkdir -p $BASEPATH
+	# Create the UCI file
+	touch $BASEPATH/env
+	uci set env.rip=ripcontent
+fi
+
+# Ethernet MAC address
+mac2uci 0032 env.rip.eth_mac
+# Wifi MAC address
+mac2uci 008d env.rip.wifi_mac
+# USB MAC address
+mac2uci 004c env.rip.usb_mac
+# BRCM Chip ID
+hex2uci 0115 4 env.rip.chip_id
+# Variant
+ascii2uci 8003 env.rip.variant_id
+# PBA Tocom
+ascii2uci 0004 env.rip.pba_tocom
+# FIA
+ascii2uci 0028 env.rip.fia
+# Factory ID
+ascii2uci 003c env.rip.factory_id
+# Date last repair
+ascii2uci 002c env.rip.last_repair_date
+# Company ID
+ascii2uci 0038 env.rip.company_id
+# Board mnemonic
+ascii2uci 0040 env.rip.board_mnemonic
+# Factory release date
+ascii2uci 0022 env.rip.factory_date
+# Product ID
+ascii2uci 8001 env.rip.product_id
+# Serial number
+ascii2uci 0012 env.rip.serial
+# Modem Access Code
+hex2uci 0083 5 env.rip.modem_access_code
+# SFP
+sfp2uci 0002 2 env.rip.sfp
+# Software Flag
+ascii2uci 0010 env.rip.sw_flag
+
+[ "$VERBOSE" -eq "1" ] && echo Commiting changes
+[ "$PRETEND" -eq "0" ] && uci commit
+
+# Useless since it won't prevent root from writing to the file ...
+[ "$VERBOSE" -eq "1" ] && echo Setting config file to read-only
+[ "$PRETEND" -eq "0" ] && chmod ogu-w $BASEPATH/env
+
+{
+    echo ''
+
+    echo 'stop() {'
+
+    echo '   echo `(echo "poni2c reboot")| consoled ` > /dev/null'
+
+    echo '}'
+
+}  >> /etc/init.d/pon_caldata
+
+ln -s /etc/init.d/pon_caldata /etc/rc.d/K19pon_caldata

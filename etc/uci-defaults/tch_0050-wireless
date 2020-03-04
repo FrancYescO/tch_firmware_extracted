@@ -1,0 +1,62 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.wl0_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`-Guest
+
+uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s1`
+
+uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+
+uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`-5G
+
+uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.wl1_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`-5G-Guest
+
+uci set wireless.ap3.wep_key=`uci get env.var.default_wep_key_r0_s1`
+
+uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+
+uci commit wireless
+
+#to update the default security mode in env
+uci set env.var.default_security_mode_r0_s0=`uci get wireless.ap0.security_mode`
+uci set env.var.default_security_mode_r1_s0=`uci get wireless.ap1.security_mode`
+
+uci commit env
+
+#/*******************************************************************/
+#/*             datamodel ordering for wireless devices             */
+#/*******************************************************************/
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.wlandevices=ordering
+uci set dmordering.wlandevices.name='InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.'
+# devices that are instantiated under `InternetGatewayDevice.LANDevice`:
+uci add_list dmordering.wlandevices.order=wl0
+uci add_list dmordering.wlandevices.order=wl1_remote
+uci commit dmordering
+

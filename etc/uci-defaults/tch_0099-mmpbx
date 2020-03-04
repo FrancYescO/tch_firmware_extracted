@@ -1,0 +1,25 @@
+#!/bin/sh
+
+#get build version
+build_version=`uci get version.@version[0].version`
+
+#get short build version (first 14 characters of build version)
+short_build_version=${build_version:0:14}
+
+#Populate user-agent
+#user-agent format: PRODUCT_NAME_FRIENDLY_NAME Build SHORT_BUILD_VERSION -- SERIAL_NUMBER
+#serial_number is added by mmpbx at the end of UA header.
+uci set mmpbxrvsipnet.sip_net.user_agent="$(uci get env.var.prod_friendly_name) Build $short_build_version"
+
+if [ $(uci get env.rip.sw_flag) = "F2" ]; then
+	uci set mmpbxrvsipnet.sip_net.isp='Internode'
+	uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.internode.on.net'
+	uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.internode.on.net'
+	uci set mmpbxrvsipnet.sip_net.domain_name='sip.internode.on.net'
+else
+	uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.nsw.iinet.net.au'
+	uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.nsw.iinet.net.au'
+	uci set mmpbxrvsipnet.sip_net.domain_name='iinetphone.iinet.net.au'
+fi
+
+uci commit mmpbxrvsipnet
