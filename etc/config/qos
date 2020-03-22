@@ -1,0 +1,226 @@
+#Internal Classification Labels
+
+config label 'Normal'
+	option trafficid '1'
+
+config label 'Interactive'
+	option trafficid '2'
+
+config label 'Network_Control'
+	option trafficid '3'
+
+config label 'Video_Data'
+	option trafficid '4'
+
+config label 'Video_Sig'
+	option trafficid '5'
+
+config label 'Management'
+	option trafficid '6'
+
+config label 'Voice_Data'
+	option trafficid '7'
+	option dscp 'EF'
+
+config label 'Voice_Sig'
+	option trafficid '8'
+	option dscp 'EF'
+
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'W_Q0'
+	option priority '0'
+
+config class 'W_Q1'
+	list trafficid '2'
+	option priority '1'
+
+config class 'W_Q2'
+	list trafficid '3'
+	option priority '2'
+
+config class 'W_Q3'
+	list trafficid '4'
+	option priority '3'
+
+config class 'W_Q4'
+	list trafficid '5'
+	option priority '4'
+
+config class 'W_Q5'
+	list trafficid '6'
+	option priority '5'
+
+config class 'W_Q6'
+	list trafficid '7'
+	option priority '6'
+
+config class 'W_Q7'
+	list trafficid '8'
+	option priority '7'
+
+#TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '4'
+	list trafficid '5'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '6'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '3'
+
+#TO_WLAN
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	list trafficid '4'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '5'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '6'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+        option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+        option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+config interface 'lan'
+	option classgroup 'TO_LAN'
+
+config device 'atm_8_35'
+	option classgroup 'TO_WAN'
+
+config device 'atm_8_81'
+	option classgroup 'TO_WAN'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+#QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+#IMPORTANT NOTE: Make sure that the order in which the rules are defined is from Lowest Priority to Highest Priority!
+
+config classify
+	option target 'Interactive'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+	option proto 'tcp'
+
+config classify
+	option target 'Interactive'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+	option proto 'udp'
+
+config classify
+	option target 'Interactive'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option proto 'tcp'
+
+config classify
+	option target 'Interactive'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option proto 'udp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'icmp'
+	option proto_option 'icmp-type=redirect'
+
+config classify
+	option target 'Network_Control'
+	option proto 'igmp'
+
+config classify
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+	option proto 'tcp'
+
+config classify
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+	option proto 'udp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'esp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'ah'
+
+#VPN's
+config classify
+	option target 'Network_Control'
+	option proto 'gre'
+
+# helper match requires reclassify
+config reclassify
+	option target 'Video_Data'
+	option helper 'rtsp'
+
+config classify
+	option target 'Video_Sig'
+	option dstports '554'
+	option proto 'tcp'
+
+#IMPORTANT NOTE: Static config of dport 7547 for cwmpd is broken once acs url is provisioned using another port via dhcpv4 option 43
+config classify
+	option target 'Management'
+	option dstports '7547'
+	option proto 'tcp'
+
+# helper match requires reclassify
+config reclassify
+	option target 'Voice_Data'
+	option helper 'sip'
+
+config reclassify
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option proto 'tcp'
+
+config reclassify
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option proto 'udp'

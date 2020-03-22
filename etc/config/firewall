@@ -1,0 +1,359 @@
+config defaults
+	option syn_flood	 1
+	option input		 ACCEPT
+	option output		 ACCEPT
+	option forward		 REJECT
+    option synflood_protect   '1'
+# Uncomment this line to disable ipv6 rules
+#	option disable_ipv6	1
+	option drop_invalid	'1'
+
+config zone
+	option name		 lan
+	list   network		 'lan'
+	option input		 ACCEPT
+	option output		 ACCEPT
+	option forward		 DROP
+	#this zone is a lan zone (for IGD/Device:2)
+    option mtu_fix		 '1'
+	option wan		 0
+
+config zone
+	option name		 wan
+	list   network		 'wan'
+	list   network		 'wan6'
+	list   network		 'iptv'
+	option input		 DROP
+	option output		 ACCEPT
+	option forward		 DROP
+	option masq		 1
+	option mtu_fix		 1
+	#this zone is a wan zone (for IGD/Device:2)
+	option wan		 1
+
+config forwarding
+	option src		 lan
+	option dest		 wan
+
+# We need to accept udp packets on port 68,
+# see https://dev.openwrt.org/ticket/4108
+config rule
+	option name		 Allow-DHCP-Renew
+	option src		 wan
+	option proto		 udp
+	option dest_port	 68
+	option target		 ACCEPT
+	option family		 ipv4
+
+# Allow IPv4 ping
+config rule
+	option name		 Allow-Ping
+	option src		 wan
+	option proto		 icmp
+	list   icmp_type	 echo-request
+	option family		 ipv4
+	option target		 ACCEPT
+
+# Allow IPv6 ping
+config rule
+	option name		 Allow-Ping6
+	option src		 wan
+	option proto		 icmp
+	list   icmp_type	 echo-request
+	option family		 ipv6
+	option target		 ACCEPT
+
+# Allow DHCPv6 replies
+# see https://dev.openwrt.org/ticket/10381
+config rule
+	option name		 Allow-DHCPv6
+	option src		 wan
+	option proto		 udp
+	option src_ip		 fc00::/6
+	option dest_ip		 fc00::/6
+	option dest_port	 546
+	option family		 ipv6
+	option target		 ACCEPT
+
+# Allow essential incoming IPv6 ICMP traffic
+config rule
+	option name		 Allow-ICMPv6-Input
+	option src		 wan
+	option proto		 icmp
+	list   icmp_type	 echo-reply
+	list   icmp_type	 destination-unreachable
+	list   icmp_type	 packet-too-big
+	list   icmp_type	 time-exceeded
+	list   icmp_type	 bad-header
+	list   icmp_type	 unknown-header-type
+	list   icmp_type	 router-solicitation
+	list   icmp_type	 neighbour-solicitation
+	list   icmp_type	 router-advertisement
+	list   icmp_type	 neighbour-advertisement
+	option limit		 1000/sec
+	option family		 ipv6
+	option target		 ACCEPT
+
+# Allow essential forwarded IPv6 ICMP traffic
+config rule
+	option name		 Allow-ICMPv6-Forward
+	option src		 wan
+	option dest		 *
+	option proto		 icmp
+	list   icmp_type	 echo-request
+	list   icmp_type	 echo-reply
+	list   icmp_type	 destination-unreachable
+	list   icmp_type	 packet-too-big
+	list   icmp_type	 time-exceeded
+	list   icmp_type	 bad-header
+	list   icmp_type	 unknown-header-type
+	option limit		 1000/sec
+	option family		 ipv6
+	option target		 ACCEPT
+
+# include a file with users custom iptables rules
+config include
+	option path		 /etc/firewall.user
+
+config include 'tchext_restart'
+	option type		 'script'
+	option path		 '/lib/functions/firewall-restart-ext-tch.sh'
+
+config include 'tchext'
+	option type		 'script'
+	option path		 '/lib/functions/firewall-ext-tch.sh'
+	option reload		 '1'
+
+config cone
+	option name		 'PS and XBox Live 1'
+	option src		 'wan'
+	option dest_port	 '88'
+
+config cone
+	option name		 'PS and XBox Live 2'
+	option src		 'wan'
+	option dest_port	 '3074:3658'
+
+config cone
+	option name		 'PS and XBox Live 3'
+	option src		 'wan'
+	option dest_port	 '10070'
+
+config cone
+	option name		 'STUN'
+	option src		 'wan'
+	option dest_port	 '3478'
+
+config cone
+	option name		 'STUN'
+	option src		 'wan'
+	option dest_port	 '3479'
+
+config cone
+	option src		 'wan'
+	option dest_port	 '7351'
+
+config cone
+	option src		 'wan'
+	option dest_port	 '9350'
+
+config include 'tod'
+	option type		 'script'
+	option path		 '/lib/functions/tod.sh'
+	option reload		 '1'
+
+config include 'intercept'
+	option type		 'script'
+	option path		 '/usr/lib/intercept/firewall.sh'
+
+config fwconfig 'fwconfig'
+	option defaultoutgoing_lax 'ACCEPT'
+	option defaultoutgoing_normal 'ACCEPT'
+	option defaultoutgoing_high 'DROP'
+	option defaultoutgoing_user 'ACCEPT'
+	option defaultincoming_lax 'ACCEPT'
+	option defaultincoming_normal 'DROP'
+	option defaultincoming_high 'DROP'
+	option defaultincoming_user 'DROP'
+    option level 'normal'
+
+config redirectsgroup 'telmexredirects'
+	option enabled		 '1'
+	option name		 'FW redirects for Telmex specific behavior (high priority vs DMZ & port forwarding)'
+	option type		 'telmexredirect'
+
+config rulesgroup 'pinholerules'
+	option enabled		 '1'
+	option name		 'FW rules for opening pinholes'
+	option type		 'pinholerule'
+
+config redirectsgroup 'userredirects'
+	option enabled		 '1'
+	option name		 'FW redirects defined by the user'
+	option type		 'userredirect'
+
+config redirectsgroup 'dmzredirects'
+	option enabled		 '0'
+	option name		 'FW redirects for the DMZ functionality'
+	option type		 'dmzredirect'
+
+config dmzredirect 'dmzredirect'
+	option name		 'DMZ rule'
+	option src		 wan
+	option dest		 lan
+	option family		 ipv4
+	option target		 DNAT
+	list   proto		 !icmp
+
+config rule
+        option name 'Disable HTTP access from LAN 443 444'
+        option src 'lan'
+	option proto 'tcp'
+        option dest_port '443-444'
+	option target 'DROP'
+        option family 'ipv4'
+
+config rule
+        option name 'Disable HTTP access from LAN 8090'
+        option src 'lan'
+	option proto 'tcp'
+        option dest_port '8090'
+	option target 'DROP'
+        option family 'ipv4'
+
+config rule
+	option name		 'Disable HTTP access from LAN 8080'
+	option src		 'lan'
+	option proto		 'tcp'
+	option dest_port	 '8080'
+	option target		 'DROP'
+	option family		 'ipv4'
+
+config rulesgroup 'normalrules'
+	option enabled		 '1'
+	option name		 'FW rules for normal level'
+	option type		 'normalrule'
+
+config rulesgroup 'laxrules'
+	option enabled		 '0'
+	option name		 'FW rules for lax level'
+	option type		 'laxrule'
+
+config rulesgroup 'highrules'
+	option enabled		 '0'
+	option name		 'FW rules for high level'
+	option type		 'highrule'
+
+config rulesgroup 'userrules'
+	option enabled		 '0'
+	option name		 'FW rules for user level'
+	option type		 'userrule'
+
+config rulesgroup 'userrules_v6'
+	option enabled		 '0'
+	option name		 'FW rules for user level IPv6'
+	option type		 'userrule_v6'
+
+config rulesgroup 'defaultrules'
+	option enabled		 '1'
+	option name		 'FW rules for default behavior'
+	option type		 'defaultrule'
+
+config highrule
+	option name		 HTTP
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 80
+	option target		 ACCEPT
+
+config highrule
+	option name		 HTTPS
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 443
+	option target		 ACCEPT
+
+config highrule
+	option name		 SMTP
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 25
+	option target		 ACCEPT
+
+config highrule
+	option name		 POP3
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 110
+	option target		 ACCEPT
+
+config highrule
+	option name		 IMAP
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 445
+	option target		 ACCEPT
+
+config highrule
+	option name		 SSH
+	option src		 lan
+	option dest		 wan
+	option proto		 tcp
+	option dest_port	 22
+	option target		 ACCEPT
+
+config defaultrule 'defaultoutgoing'
+	option name		 'Default action for outgoing NAT'
+	option src		 'lan'
+	option dest		 'wan'
+	option proto		 'all'
+	option target		 'ACCEPT'
+
+config helper
+	option helper		 ftp
+	option dest_port	 21
+	option proto		 tcp
+
+config helper
+	option helper		 tftp
+	option dest_port	 69
+	option proto		 udp
+
+config helper
+	option helper		 snmp
+	option family		 ipv4
+	option dest_port	 161
+	option proto		 udp
+
+config helper
+	option helper		 pptp
+	option family		 ipv4
+	option dest_port	 1723
+	option proto		 tcp
+
+config helper
+	option helper		 sip
+	option dest_port	 5060
+	option proto		 udp
+
+config helper
+	option helper		 irc
+	option family		 ipv4
+	option dest_port	 6667
+	option proto		 tcp
+
+config helper
+	option helper		 amanda
+	option dest_port	 10080
+	option proto		 udp
+
+config helper
+	option helper		 rtsp
+	option dest_port	 554
+	option family		 ipv4
+	option proto		 tcp
