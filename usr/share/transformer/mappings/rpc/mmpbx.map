@@ -1,0 +1,430 @@
+local conn = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+local format, match = string.format, string.match
+local popen = io.popen
+local ping_helper = require("transformer.shared.ippinghelper")
+local state_table = {}
+local section = "network_rpc"
+local NUM_REP = "2"
+local common = mapper("nwcommon")
+local get_ubus_interface_status = common.get_ubus_interface_status
+
+local mmpbx = {
+    objectType = {
+        name = "rpc.mmpbx.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            resetCallStats = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+            },
+            state = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "STARTING",
+                    "RUNNING",
+                    "STOPPING",
+                    "NA",
+                },
+                default = "NA",
+            },
+            mode = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "SIP",
+                    "PSTN",
+                    "Unknown",
+                },
+                default = "Unknown",
+            },
+            sbc1ipaddr = {
+                access = "readOnly",
+                type = "string",
+            },
+            sbc2ipaddr = {
+                access = "readOnly",
+                type = "string",
+            },
+            sbc1_ping = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "None",
+                    "Requested",
+                    "Waiting",
+                    "Success",
+                    "Failed",
+                }
+            },
+            sbc2_ping = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "None",
+                    "Requested",
+                    "Waiting",
+                    "Success",
+                    "Failed",
+                }
+            },
+            -- needed for fitting the transactions model
+            status_ping_test= {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "Done",
+                    "Waiting"
+                }
+            },
+        },
+    }
+}
+local function set(mapping, paramName, paramValue, key)
+    conn:call("mmpbx.profile.stats", "reset", {})
+    conn:call("mmpbx.device.stats", "reset", {})
+    return nil
+end
+
+--Check if the ipping is available start the test or
+-- wait till till it becomes free
+local function checkIfAvailableAndStart(host, interface)
+  local pinger_state =  ping_helper.uci_ipping_get(section, "DiagnosticsState")
+  local wait = false
+
+  if (pinger_state == "Complete" or
+     pinger_state == "Error_CannotResolveHostName" or
+     pinger_state == "Error_Internal" or
+     pinger_state == "Error_Other") then
+    for _,v in pairs(state_table) do
+      if(v == "Requested") then
+        wait = true
+      end
+    end
+    if wait == false then
+      pinger_state = "None"
+      ping_helper.uci_ipping_set(section, "DiagnosticsState", "None", commitapply)
+    end
+    return
+  end
+  if pinger_state == "None" then
+    ping_helper.uci_ipping_set(section, "Host", host, commitapply)
+    ping_helper.uci_ipping_set(section, "NumberOfRepetitions", NUM_REP, commitapply)
+    ping_helper.uci_ipping_set(section, "Interface", interface, commitapply)
+    ping_helper.uci_ipping_set(section, "DiagnosticsState", "Requested", commitapply)
+    state_table[host] = "Requested"
+  else
+    state_table[host] = "Waiting"
+  end
+end
+--This is called on read of the state
+local function getState(host)
+  local pinger_state
+
+  if state_table == nil then
+    state_table = {}
+    state_table[host] = "None"
+  end
+  if state_table[host] == nil then
+    state_table[host] = "None"
+  end
+
+  if (state_table[host] == "Success" or state_table[host] == "Failed") then
+    return state_table[host]
+  end
+  if state_table[host] == "Requested" then
+    pinger_state = ping_helper.uci_ipping_get(section, "DiagnosticsState")
+    if pinger_state == "Requested" then
+	  return "Requested"
+    end
+    if pinger_state == "Complete" then
+      local numReq = ping_helper.uci_ipping_get(section, "NumberOfRepetitions")
+      local numRec = ping_helper.uci_ipping_get(section, "SuccessCount")
+      if numReq == numRec then
+        state_table[host] = "Success"
+      else
+        state_table[host] = "Failed"
+      end
+    else
+      state_table[host] = "Failed"
+    end
+
+  end
+
+  return state_table[host]
+end
+
+local function busy()
+    for _,state in pairs(state_table) do
+        if state == "Waiting" then
+            return "Waiting"
+        end
+    end
+
+    return "Done"
+end
+
+
+--This is called to pushes the statemachine to the next state
+-- (external commit apply is needed)
+-- introduced to fit transactions
+local function pushState()
+    local pinger_state
+    pinger_state = ping_helper.uci_ipping_get(section, "DiagnosticsState")
+    if pinger_state == "Complete" then
+        ping_helper.uci_ipping_set(section, "DiagnosticsState", "None", commitapply)
+    end
+    for host,state in pairs(state_table) do
+        if state == "Waiting" then
+            if pinger_state == "None" then
+                ping_helper.uci_ipping_set(section, "Host", host, commitapply)
+                ping_helper.uci_ipping_set(section, "NumberOfRepetitions", NUM_REP, commitapply)
+                ping_helper.uci_ipping_set(section, "DiagnosticsState", "Requested", commitapply)
+                state_table[host] = "Requested"
+            end
+            return
+        end
+    end
+end
+
+local function run_dnsget(options)
+    local cmd, tpattern
+
+    if (not options) or (options.FQDN == "") then
+        return nil
+    end
+
+    if (options.type == "A") then
+        tpattern = "%s+(%d+%.%d+%.%d+%.%d+)"
+    elseif (options.type == "SRV") then
+        tpattern = "%s+.+%s+.+%s+.+%s+.+%s+(.+%..+%..+)%.$"
+    else
+        return nil
+    end
+
+    cmd = format("dnsget -n %s -t %s -o timeout:1 -o attempts:1 %s 2>/dev/null", options.server, options.type, options.FQDN)
+    local pipe = popen(cmd,'r')
+    if pipe then
+        local resolvedhostname, addr
+        local resolvedaddressesv4 = {}
+        for line in pipe:lines() do
+            resolvedhostname = match(line, options.FQDN)
+            if resolvedhostname then
+                addr = match(line, tpattern)
+                if addr then
+                    resolvedaddressesv4[#resolvedaddressesv4+1] = addr
+                end
+            end
+        end
+        pipe:close()
+
+        if resolvedhostname or resolvedaddressesv4 then
+            return resolvedhostname,resolvedaddressesv4
+        else
+            return nil -- unresolved , not an error
+        end
+    else
+        error("Failed to run dnsget")
+    end
+end
+
+local function getDnsServers(key)
+  local servers = {}
+  local v = get_ubus_interface_status(key)
+  v = v and v['dns-server']
+  if (v) then
+      for i, server in ipairs(v) do
+        servers[#servers+1] = server
+      end
+  end
+
+  return servers
+end
+
+local function getProxyIPaddr(mmpbx)
+    local srvquery = {}
+    local nsquery = {}
+    local proxyaddr = {}
+
+    if (not mmpbx) or (mmpbx.primary_proxy == "") then
+        return proxyaddr
+    end
+
+    local dns = getDnsServers(mmpbx.interface)
+    if #dns == 0 then
+        return proxyaddr
+    end
+
+    if mmpbx.primary_proxy_port == "0" then
+        local SRVname = format("_sip._%s.%s", mmpbx.transport_type, mmpbx.primary_proxy)
+        for _,v in ipairs(dns) do
+            srvquery.server = v
+            srvquery.type = "SRV"
+            srvquery.FQDN = SRVname
+            local statusOk,r2,SRVservices = pcall(run_dnsget, srvquery)
+            if statusOk and SRVservices then
+                for _,vv in ipairs(SRVservices) do
+                    nsquery.server = srvquery.server
+                    nsquery.type = "A"
+                    nsquery.FQDN = vv
+                    local resultOk,r2,SRVaddrs = pcall(run_dnsget, nsquery)
+                    if resultOk and SRVaddrs then
+                        for _,vvv in ipairs(SRVaddrs) do
+                            proxyaddr[#proxyaddr+1] = vvv
+                        end
+                    end
+                end
+            end
+        end
+    elseif mmpbx.primary_proxy_port == "5060" then
+        local proxys = {mmpbx.primary_proxy, mmpbx.secondary_proxy}
+        for _,v in ipairs(proxys) do
+            if v == "" then
+                break
+            elseif match(v, "(%d+%.%d+%.%d+%.%d+)") then
+                proxyaddr[#proxyaddr+1] = v
+            else
+                for _,vv in ipairs(dns) do
+                    nsquery.server = vv
+                    nsquery.type = "A"
+                    nsquery.FQDN = v
+                    local resultOk,r2,ipaddrs = pcall(run_dnsget, nsquery)
+                    if resultOk and ipaddrs then
+                        for _,vvv in ipairs(ipaddrs) do
+                            proxyaddr[#proxyaddr+1] = vvv
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local temp = {}
+    for k,v in ipairs(proxyaddr) do
+        temp[v] = v
+    end
+
+    proxyaddr = {}
+    for k,v in pairs(temp) do
+        proxyaddr[#proxyaddr + 1] = v
+    end
+    table.sort(proxyaddr)
+
+    return proxyaddr
+end
+
+local last_mmpbxConf = {
+    primary_proxy = "",
+    secondary_proxy = "",
+    primary_proxy_port = "",
+    transport_type = "",
+    interface = "",
+}
+
+local mmpbxbinding = {config="mmpbxrvsipnet", sectionname="sip_net"}
+local function getmmpbxconf()
+    local mmpbxConf = {}
+    for k,_ in pairs(last_mmpbxConf) do
+        mmpbxbinding.option = k
+        mmpbxConf[k] = uci_helper.get_from_uci(mmpbxbinding)
+    end
+    return mmpbxConf
+end
+
+local function getSbcInfo(key)
+    local ip_changed = false
+    last_mmpbxConf = getmmpbxconf()
+    local SBCipv4addresses = getProxyIPaddr(last_mmpbxConf)
+
+    if SBCipv4addresses[key] then
+        return SBCipv4addresses[key]
+    end
+    return ""
+end
+
+local config = "ipping"
+
+local uci_binding = {
+  DiagnosticsState = { config = config, sectionname = section, option = "state" },
+  Interface = { config = config, sectionname = section, option = "interface" },
+  Host = { config = config, sectionname = section, option = "host" },
+  NumberOfRepetitions = { config = config, sectionname = section, option = "count" },
+  Timeout = { config = config, sectionname = section, option = "timeout" },
+  DataBlockSize = { config = config, sectionname = section, option = "size" },
+  DSCP = { config = config, sectionname = section, option = "dscp" },
+}
+
+local startup = ping_helper.startup
+local clear_ping_results = ping_helper.clear_ping_results
+
+startup(section, uci_binding)
+
+mmpbx.get = {
+    resetCallStats = "false",
+    state = function(mapping, paramName, key)
+        return uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
+    end,
+    mode = function(mapping, paramName, key)
+        local res = "Unknown"
+        local fxsrelay_state = uci_helper.get_from_uci({config="mmpbxbrcmfxsdev", sectionname="fxs_dev_0", option="relay_state"})
+        local fxonet_state = uci_helper.get_from_uci({config="mmpbxbrcmfxonet", sectionname="fxo_profile", option="enabled"})
+        if fxsrelay_state == "0" and fxonet_state == "1" then
+            res = "PSTN"
+        elseif fxsrelay_state == "1" and fxonet_state == "0" then
+            res = "SIP"
+        end
+        return res
+    end,
+    sbc1ipaddr = function(mapping, param, key)
+        local sbc =  getSbcInfo(1)
+        return sbc
+    end,
+    sbc2ipaddr = function(mapping, param, key)
+        local sbc =  getSbcInfo(2)
+        return sbc
+    end,
+    sbc1_ping = function(mapping, param, key)
+        local sbc =  getSbcInfo(1)
+        if sbc ~= "" then
+            return getState(sbc)
+        end
+        return "None"
+    end,
+    sbc2_ping = function(mapping, param, key)
+        local sbc =  getSbcInfo(2)
+        if sbc ~= "" then
+            return getState(sbc)
+        end
+        return "None"
+    end,
+    status_ping_test = busy,
+}
+
+mmpbx.set = {
+    resetCallStats = set,
+    sbc1_ping = function(mapping, param, value, key)
+        local sbc =  getSbcInfo(1)
+        if sbc ~= "" and last_mmpbxConf.interface ~= "" then
+            checkIfAvailableAndStart(sbc, last_mmpbxConf.interface)
+        end
+        return true
+    end,
+    sbc2_ping = function(mapping, param, value, key)
+        local sbc =  getSbcInfo(2)
+        if sbc ~= "" and last_mmpbxConf.interface ~= "" then
+            checkIfAvailableAndStart(sbc, last_mmpbxConf.interface)
+        end
+        return true
+    end,
+    status_ping_test = pushState,
+}
+
+mmpbx.commit = ping_helper.uci_ipping_commit
+mmpbx.revert = ping_helper.uci_ipping_revert
+clear_ping_results(section)
+
+register(mmpbx)

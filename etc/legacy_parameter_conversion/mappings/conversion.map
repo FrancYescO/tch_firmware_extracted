@@ -1,0 +1,304 @@
+local gsub, format, match = string.gsub, string.format, string.match
+local sort, concat = table.sort, table.concat
+local ch = require("tch.configmigration.convert_helper")
+local emc = ch.escape_lua_magic_char
+
+
+
+local map_table = {
+
+["wireless.ini"] = {
+					--Radio state config
+					{
+						key = "radio %C-radio_id=0%D-%C+",
+						uci_config = "wireless",
+						uci_secname = "radio_2G",
+						map = {
+								["state"]	= { uci_option = "state", value = ch.convert_bool },
+						},
+					},
+					--SSID name config
+					{
+						key = "mssid ifconfig ssid_id=0%C+",
+						uci_config = "wireless",
+						uci_secname = "wl0",
+						map = {
+								["ssid"]	= {	uci_option = "ssid" },
+						},
+					},
+					--SSID Configuration
+					{
+						key = "mssid ifconfig ssid_id=0%C+",
+						uci_config = "wireless",
+						uci_secname = "ap0",
+						map = {
+								["apisolation"] = { uci_option = "ap_isolation", value = ch.convert_bool },
+								["any"] 		= { uci_option = "public", value = ch.convert_bool },
+								["secmode"] 	= { uci_option = "security_mode", value = ch.wireless_convert_secmode },
+								["WEPkey"] 		= { uci_option = "wep_key" },
+								["WPAPSKkey"] 	= { uci_option = "wpa_psk_key" },
+						},
+					},
+					--WPS State config
+					{
+						key = "wps config ssid_id=0%D-%C-radio_id=0%C+",
+						uci_config = "wireless",
+						uci_secname = "ap0",
+						map = { 
+								["state"] = { uci_option = "wps_state" , value = ch.convert_bool }, 
+						},
+					},
+					--MAC Access list allow and deny
+					{
+						key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=allow%C+",
+						uci_config = "wireless",
+						uci_secname = "ap0",
+						map = { 
+								["hwaddr"] = { uci_option = "acl_accept_list", action = "add_list" },
+						},
+					},
+					{
+						key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=deny%C+",
+						uci_config = "wireless",
+						uci_secname = "ap0",
+						map = { 
+								["hwaddr"] = { uci_option = "acl_deny_list", action = "add_list" },
+						},
+					},
+					
+				},
+				
+["dyndns.ini"] = {
+					-- single instance case: one table means one instance here
+					{
+						key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+						uci_config = "ddns",
+						uci_secname = "myddns_ipv4",
+						map = {
+							  --we use legacy parameter name as key for quick index,
+								["name"] = {uci_option = "domain"},
+						},
+					},
+					{
+						key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+						uci_config = "ddns",
+						uci_secname = "myddns_ipv4",
+						map = {
+							  --we use legacy parameter name as key for quick index,
+								["name"] = {uci_option = "lookup_host"},
+						},
+					},
+					{
+						key = "modify name=%C+ intf=%C+",
+						uci_config = "ddns",
+						uci_secname = "myddns_ipv4",
+						map = {
+							   ["status"] = { uci_option = "enabled", value = ch.convert_bool },
+							   ["user"] = { uci_option = "username" },
+							   ["password"] = { uci_option = "password", value = ch.decrypt },
+							   ["service"] = { uci_option = "service_name", value = ch.convert_ddns_service },
+						},
+					},
+				},
+				
+["service.ini"] = {
+					{
+					  keycap = "assign name=(%C+) host=%C+",
+					  type = "multiple",
+					  maps = {
+						{
+						  keygen = function (t) return format("rule add name=(%s) %%C+portrange=([%%d%%-]+)%%C+", emc(t[1])) end,
+						  type = "multiple",
+						  maps = {
+							{
+							  --uci_secname = nil, --it means nothing will be converted, because this element just do some preparations.
+							  keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+							  uci_config = "firewall",
+							  map = {
+								["mode"] = { uci_option = "target", value = ch.service_get_portmapping_mode, },
+							  },
+							},
+							{
+							  keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+							  uci_config = "firewall",
+							  map = {
+								-- when use UCI 'add' action, you need to provide 'uci_sectype' element.
+								["name"] = { uci_option = "name", uci_sectype = "userredirect", action = ch.service_add_portmapping_if_need },
+							  },
+							},
+							{
+							  keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+							  uci_config = "firewall",
+							  uci_secname = ch.service_get_uci_secname,
+							  map = {
+								["name"]      = { uci_option = "name", },
+								["protocol"]  = { uci_option = "proto", action = "add_list",
+												  -- looks like homeware has a bug, type of 'proto' is list, however,
+												  -- if we provide a list like {"tcp","udp"}, GUI will be confused
+												  -- when we change a port mapping entry.
+												  value = function (_,lv) if type(lv) == "table" then sort(lv);return concat(lv);end end },
+								["ipversion"] = { uci_option = "family",
+												  value = function (_,lv) if type(lv) == "table" then return "any" end end, },
+								["mode"]      = { uci_option = "target", value = function (_,_,lt) return lt._maps_store["_target"] end, },
+								["portrange"] = { uci_option = "src_dport", },
+							  },
+							},
+							{
+							  keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+							  uci_config = "firewall",
+							  uci_secname = ch.service_get_uci_secname,
+							  map = {
+								-- The parameter 'baseport' is optional in legacy, 'portrange' is mandatory;
+								-- but in homeware the 'dest_port' is mandatory. We cannot map an optional
+								-- parameter to a mandatory one, so we have to create a new map element to
+								-- map a mandatory parameter to another mandatory one.
+								["portrange"] = { uci_option = "dest_port", value = ch.service_convert_baseport_to_dest_port, },
+								-- uci option 'src' is mandatory when target is DNAT in homeware, in this case value usually is 'wan'
+								-- uci option 'dest' is mandatory when target is SNAT in homeware, in this case value usually is 'wan'
+								["name"] = { uci_option = function (_,_,lt) return lt._maps_store["_target"] == "DNAT" and "src" or "dest" end,
+											 value = "wan", },
+							  },
+							},
+							{
+							  keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+							  uci_config = "firewall",
+							  uci_secname = ch.service_get_uci_secname,
+							  map = {
+								["host"] = { uci_option = "dest_ip", },
+								-- there is no corresponding legacy parameter for uci_option "enabled",
+								-- since we only migrated effective legacy port mapping, so homeware
+								-- option "enabled" should always be "1"
+								["name"] = { uci_option = "enabled", value = "1", },
+							  },
+							},
+						  },
+						},
+					  },
+					},
+				},
+
+["voice.ini"] = {
+					--Proxy address config
+					{
+						key = "sip config %C+",
+						uci_config = "mmpbxrvsipnet",
+						uci_secname = "sip_net",
+						map = {
+								["primproxyaddr"]	= {	uci_option = "primary_proxy"},
+						},
+					},
+					--Profile 1 config
+					{
+						key = "profile add Index=0 %C+",
+						uci_config = "mmpbxrvsipnet",
+						uci_secname = "sip_profile_0",
+						map = {
+								["SIP_URI"]		= {	uci_option = "uri"},
+								["username"]	= {	uci_option = "user_name"},
+								["password"]	= {	uci_option = "password", value = ch.decrypt },
+								["displayname"]	= {	uci_option = "display_name" },
+								["enable"]		= { uci_option = "enabled", value = ch.convert_bool },
+						},
+					},
+					--Profile 2 config
+					{
+						key = "profile add Index=1 %C+",
+						uci_config = "mmpbxrvsipnet",
+						uci_secname = "sip_profile_1",
+						map = {
+								["SIP_URI"]		= {	uci_option = "uri"},
+								["username"]	= {	uci_option = "user_name"},
+								["password"]	= {	uci_option = "password", value = ch.decrypt },
+								["displayname"]	= {	uci_option = "display_name" },
+								["enable"]		= { uci_option = "enabled", value = ch.convert_bool },
+						},
+					},
+					--Dial Plan configuration from prefix 1 to 9
+					{
+						key = "dialplan add prefix=1 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[0]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=2 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[1]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=3 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[2]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=4 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[3]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=5 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[4]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=6 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[5]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=7 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[6]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=8 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[7]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+					{
+						key = "dialplan add prefix=9 %C+",
+						uci_config = "mmpbx",
+						uci_secname = "@dial_plan_entry[9]",
+						map = {
+								["minimumdigits"]	= { uci_option = "min_length" },
+								["maximumdigits"]	= { uci_option = "max_length" },
+						},
+					},
+				},
+				
+["dmz.ini"] = {},
+
+}
+
+return map_table

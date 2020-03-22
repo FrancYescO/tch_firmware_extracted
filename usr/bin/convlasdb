@@ -1,0 +1,156 @@
+#!/usr/bin/lua
+local getenv = os.getenv
+local open = io.open
+local sqlite = require("lsqlite3")
+local args = {...}
+local homeware_lasdb = args[1]
+local debugfile
+
+require("lsqlite3")
+
+local new_indexes = {
+    'ReadStatus',
+    'LineId',
+    'Direction',
+    'Local',
+    'LocalName',
+    'Remote',
+    'RemoteName',
+    'ProfileName',
+    'network',
+    'startTime',
+    'connectedTime',
+    'endTime',
+    'deviceName',
+    'callkey',
+    'terminationReason',
+    'NumberOfCalls',
+    'LineIdSub',
+    'NumberAtt_internal',
+    'NumberAtt_Own',
+    'LineName',
+    'CallType',
+    'TxPackets',
+    'RxPackets',
+    'TxBytes',
+    'RxBytes',
+    'PacketsLost',
+    'ReceivePacketLossRate',
+    'PacketsDiscarded',
+    'PacketsDiscardedRate',
+    'SignalLevel',
+    'NoiseLevel',
+    'RERL',
+    'RFactor',
+    'ExternalRFactor',
+    'MosLQ',
+    'MosCQ',
+    'AverageRoundTripDelay',
+    'WorstRoundTripDelay',
+    'RoundTripDelay',
+    'ReceiveInterarrivalJitter',
+    'ReceiveMinInterarrivalJitter',
+    'ReceiveMaxInterarrivalJitter',
+    'ReceiveDevInterarrivalJitter',
+    'AverageReceiveInterarrivalJitter',
+    'WorstReceiveInterarrivalJitter',
+    'Overruns',
+    'Underruns',
+    'FarEndTxPackets',
+    'FarEndTxBytes',
+    'FarEndPacketsLost',
+    'FarEndPacketLossRate',
+    'FarEndPacketsDiscardedRate',
+    'FarEndSignalLevel',
+    'FarEndNoiseLevel',
+    'FarEndRERL',
+    'FarEndRFactor',
+    'FarEndExternalRFactor',
+    'FarEndMosLQ',
+    'FarEndMosCQ',
+    'AverageFarEndRoundTripDelay',
+    'FarEndWorstRoundTripDelay',
+    'FarEndRoundTripDelay',
+    'FarEndInterarrivalJitter',
+    'FarEndReceiveMinInterarrivalJitter',
+    'FarEndReceiveMaxInterarrivalJitter',
+    'FarEndReceiveDevInterarrivalJitter',
+    'AverageFarEndInterarrivalJitter',
+    'FarEndWorstReceiveInterarrivalJitter',
+    'InboundTotalRTCPPackets',
+    'OutboundTotalRTCPPackets',
+    'InboundSumFractionLoss',
+    'InboundSumSqrFractionLoss',
+    'OutboundSumFractionLoss',
+    'OutboundSumSqrFractionLoss',
+    'InboundSumInterarrivalJitter',
+    'InboundSumSqrInterarrivalJitter',
+    'OutboundSumInterarrivalJitter',
+    'OutboundSumSqrInterarrivalJitter',
+    'SumRTCPRoundTripDelay',
+    'SumSqrRTCPRoundTripDelay',
+    'SumRTCPOneWayDelay',
+    'SumSqrRTCPOneWayDelay',
+    'MaxRTCPOneWayDelay',
+    'Codec',
+    'FarEndIPAddress',
+    'FarEndUDPPort',
+    'LocalIPAddress',
+    'LocalUDPPort'
+};
+
+local function echo_debug(fmt, ...)
+    local s = fmt:format(...)
+    io.stderr:write(s, '\n')
+    if debugfile then
+        local f = open(debugfile, 'a')
+        if f then
+            f:write(s, '\n')
+            f:close()
+        end
+    end
+end
+
+local function file_exists(name)
+    local f=io.open(name,"r")
+    if f~=nil then
+        io.close(f)
+        return true
+    else
+        return false
+    end
+end
+
+debugfile = getenv('DEBUG')
+
+if file_exists(homeware_lasdb) == true then
+   db_lasdb = sqlite.open(homeware_lasdb)
+   local alterSql = ""
+
+   for i, new_index in ipairs(new_indexes) do
+     local sql = "SELECT ".. new_index.." FROM calllog"
+     db_lasdb:exec(sql)
+     add = db_lasdb:errcode()
+     if add == 1 then
+        if new_index == "Local" or new_index == "LocalName" or new_index == "Remote" or new_index == "RemoteName" or
+           new_index == "network" or new_index == "deviceName" or new_index == "terminationReason" or
+           new_index == "LineName" or new_index == "ProfileName" or new_index == "Codec" or
+           new_index == "FarEndIPAddress" or new_index == "LocalIPAddress" then
+           alterSql = "ALTER TABLE calllog ADD COLUMN ".. new_index.." TEXT;"
+        elseif new_index == "startTime" or new_index == "connectedTime" or new_index == "endTime" then
+           alterSql = "ALTER TABLE calllog ADD COLUMN ".. new_index.." DATE;"
+        else
+           alterSql = "ALTER TABLE calllog ADD COLUMN ".. new_index.." INTEGER DEFAULT 0;"
+        end
+        db_lasdb:exec(alterSql)
+        echo_debug ("Entry Added: %s", new_index)
+     else
+        echo_debug ("Entry Already exist: %s", new_index)
+     end
+  end
+  if db_lasdb:exec('delete from DectContactTypes') == sqlite.OK then
+      echo_debug("delete from DectContactTypes success")
+  end
+  db_lasdb:close()
+
+end

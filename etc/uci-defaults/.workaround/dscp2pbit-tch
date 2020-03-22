@@ -1,0 +1,178 @@
+#!/bin/sh /etc/rc.common
+#set -x
+
+START=90
+
+BCM_VLAN_TOOL=/usr/bin/vlanctl
+BCM_VLAN_CMD=--cfg-dscp2pbits
+BCM_IF_SELECT=--if
+
+convert_class_to_dec(){
+local class=$1
+
+case $class in
+	'BE')
+		return 0 ;;
+	'EF')
+		return 46 ;;
+	'AF11')
+		return 10 ;;
+	'AF12')
+		return 12 ;;
+	'AF13')
+		return 14 ;;
+	'AF21')
+		return 18 ;;
+	'AF22')
+		return 20 ;;
+	'AF23')
+		return 22 ;;
+	'AF31')
+		return 26 ;;
+	'AF32')
+		return 28 ;;
+	'AF33')
+		return 30 ;;
+	'AF41')
+		return 34 ;;
+	'AF42')
+		return 36 ;;
+	'AF43')
+		return 38 ;;
+	'CS0')
+		return 0 ;;
+	'CS1')
+		return 8 ;;
+	'CS2')
+		return 16 ;;
+	'CS3')
+		return 24 ;;
+	'CS4')
+		return 32 ;;
+	'CS5')
+		return 40 ;;
+	'CS6')
+		return 48 ;;
+	'CS7')
+		return 56 ;;
+	*)
+		echo 'wrong dscp value'
+		return 0;;
+	esac
+}
+
+h2d(){
+    local value
+    value=`printf "%d" "$1"`
+    echo "$value"
+    return $value
+}
+d2h(){
+  local value
+  value=`printf "%x" "$1"`
+  echo "$value"
+  eval "$2=$value"
+}
+
+
+parse_dscp_to_pbit(){
+   local rule=$1
+   local dscpvalue
+   local dscpvaluehex
+   local dscpvaluedec
+   local pbitvalue
+   local ip_interface
+   local level3_ip_interface
+   local vlanmode=$2
+   local interface
+   
+   config_get dscpvalue "$rule" dscpvalue
+   config_get pbitvalue "$rule" pbitvalue
+   config_get interface "$rule" interface
+   config_get vid "$rule" vid
+   config_get ip_interface "$rule" ip_interface
+   if [ -z dscpvalue ]; then
+     echo "the dscpvalue is not set for dscp2pbit config"
+     return
+   fi
+   if [ -z pbitvalue ]; then
+      echo "the pbitvalue is not set for dscp2pbit config"
+   fi
+   if [ -z interface ]; then
+      echo " the interface is not set for dscp2pbit config"
+   fi
+   if [ "$vlanmode" = "linux" ] ; then
+      if [ -z ip_interface ]; then
+        echo " the interface is not set for dscp2pbit config"
+      fi
+   fi
+   dscp_option="--dscp"
+   if [ -z "${dscpvalue%%[EBCA]*}" ] ; then
+     dscp_option="--dscp-class"
+   fi
+   
+   case $dscp_option in
+		"--dscp-class")
+			convert_class_to_dec $dscpvalue
+			dscpvaluedec=$?
+			d2h $dscpvaluedec dscpvaluehex
+			;;
+		"--dscp")
+			if [ "${dscpvalue:0:2}" == "0x" ] || [ "${dscpvalue:0:2}" == "0X" ] ; then
+			   h2d $dscpvalue 
+			   dscpvaluedec=$? 
+			   dscpvaluehex=$dscpvalue
+			else
+			   dscpvaluedec=$dscpvalue
+                           d2h $dscpvalue dscpvaluehex
+			fi
+			echo "$dscpvaluehex"
+			echo "$dscpvaluedec"
+			;;
+   esac
+   		
+   if [ "$vlanmode" = "bcmvopi" ]; then
+     $BCM_VLAN_TOOL $BCM_IF_SELECT "$interface" $BCM_VLAN_CMD "$dscpvaluedec" "$pbitvalue"
+   else
+	 network_get_device level3_ip_interface "$ip_interface"
+     if [ "$dscp_option" == "--dscp" ]; then
+	    iptables -t mangle -A dscp2pbit -o "$level3_ip_interface" -m dscp "$dscp_option" "$dscpvaluedec" -j CLASSIFY --set-class 0:"$dscpvaluehex"
+     else
+		iptables -t mangle -A dscp2pbit -o "$level3_ip_interface" -m dscp "$dscp_option" "$dscpvalue" -j CLASSIFY --set-class 0:"$dscpvaluehex"
+     fi
+     vconfig set_egress_map "$interface"  "$dscpvaluedec" "$pbitvalue"
+   fi  
+}
+
+start(){
+   include /lib/network
+   . /lib/functions/network.sh
+
+   local vlanmode
+   config_load network
+   config_get vlanmode globals vlanmode "linux"
+   if [ "$vlanmode" = "linux" ]; then
+       iptables -t mangle -D FORWARD -j dscp2pbit
+       iptables -t mangle -D OUTPUT -j dscp2pbit
+       iptables -t mangle -N dscp2pbit
+       iptables -t mangle -A FORWARD -j dscp2pbit
+       iptables -t mangle -A OUTPUT -j dscp2pbit
+
+   fi
+   config_load dscp2pbit
+   config_foreach parse_dscp_to_pbit rule "$vlanmode"
+
+}
+
+stop(){  
+  local vlanmode
+  config_load network
+  config_get vlanmode globals vlanmode "linux"
+  if [ "$vlanmode" = "linux" ]; then
+     iptables -t mangle -F dscp2pbit 
+     iptables -t mangle -D FORWARD -j dscp2pbit
+     iptables -t mangle -D OUTPUT -j dscp2pbit
+     iptables -t mangle -X dscp2pbit
+  fi
+}
+  
