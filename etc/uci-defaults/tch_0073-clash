@@ -1,0 +1,99 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+
+config="clash"
+
+# Not ideal, but provision.sh insists in starting to count from 500.
+_top_id=550
+
+_log() {
+	logger -t ${config} "$1"
+}
+
+# Helper function to detect closed build
+__is_closed_build() {
+	expr `uci show version.@version[0].version | cut -d '-' -f2 | cut -c3` % 2 || {
+		return 0
+	}
+	return 1
+}
+
+# Close root access on closed builds.
+_close_root_access() {
+	sed -i 's#\(root.*\)/bin/ash#\1/bin/false#' /etc/passwd
+}
+
+# Add (restricted-)clash to /etc/shells
+_add_shell() {
+	# Shells set to /etc/passwd must be present in /etc/shells
+	grep -q "restricted-clash" /etc/shells || echo "/usr/bin/restricted-clash" >>/etc/shells
+}
+
+# Set shell to (restricted-)clash for the specified user
+_set_shell() {
+	local usr=$1
+
+	# Set the default shell to restricted-clash, which will verify some access rights
+	sed -i "s#\($usr.*\)/bin/ash#\1/usr/bin/restricted-clash#" /etc/passwd
+}
+
+# Create a new user in the OpenWRT system
+_create_clash_user() {
+	local usr="$1"
+	local key
+
+	# See if a dedicated password was specified by optional script firstboot-clash-passw script
+	local passw=$(uci get -q -P /var/state clash.$usr.passw)
+	if [[ $passw ]]; then
+		_log "Creating clash user $usr with password from /var/state"
+		key="$passw"
+		# Clean up for security - must not leave the passwords in the clear
+		uci -P /var/state del clash.$usr.passw
+	else
+		# If no dedicated password specified, see if a gak_id is configured in web config
+		local gid=$(uci get -q ${config}.$usr.gak_id)
+
+		if [[ ! $gid ]]; then
+			_log "Error: No gak_id or configured password for user $usr"
+			return 1
+		else
+			key=$(get_access_key $gid)
+			_log "Creating clash user $usr with key specified by gak_id $gid"
+		fi
+	fi
+
+	if [[ $key ]]; then
+		create_user $usr $key
+		# Always _set_shell only AFTER create_user as the former sets the default shell to /etc/passwd which we then change to (restricted-)clash.
+		_set_shell $usr
+		local hfile=$(uci get ${config}.${usr}.historyfile)
+		if [ -n "${hfile}" ]; then
+			touch "${hfile}"
+			chown ${usr}:${usr} ${hfile}
+		fi
+	else
+		_log "Error: Could not set $usr password for Clash; key is empty"
+		return 1
+	fi
+}
+
+# The entry point function which calls the individual setup functions
+setup() {
+	config_load ${config}
+
+	# Create the users as specified in config; these should match users from web config.
+	config_foreach _create_clash_user user
+
+	# Add (restricted-)clash to shells
+	_add_shell
+
+	# Close access with user `root` for closed builds
+
+if __is_closed_build; then
+_close_root_access
+fi
+}
+
+setup
+

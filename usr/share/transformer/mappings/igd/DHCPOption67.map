@@ -1,0 +1,104 @@
+-- This mapping registers InternetGatewayDevice. and Device. object trees
+-- Since DHCPv4.Server.Pool.Option.map (Device2) mapping only touches the global dhcp_option list (dhcp.lan.dhcp_option)
+-- we need to register an object here so that bootfile-name option only gets applied to 'stb' vendorclass
+
+local Multi_DHCPOption67_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_DHCPOption67.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BootFile = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local dhcp_config = { config="dhcp" }
+local dhcp_binding = { config="dhcp", sectionname="stb", option = "dhcp_option" }
+local vendorclass_binding = { config="dhcp", sectionname="stb", option="bootfilename" }
+
+----------------------------------------------------------
+-- Functions
+----------------------------------------------------------
+-- Checks how to update dhcp_option list with bootfile-name option
+--   If no bootfile-name entry exists, creates a new one in the table
+--   If bootfile-name entry exists, removes existing table entry and adds new one with new value
+-- Despite which path is taken to update dhcp_option, all other entries are preserved
+-- @param #string value new dhcp bootfile-name value
+local function handleDHCPOptions(value)
+    -- gather list of DHCP options
+    local dhcpList = uci_helper.get_from_uci(dhcp_binding)
+    if type(dhcpList) == "table" then
+        for k,v in ipairs(dhcpList) do
+            -- check for an existing bootfile-name option
+            if v:find("option:bootfile-name,", 1, true) ~= nil then
+                -- delete existing bootfile-name entry
+                table.remove(dhcpList, k)
+            end
+        end
+        if value and value ~= "" then
+            -- add new dhcp bootfile-name entry
+            table.insert(dhcpList, string.format('option:bootfile-name,"%s"', value))
+        end
+        -- store information to UCI layer
+        uci_helper.set_on_uci(dhcp_binding, dhcpList, commitapply)
+    end
+end
+
+-- Acquires information for vendor class binding (including dhcp bootfilename
+-- @return #string name of the bootstrap file
+local function getVendorClassBinding()
+    return uci_helper.get_from_uci(vendorclass_binding)
+end
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+Multi_DHCPOption67_.get = {
+  BootFile = function(mapping)
+    return getVendorClassBinding()
+  end,
+}
+
+Multi_DHCPOption67_.getall = function(mapping)
+  return {
+    BootFile = getVendorClassBinding(),
+  }
+end
+
+Multi_DHCPOption67_.set = {
+  BootFile = function(mapping, param, value, key)
+    -- handle DHCP option list info
+    handleDHCPOptions(value)
+    -- update UCI vendorclass binding bootfile-name to match
+    uci_helper.set_on_uci(vendorclass_binding, value, commitapply)
+  end,
+}
+
+Multi_DHCPOption67_.commit = function()
+  uci_helper.commit(dhcp_config)
+end
+
+Multi_DHCPOption67_.revert = function()
+  uci_helper.revert(dhcp_config)
+end
+
+----------------------------------------------------------
+-- Register
+----------------------------------------------------------
+-- #ROOT is just a placeholder for the multi-root object name
+-- Table in the last argument of duplicate() call contains actual root paths to register this mapping under
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DHCPOption67_, "#ROOT", { "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement", "Device.DHCPv4.Server.Pool.{i}" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
