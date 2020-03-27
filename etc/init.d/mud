@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+
+START=97
+STOP=03
+MUD_PID_FILE=/var/run/mud.pid
+FILE_TYPE=/etc/mud/mud_file_type_config.ini
+MUD_BIN=/usr/bin/mud
+MNT_PATH=/mnt/usb
+
+_log(){
+	logger -t mud "$1"
+}
+
+start(){
+	if [ -f $MUD_PID_FILE ]; then
+		return 1
+	fi
+
+	if [ ! -d $MNT_PATH ]; then
+		mkdir -p "${MNT_PATH}"
+		chmod 777 "$(dirname ${MNT_PATH})"
+	fi
+
+	local loglevel
+	config_load dlnad
+	config_get loglevel log mud_logLevel
+
+	if [ -x $MUD_BIN ]; then
+		_log "mud start."
+		if [ -z $loglevel ]; then
+			$MUD_BIN -d -t $FILE_TYPE
+		else
+			$MUD_BIN -d -t $FILE_TYPE -l $loglevel
+		fi
+	else
+		_log "mud not present."
+	fi
+}
+
+stop(){
+	service_stop $MUD_BIN
+	if [ -f $MUD_PID_FILE ]; then
+		rm -f $MUD_PID_FILE
+	fi
+	_log "mud stopped."
+}
+
+restart(){
+	_log "Stopping mud."
+	stop
+	_log "Starting mud."
+	start
+}

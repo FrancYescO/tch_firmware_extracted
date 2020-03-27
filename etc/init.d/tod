@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+
+START=96
+APP=tod.lua
+TIMECHANGEMONITOR_APP=time_change_monitor.lua
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+unset SERVICE_MATCH_EXEC
+
+config_load "tod"
+
+start() {
+    local enabled
+    config_get_bool enabled global enabled 0
+    [ $enabled -eq 0 ] && return 0
+
+    if [ -x /sbin/$TIMECHANGEMONITOR_APP ]; then
+        service_start /sbin/$TIMECHANGEMONITOR_APP
+    fi
+        service_start /sbin/$APP
+}
+
+stop() {
+    if [ -x /sbin/$TIMECHANGEMONITOR_APP ]; then
+        service_stop /sbin/$TIMECHANGEMONITOR_APP
+    fi
+    service_stop /sbin/$APP
+
+}
