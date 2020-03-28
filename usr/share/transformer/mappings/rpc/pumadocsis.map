@@ -1,0 +1,211 @@
+local find = string.find
+local conn = mapper("ubus").connect()
+local logger = require("transformer.logger")
+local log = logger.new("puma_docsis", 4)
+
+local rpc_docsis_ = {
+  objectType = {
+    name = "rpc.docsis.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      status = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local f = io.open("/usr/bin/puma_docsis_ubus", "r") 
+if (f == nil) then
+  error("Not able to locate the ubus daemon")
+  return
+else
+  f:close()
+end
+
+rpc_docsis_.get = {
+  status = function()
+    local status = conn:call("docsis", "status", { })
+    return status.status
+  end,
+}
+
+register(rpc_docsis_)
+
+local function get_channel_entries(mappings)
+  local is_upstream = string.match(mappings.objectType.name, "us_channels")
+  local n_channels = conn:call("docsis", is_upstream and "get_n_us_channels" or
+    "get_n_ds_channels", { })
+  if n_channels == nil then
+    log:warning("failed retreiving number of channels")
+    return nil
+  end
+
+  local Channels={}
+  for i = 1, n_channels.n_channels do
+    Channels[#Channels+1] = tostring(i)
+  end
+
+  return Channels
+end
+
+-- rpc.docsis.ds_channels.{i}
+local rpc_docsis_ds_channels_i_ = {
+  objectType = {
+    name = "rpc.docsis.ds_channels.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      channel_idx = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      lock_status = {
+          access = "readOnly",
+          type = "string",
+      },
+      modulation = {
+          access = "readOnly",
+          type = "string",
+      },
+      channel_id = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      frequency = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      power = {
+          access = "readOnly",
+          type = "string",
+      },
+      mse = {
+          access = "readOnly",
+          type = "long",
+      },
+      correctables = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      uncorrectables = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+    },
+  },
+}
+
+-- Convert a device key to device information
+local function key2channel(key, is_upstream)
+  local channel = conn:call("docsis", is_upstream and "get_us_channels" or "get_ds_channels" , { ["channel_idx"] = key })
+  -- only one entry should be present
+  local _, v = next(channel)
+  return v
+end
+
+local function get_channel(mapping, param, key)
+  if param == "channel_idx" then
+    return key
+  end
+  return key2channel(key, string.match(mapping.objectType.name, "us_channels"))[param]
+end
+
+local function getall_channels(mapping, key)
+  local data = key2channel(key, string.match(mapping.objectType.name, "us_channels"))
+  data.channel_idx = key
+  return data
+end
+
+rpc_docsis_ds_channels_i_.entries =  get_channel_entries
+rpc_docsis_ds_channels_i_.get = get_channel
+rpc_docsis_ds_channels_i_.getall = getall_channels
+
+register(rpc_docsis_ds_channels_i_)
+
+-- rpc.docsis.us_channels.{i}
+local rpc_docsis_us_channels_i_ = {
+  objectType = {
+    name = "rpc.docsis.us_channels.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      channel_idx = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      enabled = {
+          access = "readOnly",
+          type = "string",
+      },
+      modulation = {
+          access = "readOnly",
+          type = "string",
+      },
+      channel_id = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      frequency = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      power = {
+          access = "readOnly",
+          type = "string",
+      },
+      sym_rate = {
+          access = "readOnly",
+          type = "string",
+      },
+    },
+  },
+}
+
+rpc_docsis_us_channels_i_.entries =  get_channel_entries
+rpc_docsis_us_channels_i_.get = get_channel
+rpc_docsis_us_channels_i_.getall = getall_channels
+
+register(rpc_docsis_us_channels_i_)
+
+local docsis_network_interface_ = {
+    objectType = {
+        name = "rpc.docsis.interface.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            ipaddr = {
+                access = "readOnly",
+                type = "string",
+            },
+        }
+    }
+}
+
+local function docsis_interfaces()
+    return conn:call("network.interface.wan0", "status", {}) or ""
+end
+
+docsis_network_interface_.get = {
+    ipaddr = function(mapping, param, key)
+        local ip
+        local intf = docsis_interfaces()
+        if (intf ~= "") and (intf['ipv4-address'] ~= nil) then
+            for _,ip in pairs(intf['ipv4-address']) do
+                if (ip ~= nil) then
+                    return (ip['address'])
+                end
+            end
+        end
+        return ""
+    end
+}
+
+docsis_network_interface_.entries = docsis_interfaces
+register(docsis_network_interface_)

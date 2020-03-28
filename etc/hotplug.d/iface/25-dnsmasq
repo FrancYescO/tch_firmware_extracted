@@ -1,0 +1,24 @@
+#!/bin/sh
+
+dhcp_interface_check()
+{
+	local iface dnsmasq_cfg ignore
+
+	config_get iface "$1" interface
+	#config_get dnsmasq_cfg "$1" dnsmasq_config
+	config_get ignore "$1" ignore
+	[ "$iface" = "$INTERFACE" -a "$ignore" != 1 ] || return
+
+	if [ -z "$dnsmasq_cfg"]; then
+		/etc/init.d/dnsmasq start && exit 0
+	else
+		/etc/init.d/dnsmasq start $dnsmasq_cfg && exit 0
+	fi
+}
+
+[ "$ACTION" = ifup ] || exit 0
+
+/etc/init.d/dnsmasq enabled && {
+	config_load "dhcp"
+	config_foreach dhcp_interface_check dhcp
+}

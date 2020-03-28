@@ -1,0 +1,242 @@
+-- DESCRIPTION:
+--   provide rpc.network.firewall.pinholerule table from the uci data model
+--   firewall.pinholerule
+--   This adds some fields to provide more control in the WebUI.
+--   It also zero's out the IP address so that it can be dynamically generated
+--   from the MAC address.
+--   (Note: Developed for IPv6 requirement in the wanservices web page.
+--    IPv4 support is not well tested)
+--
+
+-- global functions used
+local mapper, register, next = mapper, register, next
+
+-- forward declare functions
+local generateUnusedSection
+
+-- library helpers
+local ubus_connect = mapper("ubus").connect()
+
+-- uci.firewall.pinholerule.{i}
+-- This is how the uci table we are duplicating in rpc is laid out
+local mapinfo_rule_uci = {
+    config = "firewall",
+    type = "pinholerule",
+    options = {
+        "enabled", "name", "family", "src", "dest", "ipset", "extra", "limit",
+        "limit_burst", "utc_time",
+        "start_date", "stop_date", "start_time", "stop_time", "weekdays",
+        "monthdays", "mark", "set_mark", "set_xmark",
+        "target",
+        "proto",       -- this is wrong ... but the uci mapping forces this
+        "dest_mac",    -- added, Used to recreate dest_ip.
+    },
+
+    lists = { "icmp_type", "src_ip", "src_mac", "src_port",
+              "dest_ip", "dest_port", },
+}
+
+-- This map lets us access the underlying uci table
+local mapping_rule_uci = mapper("uci_1to1").createNamedMultiMap(mapinfo_rule_uci)
+
+-- register this to transformer. It has a transformer specified layout and
+-- It is passed back to all the callbacks as the "mapping" argument
+local mapping_rule_rpc = {
+    uciMap = mapping_rule_uci, -- so the underlying uci is available in callbacks
+    objectType = {
+        name = "rpc.network.firewall.pinholerule.{i}.",
+        access = mapping_rule_uci.objectType.access,
+        minEntries = mapping_rule_uci.objectType.minEntries,
+        maxEntries = mapping_rule_uci.objectType.maxEntries,
+        parameters = mapping_rule_uci.objectType.parameters,
+    }
+}
+
+-- PURPOSE: Standard mapping "get" function
+-- RETURNS: value as string or nil + errmsg
+mapping_rule_rpc.get = function(mapping, param, key)
+    return mapping.uciMap.get(mapping.uciMap, param, key)
+end
+
+-- PURPOSE: Standard mapping "getall" function
+-- RETURNS: table with all parmeters of a given rule (or, nil + err)
+mapping_rule_rpc.getall = function(mapping, key)
+    return mapping.uciMap.getall(mapping.uciMap, key)
+end
+
+-- PURPOSE: Standard mapping "entries" function
+-- RETURNS: Array of keys or (names, keys) (or nil, + err)
+mapping_rule_rpc.entries = function(mapping)
+    return mapping.uciMap.entries(mapping.uciMap)
+end
+
+-- PURPOSE: Standard mapping "add" function
+-- RETURNS: unique 'key' of the newly added instance (or nil + err)
+mapping_rule_rpc.add = function(mapping, name)
+    local err     -- possible error message
+
+    if (name == nil) then
+        name, err = generateUnusedSection(mapping.uciMap.binding["type"], mapping.uciMap.instances)
+    end
+
+    return mapping.uciMap.add(mapping.uciMap, name)
+end
+
+-- PURPOSE: Standard mapping "set" function
+-- RETURNS: true (or nil + err) (or apparently nothing?)
+mapping_rule_rpc.set = function(mapping, param, value, key)
+    return mapping.uciMap.set(mapping.uciMap, param, value, key)
+end
+
+-- PURPOSE: Standard mapping "delete" function
+--     if an entry is deleted make certain it is removed from
+--     /var/state/firewall
+-- RETURNS: true (or nil + err)
+mapping_rule_rpc.delete = function(mapping, key)
+
+    -- update /var/state/firewall
+    -- Notify pinholehelper that we deleted something.
+    ubus_connect:send("pinholerule.delete", {})
+
+    return mapping.uciMap.delete(mapping.uciMap, key)
+end
+
+-- PURPOSE: Standard mapping "commit" function
+--     This means a "row" is considered "official". Now we need to
+--     update the /var/state/firewall file with the valid IPv6 addresses
+-- RETURNS: true (or nil + err)
+mapping_rule_rpc.commit = function(mapping)
+    local result, errmsg -- standard return
+
+    result, errmsg = mapping.uciMap.commit(mapping.uciMap)
+
+    if (result) then
+        -- update /var/state/firewall
+        -- Notify pinholehelper that we modified something.
+        -- dynamic dest_ip might need changed
+        ubus_connect:send("pinholerule.update", {})
+    end
+
+    return result, errmsg
+end
+
+-- PURPOSE: Standard mapping "revert" function
+-- RETURNS: true (or nil + err)
+mapping_rule_rpc.revert = function(mapping)
+    return mapping.uciMap.revert(mapping.uciMap)
+end
+
+-- PURPOSE: Generate a unique entry for the table existingSections
+--      using the prefix "prefix".
+-- PARAMS:
+--      prefix - first part of the name to create
+--      existingSections - Table of all the existing section names
+--            where our new unique value must fit
+-- RETURNS: unique string for index in map (or nil, err)
+function generateUnusedSection(prefix, existingSections)
+    local name   -- new name
+    local start  -- start for unique number
+    local id     -- current unique # to test.
+
+    start = #existingSections
+    id = start
+
+    -- keep counting until we find an open spot
+    repeat
+        if id >= 0xFFFF then
+            id = 0
+        else
+            id = id + 1
+        end
+        if id == start then
+            return nil, "Failed to generate an unique name for the new object"
+        end
+        name = prefix .. string.format("%04X", id)
+    until existingSections[name] == nil
+
+    return name
+end
+
+-- PURPOSE: Given an IPv6 address retrieve the MAC address from hostmanager
+-- RETURNS: String with MAC address (or nil)
+local function ip6_2mac(ip6Addr)
+    local macAddr -- MAC addr for ipv6Addr
+    local devices -- table of hostmanager device with ip6Addr
+
+    if (not ip6Addr) then
+        return nil
+    end
+
+    -- talk to ubus directly ... we can't use proxy.get because
+    -- we are inside of a transformer mapper. ... right? That's why?
+    devices = ubus_connect:call("hostmanager.device",
+                                "get",
+                                { ["ipv6-address"] = ip6Addr })
+    if (devices) then
+
+        -- select first result
+        local _, dev = next(devices, nil)
+        if (dev) then
+            macAddr = dev["mac-address"]
+        end
+
+    end
+
+    return macAddr
+end
+
+-- PURPOSE: Standard sublist mapping set function
+--          This is only used for the dest_ip submap list
+-- RETURNS: true (or nil + err) (or apparently nothing?)
+local function submapset(subMap, param, value, key, parentkey)
+    local macAddr -- mac address of dest_ip value
+
+    -- We know the IP address, look up the mac address and
+    -- set it's value... What happens when the set function
+    -- is called to set the "dest_mac" param? will the
+    -- value I write elsewhere in this mapper be overwritten?
+    -- The web page code doesn't write the MAC address, so we are safe
+    -- for that.
+    macAddr = ip6_2mac(value)
+    if (macAddr) then
+        subMap.parent.set(subMap.parent, "dest_mac", macAddr, parentkey)
+    end
+
+    -- Don't write the IP address to /etc/config/firewall because
+    -- it changes. The address will be written to /var/state/firewall
+    -- which won't persist across a reboot (or I think restart)
+    -- (See pinholehelper for process that does this)
+    -- 
+    -- ... but we will try to write ::/0.0.0.0 *IF* we know
+    -- the ipv4/ipv6 family ... which the GUI sets but might not be
+    -- set by some unknown entity in the future.
+    local family = subMap.parent.get(subMap.parent, "family", parentkey)
+    if (family == "ipv6") then
+        value = "::"
+    elseif (family == "ipv4") then
+        value = "0.0.0.0"
+    else
+        value = nil
+    end
+
+    -- "::" or "0.0.0.0" (or nothing at all if we can't determing the family)
+    if (value) then
+        local result, errmsg = subMap.originalSet(subMap, param, value, key, parentkey)
+    end
+
+    -- The submappings set function doesn't appear to have a return value
+end
+
+-- Register with transformer so it knows about the parameters we supply
+register(mapping_rule_rpc)
+
+-- Register the "lists" of mapinfo_rule_uci too
+-- We only hook in to the dest_ip parameter
+for _, submap in ipairs(mapping_rule_rpc.uciMap.submappings) do
+    submap.objectType.name = mapping_rule_rpc.objectType.name .. submap.binding.option .. ".@."
+    if (submap.binding.option == "dest_ip") then
+        submap.originalSet = submap.set
+        submap.set = submapset
+    end
+    register(submap)
+end

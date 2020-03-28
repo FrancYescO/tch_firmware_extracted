@@ -1,0 +1,26 @@
+#!/bin/sh /etc/rc.common
+
+START=65
+
+USE_PROCD=1
+
+start_service() {
+	local _ENABLED=$(uci_get mobiled globals enabled "1")
+	if [ "$_ENABLED" = "1" ]; then
+		logger -t mobiled "Starting Mobiled"
+		procd_open_instance
+		procd_set_param command /usr/bin/mobiled.sh
+		procd_set_param respawn
+		procd_close_instance
+	else
+		logger -t mobiled "Mobiled disabled"
+	fi
+}
+
+service_triggers() {
+	procd_add_reload_trigger "mobiled"
+}
+
+reload_service() {
+	kill -s HUP $(pgrep -f /usr/bin/mobiled)
+}
