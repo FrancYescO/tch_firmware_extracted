@@ -1,0 +1,293 @@
+#!/bin/sh
+
+# script triggered by mountd
+# mountd provides environment variables ACTION, DEVICE, NAME
+# f.e. ACTION=add DEVICE=sda1 NAME=USB-A1
+
+# Source UCI and CS functions
+. $IPKG_INSTROOT/lib/functions/contentsharing.sh
+
+# UCI
+UCI="uci -P /var/state"
+
+# Set by mounts_init
+MOUNTDPATH=""
+MOUNTPOINT=""
+
+# Set by cs_get_device_disk/partition/info
+DISK=""
+PARTITION=""
+VENDOR=""
+MODEL=""
+START=""
+SIZE=""
+HASH=""
+STATUS=""
+
+# mounts_log <msg>
+# Send <msg> to the logger with tag 'hotplug.d-mount-mounts'.
+#
+mounts_log () {
+  local msg="${1}"
+  logger -t hotplug.d-mount-mounts ${msg}
+}
+
+# mounts_init
+# Set MOUNTDPATH MOUNTPOINT DISK PARTITION
+#
+mounts_init () {
+  # Retrieve mountd configuration. Remove trailing slashes from paths.
+  config_load mountd
+  config_get MOUNTDPATH mountd path "/mnt/usb/"
+  MOUNTDPATH=$(echo ${MOUNTDPATH} | sed 's:/*$::')
+
+  # Load /var/state/mounts config for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+
+  MOUNTPOINT=$(readlink -n "${MOUNTDPATH}/${NAME}")
+  if [ -z "${MOUNTPOINT}" ] ; then
+    MOUNTPOINT="${MOUNTDPATH}/${NAME}"
+  fi
+
+  cs_get_device_disk "${DEVICE}" "DISK"
+  cs_get_device_partition "${DEVICE}" "PARTITION"
+
+  mounts_log "ACTION=${ACTION} DEVICE=${DEVICE} NAME=${NAME}"
+}
+
+# mounts_device_valid <device>
+# Return 0 if valid, 1 otherwise.
+#
+mounts_device_valid () {
+  local device="${1}"
+  if [ -z "${device}" ] ; then
+    mounts_log "No device specified"
+    return 1
+  fi
+
+  local disk=""
+  local partition=""
+  cs_get_device_disk "${device}" "disk"
+  cs_get_device_partition "${device}" "partition"
+
+  if [ -z "${disk}" ] ; then
+    mounts_log "${device} is not a disk"
+    return 1
+  fi
+
+  # On action remove no further checks are possible. /proc/partitions will not
+  # contain device information anymore.
+  if [ "${ACTION}" == "remove" ]; then return 0 ; fi
+
+  # If device has no partition table and a filesystem, one entry will match.
+  # If device has a partition table, multiple entries will match.
+  local count=$(cat /proc/partitions | grep -c ${disk})
+  if [ "${count}" -eq "1" ] ; then
+    : # No further checks
+  else
+    if [ -z "${partition}" ] ; then
+      mounts_log "${device} is not a partition"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# mounts_it_failures <section> <disk>
+# Each <section> is the name of a partition (sdaX). If, for this <section>, the
+# value of the uci option 'device' is a <disk> device and the value of the uci
+# option 'status' is CS_STATE_FAILURE, ignore the device.
+#
+mounts_it_failures () {
+  local section="${1}"
+  local disk="${2}"
+  local _device=""
+  local _status=""
+  config_get _device "${section}" device
+  config_get _status "${section}" status
+
+  local dev_disk=""
+  cs_get_device_disk "${_device}" "dev_disk"
+
+  if [ "${disk}" == "${dev_disk}" ] && [ "${_status}" == "${CS_STATUS_FAILURE}" ] ; then
+    cs_ignore_device "${_device}"
+  fi
+}
+
+# mounts_device_status <device> <status>
+# Set <status> to CS_STATUS_UNMOUNTED/MOUNTED/FAILURE/IGNORED/EJECTED.
+#
+mounts_device_status () {
+  local device="${1}"
+
+  # Is state already determined?
+  local device_status=""
+  cs_get_device_status "${DEVICE}" "device_status"
+  if [ "${device_status}" != "${CS_STATUS_UNKNOWN}" ] ; then
+    eval ${2}="${device_status}"
+    return
+  fi
+
+  # Mount failure if no entry in mounts
+  local mounts=$(cat /proc/mounts | grep -c ${device})
+  if [ "${mounts}" -ne "1" ] ; then
+    eval ${2}="${CS_STATUS_FAILURE}"
+    return
+  fi
+
+  # Mounted otherwise
+  eval ${2}="${CS_STATUS_MOUNTED}"
+}
+
+# mounts_add_uci <device> <filesystem> <mountpoint> <status>
+# Add a section type 'mount' with section name <device> and options
+# 'device' <device>, 'filesystem' <filesystem>, 'mountpoint' <mountpoint>,
+# 'status' <status>.
+#
+mounts_add_uci () {
+  local device="${1}"
+  local filesystem="${2}"
+  local mountpoint="${3}"
+  local status="${4}"
+
+  ${UCI} set mounts.${device}=mount
+  ${UCI} set mounts.${device}.device="${device}"
+  ${UCI} set mounts.${device}.filesystem="${filesystem}"
+  ${UCI} set mounts.${device}.mountpoint="${mountpoint}"
+  ${UCI} set mounts.${device}.status="${status}"
+  ${UCI} commit mounts
+  config_load mounts
+}
+
+# mounts_del_uci <device>
+# Delete the section type 'mount' with section name <device>.
+#
+mounts_del_uci () {
+  local device="${1}"
+
+  # Common way:
+  # ${UCI} delete mounts.${device}
+  # ${UCI} commit mounts
+  #
+  # When using /var/state, the common way has a nasty quirk. Instead of
+  # removing the entries from the config file, it keeps them and adds the
+  # same statement with a '-' in front to indicate deletion. Setting the same
+  # option adds a new, and duplicate, entry. This causes the file to grow in
+  # size over time. A workaround is removing these entries using sed and
+  # reloading the config.
+  #
+  # Search for the EXACT device on word boundary. Prevents sda10 triggering when
+  # searching for sda1.
+  #
+  # Remark: fails if uci value is on multiple lines, which should never be the
+  # case.
+  #
+  sed -i "/\<${device}\>/d" /var/state/mounts
+  config_load mounts
+}
+
+# mounts_add_mount
+#
+mounts_add_mount () {
+  # Rebooting/shutdown does not cause an ACTION=remove. Old data for the same
+  # mount may exists. Clean it up.
+  local oldmountname=""
+  cs_get_device_mount "${DEVICE}" "oldmountname"
+  if [ -n "${oldmountname}" ] ; then
+    mounts_log "Old mount ${oldmountname}... Cleanup"
+    mounts_del_uci "${DEVICE}"
+  fi
+
+  mounts_log "Add mount ${DEVICE} (${MOUNTPOINT})"
+
+  # Grep for the EXACT device on word boundary. Prevents sda10 triggering when
+  # grepping for sda1.
+  local filesystem=$(mount | grep "\<${DEVICE}\>" | awk '{print $5}')
+  if [ "${filesystem}" == "ufsd" ] ; then
+    filesystem="ntfs/hfs+"
+  fi
+
+  mounts_add_uci "${DEVICE}" "${filesystem}" "${MOUNTPOINT}" "${STATUS}"
+
+  # Are all partitions of the disk added?
+  local count=0
+  local proc_count=0
+  cs_get_device_count "${DEVICE}" "count"
+  cs_get_device_proc_count "${DEVICE}" "proc_count"
+
+  if [ "${count}" == "${proc_count}" ] ; then
+    mounts_log "Added disk ${DISK}"
+    config_foreach mounts_it_failures mount "${DISK}"
+  fi
+}
+
+# mounts_del_mount
+#
+mounts_del_mount () {
+  local proc_count=0
+  cs_get_device_proc_count "${DEVICE}" "proc_count"
+
+  # If disk is physically removed (proc_count == 0), mount needs to be removed.
+  # Otherwise (proc_count != 0), a status update might be required.
+  if [ "${proc_count}" -ne "0" ] ; then
+    mounts_device_status "${DEVICE}" "STATUS"
+    if [ "${STATUS}" == "${CS_STATUS_FAILURE}" ] ; then
+      # Mounting went wrong, mountd ignored the mount. Ignoring triggers an
+      # ACTION=remove. Do not remove the mount from /var/state/mounts, but update
+      # its status to reflect the ignored state.
+      cs_set_device_status "${DEVICE}" "${CS_STATUS_IGNORED}"
+      mounts_log "Changed mount ${DEVICE} status from ${CS_STATUS_FAILURE} to ${CS_STATUS_IGNORED}"
+      return
+    fi
+    if [ "${STATUS}" == "${CS_STATUS_EJECTED}" ] ; then
+      # Mount is ejected, mountd ignored the mount. Ignoring triggers an
+      # ACTION=remove. Do not remove the mount from /var/state/mounts, but update
+      # its status to reflect the unmounted state.
+      cs_set_device_status "${DEVICE}" "${CS_STATUS_UNMOUNTED}"
+      mounts_log "Changed mount ${DEVICE} status from ${CS_STATUS_EJECTED} to ${CS_STATUS_UNMOUNTED}"
+      return
+    fi
+  fi
+
+  mounts_log "Remove mount ${DEVICE} (${MOUNTPOINT})"
+  mounts_del_uci "${DEVICE}"
+
+  # Are all partitions of the disk deleted?
+  local count=0
+  cs_get_device_count "${DEVICE}" "count"
+
+  if [ "${count}" -eq "0" ] ; then
+    mounts_log "Removed disk ${diskname}"
+    # Ignoring a mount, triggers a removal event. To prevent undoing the
+    # ignore, cleanup the mount ignores only at disk removal.
+    cs_unignore_disk "${DEVICE}"
+  fi
+}
+
+# Start of execution
+
+if [ "${ACTION}" == "add" ]; then
+  # ACTION=add is called immediately after writing updated mountd
+  # information to /var/state/mountd. Information about the added partition
+  # may not yet be persistent.
+  mounts_init
+
+  if ! mounts_device_valid "${DEVICE}" ; then return ; fi
+  cs_get_device_info "${DEVICE}" "VENDOR" "MODEL" "START" "SIZE" "HASH"
+  mounts_device_status "${DEVICE}" "STATUS"
+
+  mounts_log "VENDOR=${VENDOR} MODEL=${MODEL} START=${START} SIZE=${SIZE} HASH=${HASH} STATUS=${STATUS}"
+  mounts_add_mount
+fi
+
+if [ "${ACTION}" == "remove" ]; then
+  # ACTION=remove is called before writing updated mountd information to
+  # /var/state/mountd. Information about the removed partition is still
+  # available.
+  mounts_init
+
+  if ! mounts_device_valid "${DEVICE}" ; then return; fi
+  mounts_del_mount
+fi

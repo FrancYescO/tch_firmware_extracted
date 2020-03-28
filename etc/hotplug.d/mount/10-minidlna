@@ -1,0 +1,126 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions/contentsharing.sh
+
+# dlna_log <msg>
+# Send <msg> to the logger with tag 'hotplug.d-mount-dlna'.
+#
+dlna_log() {
+  local msg="${1}"
+  logger -t hotplug.d-mount-dlna "${msg}"
+}
+
+# dlna_init
+# Set MOUNTDPATH MOUNTPOINT SAMBACONFIGSDIR.
+#
+dlna_init () {
+  # Load /var/state/minidlna config for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load minidlna
+
+  dlna_log "ACTION=${ACTION} DEVICE=${DEVICE} NAME=${NAME}"
+}
+
+# dlna_autoshare
+# Return 0 if auto sharing, 1 otherwise.
+#
+dlna_autoshare () {
+  # autoshare defaults to 1 if not set.
+  local autoshare=""
+  config_get autoshare "config" auto_share "1"
+
+  if [ "${autoshare}" -eq "0" ] ; then
+    dlna_log "Auto sharing disabled"
+    return 1
+  fi
+
+  return 0
+}
+
+# dlna_device_valid <device>
+# Return 0 if valid, 1 otherwise.
+#
+dlna_device_valid () {
+  local device="${1}"
+  if [ -z "${device}" ] ; then
+    dlna_log "No device specified"
+    return 1
+  fi
+
+  local status=""
+  cs_get_device_status "${device}" "status"
+  if [ "${ACTION}" == "remove" ] && [ "${status}" == "${CS_STATUS_UNKNOWN}" ]; then
+    # Disk is physically removed. Entry in mounts is deleted.
+    return 0
+  fi
+  if [ "${status}" != "${CS_STATUS_MOUNTED}" ] ; then
+    dlna_log "Device ${device} not mounted (${status})"
+    return 1
+  fi
+
+  return 0
+}
+
+# dlna_add_media
+dlna_add_media () {
+  cs_add_device_dlnamedia "${DEVICE}"
+  cs_update_dlnadirs
+}
+
+# dlna_del_media
+dlna_del_media () {
+  cs_del_device_dlnamedia "${DEVICE}"
+  cs_update_dlnadirs
+}
+
+# Start of execution
+
+if [ "${ACTION}" == "add" ]; then
+  dlna_init
+
+  if ! dlna_autoshare ; then return ; fi
+  if dlna_device_valid "${DEVICE}" ; then
+    dlna_add_media
+  fi
+
+  # Device valid or not (most likely not mounted), do check if this ACTION=add
+  # event was on the last device present. If so, reload/restart DLNA to
+  # (re)build the database of files.
+  local disk=""
+  cs_get_device_disk "${DEVICE}" "disk"
+
+  if cs_is_disk_added "${disk}" ; then
+    if cs_is_dlna_running ; then
+      dlna_log "Added disk ${disk} ... reload"
+      cs_reload_dlna
+    else
+      dlna_log "Added disk ${disk} ... restart"
+      cs_restart_dlna
+    fi
+  fi
+fi
+
+if [ "${ACTION}" == "remove" ]; then
+  dlna_init
+
+  if ! dlna_autoshare ; then return ; fi
+  if dlna_device_valid "${DEVICE}" ; then
+    dlna_del_media
+  fi
+
+  # Device valid or not (most likely not mounted), do check if this
+  # ACTION=remove event was on the last device present. If so, reload/restart
+  # DLNA to (re)build the database of files.
+  local disk=""
+  cs_get_device_disk "${DEVICE}" "disk"
+
+  if cs_is_disk_removed "${disk}" ; then
+    if cs_is_dlna_running ; then
+      dlna_log "Removed disk ${disk} ... reload"
+      cs_reload_dlna
+    else
+      dlna_log "Removed disk ${disk} ... restart"
+      cs_restart_dlna
+    fi
+  fi
+fi

@@ -1,0 +1,211 @@
+debug_on
+
+copy_file /etc/config/button
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_section cwmpd.cwmpd_config
+copy_dir /usr/share/transformer
+copy_dir /usr/lib/lua
+
+uci_set ddns.myddns.enabled ddns.myddns_ipv4.enabled
+uci_set ddns.myddns.service_name ddns.myddns_ipv4.service_name
+uci_set ddns.myddns.domain ddns.myddns_ipv4.domain
+uci_set ddns.myddns.username ddns.myddns_ipv4.username
+uci_set ddns.myddns.password ddns.myddns_ipv4.password
+uci_del ddns.myddns
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+
+uci_set dhcp.odhcpd.leasefile
+uci_set dhcp.odhcpd.leasetrigger
+uci_set dhcp.lan.interface
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.dhcpv6
+uci_set dhcp.lan.ra_management
+uci_set dhcp.lan.ra_min_interval
+uci_set dhcp.lan.ra_max_interval
+uci_set dhcp.lan.ra_lifetime
+uci_set dhcp.lan.ra_hoplimit
+uci_set dhcp.lan.ra_max_mtu
+uci_set dhcp.lan.force
+uci_set dhcp.wan.interface
+uci_set dhcp.wan.ignore
+uci_section dhcp.@host id=name
+uci_set dhcp.lan.ignore
+
+copy_file /etc/config/dscp2pbit
+
+#added for capturing firewall setting
+copy_file /etc/config/firewall
+
+#uci_section firewall.@userrule id=name
+#uci_section firewall.@userrule_v6 id=name
+#uci_section firewall.@fwconfig
+#uci_section firewall.@zone id=name
+#uci_set firewall.defaultoutgoing.target
+#uci_set firewall.normalrules.enabled
+#uci_set firewall.laxrules.enabled
+#uci_set firewall.highrules.enabled
+#uci_set firewall.userrules.enabled
+#uci_set firewall.userrules_v6.enabled
+#uci_set firewall.defaultrules.enabled
+#uci_section firewall.@userredirect
+#uci_set firewall.userredirects.enabled
+#uci_set firewall.@dmzredirect[0].dest_ip firewall.dmzredirect.dest_ip
+#uci_set firewall.dmzredirects.enabled
+#uci_set firewall.dmzredirect.dest_mac
+#uci_set firewall.dmzredirect.dest_ip
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+copy_file /etc/config/iqos
+
+copy_file /etc/config/mcastsnooping
+
+uci_set minidlna.config.enabled
+uci_set minidlna.config.friendly_name
+uci_set minidlna.config.db_dir
+uci_list minidlna.config.media_dir
+uci_set minidlna.config.log_dir
+
+copy_file /etc/config/mmpbx
+
+copy_file /etc/config/mmpbxbrcmdectdev
+
+copy_file /etc/config/mmpbxbrcmfxsdev
+
+copy_file /etc/config/mmpbxinternalnet
+
+#NG-72983 and NG-73559
+#copy_file /etc/config/mmpbxrvsipnet
+uci_section mmpbxrvsipnet.@network.-user_agent
+uci_section mmpbxrvsipnet.@profile
+
+
+copy_file /etc/config/mmpbxbrcmfxonet
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_section mobiled.@profile id=id
+uci_section mobiled.@sim
+uci_section mobiled.@device
+
+uci_set network.ppp.password
+uci_set network.ppp.username
+uci_set network.ppp.graceful_restart
+
+
+uci_set network.lan.netmask
+uci_set network.lan.ipaddr
+uci_set network.lan.ipv6
+uci_set network.wan.username
+uci_set network.wan.password
+uci_set network.wan.graceful_restart
+uci_set network.wan.ifname
+uci_set network.wan.proto
+
+inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
+
+uci_set network.wwan.profile
+
+copy_file /etc/config/nslookupdiag
+
+copy_file /etc/config/parental
+
+copy_file /etc/config/portmirror
+
+copy_file /etc/config/power
+
+copy_file /etc/config/pppoerelayd
+
+copy_file /etc/config/printersharing
+
+copy_file /etc/config/qos
+
+uci_set samba.@samba[0].name
+uci_set samba.@samba[0].workgroup
+uci_set samba.@samba[0].description
+uci_set samba.@samba[0].enabled
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+
+copy_file /etc/config/tod
+
+copy_file /etc/config/traceroute
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+ 
+copy_file /etc/config/user_friendly_name
+
+
+
+
+
+
+
+copy_file /etc/config/wifidoctor_station_importance
+
+uci_section wireless.@wifi-device.-acs_rescan_period,acs_channel_monitor_period
+uci_section wireless.@wifi-iface
+uci_section wireless.@wifi-ap
+uci_section wireless.@wifi-radius-server
+
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/xtm
+
+copy_file /etc/config/gpon
+copy_file /etc/config/gponl3
+
+#Change to capture the new GUI added users 
+uci_list web.default.users
+inline_sh_cmd uci del_list web.default.users=usr_engineer
+inline_sh_cmd uci add_list web.default.users=usr_engineer
+
+copy_web_users
+
+#Change to capture the vlan_id
+uci_set network.waneth4.vid
+uci_set network.wanptm0.vid
+
+#change to capture wan ipv6 address NG-71301
+uci_set network.wan.ipv6
+
+# wansensing
+# the build shall have the correct config.
+copy_file /etc/config/wansensing

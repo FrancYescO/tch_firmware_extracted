@@ -1,0 +1,74 @@
+#!/bin/sh
+
+********************************************************************
+*		Modifiing the SW version to the values required by Customer
+*********************************************************************
+
+uci set versioncusto.override.fwversion_prefix='AGTEF_'
+#this will only be used during development/customization and will be removed normally together with closing the build 
+#uci set versioncusto.override.fwversion_suffix='ti_open file 16.3.7187-2789001'
+
+
+#firmware versions conversion table : homeware version -> TI version
+#Add new entries in the 'here-document' below (before the EOTX ending line)
+#leave the last line : 'Unknown' if no matching version
+#top-down precedence order : if actual version does not match first field of first line, try next line
+TI_versions(){
+cat <<EOTXT
+16.3.7172-2789002 1.0.0_001
+16.3.7172-2781002 1.0.0_001
+16.3.7187-2789001 1.0.0_002
+16.3.7187-2781001 1.0.0_002
+16.3.7187-2789002 1.0.0_002
+16.3.7187-2781002 1.0.0_002
+16.3.7187-2789003 1.0.0_002_DUMMY
+16.3.7187-2781003 1.0.0_002_DUMMY
+16.3.7187-2781007 1.0.0_003_DUMMY
+16.3.7196-2789001 1.0.0_003
+16.3.7196-2781001 1.0.0_003
+16.3.7196-2789002 1.0.0_003
+16.3.7196-2781002 1.0.0_003
+16.3.7196-2789003 1.0.0_003_DUMMY
+16.3.7196-2781003 1.0.0_003_DUMMY
+16.3.7271-2789001 1.0.0_004
+16.3.7271-2781001 1.0.0_004
+16.3.7271-2789002 1.0.0_004
+16.3.7271-2781002 1.0.0_004
+16.3.7271-2789003 1.0.0_004_DUMMY
+16.3.7271-2781003 1.0.0_004_DUMMY
+.*	1.99.99.99 
+EOTXT
+}
+
+#perform a translation (table based in this example : output 2nd field of matching version entry in PXS_versions table above)
+#input params:
+#   none
+TI_translate_swversions(){
+	tver=$(TI_versions | awk -v srch="$(uci get env.var.friendly_sw_version_activebank)" 'srch ~ $1 {print $2}' | head -1)
+	uci set env.var.friendly_sw_version_activebank=`uci get versioncusto.override.fwversion_prefix`"$tver"
+	uci set versioncusto.override.fwversion_override="$tver"
+#Populate user-agent
+#user-agent format for TI: vendorname / <HWversion>/ <FWversion> / <SWversion>
+	uci set mmpbxrvsipnet.sip_net.user_agent="$(uci get env.var.company_name) / $(uci get env.var.hardware_version) / `uci get versioncusto.override.fwversion_prefix`"$tver" / `uci get versioncusto.override.fwversion_prefix`"$tver""
+	uci commit mmpbxrvsipnet
+	
+	tver=$(TI_versions | awk -v srch="$(uci get env.var.friendly_sw_version_passivebank)" 'srch ~ $1 {print $2}' | head -1)
+	uci set env.var.friendly_sw_version_passivebank=`uci get versioncusto.override.fwversion_prefix`"$tver"
+#if no conversion needed : comment previous 3 lines
+uci commit env
+}
+
+
+
+TI_translate_swversions
+
+
+
+SW_Version=`lua -e "t=require'transformer.shared.banktable' value=t.getCurrentVersion() print(string.match(value,'([^%-]+)%-'))"`
+
+#this will only be used during development/customization and will be removed normally together with closing the build 
+#uci set versioncusto.override.fwversion_suffix='_Custo005'
+
+
+uci commit versioncusto
+

@@ -1,0 +1,270 @@
+#!/bin/sh
+
+[ "$#" -ne 4 ] && echo "usage: $0 <session_id> <dev_idx> <interface> <action>" && exit 1
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+. /lib/netifd/netifd-proto.sh
+
+PPP_SUPPORT=0
+if [ -f "/lib/netifd/proto/ppp.sh" ]; then
+	export INCLUDE_ONLY="false"
+	. /lib/netifd/proto/ppp.sh
+	PPP_SUPPORT=1
+fi
+
+ubus_call() {
+	json_init
+	local _data="$(ubus -S call "$1" "$2" "$3")"
+	[ $? -ne 0 ] || [ -z "$_data" ] && return 1
+	json_load "$_data"
+	return 0
+}
+
+#
+# Function calculates number of bit in a netmask
+#
+mask2cidr() {
+	nbits=0
+	IFS=.
+	for dec in $1 ; do
+	case $dec in
+		255) let nbits+=8;;
+		254) let nbits+=7;;
+		252) let nbits+=6;;
+		248) let nbits+=5;;
+		240) let nbits+=4;;
+		224) let nbits+=3;;
+		192) let nbits+=2;;
+		128) let nbits+=1;;
+		0);;
+		*) return
+	esac
+	done
+	echo "$nbits"
+}
+
+session_id="$1"
+dev_idx="$2"
+interface="$3"
+action="$4"
+defaultroute=$(uci -q get "network.${interface}.defaultroute" || true)
+metric=$(uci -q get "network.${interface}.metric" || true)
+
+if [ "$action" = "setup" ]; then
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		return 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		return 1
+	fi
+
+	if [ "$proto" = "ppp" ]; then
+		if [ $PPP_SUPPORT -ne 1 ]; then
+			proto_notify_error "$interface" "NO_PPP_SUPPORT"
+			return 1
+		fi
+
+		json_select "ppp"
+		json_get_vars username password authentication apn device
+		if [ -z "$device" ]; then
+			proto_notify_error "$interface" "NO_PPP_DEVICE"
+			return 1
+		fi
+
+		json_init
+		if [ -n "$metric" ]; then
+			json_add_int metric "$metric"
+		fi
+		json_add_string name "${interface}_ppp"
+		json_add_string device "$device"
+		json_add_string ifname "@$interface"
+		json_add_string proto "ppp"
+		json_add_string pppname "${interface}_ppp"
+		json_add_string username "$username"
+		json_add_string password "$password"
+		json_add_string pppd_options "debug noaccomp nopcomp novj nobsdcomp noauth noccp lock crtscts 115200 $device"
+		json_add_string connect "${apn:+USE_APN=$apn }/usr/sbin/chat -t5 -v -E -f /etc/chatscripts/mobiled.chat"
+		ubus call network add_dynamic "$(json_dump)"
+	fi
+elif [ "$action" = "connected" ]; then
+	for FIXUP in /tmp/mobiled_fixups/fixup-*; do
+		if [ -x "$FIXUP" ]; then
+			device=""
+			network_get_physdev device "$interface"
+			if [ -n "$device" ]; then
+				$FIXUP "$device"
+			fi
+		fi
+	done
+
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		return 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		return 1
+	fi
+	# Interfaces using DHCP
+	if [ "$proto" = "dhcp" ]; then
+		json_select "dhcp"
+		json_get_vars ifname
+		if [ -z "$ifname" ]; then
+			proto_notify_error "$interface" "NO_IFNAME"
+			return 1
+		fi
+
+		proto_init_update "$ifname" 1
+		proto_send_update "$interface"
+
+		json_init
+		if [ -n "$metric" ]; then
+			json_add_int metric "$metric"
+		fi
+		if [ "$defaultroute" = "0" ]; then
+			json_add_boolean defaultroute 0
+		fi
+		json_add_string name "${interface}_4"
+		json_add_string ifname "@$interface"
+		json_add_string proto "dhcp"
+		json_add_string reqopts "1 3 6 15 33 42 51 121 249"
+		ubus call network add_dynamic "$(json_dump)"
+
+		json_init
+		if [ -n "$metric" ]; then
+			json_add_int metric "$metric"
+		fi
+		if [ "$defaultroute" = "0" ]; then
+			json_add_boolean defaultroute 0
+		fi
+		json_add_string name "${interface}_6"
+		json_add_string ifname "@$interface"
+		json_add_string proto "dhcpv6"
+		json_add_string extendprefix 1
+		json_add_string reqopts "12 21 22 23 24 25 31 56 64 67 82 83"
+		ubus call network add_dynamic "$(json_dump)"
+	# Interfaces using PPP
+	elif [ "$proto" = "ppp" ]; then
+		if [ $PPP_SUPPORT -ne 1 ]; then
+			proto_notify_error "$interface" "NO_PPP_SUPPORT"
+			return 1
+		fi
+		proto_init_update "${interface}_ppp" 1
+		proto_send_update "$interface"
+	# Interfaces using external router mode dongles
+	elif [ "$proto" = "router" ]; then
+		json_select "router"
+		json_get_vars ipv4_gw ipv4_dns1 ifname
+		if [ -z "$ifname" ]; then
+			proto_notify_error "$interface" "NO_IFNAME"
+			return 1
+		fi
+		proto_init_update "$ifname" 1
+		if [ -n "$ipv4_gw" ]; then
+			proto_add_ipv4_route "0.0.0.0" 0 "$ipv4_gw"
+		else
+			proto_add_ipv4_route "0.0.0.0" 0 "0.0.0.0"
+		fi
+		if [ -n "$ipv4_dns1" ]; then
+			proto_add_dns_server "$ipv4_dns1"
+		fi
+		proto_send_update "$interface"
+	# Interfaces using Mobiled to retrieve the IP info
+	elif [ "$proto" = "static" ]; then
+		json_select "static"
+		json_get_vars ifname ipv4_addr ipv4_gw ipv4_subnet ipv4_dns1 ipv4_dns2 ipv6_addr ipv6_gw ipv6_dns1 ipv6_dns2 ipv6_prefix ipv6_prefix_length
+		if [ -n "$ipv4_addr" ] || [ -n "$ipv6_addr" ]; then
+			ipv4_subnet_bits=$(mask2cidr "$ipv4_subnet")
+
+			# Send an empty update to clear previous routes and DNS addresses
+			proto_init_update "$ifname" 1
+			proto_send_update "$interface"
+
+			proto_init_update "$ifname" 1
+			if [ -n "$ipv4_addr" ] && [ -n "$ipv4_subnet_bits" ]; then
+				proto_add_ipv4_address "$ipv4_addr" "$ipv4_subnet_bits"
+			fi
+			if [ -n "$ipv4_dns1" ]; then
+				proto_add_dns_server "$ipv4_dns1"
+			fi
+			if [ -n "$ipv4_dns2" ]; then
+				proto_add_dns_server "$ipv4_dns2"
+			fi
+			if [ "$defaultroute" = "1" ] && [ -n "$ipv4_gw" ]; then
+				proto_add_ipv4_route "0.0.0.0" 0 "$ipv4_gw"
+			elif [ "$defaultroute" = "1" ]; then
+				proto_add_ipv4_route "0.0.0.0" 0 "0.0.0.0"
+			fi
+			if [ "$defaultroute" = "1" ] && [ -n "$ipv6_gw" ]; then
+				proto_add_ipv6_route "::" 0 "$ipv6_gw" 0
+			fi
+			if [ -n "$ipv6_addr" ]; then
+				proto_add_ipv6_address "$ipv6_addr" 128
+			fi
+			if [ -n "$ipv6_prefix" ] && [ -n "$ipv6_prefix_length" ]; then
+				proto_add_ipv6_prefix "$ipv6_prefix/$ipv6_prefix_length"
+			fi
+			if [ -n "$ipv6_dns1" ]; then
+				proto_add_dns_server "$ipv6_dns1"
+			fi
+			if [ -n "$ipv6_dns2" ]; then
+				proto_add_dns_server "$ipv6_dns2"
+			fi
+			logger -t mobiled "Update interface $interface ipv4_addr: $ipv4_addr ipv4_gw: $ipv4_gw ipv4_dns1: $ipv4_dns1 ipv4_dns2: $ipv4_dns2"
+			proto_send_update "$interface"
+		fi
+	fi
+elif [ "$action" = "disconnected" ]; then
+	proto_init_update "*" 0
+	proto_send_update "$interface"
+elif [ "$action" = "teardown" ]; then
+	# We need to kill the PPP interface in order to bring down the session
+	ubus call network.interface remove '{"interface":"'"${interface}_ppp"'"}'
+elif [ "$action" = "augment" ]; then
+	if ! ubus_call "mobiled.network" "sessions" "{'session_id':$session_id, 'dev_idx':$dev_idx}"; then
+		proto_notify_error "$interface" "NO_SESSION_INFO"
+		return 1
+	fi
+
+	json_get_vars proto
+	if [ -z "$proto" ]; then
+		proto_notify_error "$interface" "NO_PROTO"
+		return 1
+	fi
+	# Interfaces using DHCP
+	if [ "$proto" = "dhcp" ]; then
+		json_select "dhcp"
+		json_get_vars ipv6_dns1 ipv6_dns2
+		if [ -n "$ipv6_dns1" ] || [ -n "$ipv6_dns2" ]; then
+			network_get_dnsserver current_dns "${interface}_6"
+
+			proto_init_update "${interface}_6" 1
+			proto_set_keep 1
+			SEND_UPDATE=0
+
+			if [ -n "$ipv6_dns1" ]; then
+				if ! echo "$current_dns" | grep -q "$ipv6_dns1"; then
+					proto_add_dns_server "$ipv6_dns1"
+					SEND_UPDATE=1
+				fi
+			fi
+			if [ -n "$ipv6_dns2" ]; then
+				if ! echo "$current_dns" | grep -q "$ipv6_dns2"; then
+					proto_add_dns_server "$ipv6_dns2"
+					SEND_UPDATE=1
+				fi
+			fi
+
+			if [ "$SEND_UPDATE" -eq 1 ]; then
+				proto_send_update "${interface}_6"
+			fi
+		fi
+	fi
+fi

@@ -1,0 +1,54 @@
+#!/bin/sh
+
+has_ssh_user=0
+
+# Helper function to detect closed build
+__is_closed_build() {
+	expr `uci show version.@version[0].version | cut -d '-' -f2 | cut -c3` % 2 || {
+		return 0
+	}
+	return 1
+}
+
+# Helper function to set the required options on each dropbear section
+__prepare_db() {
+	local db="$1"
+	uci set dropbear."$db".enable=1
+	# Disable root login for this dropbear section.
+	# This is an extra level of security, additional to setting root shell to false (see _close_root_access() from firstboot-clash)
+	uci set dropbear."$db".RootLogin=0
+}
+
+# Helper function to check if any users have SSH access
+__check_ssh() {
+	local user="$1"
+	local ssh=$(uci_get clash."$user".ssh)
+	if [ "$ssh" -eq 1 ]; then
+		has_ssh_user=1
+	fi
+}
+
+# Enable dropbear in closed builds, if any users require it
+_enable_dropbear() {
+	config_load "clash"
+	config_foreach __check_ssh user
+
+	# When at least one SSH user, set `enable` to `1` for all dropbear sections
+	if [ "$has_ssh_user" -eq 1 ]; then
+		config_load "dropbear"
+		config_foreach __prepare_db dropbear
+		uci commit dropbear
+	fi
+}
+
+# The entry point function which calls the individual setup functions
+setup() {
+	# For closed builds, enable dropbear if users require it
+	if __is_closed_build; then
+		# ! Always keep this one last, as it does config_load "dropbear"
+#		_enable_dropbear
+	fi
+}
+
+setup
+

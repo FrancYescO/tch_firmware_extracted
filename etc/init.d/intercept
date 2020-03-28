@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+USE_PROCD=1
+
+. $IPKG_INSTROOT/usr/lib/intercept/functions.sh
+
+start_service() {
+   logger -t intercept "start_service"
+   $INTERCEPT_SETUP boot
+}
+
+reload_service() {
+    logger -t intercept "init RELOAD"
+    # by opening and closing the service, procd calls service_triggers again 
+    procd_open_service intercept
+    procd_close_service
+    $INTERCEPT_SETUP reload
+
+}
+
+service_triggers() {
+    local enabled
+    config_load "intercept"
+    procd_open_trigger
+    procd_add_reload_trigger "intercept"
+    config_get_bool enabled config enabled 0
+    [ "$enabled" != "0" ] && {
+	config_get interfaces 'config' 'wan'
+	for interface in $interfaces
+	do
+	    procd_add_interface_trigger "interface.*" $interface  $INTERCEPT_SETUP ifchanged
+	done
+    }
+    procd_close_trigger
+}
