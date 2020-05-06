@@ -1,0 +1,298 @@
+
+debug_on
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_section cwmpd.cwmpd_config
+
+uci_set env.custovar.wan_if
+uci_set env.var.download_from_data
+uci_set env.var.provisioning_code
+
+uci_set ddns.myddns.enabled ddns.myddns_ipv4.enabled
+uci_set ddns.myddns.service_name ddns.myddns_ipv4.service_name
+uci_set ddns.myddns.domain ddns.myddns_ipv4.domain
+uci_set ddns.myddns.username ddns.myddns_ipv4.username
+uci_set ddns.myddns.password ddns.myddns_ipv4.password
+uci_set ddns.myddns.lookup_host ddns.myddns_ipv4.lookup_host
+uci_del ddns.myddns
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+
+uci_set dhcp.odhcpd.leasefile
+uci_set dhcp.odhcpd.leasetrigger
+uci_set dhcp.lan.interface
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.dhcpv6
+uci_set dhcp.lan.ra_management
+uci_set dhcp.lan.ra_min_interval dhcp.lan.ra_mininterval
+uci_set dhcp.lan.ra_max_interval dhcp.lan.ra_maxinterval
+uci_set dhcp.lan.ra_lifetime
+uci_set dhcp.lan.ra_hoplimit
+uci_set dhcp.lan.ra_mtu
+uci_set dhcp.lan.force
+uci_set dhcp.wan.interface
+uci_set dhcp.wan.ignore
+uci_set dhcp.mgmt.interface
+uci_set dhcp.mgmt.ignore
+uci_section host /etc/config/dhcp
+uci_set dhcp.lan.ignore
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ignore') if (v == '1') then n:set('dhcp','lan','dhcpv4','disabled') else n:set('dhcp','lan','dhcpv4','server') end n:commit('dhcp')\"
+
+uci_section dhcp.@relay
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convdhcprelay.lua
+
+copy_file /etc/config/dscp2pbit
+
+
+
+uci_section userrule /etc/config/firewall
+uci_section userrule_v6 /etc/config/firewall
+uci_section firewall.@fwconfig
+uci_section firewall.@zone id=name
+uci_set firewall.defaultoutgoing.target
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_section userredirect /etc/config/firewall
+uci_set firewall.userredirects.enabled
+uci_set firewall.@dmzredirect[0].dest_ip firewall.dmzredirect.dest_ip
+uci_set firewall.@dmzredirect[0].dest_mac firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirects.enabled
+uci_set firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirect.dest_ip
+
+uci_set firewall.dmzredirects.enabled firewall.fwconfig.dmz
+
+uci_set firewall.wan.output
+uci_set firewall.SNAT_wan_zone.src_dip
+uci_set firewall.SNAT_wan_zone.enabled
+uci_set firewall.SNAT_RADIUS.src_dip
+uci_set firewall.SNAT_RADIUS.enabled
+uci_set firewall.SNAT_wan_zone_guest.enabled
+uci_set firewall.SNAT_wan_zone_guest.src_dip
+uci_set firewall.SNAT_PING.enabled
+uci_set firewall.SNAT_PING.src_dip
+uci_set firewall.MARK_WAN_TO_LAN.dest_ip
+uci_set firewall.@cone[0].src_dip
+uci_set firewall.@cone[1].src_dip
+uci_set firewall.@cone[2].src_dip
+uci_section forwarding /etc/config/firewall
+uci_set firewall.wan.extra
+uci_set firewall.mgmt.extra
+uci_set firewall.mgmt.masq
+uci_set firewall.Allow_ACS_1.src
+uci_set firewall.Allow_ACS_2.src
+uci_set firewall.Allow_restricted_sip_1.src
+uci_set firewall.Allow_restricted_sip_2.src
+uci_set firewall.Allow_restricted_sip_3.src
+uci_set firewall.Allow_restricted_sip_4.src
+uci_set firewall.Allow_restricted_sip_5.src
+uci_set firewall.Allow_restricted_sip_6.src
+uci_set firewall.Allow_restricted_sip_7.src
+uci_set firewall.Allow_restricted_sip_8.src
+uci_set firewall.Allow_restricted_sip_9.src
+uci_set firewall.Allow_restricted_sip_10.src
+uci_set firewall.Allow_restricted_sip_11.src
+uci_set firewall.Allow_restricted_sip_12.src
+uci_set firewall.Allow_restricted_sip_13.src
+uci_set firewall.Allow_restricted_sip_14.src
+uci_set firewall.Allow_restricted_sip_15.src
+uci_set firewall.Allow_restricted_sip_16.src
+uci_set firewall.Allow_restricted_sip_17.src
+uci_set firewall.Allow_restricted_sip_18.src
+
+uci_set firewall.MARK_LAN_TO_WAN.enabled
+uci_set firewall.MARK_WAN_TO_LAN.enabled
+uci_set firewall.MARK_WWAN_TO_LAN.enabled
+uci_set firewall.MARK_GUEST_TO_WAN.enabled
+
+uci_list firewall.wan.network
+
+uci_section redirect /etc/config/firewall
+uci_section network.default_wan_route
+
+uci_set firewall.Guest.forward
+uci_set firewall.defaultoutgoing_Guest.target
+
+uci_set firewall.wanapi.src_dport
+copy_file /etc/config/ipset
+copy_file /etc/nginx/server.crt
+copy_file /etc/nginx/server.key
+uci_set fastweb.wan.auth
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+copy_file /etc/config/iqos
+
+copy_file /etc/config/mcastsnooping
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+uci_set minidlna.config.enabled dlnad.config.enabled
+uci_set minidlna.config.friendly_name dlnad.config.friendly_name
+
+
+uci_set mmpbx.global.enabled
+uci_set mmpbxrvsipnet.sip_net.interface 
+uci_set mmpbxrvsipnet.sip_net.cac
+uci_set mmpbxrvsipnet.sip_net.primary_proxy
+uci_set mmpbxrvsipnet.sip_net.primary_registrar
+
+uci_section mmpbx.@profile 
+uci_section mmpbx.@incoming_map id=profile
+uci_section mmpbx.@outgoing_map id=device
+uci_section mmpbx.@service id=type
+
+uci_section mmpbxbrcmdectdev.@base
+uci_section mmpbxbrcmdectdev.@device
+uci_section mmpbxrvsipnet.@profile
+
+copy_file /etc/config/mmpbxbrcmfxsdev
+
+copy_file /etc/config/mmpbxinternalnet
+
+copy_file /etc/config/mmpbxrvsipnet
+
+copy_file /etc/config/mmpbxbrcmfxonet
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_section mobiled.@profile id=id
+uci_section mobiled.@sim
+uci_section mobiled.@device
+inline_sh_cmd lua /usr/lib/parameter_conversion/copy_mobiled_device_defaults.lua
+
+uci_set mobiled.device_defaults.network_selection
+uci_set mobiled.device_defaults.mcc
+uci_set mobiled.device_defaults.mnc
+uci_set mobiled.device_defaults.radio_pref
+uci_set mobiled.device_defaults.lte_bands
+uci_set mobiled.device_defaults.earfcn
+
+uci_section network.@interface
+
+uci_set wansensing.global.enable
+uci_set wansensing.global.network_mode
+uci_set wansensing.global.backup_time
+
+inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
+
+uci_set network.wwan.profile
+
+copy_file /etc/config/mwan
+
+copy_file /etc/config/nslookupdiag
+
+copy_file /etc/config/parental
+
+copy_file /etc/config/portmirror
+
+copy_file /etc/config/power
+
+copy_file /etc/config/pppoerelayd
+
+copy_file /etc/config/printersharing
+
+copy_file /etc/config/qos
+
+copy_file /etc/config/telnet
+
+uci_set samba.samba.name
+uci_set samba.samba.workgroup
+uci_set samba.samba.description
+uci_set samba.samba.enabled
+uci_set samba.samba.filesharing
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+uci_set system.config.iad_function
+
+copy_file /etc/config/tod
+
+copy_file /etc/config/traceroute
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+ 
+copy_file /etc/config/user_friendly_name
+
+copy_file /etc/config/user_friendly_name
+
+
+
+
+
+copy_web_users
+
+copy_file /etc/config/wifidoctor_station_importance
+
+uci_section wireless.@wifi-device.-acs_policy,acs_rescan_period,acs_rescan_delay,acs_rescan_delay_policy,acs_rescan_delay_max_events,acs_channel_monitor_period,txbf
+uci_section wireless.@wifi-iface
+uci_section wireless.@wifi-ap
+uci_section wireless.@wifi-radius-server
+
+uci_set ethernet.globals.eth4lanwanmode
+uci_set ethernet.shapingconf.enable
+uci_set ethernet.shapingconf.mbr
+uci_set ethernet.shapingconf.mbs
+uci_set xdsl.dsl0.maxusdatarate
+uci_set xdsl.dsl0.maxdsdatarate
+uci_set xdsl.dsl0.maxaggrdatarate
+uci_section fastweb.port_shaping
+uci_section fastweb.webui
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/bulkdata
+copy_file /etc/config/xtm
+
+copy_file /etc/config/gpon
+copy_file /etc/config/gponl3
+
+copy_file /etc/config/button
+copy_file /etc/config/wifi_doctor_agent
+
+uci_section web.speedlog
+uci_list web.default.users
+copy_web_users

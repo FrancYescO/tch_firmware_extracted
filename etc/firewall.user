@@ -1,0 +1,27 @@
+# This file is interpreted as shell script.
+# Put your custom iptables rules here, they will
+# be executed with each firewall (re-)start.
+
+# Internal uci firewall chains are flushed and recreated on reload, so
+# put custom rules into the root chains e.g. INPUT or FORWARD or into the
+# special user chains, e.g. input_wan_rule or postrouting_lan_rule.
+iptables -t mangle -D PREROUTING -j CONNMARK --save-mark --nfmask 0xf0000000 --ctmask 0xf0000000
+iptables -t mangle -A PREROUTING -j CONNMARK --save-mark --nfmask 0xf0000000 --ctmask 0xf0000000
+ip6tables -t mangle -D PREROUTING -j CONNMARK --save-mark --nfmask 0xf0000000 --ctmask 0xf0000000
+ip6tables -t mangle -A PREROUTING -j CONNMARK --save-mark --nfmask 0xf0000000 --ctmask 0xf0000000
+iptables -t filter -D output_rule -p icmp --icmp-type redirect -j ACCEPT
+iptables -t filter -A output_rule -p icmp --icmp-type redirect -j ACCEPT
+ip6tables -t filter -D output_rule -p icmpv6 --icmpv6-type redirect -j ACCEPT
+ip6tables -t filter -A output_rule -p icmpv6 --icmpv6-type redirect -j ACCEPT
+
+# Directly add rule to drop SSDP and IGMP packet out through ETH4 as the SFP
+# interface has static IP on it, which makes the packet be sent out before
+# wan interface really UP with IP.
+iptables -t filter -D output_rule -o eth4 -p udp --dport 1900 -j DROP
+iptables -t filter -I output_rule -o eth4 -p udp --dport 1900 -j DROP
+ip6tables -t filter -D output_rule -o eth4 -p udp --dport 1900 -j DROP
+ip6tables -t filter -I output_rule -o eth4 -p udp --dport 1900 -j DROP
+iptables -t filter -D output_rule -o eth4 -p igmp -j DROP
+iptables -t filter -I output_rule -o eth4 -p igmp -j DROP
+ip6tables -t filter -D output_rule -o eth4 -p igmp -j DROP
+ip6tables -t filter -I output_rule -o eth4 -p igmp -j DROP
