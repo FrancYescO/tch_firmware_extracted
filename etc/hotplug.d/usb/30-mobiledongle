@@ -1,0 +1,94 @@
+#!/bin/sh
+#set -x
+
+/etc/init.d/mobiledongle enabled && {
+#  logger -t mobiledongle-hotplug "== DEBUG == device=$DEVICENAME $ACTION"
+
+    usb_id=`echo $DEVICENAME | awk 'match($0, "[0-9]+\-[0-9]+[\.]?[0-9]?[\.]?[0-9]?\:") { print substr($0, RSTART, RLENGTH)}'`
+
+
+    [ "$ACTION" = "add" ] && {
+      [ -n "$usb_id" ] && {
+         list_bind=`find /sys/bus/usb/drivers | grep $usb_id | sort -r | grep $usb_id`
+         usb_trigger=`find /sys/bus/usb/drivers | grep $usb_id | awk 'match($0, "[0-9]+\-[0-9]+[\.]?[0-9]?[\.]?[0-9]?\:[0-9]+\.[0-9]+") { print substr($0, RSTART, RLENGTH)}' | sort -r | grep -m 1 $usb_id`
+         usb_trigger_remove=`echo $usb_trigger | awk 'match($0, "[0-9]+\-[0-9]+[\.]?[0-9]?[\.]?[0-9]?\:[0-9]+\.") { print substr($0, RSTART, RLENGTH)}'`
+
+      if [ -n "$usb_trigger" ] && [ -n "$usb_trigger_remove" ] ; then
+
+        test_dongle=`uci -P /var/state get mobiledongle 2>/dev/null | egrep -e '=dongle'`
+
+
+        if [ "$DEVICENAME" == "$usb_trigger" ] && [ -z "$test_dongle" ] ; then
+
+          if [ "$test_dongle" != "" ] ; then
+             logger -t mobiledongle-hotplug "WARNING: double registration ($test_dongle)"
+             exit 1
+           fi
+
+          qmi_dongle=`echo $list_bind | grep qmi_wwan`
+          huawei_ether_dongle=`echo $list_bind | grep huawei_ether`
+          huawei_cdc_ncm_dongle=`echo $list_bind | grep huawei_cdc_ncm`
+          sierra_dongle=`echo $list_bind | grep sierra`
+          option_dongle=`echo $list_bind | grep option`
+
+          # only one dongle is allowed!
+          if [ x"$qmi_dongle" != x""  ] ; then
+            dongle_type="qmi_wwan"
+          elif [ x"$huawei_ether_dongle" != x""  ] ; then
+            dongle_type="huawei_ether"
+          elif [ x"$huawei_cdc_ncm_dongle" != x""  ] ; then
+            dongle_type="huawei_ether"
+          elif [ x"$sierra_dongle" != x""  ] ; then
+           dongle_type="sierra_ppp"
+          elif [ x"$option_dongle" != x""  ] ; then
+           dongle_type="option_ppp"
+          else
+             #logger -t mobiledongle-hotplug "WARNING: not a mobile dongle ($list_bind)"
+             unset dongle_type
+          fi
+
+          if [ -n "$dongle_type" ] ; then
+           uci -P /var/state set mobiledongle.$dongle_type=dongle
+           uci -P /var/state set mobiledongle.$dongle_type.usb_id="${usb_trigger_remove}0"
+
+           uci set mobiledongle.config.enabled=0
+           uci commit mobiledongle.config.enabled
+           logger -t mobiledongle-hotplug "Dongle detected ($dongle_type) @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+           uci set mobiledongle.config.enabled=0
+           uci commit mobiledongle.config.enabled
+           uci -q -P /var/state delete mobiledongle.parm
+           uci -q -P /var/state delete mobiledongle.info
+           uci -q -P /var/state delete mobiledongle.cardinfo
+           uci -q -P /var/state delete mobiledongle.network
+           MBD_HOTPLUG=1 /etc/init.d/mobiledongle start
+
+         fi
+
+         fi
+       fi
+
+      }
+
+    }
+
+
+#    logger -t mobiledongle-hotplug "@@@@@@@ check remove $DEVICENAME @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+    [ "$ACTION" = "remove" ] && {
+      uci_dongle_name=`uci -P /var/state show mobiledongle | egrep -e "=dongle" | cut -f 1 -d '='`
+      uci_dongle_remove=`uci -P /var/state get ${uci_dongle_name}.usb_id | cut -f 2 -d '='`
+#    logger -t mobiledongle-hotplug "@@@@@@@ check remove $DEVICENAME @@@@@ $uci_dongle_name @ $uci_dongle_remove @@@@@@"
+
+      if [ x"$uci_dongle_remove" != x"" ] ; then
+        logger -t mobiledongle-hotplug "@@@@@@@ doit remove $DEVICENAME @@@@@ $uci_dongle_name @ $uci_dongle_remove @@@@@@"
+        logger -t mobiledongle-hotplug "Dongle unplugged ($uci_dongle_name)"
+         # order is important => service know now the dongle is removed!
+         uci delete -P /var/state $uci_dongle_name
+         uci set mobiledongle.config.enabled=0
+         uci commit mobiledongle.config.enabled
+         MBD_HOTPLUG=1 /etc/init.d/mobiledongle stop
+      fi
+
+    }
+}
+
+exit 0

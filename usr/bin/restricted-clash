@@ -1,0 +1,85 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+# Helper function for logging with category `restricted-clash`
+__log() {
+	logger -t restricted-clash "$1"
+}
+
+# Temp telnet check for workaround
+_is_telnet() {
+
+  # Test is session is SSH, and not e.g. SCP. If SSH, it must provide a tty.
+  if [ -w "/dev/pts/0" -o -w "/dev/pts/1" ] ; then
+    __log "User $USER is connecting through Telnet..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if the current session is established by a SSH connection,
+#   and SSH only; not e.g. SCP.
+# Clash requires a tty!
+_is_ssh() {
+
+  # Test is session is SSH, and not e.g. SCP. If SSH, it must provide a tty.
+  if [ "$SSH_TTY" ]; then
+    __log "User $USER is connecting through SSH (tty=$SSH_TTY)..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if the current session is established over a serial connection
+_is_serial() {
+
+  # Test if user is connecting through serial
+  readlink -f /proc/self/fd/0 | grep -q tty
+
+  if [ "$?" -eq 0 ]; then
+    __log "User $USER is connecting through tty..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Verify if the specified user has access to clash over the specified interface (serial or ssh)
+_verify_access() {
+  local conn=$1
+  local access=$(uci_get clash "$USER" "$conn" 0)
+
+  if [ "$access" = 1 ]; then
+    __log "User $USER has $conn access"
+    return 0
+  fi
+
+  __log "User $USER has no $conn access"
+  return 1
+}
+
+# Check all pre-conditions before starting the shell:
+#   (1) Connection must be through serial or by SSH, nothing else.
+#   (2) User must have access over that respective connection.
+# Anything else is not allowed or supported.
+if _is_serial; then
+  # Only grant access if user has serial access
+  _verify_access "serial" || exit 1
+elif _is_ssh; then
+  # Only grant access if user has ssh access
+  _verify_access "ssh" || exit 1
+elif _is_telnet; then
+  __log "User $USER has TELNET access"
+else
+  __log "User $USER attempts login: no serial, no SSH, no TELNET!"
+  # This could be SCP or something else; not allowed.
+  exit 1
+fi
+
+# Start clash
+/usr/bin/clash
+
+__log "User $USER exited"

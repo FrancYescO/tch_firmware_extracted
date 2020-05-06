@@ -1,0 +1,36 @@
+#!/bin/sh
+
+SEALTYPE=`dd bs=1 count=1 2>/dev/null | hexdump -e '"%02X"' | cut -c 1-2`
+MAGIC=`dd bs=4 count=1 2>/dev/null `
+
+if [ "$MAGIC" != "MUTE" ]; then
+	echo "Not a sealed file: $MAGIC"  1>&2
+fi
+
+case $SEALTYPE in
+    B8 )
+	exec bli_unseal_sha256
+	;;
+    B4 )
+	exec bli_unseal_zip
+	;;
+    B0 )
+	exec bli_unseal_open
+	;;
+    B7 )
+	exec bli_unseal_aes256
+	;;
+	B2 )
+	exec bli_unseal_rsa
+	;;
+	B1 )
+	exec bli_unseal_aes128
+	;;
+	B3 )
+	exec bli_unseal_sha1
+	;;
+    * )
+        echo "Unsupported seal type: $SEALTYPE" 1>&2
+	;;
+esac
+
