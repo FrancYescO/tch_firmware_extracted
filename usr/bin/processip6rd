@@ -1,0 +1,33 @@
+#!/bin/sh
+
+. /lib/config/uci.sh
+
+if [ "$(uci_get network 6rd)" == "interface" ]; then
+	#process DHCP ip6rd option (212)
+	if [ -n "$1" ]; then
+		local option6rd=$1
+		local v4mask="${option6rd%% *}"
+		option6rd="${option6rd#* }"
+		local ip6rdprefixlen="${option6rd%% *}"
+		option6rd="${option6rd#* }"
+		local ip6rdprefix="${option6rd%% *}"
+		option6rd="${option6rd#* }"
+		local ip6rdbr="${option6rd%% *}"
+
+		#set 6rd params according to DHCP ip6rd option in the network
+		uci_set network 6rd auto 1
+		uci_set network 6rd peeraddr "$ip6rdbr"
+		uci_set network 6rd ip6prefix "$ip6rdprefix"
+		uci_set network 6rd ip6prefixlen "$ip6rdprefixlen"
+		uci_set network 6rd ip4prefixlen "$v4mask"
+		uci_commit network
+	else
+		if [ "$(uci_get network 6rd auto)" -eq 1 ]; then
+			#turn 6rd off when there is no DHCP ip6rd option in the network
+			uci_set network 6rd auto 0
+			uci_commit network
+		fi
+	fi
+
+	/etc/init.d/network reload
+fi

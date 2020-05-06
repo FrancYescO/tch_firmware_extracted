@@ -1,0 +1,172 @@
+#!/usr/bin/env lua
+
+local tonumber, assert, io, string =
+      tonumber, assert, io, string
+local format, match = string.format, string.match
+local logger = require 'transformer.logger'
+local cursor = require("uci").cursor()
+local common = require 'transformer.mapper.nwcommon'
+local ubus = require("ubus")
+-- UBUS connection
+local ubus_conn
+
+
+local log_config = {
+    level = 3,
+    stderr = false
+}
+-- get ping configuration from UCI
+local config = "ipping"
+
+local state = "Complete"
+local sent, recv = 0, 0
+local min, avg, max = 0, 0, 0
+local event_msg = {}
+
+-- command line argument = user name
+local user=arg[1]
+-- interface cannot be nil
+if user==nil then
+  logger:critical("You need to specify an user (igd,wwwconn,wwwping,...)")
+  return
+end
+
+
+local output
+
+local function ping(user)
+  -- get ping configuration from UCI
+  local host = cursor:get(config, user, "host")
+  local count = cursor:get(config, user, "count")
+  -- IGD timeout is in milliseconds, ping uses seconds
+  local timeout = cursor:get(config, user, "timeout")
+  local size = cursor:get(config, user, "size")
+
+  -- check if all required parameters are present
+  if not (host and count and timeout and size) then
+    state = "Error_Other"
+    return
+  end
+  count = tonumber(count)
+  timeout = math.floor(tonumber(timeout) / 1000)
+  size = tonumber(size)
+
+  -- get logical interface and convert to physical
+  local iface = cursor:get(config, user, "interface")
+  local iface_option = ""
+  if iface and iface:len() ~= 0 then
+
+    iface = common.get_ubus_interface_status(iface)
+    iface = iface and iface["l3_device"]
+    if not iface then
+      state = "Error_Other"
+      return
+    end
+    logger:debug("resolved logical name to physical device: " .. iface)
+    iface_option = format("-I %s", iface)
+  end
+
+  if timeout < 1 then timeout = 1 end
+
+  -- do ping and capture output
+  local cmdline = format("ping %s -c %d -s %d -W %d %s 2>&1", iface_option, count, size, timeout, host)
+  local p = assert(io.popen(cmdline))
+  output = p:read("*a")
+  p:close()
+
+  -- parse output
+  -- typical output of successful ping:
+  --    PING 192.168.1.2 (192.168.1.2): 56 data bytes
+  --
+  --    --- 192.168.1.2 ping statistics ---
+  --    3 packets transmitted, 3 packets received, 0% packet loss
+  --    round-trip min/avg/max = 0.436/0.571/0.821 ms
+  -- typical output of failed ping:
+  --    PING 192.168.1.5 (192.168.1.5): 56 data bytes
+  --
+  --    --- 192.168.1.5 ping statistics ---
+  --    3 packets transmitted, 0 packets received, 100% packet loss
+  -- typical output if the hostname could not be resolved:
+  --    ping: bad address 'foo.bar'
+  if match(output,"100%% packet loss") then
+    state = "Error_NoRouteToHost"
+  end
+  if match(output, "^ping: bad address") then
+    state = "Error_CannotResolveHostName"
+  else
+    sent, recv = match(output, "(%d+) packets transmitted, (%d+) packets received")
+    sent = tonumber(sent) or 0
+    recv = tonumber(recv) or 0
+    min, avg, max = match(output, "min/avg/max = (%d+)%.%d+/(%d+)%.%d+/(%d+)%.%d+ ms")
+    min = tonumber(min)
+    if min == 0 then
+      min = 1
+    end
+    min = min or 0
+    avg = tonumber(avg)
+    if avg == 0 then
+      avg = 1
+    end
+    avg = avg or 0
+    max = tonumber(max)
+    if max == 0 then
+      max = 1
+    end
+    max = max or 0
+  end
+  local info ={}
+  info["host"] = host
+  info["recvieved"] = recv
+  info["lost"] = sent - recv
+  info["min"] = min
+  info["average"] = avg
+  info["max"] = max
+  info["state"] = state
+  event_msg[user] = info
+  -- Publish the ping result on ubus
+  ubus_conn:send('ipping.ipping_'.. user, info)
+end
+
+logger.init(log_config.level, log_config.stderr)
+logger = logger.new("IPPing", log_config.level)
+
+--publish results in ubus
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end 
+
+
+local err, msg = pcall(ping, user)
+if not err then
+  state = "Error_Internal"
+  logger:critical(msg)
+end
+local fh, msg = io.open("/tmp/ipping_"..user, "w")
+assert(fh, msg)
+fh:write(format('%d\n', recv))
+fh:write(format('%d\n', sent - recv))
+fh:write(format('%d\n', min))
+fh:write(format('%d\n', avg))
+fh:write(format('%d\n', max))
+fh:close()
+
+-- write results to UCI
+cursor:set(config, user, "state",   state)
+cursor:commit("ipping")
+
+if user == "diagping" then
+  local fh1, msg1 = io.open("/tmp/ping_"..user, "w")
+  assert(fh1, msg1)
+  for line in output:gmatch("[^\r\n]+") do
+    -- 64 bytes from 106.10.139.246: seq=0 ttl=51 time=54.495 ms
+    if match(line, "(%d+) bytes from (%S+)%: seq=(%d+) ttl=(%d+) time=(%d+)%.%d+ ms") then
+      fh1:write(format('%s\n',line))
+    end
+  end
+  fh1:close()
+end
+
+
+
+
+
