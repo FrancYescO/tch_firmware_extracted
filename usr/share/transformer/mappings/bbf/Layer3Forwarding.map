@@ -1,0 +1,375 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local InternetGatewayDevice_Layer3Forwarding_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Layer3Forwarding.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DefaultConnectionService = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        max = "256",
+      },
+      -- ForwardNumberOfEntries
+      -- automatically created when InternetGatewayDevice.Layer3Forwarding.Forwarding.{i}. is loaded
+    }
+  }
+}
+
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_Layer3Forwarding_Forwarding_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",  -- readWrite currently not supported
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      StaticRoute = {
+        access = "readOnly",
+        type = "boolean",
+        default = "true",
+      },
+      Type = {
+        access = "readOnly",  -- readWrite currently not supported
+        status = "deprecated",
+        type = "string",
+        enumeration = {
+          "Default",
+          "Network",
+          "Host",
+        },
+        default = "Host",
+      },
+      DestIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      DestSubnetMask = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      SourceIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      SourceSubnetMask = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      ForwardingPolicy = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      GatewayIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      Interface = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      ForwardingMetric = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      MTU = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "1540",
+          },
+        },
+      },
+    }
+  }
+}
+local mapper, register, string = mapper, register, string
+local pairs, ipairs, open = pairs, ipairs, io.open
+local tonumber, tostring = tonumber, tostring
+local floor, concat = math.floor, table.concat
+local nwCommon = mapper('nwcommon')
+local numToIPv4 = nwCommon.numToIPv4
+local findLanWanInterfaces = nwCommon.findLanWanInterfaces
+local match, format = string.match, string.format
+local resolve = resolve
+local ubus = mapper("ubus").connect()
+local uciHelper = mapper('ucihelper')
+local networkBinding = { config = "network"}
+local loadRoutes = nwCommon.loadRoutes
+local forEachOnUci = uciHelper.foreach_on_uci
+
+local function getVlanDeviceName(device)
+  local intf = ""
+  networkBinding.sectionname = "device"
+  forEachOnUci(networkBinding, function(s)
+    if s.name == device then
+      intf = s.ifname or ""
+      return false
+    end
+  end)
+  return intf
+end
+
+local function netmask_bits(nbits)
+  if nbits<0 then
+    return
+  elseif nbits==0 then
+    return 0
+  elseif nbits<=32 then
+    return (2^nbits-1)*(2^(32-nbits))
+  else
+    return
+  end
+end
+
+-- memoize the netmask, there are only 33
+local netmasks = {}
+
+local function get_interfaces()
+  local interfaces = {}
+  local info = ubus:call("network.interface", "dump", {})
+  for _, intf in ipairs(info.interface or {}) do
+    local ipv4 = intf['ipv4-address']
+    ipv4 = ipv4 and ipv4[1]
+    if ipv4 then
+      intf.ipv4 = ipv4
+      interfaces[intf.interface] = intf
+    end
+  end
+  -- mark the wan interfaces
+  for _, wanif in ipairs(findLanWanInterfaces(true)) do
+    local intf = interfaces[wanif]
+    if intf then
+      intf.is_wan = true
+    end
+  end
+  return interfaces
+end
+
+local intf_cache
+local function get_intf(L3name)
+  if not intf_cache then
+    local interfaces = get_interfaces()
+    local L3map = {}
+    for _, intf in pairs(interfaces) do
+      local l3 = intf.l3_device
+      if l3 then
+        L3map[l3] = intf
+      end
+    end
+    intf_cache = L3map
+  end
+  return intf_cache[L3name]
+end
+
+local function get_physical(intf)
+  local physical = intf.physical -- use cached if present
+  if not physical then
+    physical = getVlanDeviceName(intf.device)
+    if physical=='' then
+      physical = intf.device:match("^([^.]+)")
+    end
+    intf.physical = physical
+  end
+  return physical
+end
+
+local function is_ppp(intf)
+  local proto = intf.proto or ""
+  return proto:match("^ppp")
+end
+
+local function resolve_connection_device(mapping, intf)
+  if intf then
+    if match(mapping.objectType.name, "^InternetGatewayDevice") then --igd
+      if intf.is_wan then
+        local key = intf.interface..'|'..get_physical(intf)
+        if is_ppp(intf) then
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key) or ''
+        else
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key) or ''
+        end
+      else
+        return resolve("InternetGatewayDevice.LANDevice.{i}.", intf.interface) or ''
+      end
+    else --device2
+      return resolve("Device.IP.Interface.{i}.", intf.interface) or ''
+    end
+  end
+  return ''
+end
+
+InternetGatewayDevice_Layer3Forwarding_.get = {
+  DefaultConnectionService = function (mapping)
+    -- Find Interface where Destination == 0.0.0.0
+    intf_cache = nil
+    local defaultL3 = loadRoutes(true)
+    if not defaultL3 then
+      -- there is no default route
+      return ''
+    end
+    return resolve_connection_device(mapping, get_intf(defaultL3))
+  end,
+}
+
+register(InternetGatewayDevice_Layer3Forwarding_)
+
+-- cache of routes, filled in in entries and used in get
+local routes = {}
+
+Multi_Layer3Forwarding_Forwarding_i_.entries = function()
+  local entries = {}
+  intf_cache = nil
+  routes = {}
+  for _, route in ipairs(loadRoutes()) do
+    -- generate key from IFace, Destination and Gateway fields
+    local key = format("%s|%s|%s", route.ifname, route.destip, route.gateway)
+    entries[#entries+1] = key
+    -- store date for retrieval
+    routes[key] = route
+  end
+  return entries
+end
+
+Multi_Layer3Forwarding_Forwarding_i_.get = {
+  Enable = "1", -- if entries returns the key, the route is enabled
+  Status = "Enabled",
+  Type = 'Host',
+  DestIPAddress = function(mapping, param, key)
+    local route = routes[key]
+    return route and numToIPv4(tostring(tonumber(route.destip, 16)), true) or ''
+  end,
+  DestSubnetMask = function(mapping, param, key)
+    local route = routes[key]
+    return route and numToIPv4(tostring(tonumber(route.netmask, 16)), true) or ''
+  end,
+  SourceIPAddress = function(mapping, param, key)
+    local route = routes[key]
+    if route then
+      local intf = get_intf(route.ifname)
+      if intf then
+        local ip = intf.ipv4
+        return ip and ip.address or ''
+      end
+    end
+    return ''
+  end,
+  SourceSubnetMask = function(mapping, param, key)
+    local route = routes[key]
+    if route then
+      local intf = get_intf(route.ifname)
+      if intf then
+        local ip = intf.ipv4
+        return nwCommon.netmask2mask(ip and ip.mask or 0)
+      end
+    end
+    return ''
+  end,
+  ForwardingPolicy = '-1',
+  GatewayIPAddress = function(mapping, param, key)
+    local route = routes[key]
+    return route and numToIPv4(tostring(tonumber(route.gateway, 16)), true) or ''
+  end,
+  Interface = function(mapping, param, key)
+    local route = routes[key]
+    return resolve_connection_device(mapping, route and get_intf(route.ifname))
+  end,
+  ForwardingMetric = function(mapping, param, key)
+    local route = routes[key]
+    return route and route.metric or '-1'
+  end,
+  MTU = function(mapping, param, key)
+    local route = routes[key]
+    if route then
+      local fd = open(format("/sys/class/net/%s/mtu", route.ifname), "r")
+      if fd then
+        local mtu = fd:read("*l"):match("^(%d+)")
+        fd:close()
+        if mtu then
+          return mtu
+        end
+      end
+    end
+    return '1'
+  end,
+  StaticRoute = function(mapping, param, key)
+    local isEnabled = false
+    networkBinding.sectionname = 'route'
+    local route = routes[key]
+    local destIPAddress = numToIPv4(tostring(tonumber(route.destip, 16)), true)
+    forEachOnUci(networkBinding, function(s)
+      if route.ifname == nwCommon.getIntfName(s.interface) and match(s.target, destIPAddress) then
+        isEnabled = true
+        return false
+      end
+    end)
+    return isEnabled and '1' or '0'
+  end,
+}
+
+-- A getall implementation is not done as it will not bring any improvement,
+-- as data retrieval is done in the entries call. The get will use the cached
+-- data, no work is duplicated.
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Layer3Forwarding_Forwarding_i_, "#ROOT", {"InternetGatewayDevice.Layer3Forwarding.Forwarding", "Device.Routing.Router.{i}.IPv4Forwarding"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match("^InternetGatewayDevice.") then
+    dupli.objectType.numEntriesParameter = "ForwardNumberOfEntries"
+  else
+    dupli.objectType.numEntriesParameter = "IPv4ForwardingNumberOfEntries"
+    -- Remove igd-specific parameters from device2
+    dupli.objectType.parameters["Type"] = nil
+    dupli.objectType.parameters["SourceIPAddress"] = nil
+    dupli.objectType.parameters["SourceSubnetMask"] = nil
+    dupli.objectType.parameters["ForwardingPolicy"] = nil
+    dupli.objectType.parameters["MTU"] = nil
+  end
+  register(dupli)
+end

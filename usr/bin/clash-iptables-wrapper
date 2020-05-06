@@ -1,0 +1,58 @@
+#!/usr/bin/env lua
+
+--[[
+  clash-iptables-wrapper is designed for the CLI's (clash) iptables command.
+  It may be used from a root shell, but this is not its main purpose.
+
+  Summary:
+    The script may be called with any list of arguments.
+    The script in turn calls `iptables` with these arguments, with one important exception:
+       `-L all`
+       As the other options, `-L` is also passed trough as is, except when it is set with value `all`.
+       This value is stripped from the arguments, so that `iptables` is executed with plain `-L`.
+       When `-L` is set to a chain name, `-L 'that_chain_name'` is simply passed to iptables.
+
+  Background:
+    Declaring clash command with flag `-L (string default "")` is insufficient to get the arguments flow
+    correctly from clash -> transformer -> iptables in all cases.
+
+    Due to design, when `-L` is left empty, it never arrives at iptables, hence we would not be able to
+    list all chains from iptables. The wrapper script covers this by translating `-L all` to `all` before calling
+    iptables.
+]]--
+
+-- Call iptables with provided args string.
+-- The args string should represent valid iptables arguments,
+-- but it will report back its error(s) if not.
+local function iptables(args)
+  os.execute("iptables " .. (args or ""))
+end
+
+-- Serialize script's arg table to a string, before passing to iptables.
+-- This function translates `-L all` to `-L`; in all other cases
+-- arguments are simply appended to the resulting args string.
+local function arg_to_string(arg)
+  local args = ""
+
+  -- This flag is set when finding arg `-L`.
+  -- The next argument is then the chain name, or `all`
+  local checknext=false
+
+  for i=1, #arg do
+    if checknext and arg[i] == "all" then
+      -- `L all` was provided; do not append `all`, just reset the flag
+      checknext = false
+    else
+      -- Simply append the option or option value
+      args = args .. arg[i] .. " "
+    end
+
+    -- When arg is `-L`, check its value for `all`
+    if arg[i] == "-L" then
+      checknext = true
+    end
+  end
+  return args
+end
+
+iptables( arg_to_string(arg) )

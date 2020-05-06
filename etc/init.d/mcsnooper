@@ -1,0 +1,76 @@
+#!/bin/sh /etc/rc.common
+
+START=60
+SERVICE_DAEMONIZE=1
+
+args=""
+
+check_trafficid() {
+	local trafficid=$1
+	local class=$2
+
+	if [ "${trafficid}" = "${trafficid_video}" ]; then
+		class_video=${class}
+		queue_video=${queue_num}
+	fi
+}
+
+get_multicast_prio_queue() {
+	local iface=$1
+	local label="Video_Data Video"
+
+	config_load qos
+
+	for lb in ${label}
+	do
+		config_get trafficid_video ${lb} trafficid
+		[ -n "${trafficid_video}" ] && break
+	done
+	[ -z "${trafficid_video}" ] && return 1
+
+	config_get classgroup ${iface} classgroup
+	[ -z "${classgroup}" ] && return 1
+	config_get_bool enable ${iface} enable 1
+	[ 1 -eq "${enable}" ] || return 1
+
+	config_get classes ${classgroup} classes
+	config_get class_default ${classgroup} default
+	queue_num=0
+	for class in ${classes} ; do
+		config_list_foreach ${class} trafficid check_trafficid ${class}
+		[ -n "${class_default}" -a "${class}" = "${class_default}" ] && queue_default=${queue_num}
+		queue_num=$((queue_num + 1))
+	done
+
+	if [ -z "${class_video}" ]; then
+		[ -n "${class_default}" ] || return 1
+		class_video=${class_default}
+		queue_video=${queue_default}
+	fi
+
+	config_get priority ${class_video} priority
+	append args "-P ${priority:-${queue_video}}"
+}
+
+parse_interface() {
+	[ "$found" -gt 0 ] && return
+
+	config_get state "$1" state "downstream"
+	[ "$state" == "downstream" ] && get_multicast_prio_queue "$1" && found=1
+}
+
+start() {
+	logger -t mcsnooper "Starting multicast snooper daemon"
+
+	config_load mcastsnooping
+	found=0
+	config_foreach parse_interface interface
+
+	service_start /usr/bin/mcsnooper $args
+}
+
+stop() {
+	logger -t mcsnooper "Stopping multicast snooper daemon"
+
+	service_stop /usr/bin/mcsnooper
+}

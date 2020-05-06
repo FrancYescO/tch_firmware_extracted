@@ -1,0 +1,228 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANDSLDiagnostics.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      LoopDiagnosticsState = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Complete",
+          "Error_Internal",
+          "Error_Other",
+        },
+      },
+      ACTATPds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+      },
+      ACTATPus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+      },
+      ACTPSDds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+      },
+      ACTPSDus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+      },
+      BITSpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      HLINpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      QLNpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      SNRpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      HLINSCds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+      },
+      GAINSpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+    },
+  }
+}
+
+local logger = require 'transformer.logger'
+local common = mapper("nwcommon")
+local xdslctl = require("transformer.shared.xdslctl")
+local cmdhelper = require("transformer.shared.cmdhelper")
+local execute = os.execute
+local split_key = common.split_key
+local uciHelper = mapper("ucihelper")
+local diagresult = ""
+
+local function getDiagStatus()
+    local none_mt = { __index = function() return "None" end }
+    local LoopDiagnosticsStateMapping = setmetatable({
+        ["progress"] = "Requested",
+        ["completed"] = "Complete",
+        ["internal"] = "Error_Internal",
+        ["other"] = "Error_Other",
+        }, none_mt)
+
+    local values = {}
+    local keyarray = {"status", "LoopDiagnostic"}
+    local xdslctlstate={ command = "xdslctl info --state",
+                         lookup  = {["status"] = { pat = "^Status:%s+(%S+)" },["LoopDiagnostic"] = { pat = "^Loop Diagnostic%s+.*%s+(%a+)" },}
+                        }
+
+    cmdhelper.parseCmd(xdslctlstate, keyarray, values)
+
+    return LoopDiagnosticsStateMapping[values["LoopDiagnostic"]]
+end
+
+InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_.get = {
+  LoopDiagnosticsState = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return (diagresult ~= "" and diagresult or getDiagStatus())
+    end
+    return ""
+  end,
+  ACTATPds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("ACTATP", "ds", "", key)
+    end
+    return ""
+  end,
+  ACTATPus = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("ACTATP", "us", "", key)
+    end
+    return ""
+  end,
+  ACTPSDds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("ACTPSD", "ds", "", key)
+    end
+    return ""
+  end,
+  ACTPSDus = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("ACTPSD", "us", "", key)
+    end
+    return ""
+  end,
+  BITSpsds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("BITSps", "ds", "", key)
+    end
+    return ""
+  end,
+  HLINpsds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("HLINps", "ds", "", key)
+    end
+    return ""
+  end,
+  QLNpsds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("QLNps", "ds", "", key)
+    end
+    return ""
+  end,
+  SNRpsds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        return xdslctl.infoValue("SNRps", "ds", "", key)
+    end
+    return ""
+  end,
+  HLINSCds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        local status, result = pcall(xdslctl.infoValue, "HLINSC", "ds", "", key)
+        return (status and result or "0")
+    end
+    return ""
+  end,
+  GAINSpsds = function (mapping, paramname, key)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        local status, result = pcall(xdslctl.infoValue, "GAINSps", "ds", "", key)
+        return (status and result or "")
+    end
+    return ""
+  end,
+}
+
+InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_.set = {
+  LoopDiagnosticsState = function(mapping, paramname, paramvalue, key, parentkey)
+    local devtype = split_key(key)
+    if devtype == "DSL" then
+        if paramvalue == "Requested" then
+            commitapply:newset("InternetGatewayDevice.WANDevice.{i}.WANDSLDiagnostics.LoopDiagnosticsState")
+            return true
+        else
+            return nil, "The only allowed value is Requested"
+        end
+    end
+  end,
+}
+
+local function ubus_event_cb(mapping, event, data)
+    if data and data.LoopDiagnosticsState then
+       diagresult = data.LoopDiagnosticsState
+    end
+end
+
+InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_.add_watchers = function(mapping)
+    local ubus_evsrc = eventsource("ubus")
+    ubus_evsrc.watch_event(mapping, ubus_event_cb, "dsl.loopdiagnostics_igd")
+end
+
+InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_.entries = function()
+    local xdsl_binding = { config = "xdsl", sectionname = "xdsl" }
+    local interfaces = {}
+    -- check whether DSL is present on the board
+    uciHelper.foreach_on_uci(xdsl_binding, function(s)
+        -- iterate over all DSL ports (all - it could be a bonding board)
+        interfaces[#interfaces + 1] = "DSL|" .. s['.name']
+    end)
+    return interfaces
+end
+
+InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_.revert = function(mapping)
+    logger:debug("====== Resume DSL ======")
+    execute("xdslctl connection --up")
+end
+
+register(InternetGatewayDevice_WANDevice_i_WANDSLDiagnostics_)

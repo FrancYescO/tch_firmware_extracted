@@ -1,0 +1,63 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+#set -x
+
+START=50
+
+ARGS=
+
+pppoerelay_read_config() {
+    config_load "pppoerelayd"
+    local siface ciface nsessions timeout
+    
+    config_get CONNSTATUS config enable 1
+    config_get siface config server_intf
+    config_get ciface config client_intf
+    config_get nsessions config nsessions 32
+    config_get timeout config timeout 0
+    
+    . /lib/functions/network.sh
+    VALID_CONFIG=1
+
+    local wan_device
+    network_get_physdev wan_device ${siface:-wan}
+    if [ -n "$wan_device" ]; then 
+	ARGS="-S $wan_device"
+    else
+	logger -t pppoerelayd "invalid server interface <$siface> specified, not starting"
+	VALID_CONFIG=0
+    fi
+
+    local lan_device
+    for interface in ${ciface:-lan}; do
+	network_get_physdev lan_device $interface
+	if [ -n "$lan_device" ]; then
+	    ARGS="$ARGS -C $lan_device"
+	else
+	    logger -t pppoerelayd "invalid client interface <$interface> specified, not starting"
+	    VALID_CONFIG=0
+	fi
+	lan_device=
+    done
+
+    if ([ $nsessions -ge 0 ] && [ $nsessions -le 32 ]); then
+	ARGS="$ARGS -n $nsessions"
+    else
+	logger -t pppoerelayd "invalid number of sessions specified [0..32], not starting"
+	VALID_CONFIG=0
+    fi
+
+    ARGS="$ARGS -i $timeout"
+}
+
+start() {
+    pppoerelay_read_config
+    [ "${CONNSTATUS}" -gt 0 ] && [ "${VALID_CONFIG}" -gt 0 ] && echo "service_start /usr/sbin/pppoe-relay $ARGS" && service_start /usr/sbin/pppoe-relay $ARGS && return
+
+    [ "${CONNSTATUS}" -eq 0 ] && echo "PPPoE RELAYD not started, not enabled by configuration"
+    [ "${VALID_CONFIG}" -eq 0 ] && echo "PPPoE RELAYD not started, invalid configuration (check syslog)"
+}
+
+stop() {
+    service_stop /usr/sbin/pppoe-relay
+}

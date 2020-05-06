@@ -1,0 +1,73 @@
+-- Manually generated
+local x_belgacom_tv_ = {
+  objectType = {
+    name = "Device.Services.X_BELGACOM_TV.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        Mode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Routed",
+          "Bridged"
+        },
+        default = "Routed",
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local binding = { config = "env", sectionname = "var" }
+local configChanged = false
+local logger = require("transformer.logger")
+local ubus = require("ubus")
+local ubus_conn
+local current_mode
+
+x_belgacom_tv_.get = {
+   Mode = function()
+     binding.option = "bgc_tv_mode_current"
+     binding.default = "Routed"
+     return uciHelper.get_from_uci(binding)
+   end
+}
+
+x_belgacom_tv_.set = {
+   Mode = function(_, _, paramvalue)
+     binding.option = "bgc_tv_mode_current"
+     if paramvalue ~= uciHelper.get_from_uci(binding) then
+       uciHelper.set_on_uci(binding, paramvalue)
+       current_mode = paramvalue
+       configChanged = true
+     end
+   end
+}
+
+local function send_ubus_event(mode)
+  local info = {}
+  info["request_mode"] = mode
+  if ubus_conn == nil then
+    ubus_conn = ubus.connect()
+  end
+  ubus_conn:send('network.tv_mode',info)
+end
+
+x_belgacom_tv_.commit = function()
+  if configChanged then
+    uciHelper.commit(binding)
+    send_ubus_event(current_mode)
+    configChanged = false
+  end
+end
+
+x_belgacom_tv_.revert = function()
+  if configChanged then
+    uciHelper.revert(binding)
+    configChanged = false
+  end
+end
+
+register(x_belgacom_tv_)
