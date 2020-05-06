@@ -1,0 +1,136 @@
+-- Manually generated
+local InternetGatewayDevice_X_0876FF_LED_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_0876FF_LED.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the LED Status",
+    parameters = {
+      InternetLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the internet LED",
+      },
+      PowerLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Power LED",
+      },
+      WirelessLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Wireless LED",
+      },
+      DSLLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the DSL LED",
+      },
+      USBLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the USB LED",
+      },
+      Ethernet1LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet1 LED",
+      },
+      Ethernet2LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet2 LED",
+      },
+      Ethernet3LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet3 LED",
+      },
+      Ethernet4LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet4 LED",
+      },
+      WANLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Eth wan LED",
+      },
+    }
+  }
+}
+
+local lfs = require("lfs")
+local open = io.open
+
+local paramMap = {
+  InternetLEDState = "internet",
+  PowerLEDState    = "power",
+  WirelessLEDState = "wireless",
+  DSLLEDState      = "broadband",
+  USBLEDState      = "usb",
+  WANLEDState      = "wanlan"
+}
+
+local ethMap = {
+  Ethernet1LEDState = "eth3",
+  Ethernet2LEDState = "eth2",
+  Ethernet3LEDState = "eth1",
+  Ethernet4LEDState = "eth0"
+}
+
+--- Retrieves the LED status
+-- @param param the parameter name
+-- @return the led status
+local function getLedState(param)
+  local path = "/sys/class/leds/"
+  local fileName
+  for file in lfs.dir(path) do
+    if file:match("^"..paramMap[param]) then
+      fileName = path .. file .. "/delay_on"
+      local fd = open(fileName)
+      if fd then
+        local color = file:match(".*:(.*)")
+        fd:close()
+        return color .. "-blink"
+      else
+        fileName = path .. file .. "/brightness"
+        local fd1 = open(fileName)
+        if fd1 then
+          local brightness = fd1:read()
+          fd1:close()
+          if tonumber(brightness) > 0 then
+            return file:match(".*:(.*)")
+          end
+        end
+      end
+    end
+  end
+  return "off"
+end
+
+--- Retrieves the state of the Ethernet
+-- @param param the parameter name
+-- @return on/off based on the oper state of ethernet
+local function getEthLedState(param)
+  local fileName = "/sys/class/net/" .. ethMap[param] .. "/operstate"
+  local fd = open(fileName)
+  if fd then
+    local state = fd:read()
+    if state == "up" then
+      return "on"
+    end
+  end
+  return "off"
+end
+
+InternetGatewayDevice_X_0876FF_LED_.get = function(mapping, param)
+  if paramMap[param] then
+    return getLedState(param)
+  elseif ethMap[param] then
+    return getEthLedState(param)
+  end
+end
+
+register(InternetGatewayDevice_X_0876FF_LED_)
