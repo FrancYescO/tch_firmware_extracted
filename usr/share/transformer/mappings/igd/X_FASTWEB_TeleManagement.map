@@ -1,0 +1,57 @@
+local InternetGatewayDevice_X_FASTWEB_TeleManagement_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_FASTWEB_TeleManagement.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      LastModifiedByUser = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+
+local binding = {
+  config = "guiwatcher",
+  sectionname = "guiwatcher",
+  option = "lastmodifiedbyuser",
+}
+
+InternetGatewayDevice_X_FASTWEB_TeleManagement_.get = {
+  LastModifiedByUser = function(mapping, param)
+    return uci_helper.get_from_uci(binding)
+  end,
+}
+
+local function ubus_wifi_onoff_event_cb(mapping,event,data)
+  if(data["state"]== "wifi_leds_on" or data["state"]== "wifi_leds_off") then
+    uci_helper.set_on_uci(binding,os.date("!%Y-%m-%dT%XZ"),commitapply)
+    uci_helper.commit({config="guiwatcher"})
+  end
+end
+
+local function translate_cb(mapping, action, config, sectiontype, sectionname, option)
+  return { { key = sectionname, paramname = "LastModifiedByUser" } }
+end
+
+InternetGatewayDevice_X_FASTWEB_TeleManagement_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = translate_cb }, "guiwatcher", "guiwatcher", nil, "lastmodifiedbyuser")
+
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping,ubus_wifi_onoff_event_cb,"event")
+end
+
+InternetGatewayDevice_X_FASTWEB_TeleManagement_.commit = function()
+  uci_helper.commit(binding)
+end
+
+InternetGatewayDevice_X_FASTWEB_TeleManagement_.revert = function()
+  uci_helper.revert(binding)
+end
+
+register(InternetGatewayDevice_X_FASTWEB_TeleManagement_)

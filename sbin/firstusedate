@@ -1,0 +1,29 @@
+#! /bin/sh
+
+. /lib/functions.sh
+
+config_load "system"
+config_get ntpsynced ntp synced 0
+
+if [ $ntpsynced == "0" ]; then
+        if [ $1 == "step" ] || [ $1 == "stratum" ]; then
+                uci_set_state system ntp synced 1
+                config_load "cwmpd"
+                config_get cwmpdfirstusedate cwmpd_config firstusedate
+                if [ "$cwmpdfirstusedate" == "" ]; then
+                        TIME=$(date -u +"%Y-%m-%dT%TZ")
+                        uci_set cwmpd cwmpd_config firstusedate $TIME
+                        uci_commit cwmpd
+                fi
+        fi
+fi
+
+#update hostmanager devices' connected time
+ubus send ntp.connected
+
+# Update kernel timezone when ntpd stepping time.
+# NTP will not change system timezone settings, but system will adjust display
+# time accroding to timezone and daylight saving settings. Run below command to
+# reflect potential daylight saving change to kernel GMT offset.
+date -k
+

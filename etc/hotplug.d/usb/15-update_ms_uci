@@ -1,0 +1,114 @@
+#!ash
+
+MSPATH="/etc/usb_modeswitch.d"
+
+VAR_LIST="\
+STORAGE_ID \
+VENDOR_ID \
+FILE \
+TARGET_MODEM_ID \
+TARGET_VENDOR_ID \
+TARGET_PROD_ID \
+COMMENT \
+NEED_RESP \
+MODESW_STR \
+"
+
+REQUIRED_VAR_LIST="\
+STORAGE_ID \
+TARGET_MODEM_ID \
+MODESW_STR \
+"
+lower () {
+echo $@ | tr A-Z a-z
+}
+
+dispvar () {
+tmp_var=`eval echo $"$1"`
+echo Value of $1= $tmp_var
+if [ -z "$tmp_var" ] ;then 
+   echo "!=!=!=!" "Variable $1 is NOT set (empty) !"
+   for req in $REQUIRED_VAR_LIST ;do
+   if [ "$1" = "$req" ] ; then echo $1 is required !;fi
+   done
+fi 
+}
+
+
+dispvars () {
+echo Variables for $1 :
+for var in $VAR_LIST
+do 
+   dispvar $var
+done 
+}
+  
+
+
+#get list of uci configured mobiledongles
+list_dongles() {
+   uci show mobiledongle | grep =modeswitch | cut -d'=' -f1 | cut -d'.' -f2
+}
+
+#get their configuration : 
+show_dongle_configs () {
+   for dongle in `list_dongles`; do
+      echo -e "\n***" dongle : $dongle
+      uci show mobiledongle.$dongle
+   done
+}
+
+
+write_file() {
+    echo Writing file \'$1\' !
+cat >$1 << ENDOFTEXT
+$COMMENT
+ 
+TargetVendor=  0x$TARGET_VENDOR_ID 
+TargetProduct= 0x$TARGET_PROD_ID
+
+MessageContent=$MODESW_STR
+
+$RESP_STR
+ 
+ENDOFTEXT
+}
+
+for dongle in `list_dongles`;do 
+   echo -e "\n***" dongle : $dongle
+   uci show mobiledongle.$dongle
+   STORAGE_ID=`uci get mobiledongle.$dongle.storage_id`
+   VENDOR_ID=`lower $(echo ${STORAGE_ID} | cut -d':' -f1)`
+   FILE=$MSPATH/`lower $STORAGE_ID`
+   TARGET_MODEM_ID=$(lower `uci get mobiledongle.$dongle.modem_id`)
+   TARGET_VENDOR_ID=$(lower `echo ${TARGET_MODEM_ID} | cut -d':' -f1`)
+   TARGET_PROD_ID=$(lower `echo ${TARGET_MODEM_ID} | cut -d':' -f2`)
+   COMMENT="# `uci show mobiledongle.$dongle | grep comment= | cut -d'=' -f2`"
+   if [ "$COMMENT" = "# " ] ;then COMMENT="# <Add your descriptive comments here>" ;fi
+   RESP_STR=""
+   NEED_RESP=`uci show mobiledongle.$dongle | grep need_response= | cut -d'=' -f2`
+   if ! [ "$NEED_RESP" = "" ] ;then 
+      RESP_STR="NeededResponse=$NEED_RESP"
+   fi
+   MODESW_STR="\""$(lower `uci get mobiledongle.$dongle.modeswitch_str`)"\""
+
+   dispvars $dongle
+
+   if  ! [ -f $FILE ] ;then
+      echo File \'$FILE\' Does not exist exists ... Creating !!!!!
+   else
+      echo File \'$FILE\' exists ... Overwriting or altering !!!!!
+   fi
+
+   target_file="$MSPATH/$TARGET_MODEM_ID"
+                       
+   if [ -e $target_file ]; then
+     logger -t "mobiledongle-update_ms_uci" "Only ONE modemswitch allowed!"
+     rm -f $target_file                  
+   fi           
+
+   README.txt
+   write_file $FILE
+
+done
+

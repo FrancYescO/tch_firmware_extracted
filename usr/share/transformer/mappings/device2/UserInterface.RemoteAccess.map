@@ -1,0 +1,108 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Device_UserInterface_RemoteAccess_ = {
+  objectType = {
+    name = "Device.UserInterface.RemoteAccess.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Port = {
+        access = "readOnly", --readWrite not supported since lower layer support not available.
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      SupportedProtocols = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "HTTP",
+          "HTTPS",
+        },
+      },
+      Protocol = {
+        access = "readOnly", --readWrite not supported since lower layer support not available.
+        type = "string",
+        enumeration = {
+          "HTTP",
+          "HTTPS",
+        },
+      },
+    }
+  }
+}
+
+local open = io.open
+
+local function loadState()
+  local state = {
+    wanip="",
+    wanport="",
+    lanport="",
+    enabled="0",
+    password="_dummy_",
+    mode="0",
+  }
+  local f = open("/var/run/assistance/remote",'r')
+  if f then
+    for ln in f:lines() do
+      local key, value = ln:match('^%s*([^=%s]*)%s*=%s*([^%s]*)')
+      if key then
+        state[key] = value
+      end
+    end
+    f:close()
+  end
+  return state
+end
+
+Device_UserInterface_RemoteAccess_.get = {
+  Enable = function(mapping, param, key)
+    local state = loadState()
+    return state.enabled=="1" and "1" or "0"
+  end,
+
+  Port = function(mapping, param, key)
+    local state = loadState()
+    if state.enabled == "1" then
+      return  state.wanport
+    end
+    return ""
+  end,
+
+  SupportedProtocols = "HTTPS",
+
+  Protocol = "HTTPS",
+}
+
+Device_UserInterface_RemoteAccess_.getall = function(mapping, key)
+  local state = loadState()
+  return {
+    Enable = state.enabled=="1" and "1" or "0",
+    Port = state.enabled=="1" and state.wanport or "",
+    SupportedProtocols = "HTTPS",
+    Protocol = "HTTPS",
+  }
+end
+
+Device_UserInterface_RemoteAccess_.set = {
+  Enable = function(mapping, param, value, key)
+    local f = open("/tmp/.remoteassistance",'w')
+    if f then
+      f:write(value)
+      f:close()
+    end
+    commitapply:newset("Device.UserInterface.RemoteAccess.Enable")
+  end,
+}
+
+register(Device_UserInterface_RemoteAccess_)
