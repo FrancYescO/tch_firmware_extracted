@@ -1,0 +1,171 @@
+local mapper, os, pairs, resolve, next, string = mapper, os, pairs, resolve, next, string
+local ubus_connect = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+local restrictedBinding = { config = "firewall", sectionname = "rule" }
+local Device_X_FASTWEB_RestrictedAccess_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_RestrictedAccess.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Behaviour = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Allow access",
+          "Deny access",
+        },
+      },
+    }
+  }
+}
+
+local configChanged ={}
+local host_uci_set
+local host_uci_get
+local host_uci_del
+local host_uci_add
+local binding = {}
+do
+  host_uci_get = function(config, sectionname, option, default)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    binding.default = default
+    return uci_helper.get_from_uci(binding)
+  end
+  host_uci_set = function(config, sectionname, option, value)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    configChanged[config] = true
+    return uci_helper.set_on_uci(binding, value, commitapply)
+  end
+  host_uci_del = function(config, sectionname)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = nil
+    configChanged[config] = true
+    return uci_helper.delete_on_uci(binding,commitapply)
+  end
+  host_uci_add = function(configName, sectionname,type)
+  binding.config = configName
+  binding.sectionname = sectionname
+  binding.option = nil
+  uci_helper.set_on_uci(binding, type, commitapply)
+  uci_helper.commit({config = configName})
+  end
+end
+
+local function getCurrentRestrictionAccess()
+  local mode = "Deny access"
+  uci_helper.foreach_on_uci( restrictedBinding, function(s)
+    if (s.name == "Dev_Deny_Access" or s.name == "Dev_Allow_Access") and s.src_mac == nil and s.target == "DROP" then
+      mode = "Allow access"
+      return false
+    end
+  end)
+  return mode
+end
+
+local function copySectionParams(oldsection,newsectionname)
+  host_uci_set("firewall", newsectionname, "dest_port", oldsection.dest_port)
+  host_uci_set("firewall", newsectionname, "src", oldsection.src)
+  host_uci_set("firewall", newsectionname, "src_mac", oldsection.src_mac)
+  host_uci_set("firewall", newsectionname, "enabled", oldsection.enabled)
+  host_uci_set("firewall", newsectionname, "target", oldsection.target)
+  host_uci_set("firewall", newsectionname, "name", oldsection.name)
+end
+
+local function setDeviceParam(value)
+  uci_helper.foreach_on_uci( restrictedBinding, function(s)
+    local index = s[".name"]
+    if (s.name == "Dev_Deny_Access" or s.name == "Dev_Allow_Access") and s.src_mac then
+      if index:find("Dev_") == nil then
+        local nickname = "Dev_" ..  string.gsub(s.src_mac,":","_")
+        host_uci_add("firewall",nickname,"rule")
+        copySectionParams(s,nickname)
+        host_uci_del("firewall",index)
+        index = nickname
+      end
+
+      host_uci_set("firewall", index, "target", value)
+      if value == "ACCEPT" then
+        host_uci_set("firewall", index, "name", "Dev_Allow_Access")
+      else
+       host_uci_set("firewall", index, "name", "Dev_Deny_Access")
+      end
+    end
+  end)
+end
+
+Device_X_FASTWEB_RestrictedAccess_.get = {
+  Behaviour = function(mapping, paramname, key)
+    return getCurrentRestrictionAccess()
+  end,
+}
+
+Device_X_FASTWEB_RestrictedAccess_.set = {
+  Behaviour = function(mapping, param, value)
+    local mode = getCurrentRestrictionAccess()
+    if mode == value then
+      return true
+    end
+    if value:find("Allow")then
+      local flag = false
+      uci_helper.foreach_on_uci(restrictedBinding, function(s)
+        if (s.name == "Dev_Deny_Access" or s.name == "Dev_Allow_Access") then
+          flag = true
+          return false
+        end
+      end)
+      local add_options = {
+        dest_port = "80",
+        name = "Dev_Deny_Access",
+        src= "lan",
+        target = "DROP",
+        enabled = "1"
+      }
+      if flag == false then
+        add_options.enabled = "0"
+      end
+      setDeviceParam("ACCEPT")
+      local nickname = "Dev_restricted_tail"
+      host_uci_add("firewall",nickname,"rule")
+      for k,v in pairs(add_options) do
+        host_uci_set("firewall", nickname, k, v)
+      end
+    elseif value:find("Deny") then
+      local index
+      uci_helper.foreach_on_uci( restrictedBinding, function(s)
+        if s.name == "Dev_Deny_Access" and s.src_mac == nil and s.target == "DROP" then
+          index = s[".name"]
+          return false
+        end
+      end)
+      host_uci_del("firewall",index)
+      setDeviceParam("DROP")
+    end
+  end,
+}
+
+Device_X_FASTWEB_RestrictedAccess_.commit = function()
+  local config_binding = {}
+  for config in pairs(configChanged) do
+    config_binding.config = config
+    uci_helper.commit(config_binding)
+  end
+  configChanged = {}
+end
+
+Device_X_FASTWEB_RestrictedAccess_.revert = function()
+  local config_binding = {}
+  for config in pairs(configChanged) do
+    config_binding.config = config
+    uci_helper.revert(config_binding)
+  end
+  configChanged = {}
+end
+
+register(Device_X_FASTWEB_RestrictedAccess_)

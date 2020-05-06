@@ -1,0 +1,229 @@
+#!/usr/bin/env lua
+
+local proxy = require("datamodel")
+
+local setmetatable = setmetatable
+local ipairs = ipairs
+local pairs = pairs
+local pcall = pcall
+local unpack = unpack
+local remove = table.remove
+local concat = table.concat
+local format = string.format
+local find = string.find
+local time = os.time
+local date = os.date
+local open = io.open
+local popen = io.popen
+
+local var_log = "/etc/speedlog"
+local max_logs = 90
+
+-- xdslctl info
+local dslratepath = "sys.class.xdsl."
+local dslrate = {
+  up_max = "UpstreamCurrRate",
+  down_max = "DownstreamCurrRate",
+}
+
+local content_wwan = {
+  ipaddr = "rpc.network.interface.@wwan.ipaddr",
+  ifname = "rpc.network.interface.@wwan.ifname",
+}
+local content_wan = {
+  ipaddr = "rpc.network.interface.@wan.ipaddr",
+  ifname = "rpc.network.interface.@wan.ifname",
+}
+local content_shaping = {
+  ds_disable = "Device.X_FASTWEB_QOS.DS_Disable",
+  totalDownloadBW = "Device.X_FASTWEB_QOS.TotalDownloadBW",
+  totalUploadBW = "Device.X_FASTWEB_QOS.TotalUPloadBW",
+}
+local function get_content(content)
+  local temp = {}
+  local paths = {}
+  for _,v in pairs(content) do
+    paths[#paths+1] = v
+  end
+  local result = proxy.get(paths)
+  if result then
+    for _,v in ipairs(result) do
+      temp[v.path..v.param] = v.value
+    end
+    result = {}
+    for k,v in pairs(content) do
+      result[k] = temp[v]
+    end
+  end
+  return result
+end
+
+local function get_all_path(partialpath, params)
+  local paths = proxy.getPN(partialpath, true)
+  if not paths then
+    return 0, {}
+  end
+  local content = {}
+  for k,v in ipairs(paths) do
+    for id,param in pairs(params) do
+      content[format("%s_%d",id,k)] = format("%s%s", v.path, param)
+    end
+  end
+  return #paths, content
+end
+
+local function do_test()
+  local data = {}
+  local timestamp = date("%Y-%m-%dT%H:%M")
+  local us = 0
+  local ds = 0
+  local us_shaping = 0
+  local ds_shaping = 0
+  local us_sync = 0
+  local ds_sync = 0
+  local num, content = 0, {}
+
+  content = get_content(content_wwan)
+  if not content.ipaddr or content.ipaddr:len() == 0 then
+    content = get_content(content_wan)
+  end
+  if content.ifname and content.ifname:match("^eth") then
+    if content.ipaddr and content.ipaddr:len() ~= 0 then
+      local fd = open(format("/sys/class/net/%s/speed", content.ifname), "r")
+      if fd then
+        local speed = fd:read("*l")
+        if speed and speed:match("^%d+$") then
+          us_sync = tonumber(speed)*1024
+          ds_sync = us_sync
+        end
+        fd:close()
+      end
+    end
+  else
+    num, content = get_all_path(dslratepath, dslrate)
+    if num > 0 then
+      content = get_content(content)
+      for i=1,num do
+        us_sync = us_sync + tonumber(content[format("up_max_%d", i)])
+        ds_sync = ds_sync + tonumber(content[format("down_max_%d", i)])
+      end
+    end
+  end
+
+  content = get_content(content_shaping)
+  if content.ds_disable == "0" then
+    ds_shaping = tonumber(content.totalDownloadBW)
+  end
+  us_shaping = tonumber(content.totalUploadBW)
+
+  us = (us_shaping ~= 0 and us_shaping < us_sync) and us_shaping or us_sync
+  ds = (ds_shaping ~= 0 and ds_shaping < ds_sync) and ds_shaping or ds_sync
+
+  us = us*1024
+  ds = ds*1024
+  data[#data+1] = format("%s %s %s", timestamp, us, ds)
+
+  local fd = open(var_log, "r")
+  if fd then
+    for l in fd:lines() do
+      data[#data+1] = l
+      if #data == max_logs then
+        break
+      end
+    end
+    fd:close()
+  end
+  local ratestr = concat(data, "\n")
+  local fd = open(var_log, "w")
+  if fd then
+    fd:write(ratestr)
+    fd:close()
+  end
+end
+
+
+local function do_update_crontab()
+  -- for crontab updating
+  local cron_path = "/etc/crontabs"
+  local cron_root = "/etc/crontabs/root"
+  local cronupdateapply = false
+  local crontask = {}
+
+  local uciconf = {
+    auto = "uci.web.connectionmgr.@speedlog.auto",
+    time = "uci.web.connectionmgr.@speedlog.time",
+  }
+  local content = get_content(uciconf)
+  local timepattern = "%s %s * * * /usr/bin/speedlog test"
+  local tasktest = ""
+  if content.time == "9999" then
+    tasktest = format(timepattern, "0", "0,4,8,12,16,20")
+  else
+    tasktest = format(timepattern, content.time:sub(3,4), content.time:sub(1,2))
+  end
+
+  -- open the crontab file to read the current tasks
+  local fd = open(cron_root, "r+")
+  if fd then
+    for l in fd:lines() do
+      -- task is speedlog task
+      if find(l, "speedlog") then
+        if content.auto ~= "0" then
+          if l ~= tasktest then
+            crontask[#crontask+1] = tasktest
+            cronupdateapply = true
+          end
+        else
+          cronupdateapply = true
+        end
+        renewed = true
+      else
+        crontask[#crontask+1] = l
+      end
+    end
+    fd:close()
+  end
+  if not renewed then
+    if content.auto ~= "0" then
+      crontask[#crontask+1] = tasktest
+      cronupdateapply = true
+    end
+  end
+  if cronupdateapply then
+    local taskstr = concat(crontask, "\n")
+    local command = format("echo \"%s\" | crontab -c %s -", taskstr, cron_path)
+    os.execute(command)
+  end
+  return
+end
+
+local function do_help()
+  print [=[
+List of commands:
+    update  Update crontab for test configuration
+    test    Do a test
+  ]=]
+end
+
+local actions = {
+  update = do_update_crontab,
+  test = do_test,
+  __index = function(_, action)
+    return function()
+      print(format("invalid command: %s", tostring(action)))
+    end
+  end
+}
+setmetatable(actions, actions)
+
+local function main(args)
+  if #args > 0 then
+    local action = remove(args, 1)
+    actions[action](unpack(args))
+    return
+  else
+    do_help()
+  end
+end
+
+main({...})

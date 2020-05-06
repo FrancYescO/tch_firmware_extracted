@@ -1,0 +1,46 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+
+#releae telnet
+sed -i '30,33s/^/#/g' /etc/init.d/telnet
+sed -i '37s/^/#/g' /etc/init.d/telnet
+
+sed -i 's/Login failed/WARNING: telnet is a security risk/g' /bin/login.sh
+sed -i 's/exit 0/busybox login/g' /bin/login.sh
+sed -i 's/disable telnet and enable SSH/enable telnet login with password/g' /bin/login.sh
+
+sed -i '19d' /bin/login.sh
+sed '16 aexec\ /bin/ash\ --login' -i /bin/login.sh
+
+
+#add firewall rule
+uci -q batch <<-EOT
+    delete firewall.telnetlan
+    set firewall.telnetlan=rule
+    set firewall.telnetlan.name='Refuse_TELNET_LAN'
+    set firewall.telnetlan.src='lan'
+    set firewall.telnetlan.proto='tcp'
+    set firewall.telnetlan.dest_port='23'
+    set firewall.telnetlan.target='REJECT'
+    set firewall.telnetlan.enabled='1'
+
+    delete firewall.telnetguest
+    set firewall.telnetguest=rule
+    set firewall.telnetguest.name='Refuse_TELNET_GUEST'
+    set firewall.telnetguest.src='Guest'
+    set firewall.telnetguest.proto='tcp'
+    set firewall.telnetguest.dest_port='23'
+    set firewall.telnetguest.target='REJECT'
+    set firewall.telnetguest.enabled='1'
+
+    delete firewall.telnet
+    set firewall.telnet=include
+    set firewall.telnet.type='script'
+    set firewall.telnet.path='/lib/functions/firewall-telnet.sh'
+    set firewall.telnet.reload='1'
+
+    commit firewall
+EOT
+
+exit 0

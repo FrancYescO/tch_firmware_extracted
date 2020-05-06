@@ -1,0 +1,190 @@
+local mapper, register = mapper, register
+local conn = mapper("ubus").connect()
+local ucihelper = mapper("ucihelper")
+local configChanged ={}
+local binding = { }
+local uci_tod_set
+local uci_tod_get
+do
+  uci_tod_get = function(config, sectionname, option)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    return ucihelper.get_from_uci(binding)
+  end
+  uci_tod_set = function(config, sectionname, option, value)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    configChanged[config] = true
+    return ucihelper.set_on_uci(binding, value, commitapply)
+  end
+end
+
+local Telemanagement_Led_Ambientlight_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_LED.AmbientLight.",
+    access = "readOnly",
+    description = "To get led ambientlight switchoff parameters Enable, Start, End.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local function convert2Sec(value)
+  if value == nil or value == "" then return -1 end
+  local  hour, min = value:match("(%d+):(%d+)")
+  local secs = hour*3600 + min*60
+  return tonumber(secs)
+end
+
+local function led_timeslot_status()
+  local timeslot = false
+  local start_time = uci_tod_get("tod", "sleep_hours", "start_time")
+  local stop_time = uci_tod_get("tod", "sleep_hours", "stop_time")
+  local current_time = os.date("%H:%M:%S", os.time())
+  local cts = convert2Sec(current_time)
+  local start_s = convert2Sec(start_time)
+  local stop_s = convert2Sec(stop_time)
+  if (start_s < stop_s and cts >= start_s and cts <= stop_s) or (start_s > stop_s and (cts >= start_s or cts <= stop_s)) then
+    timeslot = true
+  end
+  return timeslot
+end
+
+Telemanagement_Led_Ambientlight_.get = {
+  Enable = function(mapping, paramname, key)
+    local enable = uci_tod_get("ledfw", "ambient", "active")
+    return enable or "0"
+  end,
+}
+
+Telemanagement_Led_Ambientlight_.set = {
+  Enable = function(mapping, paramname, paramvalue)
+    local packet = {}
+    local timeslot = false
+    local tod_enable = uci_tod_get("tod", "ledtod", "enabled")
+    if tod_enable == "1" then
+      timeslot = led_timeslot_status()
+    end
+    paramvalue = timeslot and "0" or paramvalue
+    packet["state"] = paramvalue == "1" and "active" or "inactive"
+    conn:send("ambient.status", packet)
+    uci_tod_set("ledfw", "ambient", "active", paramvalue)
+    return true
+  end,
+}
+
+Telemanagement_Led_Ambientlight_.commit = function()
+  if configChanged["ledfw"] then
+    binding = { config = 'ledfw' }
+    ucihelper.commit(binding)
+    configChanged["ledfw"] = false
+  end
+end
+
+Telemanagement_Led_Ambientlight_.revert = function()
+  if configChanged["ledfw"] then
+    binding = { config = 'ledfw' }
+    ucihelper.revert(binding)
+    configChanged["ledfw"] = false
+  end
+end
+
+register(Telemanagement_Led_Ambientlight_)
+
+local Telemanagement_Led_Ambientlight_SwitchOff_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_LED.AmbientLight.SwitchOff.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+      End = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+Telemanagement_Led_Ambientlight_SwitchOff_.get = {
+  Enable = function(mapping, paramname, key)
+    local enable = uci_tod_get("tod", "ledtod", "enabled")
+    return enable or "0"
+  end,
+  Start = function(mapping, paramname, key)
+    local time = uci_tod_get("tod", "sleep_hours", "start_time")
+    time = string.match(time, "%d%d:%d%d")
+    return time or ""
+  end,
+  End = function(mapping, paramname, key)
+    local time = uci_tod_get("tod", "sleep_hours", "stop_time")
+    time = string.match(time, "%d%d:%d%d")
+    return time or ""
+  end,
+}
+
+local function LedTodSetValue(mapping, paramname, paramvalue)
+  if not paramvalue then
+    return false
+  end
+  if paramname == "Enable" then
+    uci_tod_set("tod", "ledtod", "enabled", paramvalue)
+  elseif paramname == "Start" then
+    uci_tod_set("tod", "sleep_hours", "start_time", "All:" .. paramvalue)
+  elseif paramname == "End" then
+    uci_tod_set("tod", "sleep_hours", "stop_time", "All:" .. paramvalue)
+  end
+  uci_tod_set("tod", "sleep_hours", "periodic", "1")
+  local led_enable = ""
+  local timeslot = led_timeslot_status()
+  local tod_enable = uci_tod_get("tod", "ledtod", "enabled")
+  local current_led_enable = uci_tod_get("ledfw", "ambient", "active")
+  if timeslot and tod_enable == "1" and current_led_enable == "1" then
+    led_enable = "0"
+  elseif not timeslot and tod_enable == "1" and current_led_enable == "0" then
+    led_enable = "1"
+  end
+  if led_enable ~= "" then
+    local packet = {}
+    packet["state"] = (led_enable == "1") and "active" or "inactive"
+    conn:send("ambient.status", packet)
+    uci_tod_set("ledfw", "ambient", "active", led_enable)
+  end
+  return true
+end
+
+Telemanagement_Led_Ambientlight_SwitchOff_.set = LedTodSetValue
+
+Telemanagement_Led_Ambientlight_SwitchOff_.commit = function()
+  if configChanged["tod"] then
+    binding = { config = 'tod' }
+    ucihelper.commit(binding)
+    configChanged["tod"] = false
+  end
+end
+
+Telemanagement_Led_Ambientlight_SwitchOff_.revert = function()
+  if configChanged["tod"] then
+    binding = { config = 'tod' }
+    ucihelper.revert(binding)
+    configChanged["tod"] = false
+  end
+end
+
+register(Telemanagement_Led_Ambientlight_SwitchOff_)

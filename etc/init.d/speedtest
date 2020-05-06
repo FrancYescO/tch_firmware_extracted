@@ -1,0 +1,59 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+START=99
+
+
+start () {
+  local enabled
+  config_load system
+  config_get_bool enabled speedtest enabled 1
+  [ $enabled -eq 0 ] && exit
+
+  echo "Run cm..."
+
+  [ ! -e /etc/ah ] && ln -s /etc_tss/ah /etc/ah
+  [ ! -e /etc/cm ] && ln -s /etc_tss/cm /etc/cm
+
+  cm >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient DOM Device /etc/cm/dom/ >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient DOM Device /etc/cm/domx/ >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  cmclient CONF /etc/cm/factory/ >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient CONF /etc/cm/version/ >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient CONF /etc/cm/conf/ >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  MACAddress=`cat /sys/class/net/br-lan/address`
+  cmclient SET Ethernet.Interface.1.MACAddress "$MACAddress" && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient SET X_ADB_FactoryData.BaseMACAddress "$MACAddress" && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient SET IP.Diagnostics.X_ADB_Report.Interface Device.IP.Interface.1 && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient SET IP.Diagnostics.X_ADB_Report.Enable true >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  cmclient SET IP.Diagnostics.IPPing.Interface Device.IP.Interface.1 && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient SET IP.Diagnostics.DownloadDiagnostics.Interface Device.IP.Interface.1 && echo $! >> /cgroups/cpumemblk/adb/tasks
+  cmclient SET IP.Diagnostics.UploadDiagnostics.Interface Device.IP.Interface.1 && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  echo "Run ec..."
+  ec2 & >> /dev/null && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  echo "Run http deamon..."
+  lighttpd -f /etc_tss/lighttpd/lighttpd.conf || lighttpd -f /etc_tss/lighttpd/lighttpd_lo.conf && echo $! >> /cgroups/cpumemblk/adb/tasks
+
+  #waiting 1 second for lighttpd launch
+  sleep 1
+  #send wanstatus to lighttpd
+  echo "Send wanstatus to lighttpd..."
+  curl http://localhost:8889/wanstatus?status=up
+}
+
+stop () {
+  # remove all tasks from adb cgroup
+  [ -e /cgroups/cpumemblk/adb ] && for id in $(cat /cgroups/cpumemblk/adb/tasks)
+  do
+    [ -e /cgoups/cpumemblk/tasks ] && echo $id > /cgoups/cpumemblk/tasks
+  done
+
+  killall cm
+  killall ec2
+  killall lighttpd
+}

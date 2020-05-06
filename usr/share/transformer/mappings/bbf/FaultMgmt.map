@@ -1,0 +1,76 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_FaultMgmt_ = {
+  objectType = {
+    name = "#ROOT.FaultMgmt.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- SupportedAlarmNumberOfEntries
+      -- automatically created when #ROOT.FaultMgmt.SupportedAlarm.{i}. is loaded
+      MaxCurrentAlarmEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      X_FASTWEB_EnableNotification = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Send faultmgmt notifications to ACS or not",
+      },
+
+      -- CurrentAlarmNumberOfEntries
+      -- automatically created when #ROOT.FaultMgmt.CurrentAlarm.{i}. is loaded
+      -- HistoryEventNumberOfEntries
+      -- automatically created when #ROOT.FaultMgmt.HistoryEvent.{i}. is loaded
+      -- ExpeditedEventNumberOfEntries
+      -- automatically created when #ROOT.FaultMgmt.ExpeditedEvent.{i}. is loaded
+      -- QueuedEventNumberOfEntries
+      -- automatically created when #ROOT.FaultMgmt.QueuedEvent.{i}. is loaded
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local fault_helper = require 'transformer.shared.faultmgmthelper'
+local commitapply = commitapply
+local setSomething
+local binding = { config = "faultmgmt", sectionname = "global"}
+
+Multi_FaultMgmt_.get = {
+  MaxCurrentAlarmEntries = function (mapping, paramname, key)
+    binding.option = "maxcurrent_alarm_tbsize"
+    return uci_helper.get_from_uci(binding)
+  end,
+  X_FASTWEB_EnableNotification = function (mapping, paramname, key)
+    binding.option = "enable_notification"
+    local enable_notif = uci_helper.get_from_uci(binding)
+    if enable_notif == "" then
+      enable_notif = "1"
+    end
+    return enable_notif
+  end,
+}
+
+Multi_FaultMgmt_.set = {
+  X_FASTWEB_EnableNotification = function (mapping, paramname, value)
+    binding.option = "enable_notification"
+    uci_helper.set_on_uci(binding, value, commitapply)
+    setSomething = true
+  end,
+}
+Multi_FaultMgmt_.commit = function()
+  if setSomething then
+    uci_helper.commit(binding)
+    setSomething = false
+  end
+end
+
+Multi_FaultMgmt_.revert = function()
+  if setSomething then
+    uci_helper.revert(binding)
+    setSomething = false
+  end
+end
+
+fault_helper.register(Multi_FaultMgmt_, register)

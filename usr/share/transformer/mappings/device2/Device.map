@@ -1,0 +1,113 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_ = {
+  objectType = {
+    name = "Device.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      RootDataModelVersion = {
+        access = "readOnly",
+        forcedInform = "true",
+        type = "string",
+        max = "32",
+      },
+      X_FASTWEB_NetbtnTarget = {
+        access = "readWrite",
+        type = "string",
+        max = "32",
+      },
+      X_FASTWEB_DownloadFromData = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Allow to configure CWMP firmware download through data PVC in ADSL 2PVC scenario",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local register, commitapply ,mapper = register, commitapply, mapper
+local uci_helper = mapper("ucihelper")
+local set_on_uci = uci_helper.set_on_uci
+local get_from_uci = uci_helper.get_from_uci
+local system_binding = {config="system", sectionname="config", option="net_btn_target"}
+local env_binding = {config = "env", sectionname = "var"}
+local mwan_binding = {config = "mwan" }
+local transactions = {}
+
+local function add_del_mwan_curl_policy(value)
+  -- DownloadFromData=false - firmware download via mgmt interface(mwan host policy for curl added)
+  -- DownloadFromData=true - firmware download via data interface (use default route no mwan policy)
+  mwan_binding.sectionname = "curl_host"
+  if value == "0" then
+     set_on_uci(mwan_binding, "host", commitapply)
+     mwan_binding.option = "path"
+     set_on_uci(mwan_binding, "/usr/bin/curl", commitapply)
+     mwan_binding.option = "policy"
+     set_on_uci(mwan_binding, "mgmt_only", commitapply)
+  else
+     mwan_binding.option = nil
+     uci_helper.delete_on_uci(mwan_binding, commitapply)
+  end
+end
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+Device_.get = {
+  -- this value is hardcoded since the approach to get the version is not clear
+  RootDataModelVersion = "2.10",
+
+  X_FASTWEB_NetbtnTarget = function(mapping)
+    system_binding.default = "8.8.4.4"
+    return get_from_uci(system_binding)
+  end,
+  X_FASTWEB_DownloadFromData = function(mapping)
+    -- default value for DownloadFromData = true
+    env_binding.option = "download_from_data"
+    local download_from_data = get_from_uci(env_binding)
+    return download_from_data ~= "" and download_from_data or "1"
+  end,
+}
+
+Device_.set = {
+  X_FASTWEB_NetbtnTarget = function(mapping, param, value)
+    set_on_uci(system_binding, value, commitapply)
+    transactions[system_binding.config] = true
+  end,
+  X_FASTWEB_DownloadFromData = function(mapping, param, value)
+    env_binding.option = "provisioning_code"
+    local provisioning_code = get_from_uci(env_binding)
+    if provisioning_code == "2PVC" then
+      add_del_mwan_curl_policy(value)
+      transactions[mwan_binding.config] = true
+    end
+    env_binding.option = "download_from_data"
+    set_on_uci(env_binding, value)
+    transactions[env_binding.config] = true
+  end,
+}
+
+Device_.commit = function()
+  local binding = {}
+  for config,_ in pairs(transactions) do
+     binding.config = config
+     uci_helper.commit(binding)
+  end
+  transactions = {}
+end
+
+Device_.revert = function()
+  local binding = {}
+  for config,_ in pairs(transactions) do
+     binding.config = config
+     uci_helper.revert(binding)
+  end
+  transactions = {}
+end
+
+register(Device_)

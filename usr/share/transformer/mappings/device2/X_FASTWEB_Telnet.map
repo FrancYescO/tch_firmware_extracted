@@ -1,0 +1,60 @@
+local Multi_X_FASTWEB_Telnet_i_ = {
+  objectType = {
+    name = "#ROOT.X_FASTWEB_Telnet.{i}.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean"
+      },
+      Interface = {
+        access = "readOnly",
+        type = "string"
+      }
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local function binding(sectionname, option)
+  return { config = "telnet", sectionname = sectionname, option = option }
+end
+
+Multi_X_FASTWEB_Telnet_i_.entries = function()
+  local entries = {}
+  uci_helper.foreach_on_uci(binding(), function(s)
+    entries[#entries+1] = s['.name']
+  end)
+  return entries
+end
+
+Multi_X_FASTWEB_Telnet_i_.get = {
+  Enabled = function(mapping, param, key)
+    return uci_helper.get_from_uci(binding(key,"enable"))
+  end,
+  Interface = function(mapping, param, key)
+    return uci_helper.get_from_uci(binding(key,"Interface"))
+  end,
+}
+
+Multi_X_FASTWEB_Telnet_i_.set = {
+  Enabled = function(mapping, param, value, key)
+    uci_helper.set_on_uci(binding(key,"enable"), value, commitapply)
+  end
+}
+
+Multi_X_FASTWEB_Telnet_i_.commit = function()
+  uci_helper.commit(binding())
+end
+
+Multi_X_FASTWEB_Telnet_i_.revert = function()
+  uci_helper.revert(binding())
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_FASTWEB_Telnet_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
