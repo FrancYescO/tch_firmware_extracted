@@ -1,0 +1,20 @@
+[ ifup = "$ACTION" ] || exit
+
+. $IPKG_INSTROOT/lib/config/uci.sh
+
+[ "$(uci_get_state system warmboot sent 0)" != "1" ] || exit
+
+. $IPKG_INSTROOT/lib/functions.sh
+. $IPKG_INSTROOT/lib/functions/syslog.sh
+. $IPKG_INSTROOT/lib/functions/reboot_reason.sh
+
+local syslog_iface
+
+get_syslog_iface syslog_iface
+
+[ "$syslog_iface" == "$INTERFACE" ] && {
+	local reboot=$(uci_get_state system warmboot reboot)
+	local reboot_reason_str=$(get_reboot_reason $reboot)
+	logger -t warmboot "reason:${reboot} ${reboot_reason_str}"
+	uci_set_state system warmboot sent 1
+}
