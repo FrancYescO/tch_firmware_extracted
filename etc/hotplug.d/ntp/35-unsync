@@ -1,0 +1,37 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+
+PROCD_NTP_STATUS="not synced"
+NTP_STATUS="not synced"
+
+NTPD_SERVICE=` ubus call service list '{"name":"sysntpd"}' | jsonfilter -e '@.sysntpd.instances.instance1'`
+
+json_load "$NTPD_SERVICE"
+json_select data && json_get_var PROCD_NTP_STATUS ntp_status && json_select ..
+
+[ "$ACTION" = "stratum" -o "$ACTION" = "step" ] && NTP_STATUS="synced"
+
+[ "$NTP_STATUS" != "$PROCD_NTP_STATUS" ] && (
+    local old_cb;
+    json_set_namespace msg old_cb;
+    json_init;
+    json_add_string Source "ntpd";
+    json_add_string EventType "NTP";
+    [ "$NTP_STATUS" = "not synced" ] && \
+      json_add_string ProbableCause "Synchronizing failure" && \
+      json_add_string SpecificProblem "Client failed to synchronize with NTP server";
+    [ "$NTP_STATUS" = "synced" ] && \
+      json_add_string ProbableCause "Synchronizing success" && \
+      json_add_string SpecificProblem "Client succeeded to synchronize with NTP server";
+    json_add_string AdditionalText "Server=[ $( uci_get system.ntp.server ) ]";
+    ubus send "FaultMgmt.Event" "$(json_dump)";
+
+    json_set_namespace $old_cb;
+    json_add_object 'data';
+    json_add_string 'ntp_status' "$NTP_STATUS";
+    json_close_object;
+
+    ubus call service set "{\"name\":\"sysntpd\",\"instances\":{ \"instance1\": $( json_dump ) }}"
+)

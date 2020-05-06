@@ -1,0 +1,84 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_FaultMgmt_SupportedAlarm_i_ = {
+  objectType = {
+    name = "#ROOT.FaultMgmt.SupportedAlarm.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "SupportedAlarmNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      EventType = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ProbableCause = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      SpecificProblem = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      PerceivedSeverity = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "",
+          "*",
+          "Cleared",
+          "Critical",
+          "Major",
+          "Minor",
+          "Warning",
+          "Indeterminate",
+        },
+      },
+      ReportingMechanism = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "0 Expedited",
+          "1 Queued",
+          "2 Logged",
+          "3 Disabled",
+        },
+      },
+    }
+  }
+}
+
+local fault_helper = require 'transformer.shared.faultmgmthelper'
+local ubus = require('transformer.mapper.ubus').connect()
+
+fault_helper.SetElementList(Multi_FaultMgmt_SupportedAlarm_i_, 'supported')
+
+Multi_FaultMgmt_SupportedAlarm_i_.entries = function(mapping, parentkey)
+  return mapping._alarm:getKeys(parentkey)
+end
+
+Multi_FaultMgmt_SupportedAlarm_i_.getall = function(mapping, key)
+  return mapping._alarm.entries[key]
+end
+
+Multi_FaultMgmt_SupportedAlarm_i_.get = function(mapping, param, key)
+  return mapping._alarm.entries[key][param]
+end
+
+
+
+Multi_FaultMgmt_SupportedAlarm_i_.set = {
+  ReportingMechanism = function (mapping, paramname, paramvalue, key)
+    local ret = ubus:call("faultmgmt.event", "set", {["alarm_name"] = key, ["reporting_mechanism"] = paramvalue})
+    if ret.ok then
+      return true
+    else
+      return nil, ret.error
+    end
+  end,
+}
+
+fault_helper.register(Multi_FaultMgmt_SupportedAlarm_i_, register)

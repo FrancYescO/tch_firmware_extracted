@@ -1,0 +1,41 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+unset SERVICE_MATCH_EXEC
+
+dnsmasq()
+{
+  local log_file
+  config_get log_file $1 logfacility '/tmp/debug'
+
+  [ ! -f "$log_file" ] && touch "$log_file"
+
+  tail -f $log_file | awk -v logfile="${log_file}" -f /usr/bin/faultmgmt.awk &
+}
+
+start() {
+  local enabled
+  local last_id
+
+  config_load "faultmgmt"
+  config_get_bool enabled global enabled 0
+  config_get last_id global last_kernel_alarm ""
+  if [ $enabled -eq 0 ]; then
+    logger -t faultmgmt "Fault management not enabled by config not starting"
+    return 0
+  fi
+  #Start fault management daemon
+  service_start /usr/bin/faultmgmt.lua
+
+  #generate DHCP/DNS Alarm
+  config_load "dhcp"
+  config_foreach dnsmasq dnsmasq
+}
+
+stop() {
+  service_stop /usr/bin/faultmgmt.lua && echo >/var/run/faultmgmt.lua.pid
+  filt_pid=$(ps | grep "\-f" | grep tail | awk '{print $1}')
+  [ -n "${filt_pid}" ] && kill -9 ${filt_pid}
+}
