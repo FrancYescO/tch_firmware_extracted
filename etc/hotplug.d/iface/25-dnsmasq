@@ -1,0 +1,31 @@
+#!/bin/sh
+# do not run during /etc/init.d/network boot()
+# dnsmasq config will be set in /etc/init.d/dnsmasq
+[ -f /var/state/bootnetwork ] && exit 0
+
+dhcp_interface_check()
+{
+	local iface dnsmasq_cfg
+
+	config_get iface "$1" interface
+	config_get dnsmasq_cfg "$1" dnsmasq_config
+	config_get ignore "$1" ignore
+	[ "$iface" = "$INTERFACE" -a "$ignore" != 1 ] || return
+
+	if [ -z "$dnsmasq_cfg"]; then
+		/etc/init.d/dnsmasq restart && exit 0
+	else
+		/etc/init.d/dnsmasq restart $dnsmasq_cfg && exit 0
+	fi
+}
+
+[ "$ACTION" = ifup ] || exit 0
+
+# check if the dnsmasq init script has already run
+CONFIGFILES=$(find /var/etc -name 'dnsmasq-*.conf')
+[ -z "$CONFIGFILES" ] && exit 0
+
+/etc/init.d/dnsmasq enabled && {
+	config_load "dhcp"
+	config_foreach dhcp_interface_check dhcp
+}

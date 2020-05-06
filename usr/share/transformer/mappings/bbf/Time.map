@@ -1,0 +1,377 @@
+-- Automatically generated from InternetGatewayDevice:1.3 and Device:2.2
+-- using generator version 2.1
+local Multi_Time_ = {
+  objectType = {
+    name = "#ROOT.Time.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Unsynchronized",
+          "Synchronized",
+          "Error_FailedToSynchronize",
+          "Error",
+        },
+      },
+      NTPServer1 = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      NTPServer2 = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      NTPServer3 = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      NTPServer4 = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      NTPServer5 = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      CurrentLocalTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "dateTime",
+      },
+      LocalTimeZone = {
+        access = "readOnly",
+        type = "string",
+        max = "6",
+      },
+      LocalTimeZoneName = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      DaylightSavingsUsed = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      DaylightSavingsStart = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      DaylightSavingsEnd = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+    }
+  }
+}
+
+------------------------------ transferring timezone descriptions -----------------------
+-- IGD: dateTime format: yyyy-mm-ddThh:mm:ss; this time is always given in UTC
+-- in uci, the format should be one as described in IEEE Std 1003.1 (=POSIX specification)
+--			stdoffset[dst[offset][,start[/time],end[/time]]]
+--				std = Standard Time
+--				dst = Daylight Savings Time
+--				start, end; can be written as
+--                      1) zero-based Julian day: <std>offset<dst>,n/hh[:mm[:ss]],n/hh[:mm[:ss]]
+--                      2) Julian day:            std>offset<dst>,Jn/hh[:mm[:ss]],Jn/hh[:mm[:ss]]
+--                      3) Mm.n.d:                <std>offset<dst>,Mm.n.d/hh[:mm[:ss]],Mm.n.d/hh[:mm[:ss]]
+-- We will use the zero-based Julian day (0 <= n <=365). Leap days shall be counted, and it is possible to refer to February 29
+-- SET
+--    1) what we receive from the ACS will be saved unchanged in uci:
+--              LocalTimeZoneName    --> system.@system[0].timezone
+-- GET
+--    1) LocalTimeZoneName will be retrieved from uci
+--    2) LocalTimeZone, DaylightSavingsUsed, DaylightSavingsStart and DaylightSavingsEnd will be retrieved from timezone
+--    3) CurrentLocalTime: os.date("%FT%T", os.time())
+-----------------------------------------------------------------------------------------
+
+local commitapply = commitapply
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local format, tinsert = string.format, table.insert
+local timezone = require('transformer.shared.timezone')
+local indexs = {1, 2, 3, 4, 5}
+
+local ntp_uci = {
+  config = "system",
+  sectionname = "ntp",
+  option = "server"
+}
+
+local ntp_enable_uci = {
+  config = "system",
+  sectionname = "ntp",
+  option = "enable_client"
+}
+
+local timezone_uci = {
+  config = "system",
+  sectionname = "@system[0]",
+  option = "timezone",
+  extended=true,
+}
+
+local zonename_uci = {
+  config = "system",
+  sectionname = "@system[0]",
+  option = "zonename",
+  extended=true,
+}
+
+local networkTime_uci = {
+  config = "system",
+  sectionname = "@system[0]",
+  option = "network_timezone",
+  extended=true,
+}
+
+local function hourminFormatForTimezone(value)
+  local pos = string.find(value,":")
+  if not pos then
+    value = tonumber(value) * (-1)
+    value = tostring(value)..":00"
+  else
+    if string.find(value,"-") then
+      -- value str must begin with "-", example:change "-10:00" to "10:00"
+      value = string.sub(value, 2, -1)
+    else
+      value = "-"..tostring(value)
+    end
+  end
+  return value
+end
+
+-- Get Functions
+local function get_DayLightSavingsDayStart()
+  local value = get_from_uci(timezone_uci)
+  local timezoneValuePos = string.find(value,",")
+  if timezoneValuePos then
+    local daylightsavingstart = timezone.getStartEndDay(value)
+    if not daylightsavingstart then
+      return ""
+    end
+    return daylightsavingstart
+  else
+    return ""
+  end
+end
+
+local function get_DayLightSavingsDayEnd()
+  local value = get_from_uci(timezone_uci)
+  local timezoneValuePos = string.find(value,",")
+  if timezoneValuePos then
+    local _, daylightsavingend = timezone.getStartEndDay(value)
+    if not daylightsavingend then
+      return ""
+    end
+    return daylightsavingend
+  else
+    return ""
+  end
+end
+
+local function get_DaylightSavingsUsed()
+  local value = get_from_uci(timezone_uci)
+  local timezoneValuePos = string.find(value,",")
+  if timezoneValuePos then
+    return "1"
+  else
+    return "0"
+  end
+end
+
+local function get_localTimeZone()
+  local value = get_from_uci(timezone_uci)
+  local timezoneValuePos = string.find(value,",")
+  local localtimezone
+  if timezoneValuePos then
+    local localtimezoneValue = string.sub(value, 1, timezoneValuePos-1)
+    localtimezone = timezone.getLocaltimezoneWithoutSDTDST(localtimezoneValue)
+  else
+    localtimezone = timezone.getLocaltimezoneWithoutSDTDST(value)
+  end
+  if not localtimezone then
+    return ""
+  end
+  localtimezone = hourminFormatForTimezone(localtimezone)
+  return localtimezone
+end
+
+local function get_localTimeZoneName()
+  return get_from_uci(timezone_uci) or ""
+end
+
+local function get_enable()
+  local enableClient = get_from_uci(ntp_enable_uci)
+
+  if not enableClient  or enableClient == "" then
+    local servers = get_from_uci(ntp_uci)
+
+    if not servers or  servers == "" then
+      enableClient = "0"
+    else
+      enableClient = "1"
+    end
+  end
+  return enableClient
+end
+
+local function get_status()
+  local status = get_from_uci(ntp_enable_uci)
+    if not status  or status == "" then
+      local servers = get_from_uci(ntp_uci)
+        if not servers or  servers == "" then
+          status = "Disabled"
+        else
+          status = "Synchronized"
+        end
+      end
+  return status
+end
+
+local function set_enable(info, value)
+  local servers = get_from_uci(ntp_uci)
+  if( (value == "1") and (not servers or servers == "") ) then
+    return nil, "Please set NTP Servers firstly"
+  else
+    set_on_uci(ntp_enable_uci, value, commitapply)
+  end
+end
+
+local function set_localTimeZoneName(info, value)
+  local timezoneValuePos = string.find(value,",")
+  local localtimezoneValue, localtimezone, dstlocaltimezone
+  if timezoneValuePos then
+    localtimezoneValue = string.sub(value, 1, timezoneValuePos-1)
+    localtimezone, dstlocaltimezone = timezone.getLocaltimezoneWithoutSDTDST(localtimezoneValue)
+    local daylightsavingstart, daylightsavingend = timezone.getStartEndDay(value)
+    if not localtimezone or not daylightsavingstart or not daylightsavingend then
+      return nil, "Invalid value"
+    end
+  else
+    localtimezone, dstlocaltimezone = timezone.getLocaltimezoneWithoutSDTDST(value)
+    if not localtimezone then
+      return nil, "Invalid value"
+    end
+  end
+  set_on_uci(networkTime_uci, "1", commitapply)
+  set_on_uci(timezone_uci, value, commitapply)
+  set_on_uci(zonename_uci, "", commitapply)
+end
+
+local function set_NTPServer(info, value)
+  local servers = get_from_uci(info.uci)
+  for i = #servers + 1, info.index - 1 do
+    servers[i] = ""
+  end
+  servers[info.index] = value
+  set_on_uci(info.uci, servers, commitapply)
+end
+
+-- Get functions
+local function get_localtime()
+  return os.date("%FT%T", os.time())
+end
+
+local binding = {
+  Enable = { get = get_enable, set = set_enable },
+  Status = { get = get_status },
+  NTPServer1 = { uci = ntp_uci, index = 1, set = set_NTPServer },
+  NTPServer2 = { uci = ntp_uci, index = 2, set = set_NTPServer },
+  NTPServer3 = { uci = ntp_uci, index = 3, set = set_NTPServer },
+  NTPServer4 = { uci = ntp_uci, index = 4, set = set_NTPServer },
+  NTPServer5 = { uci = ntp_uci, index = 5, set = set_NTPServer },
+  CurrentLocalTime = { get = get_localtime },
+  LocalTimeZone = {  get = get_localTimeZone },
+  LocalTimeZoneName = { get = get_localTimeZoneName, set = set_localTimeZoneName },
+  DaylightSavingsUsed = {  get = get_DaylightSavingsUsed },
+  DaylightSavingsStart = { get = get_DayLightSavingsDayStart },
+  DaylightSavingsEnd = { get = get_DayLightSavingsDayEnd },
+}
+
+local function get(mapping, paramname)
+  if mapping.objectType.name:match('^Device%.') and paramname == "LocalTimeZone" then
+    paramname = "LocalTimeZoneName"
+  end
+  local info = binding[paramname]
+  local value
+  if info.uci then
+    value = get_from_uci(info.uci)
+    if info.index and type(value) == 'table' and value[info.index] then
+      value = value[info.index]
+    elseif info.index then
+      value = ""
+    end
+  else
+    value = info.get()
+  end
+  return value
+end
+
+local function timezone_commit()
+  local binding = {config = "system"}
+  uci_helper.commit(binding)
+end
+
+local function timezone_revert()
+  local binding = {config = "system"}
+  uci_helper.revert(binding)
+end
+
+local function set(mapping, paramname, value)
+  if mapping.objectType.name:match('^Device%.') and paramname == "LocalTimeZone" then
+    paramname = "LocalTimeZoneName"
+  end
+  local info = binding[paramname]
+  return info.set(info, value)
+end
+
+Multi_Time_.get=get
+Multi_Time_.set=set
+Multi_Time_.commit = timezone_commit
+Multi_Time_.revert = timezone_revert
+
+local function uci_event_cb (mapping, action, config, sectiontype, sectionname, option)
+  local events = {}
+  for k,v in ipairs(indexs) do
+    tinsert(events, { key = "", paramname = format("NTPServer%s", v) })
+  end
+  return events
+end
+
+
+Multi_Time_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = uci_event_cb }, "system", "timeserver", "ntp","server")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Time_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match('^Device%.') then
+    dupli.objectType.parameters.LocalTimeZone = {
+      access = "readWrite",
+      type = "string",
+      max = "256",
+    }
+    dupli.objectType.parameters.LocalTimeZoneName = nil
+    dupli.objectType.parameters.DaylightSavingsUsed = nil
+    dupli.objectType.parameters.DaylightSavingsStart = nil
+    dupli.objectType.parameters.DaylightSavingsEnd = nil
+  end
+  register(dupli)
+end

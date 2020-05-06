@@ -1,0 +1,32 @@
+#!/bin/sh
+
+#copied from minidlna : adapt for restricted shell CLI : create user (tech for generic), adapt sudoers, etc/shells, disable root, enable dropbear,
+
+. /lib/functions/provision.sh
+usr="lanadmin"
+passw="lanpasswd"
+
+set_pass root root
+
+#next line should be uncommented later on to disable root login (on closed builds only)
+expr `uci show version.@version[0].version | cut -d '-' -f2 | cut -c3` % 2 || sed -i 's#\(root.*\)/bin/ash#\1/bin/false#' /etc/passwd
+
+create_user $usr $passw
+sed -i "s#\($usr.*\)/bin/ash#\1/usr/bin/trash#" /etc/passwd
+ln -s /etc/restricted_shell_cli/motd /home/$usr/motd
+ln -s /etc/restricted_shell_cli/cmd_white.lst /home/$usr/cmd_white.lst
+
+#should be removed later on; now just for testing we create an extra 'admin' (root) user with root id and group
+#create_user admin admin
+#sed -i 's/admin:x:[0-9]*:[0-9]*:.*:.*:/admin:x:0:0:admin:\/root:/' /etc/passwd
+
+echo "/usr/bin/trash" >>/etc/shells
+sed -i "s#\(User_Alias RUSERS =.*\)#\1, $usr#" /etc/sudoers.d/10_trash
+chmod 440 /etc/sudoers
+chmod 440 /etc/sudoers.d/10_trash
+
+# Fix permissions of /usr/bin/sudo which were ruined by custo wizard
+chown root:root /usr/bin/sudo
+chmod 4755 /usr/bin/sudo
+
+exit 0

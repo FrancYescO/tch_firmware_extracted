@@ -1,0 +1,254 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DSL_Channel_i_ = {
+  objectType = {
+    name = "Device.DSL.Channel.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ChannelNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", --readWrite not supported since lower layer support not available.
+        type = "boolean",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Down",
+          "Unknown",
+          "Dormant",
+          "NotPresent",
+          "LowerLayerDown",
+          "Error",
+        },
+      },
+      LowerLayers = {
+        access = "readOnly",
+        list = true,
+        max = "1024",
+        type = "string",
+        pathRef = true,
+      },
+      UpstreamCurrRate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      DownstreamCurrRate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      LPATH = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "3",
+          },
+        },
+      },
+      LinkEncapsulationSupported = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "G.992.3_Annex_K_ATM",
+          "G.992.3_Annex_K_PTM",
+          "G.993.2_Annex_K_ATM",
+          "G.993.2_Annex_K_PTM",
+          "G.994.1",
+        },
+      },
+      LinkEncapsulationUsed = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "G.992.3_Annex_K_ATM",
+          "G.992.3_Annex_K_PTM",
+          "G.993.2_Annex_K_ATM",
+          "G.993.2_Annex_K_PTM",
+        },
+      },
+      ACTINP = {
+        access = "readOnly",
+        type = "int",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+--[[ TO DO
+      LastChange = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      INTLVDEPTH = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      INTLVBLOCK = {
+        access = "readOnly",
+        type = "int",
+      },
+      ActualInterleavingDelay = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      INPREPORT = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      NFEC = {
+        access = "readOnly",
+        type = "int",
+      },
+      RFEC = {
+        access = "readOnly",
+        type = "int",
+      },
+      LSYMB = {
+        access = "readOnly",
+        type = "int",
+      },
+      ACTNDR = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ACTINPREIN = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "255",
+          },
+        },
+      },
+--]]
+    }
+  },
+  aliasDefault = "Name"
+}
+
+local nwmodel = require "transformer.shared.models.device2.network"
+local DSLChannel = nwmodel.register("DSLChannel", Device_DSL_Channel_i_.objectType.name)
+
+local model
+
+local ubusConnection = mapper("ubus").connect()
+local xdslctl = require("transformer.shared.xdslctl")
+
+
+-- map table for xdsl status
+-- Note : Only up/down/unknown status available now .
+--        since lower layer support is not present.
+local statusMap = {
+  [-1] = "Down",
+  [0]  = "Down",
+  [1]  = "Down",
+  [2]  = "Down",
+  [3]  = "Down",
+  [4]  = "Down",
+  [5]  = "Up",
+  [6]  = "Down",
+  [7]  = "Down",
+  [8]  = "Down",
+}
+
+-- keys to retrieve for getall (xdslctl info --show)
+local xdslInfoGetAllKeys = {
+  "currentrate",
+  "LinkEncapsulationSupported",
+  "LinkEncapsulationUsed",
+  "LPATH",
+  "ACTINP",
+}
+
+local function getStatus(mapping, param)
+  local status = ubusConnection:call("xdsl", "status", {})
+  if not status then
+    return nil, "cannot retrieve xdsl status"
+  end
+  status = statusMap[status.statuscode]
+  if status  then
+    return status
+  end
+  return "Unknown"
+end
+
+Device_DSL_Channel_i_.entries = function(mapping, param, key)
+  model = nwmodel.load()
+  return model:getKeys(DSLChannel)
+end
+
+Device_DSL_Channel_i_.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+
+  Enable = "1",
+
+  Status = getStatus,
+
+  LowerLayers = function(mapping, param, key)
+    return model:getLowerLayersResolved(key, resolve)
+  end,
+
+  UpstreamCurrRate = function(mapping, param, key)
+    return xdslctl.infoValue("currentrate", "us", "0")
+  end,
+
+  DownstreamCurrRate = function(mapping, param, key)
+    return xdslctl.infoValue("currentrate", "ds", "0")
+  end,
+
+  LPATH = function(mapping, param, key)
+    return xdslctl.infoValue("LPATH") or ""
+  end,
+
+  LinkEncapsulationSupported = function(mapping, param, key)
+    local link = xdslctl.infoValue("LinkEncapsulationSupported")
+    return link and link:gsub("%s%b()","") or ""
+  end,
+
+  LinkEncapsulationUsed = function(mapping, param, key)
+    return xdslctl.infoValue("LinkEncapsulationUsed") or ""
+  end,
+
+  ACTINP = function(mapping, param, key)
+    return xdslctl.infoValue("ACTINP") or ""
+  end,
+}
+
+Device_DSL_Channel_i_.getall = function(mapping, key)
+  -- get all required values from xdslctl info --show, xdslctl info --stats
+  local xdslInfoValues = xdslctl.infoValueList(xdslInfoGetAllKeys)
+  local link = xdslInfoValues["LinkEncapsulationSupported"]
+  local allValues = {
+    Name = key or "",
+    Enable = "1",
+    Status =  getStatus() or "",
+    LowerLayers = model:getLowerLayersResolved(key, resolve),
+    UpstreamCurrRate = xdslInfoValues["currentrate"]["us"] or "0",
+    DownstreamCurrRate = xdslInfoValues["currentrate"]["ds"] or "0",
+    LPATH = xdslInfoValues["LPATH"] or "",
+    LinkEncapsulationSupported = link and link:gsub("%s%b()","") or "",
+    LinkEncapsulationUsed = xdslInfoValues["LinkEncapsulationUsed"] or "",
+    ACTINP = xdslInfoValues["ACTINP"] or "",
+  }
+  return allValues
+end
+
+register(Device_DSL_Channel_i_)

@@ -1,0 +1,198 @@
+-- Automatically generated from InternetGatewayDevice:1.14 and Device:2.10
+-- using generator version 2.3
+local Multi_Firewall_ = {
+  objectType = {
+    name = "#ROOT.Firewall.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+--[[ TODO
+	Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+--]]
+      Config = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "High",
+          "Low",
+          "Advanced",
+          "X_000E50_Lax",
+          "X_000E50_User"
+        },
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+--[[ TODO
+      AdvancedLevel = {
+        access = "readWrite",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.Firewall.Level.{i}.",
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Stateless",
+          "Stateful",
+        },
+      },
+      LastChange = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+--]]
+      -- LevelNumberOfEntries
+      -- automatically created when Device.Firewall.Level.{i}. is loaded
+      -- ChainNumberOfEntries
+      -- automatically created when Device.Firewall.Chain.{i}. is loaded
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local fwBinding = {config = "firewall", sectionname = "",option = "",default = ""}
+local fwZone = {config = "firewall", sectionname = "zone"}
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commitApply = commitapply
+
+
+local function setOutGoingPolicyTo(policy)
+  fwBinding.sectionname = "defaultoutgoing"
+  fwBinding.option = "target"
+  fwBinding.default = ""
+  setOnUci(fwBinding, policy, commitApply)
+end
+
+local function getOutGoingPolicyForMode(mode)
+  fwBinding.sectionname = "fwconfig"
+  fwBinding.option = "defaultoutgoing_" .. mode
+  fwBinding.default = "ACCEPT"
+  return getFromUci(fwBinding)
+end
+
+local function setIncomingPolicyTo(policy)
+-- set FORWARD and INPUT on wan zone to the policy
+  uciHelper.foreach_on_uci(fwZone, function(s)
+    if s["name"] == "wan" then
+      fwBinding.sectionname = s[".name"]
+      fwBinding.option = "forward"
+      fwBinding.default = ""
+      setOnUci(fwBinding, policy, commitApply)
+
+      fwBinding.option = "input"
+      setOnUci(fwBinding, policy, commitApply)
+      return false
+    end
+ end)
+ uciHelper.commit({config = "firewall"})
+end
+
+local function getIncomingPolicyForMode(mode)
+  fwBinding.sectionname = "fwconfig"
+  fwBinding.option = "defaultincoming_" .. mode
+  fwBinding.default= "DROP"
+  return getFromUci(fwBinding)
+end
+
+local function getFirewallMode()
+  fwBinding.sectionname = "userrules"
+  fwBinding.option = "enabled"
+  fwBinding.default= "0"
+  local user = getFromUci(fwBinding)
+
+  fwBinding.sectionname = "userrules_v6"
+  local userRulesv6 = getFromUci(fwBinding)
+
+  if user ~= "0" or userRulesv6 ~= "0" then
+    return "X_000E50_User"
+  end
+
+  fwBinding.sectionname = "highrules"
+  local high = getFromUci(fwBinding)
+  if high ~= "0" then
+    return "High"
+  end
+
+  fwBinding.sectionname = "laxrules"
+  local lax = getFromUci(fwBinding)
+  if lax ~= "0" then
+    return "X_000E50_Lax"
+  end
+
+  fwBinding.sectionname = "normalrules"
+  local normal = getFromUci(fwBinding)
+  if normal ~= "0" then
+    return "Low"
+  end
+end
+
+Multi_Firewall_.get = {
+  Config = function(mapping, param, key, parentkey)
+    return getFirewallMode()
+  end,
+
+  Version = "",
+}
+
+Multi_Firewall_.set = {
+  Config = function (mapping, paramName, paramValue, key)
+    local options = {
+      High = { "highrules", "0"},
+      Low = { "normalrules", "0"},
+      X_000E50_User = {"userrules", "0"},
+      X_000E50_Lax = { "laxrules", "0"}
+    }
+    options[paramValue][2] = "1"
+
+    fwBinding.default = ""
+    for k,v in pairs(options) do
+      fwBinding.sectionname = v[1]
+      fwBinding.option = "enabled"
+      setOnUci(fwBinding, v[2], commitApply)
+    end
+    if paramValue == "X_000E50_User" then
+      fwBinding.sectionname = "userrules_v6"
+      fwBinding.option = "enabled"
+      setOnUci(fwBinding, "1", commitApply)
+    else
+      fwBinding.sectionname = "userrules_v6"
+      fwBinding.option = "enabled"
+      setOnUci(fwBinding, "0", commitApply)
+    end
+    local policy = getOutGoingPolicyForMode(paramValue)
+    setOutGoingPolicyTo(policy)
+    policy = getIncomingPolicyForMode(paramValue)
+    setIncomingPolicyTo(policy)
+    uciHelper.commit({config = "firewall"})
+  end,
+}
+
+
+local function uciEventCb (mapping, action, config, sectiontype, sectionname, option)
+  return  { { key = "", paramName = "Config"} }
+end
+
+
+Multi_Firewall_.add_watchers = function(mapping)
+  local uciEvsrc = eventsource("uci")
+  uciEvsrc.watch(mapping, { set = uciEventCb }, "firewall", "rulesgroup", "highrules","enabled")
+  uciEvsrc.watch(mapping, { set = uciEventCb }, "firewall", "rulesgroup", "userrules","enabled")
+  uciEvsrc.watch(mapping, { set = uciEventCb }, "firewall", "rulesgroup", "normalrules","enabled")
+  uciEvsrc.watch(mapping, { set = uciEventCb }, "firewall", "rulesgroup", "laxrules","enabled")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Firewall_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

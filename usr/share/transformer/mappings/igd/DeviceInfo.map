@@ -1,0 +1,345 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_DeviceInfo_ = {
+  objectType = {
+    name = "InternetGatewayDevice.DeviceInfo.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Manufacturer = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ManufacturerOUI = {
+        access = "readOnly",
+        type = "string",
+        max = "6",
+      },
+      ModelName = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      ProductClass = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      HardwareVersion = {
+        access = "readOnly",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      ModemFirmwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      EnabledOptions = {
+        access = "readOnly",
+        list = true,
+        max = "1024",
+        type = "string",
+      },
+      AdditionalHardwareVersion = {
+        access = "readOnly",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      AdditionalSoftwareVersion = {
+        access = "readOnly",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      SpecVersion = {
+        access = "readOnly",
+        status = "deprecated",
+        forcedInform = "true",
+        type = "string",
+        max = "16",
+        default = "1.0",
+      },
+      ProvisioningCode = {
+        access = "readWrite",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      UpTime = {
+        access = "readOnly",
+	activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      FirstUseDate = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      DeviceLog = {
+        access = "readOnly",
+        type = "string",
+        max = "32768",
+      },
+      X_000E50_SoftwareVersionPassiveBank = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      X_000E50_SwitchtoPassiveBank = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_000E50_ReturnToFactoryDefaultsSoft = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      -- VendorConfigFileNumberOfEntries
+      -- automatically created when InternetGatewayDevice.DeviceInfo.VendorConfigFile.{i}. is loaded
+    }
+  }
+}
+
+local floor = math.floor
+local open = io.open
+local tostring = tostring
+local uci = mapper("ucihelper")
+
+local banktable = require "transformer.shared.banktable"
+
+local switchover = false
+
+local function firstline(filename, nb)
+  local fd = open(filename)
+  if not fd then
+    -- you could return nil and and error message but that will abort
+    -- iterating over all parameters.
+    -- so here I opt to just return an empty string.
+    return ""
+  end
+  local result = fd:read(nb or "*l")
+  fd:close()
+  return result
+end
+
+local function friendly_name()
+  local binding = { config = "env", sectionname = "var", option = "prod_description" }
+  local value = uci.get_from_uci(binding)
+  if value == "" then
+    value = firstline("/proc/rip/0040")
+  end
+  Multi_DeviceInfo_.get.Description = value
+  return value
+end
+
+local function PassiveBankVersion()
+    local value = banktable.getOtherVersion() or "Unknown"
+    value = value:match("([^%-]+)%-")
+    if value == nil then
+        return "Unknown"
+    end
+    return value
+end
+
+local provcode_binding = { config = "env", sectionname = "var", option = "provisioning_code" }
+local rtfds_binding = { config = "env", sectionname = "var", option = "rtfds", default = "0" }
+
+InternetGatewayDevice_DeviceInfo_.get = {
+  Manufacturer = function()
+    local binding = { config = "env", sectionname = "var", option = "company", default = "Technicolor" }
+    local override_binding = { config = "env", sectionname = "var", option = "company_name_override_igd" }
+    local value = uci.get_from_uci(override_binding)
+    if value == "" then
+      value = uci.get_from_uci(binding)
+    end
+    InternetGatewayDevice_DeviceInfo_.get.Manufacturer = value
+    return value
+  end,
+  ManufacturerOUI = function()
+    local binding = { config = "env", sectionname = "var", option = "oui" }
+    local value = uci.get_from_uci(binding)
+    InternetGatewayDevice_DeviceInfo_.get.ManufacturerOUI = value
+    return value
+  end,
+  ModelName = function()
+    local binding = { config = "env", sectionname = "var", option = "prod_friendly_name" }
+    local value = uci.get_from_uci(binding)
+    InternetGatewayDevice_DeviceInfo_.get.ModelName = value
+    return value
+  end,
+  Description = "Technicolor Internet Gateway Device",
+  ProductClass = function()
+    local binding = { config = "env", sectionname = "var", option = "ProductClass" }
+    local value = uci.get_from_uci(binding)
+    InternetGatewayDevice_DeviceInfo_.get.ProductClass = value
+    return value
+  end,
+  SerialNumber = function()
+    local binding = { config = "env", sectionname = "var", option = "serial" }
+    local value = uci.get_from_uci(binding)
+    InternetGatewayDevice_DeviceInfo_.get.SerialNumber = value
+    return value
+  end,
+  HardwareVersion = function()
+    local binding = { config = "env", sectionname = "var", option = "hardware_version" }
+    local value = uci.get_from_uci(binding)
+    InternetGatewayDevice_DeviceInfo_.get.HardwareVersion = value
+    return value
+  end,
+  SoftwareVersion = function()
+    local binding = { config = "env", sectionname = "var", option = "friendly_sw_version_activebank"}
+    local value = uci.get_from_uci(binding)
+    local newvalue = value:match("([^%-]+)%-")
+    if newvalue then
+       value = newvalue
+    end
+    binding = { config = "versioncusto", sectionname = "override", option = "fwversion_prefix" }
+    local fwp = uci.get_from_uci(binding)
+    binding.option = "fwversion_suffix"
+    local fws = uci.get_from_uci(binding)
+    value = fwp .. value .. fws
+    InternetGatewayDevice_DeviceInfo_.get.SoftwareVersion = value
+    return value
+  end,
+  AdditionalSoftwareVersion = function()
+    local binding = { config = "env", sectionname = "var", option = "friendly_sw_version_activebank"}
+    local value = uci.get_from_uci(binding)
+    local newvalue = value:match("([%x]+)$")
+    if newvalue then
+       value = newvalue
+    end
+    InternetGatewayDevice_DeviceInfo_.get.AdditionalSoftwareVersion = value
+    return value
+  end,
+  UpTime = function()
+    local fd, msg = open("/proc/uptime")
+    if not fd then
+      return fd, msg
+    end
+    local uptime = fd:read("*n")
+    fd:close()
+    return tostring(floor(uptime))
+  end,
+  -- Related to the deprecated voucher system, and can thus be ignored
+  EnabledOptions = "",
+  -- Vendor-specific, currently deemed unimportant and might be adapted when specifically requested
+  AdditionalHardwareVersion = "",
+  -- Obsolute, must be set to 1.0 by TR-098-Amdt2
+  SpecVersion = "1.0",
+  ProvisioningCode = function()
+    local value = uci.get_from_uci(provcode_binding)
+    return value
+  end,
+  -- Applicable only when the modem firmware is separable from the overall CPE software
+  ModemFirmwareVersion = function()
+    local fd, msg = io.open("/usr/bin/xdslctl")
+    if msg ~= nil then
+      return ""
+    end
+    fd:close()
+    local p = assert(io.popen("xdslctl --version 2>&1"))
+    local output = p:read("*a")
+    p:close()
+    if not output then
+      return ""
+    end
+    local version = string.match(output, "AnnexA version%s*-%s*(.*)[\n]$")
+    if not version then
+      return ""
+    end
+    InternetGatewayDevice_DeviceInfo_.get.ModemFirmwareVersion = version
+    return version
+  end,
+  FirstUseDate = function()
+    local binding = { config = "cwmpd", sectionname = "cwmpd_config", option = "firstusedate" }
+    local value = uci.get_from_uci(binding)
+    if value == "" then
+      value = "0001-01-01T00:00:00Z" --Unknown Time value
+    end
+    return value
+  end,
+  DeviceLog = function()
+    local log = io.popen("/sbin/logread")
+    if log == nil then
+      return ""
+    end
+    local logString = log:read("*a")
+    if logString == nil then
+      return ""
+    end
+    return string.sub(logString, -32768)
+  end,
+  X_000E50_SoftwareVersionPassiveBank = function()
+      local value = PassiveBankVersion()
+      if value ~= "Unknown" then
+          local binding = { config = "versioncusto", sectionname = "override", option = "fwversion_prefix" }
+          local fwp = uci.get_from_uci(binding)
+          binding.option = "fwversion_suffix"
+          local fws = uci.get_from_uci(binding)
+          value = fwp .. value .. fws
+      end
+      return value
+  end,
+  X_000E50_SwitchtoPassiveBank = "0",
+  X_000E50_ReturnToFactoryDefaultsSoft = function()
+    local value = uci.get_from_uci(rtfds_binding)
+    return value
+  end
+}
+
+
+InternetGatewayDevice_DeviceInfo_.set = function(mapping, pname, pvalue)
+    if pname == "ProvisioningCode" then
+        InternetGatewayDevice_DeviceInfo_.get.ProvisioningCode = pvalue
+        return uci.set_on_uci(provcode_binding, pvalue, commitapply)
+    end
+    if pname == "X_000E50_SwitchtoPassiveBank" and pvalue == "1" then
+        if banktable.isOtherBankValid() then
+            switchover = true
+            commitapply:newset("InternetGatewayDevice.DeviceInfo.X_000E50_SwitchtoPassiveBank")
+        else
+            return nil, "No software in passive bank"
+        end
+    end
+    if pname == "X_000E50_ReturnToFactoryDefaultsSoft" then
+        return uci.set_on_uci(rtfds_binding, pvalue, commitapply)
+    end
+end
+
+InternetGatewayDevice_DeviceInfo_.commit = function()
+    if switchover then
+        banktable.prepareSwitchOver()
+        switchover = false
+    end
+    uci.commit({config = "env"})
+end
+
+InternetGatewayDevice_DeviceInfo_.revert = function()
+    switchover = false
+    uci.revert({config = "env"})
+end
+
+register(InternetGatewayDevice_DeviceInfo_)

@@ -1,0 +1,666 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_NAT_ = {
+  objectType = {
+    name = "Device.NAT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- InterfaceSettingNumberOfEntries
+      -- automatically created when Device.NAT.InterfaceSetting.{i}. is loaded
+      -- PortMappingNumberOfEntries
+      -- automatically created when Device.NAT.PortMapping.{i}. is loaded
+    }
+  }
+}
+
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_NAT_PortMapping_i_ = {
+  objectType = {
+    name = "Device.NAT.PortMapping.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PortMappingNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max  = "64",
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        default = "",
+      },
+--      AllInterfaces = {
+--        access = "readWrite",
+--        type = "boolean",
+--        default = "false",
+--      },
+      LeaseDuration = {
+        access = "readOnly",  -- readWrite currently not supported
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      RemoteHost = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ExternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+      },
+      ExternalPortEndRange = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        default = "0",
+      },
+      InternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+      },
+      Protocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      InternalClient = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+      Description = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+local commitapply, mapper, pairs = commitapply, mapper, pairs
+local register, resolve, string = register, resolve, string
+local common = mapper("nwcommon")
+local split_key = common.split_key
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local getall_from_uci = uci_helper.getall_from_uci
+local foreach_on_uci = uci_helper.foreach_on_uci
+local generate_key_on_uci = uci_helper.generate_key_on_uci
+local commit_on_uci = uci_helper.commit
+local revert_on_uci = uci_helper.revert
+local delete_on_uci = uci_helper.delete_on_uci
+local upnpPortMappings = {}
+local ipairs, type, tonumber = ipairs, type, tonumber
+local lower, upper, match = string.lower, string.upper, string.match
+
+local fw_binding = { config = "firewall", sectionname = "", option = "", default = "" }
+
+-- Cache that maps the generated _key of a portmap to the corresponding
+-- generated section name.
+-- Note that this cache needs to be rebuild every entries() because the
+-- entries could have been added or deleted.
+local key2sectionname = {}
+
+local changes_done = false
+
+local function isValidIPAddress(value)
+  local v = {match(value or "", "^(%d+)%.(%d+)%.(%d+)%.(%d+)$")}
+  if #v == 4 then
+    for _, val in ipairs(v) do
+      if tonumber(val)>255 then
+        return false
+      end
+    end
+    return true
+  end
+end
+
+local function get_from_rule(key, option, default)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  fw_binding.default = default
+  if option then
+    return get_from_uci(fw_binding)
+  end
+  return getall_from_uci(fw_binding)
+end
+
+local function set_on_rule(key, param, value)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = param
+  set_on_uci(fw_binding, value, commitapply)
+  changes_done = true
+end
+
+local function delete_on_rule(key, option)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  delete_on_uci(fw_binding, commitapply)
+  changes_done = true
+end
+
+local function add(mapping)
+  fw_binding.sectionname = "userredirect"
+  local sectionname = uci_helper.add_on_uci(fw_binding, commitapply)
+  fw_binding.sectionname = sectionname
+  local _key = uci_helper.generate_key()
+  fw_binding.option = "_key"
+  set_on_uci(fw_binding, _key)
+  key2sectionname[_key] = sectionname
+  fw_binding.option = "enabled"
+  set_on_uci(fw_binding, "0", commitapply)
+  fw_binding.option = "target"
+  set_on_uci(fw_binding, "DNAT", commitapply)
+  changes_done = true
+  return _key
+end
+
+local function split_uci_section(mapping, param, value, key)
+  local portmap_values = get_from_rule(key)
+  local proto_val,key_val = split_key(key)
+  set_on_rule(key, "proto", { proto_val })
+  set_on_rule(key, "_key", key)
+  local new_section_key = add(mapping)
+  local proto_val_new
+  if proto_val == "tcp" then
+    proto_val_new = "udp"
+  else
+    proto_val_new = "tcp"
+  end
+  local _key_change = proto_val_new .. "|" .. key_val
+  set_on_rule(new_section_key, "proto", { proto_val_new })
+  set_on_rule(new_section_key, "_key", _key_change)
+  for option,old_value in pairs(portmap_values) do
+    if option ~= "proto" and option ~= ".anonymous" and option ~= "_key" and old_value ~= "" then
+      set_on_rule(new_section_key, option, old_value)
+    end
+  end
+  set_on_rule(key, param, value)
+  return true
+end
+
+local function get_proto(key, value)
+  local val = value or get_from_rule(key, "proto", {})
+  local protocol
+  if ((type(val) == "table") and #val == 1) then
+    protocol = val[1]
+  end
+  return protocol
+end
+
+-- Table containing the parameter names and their default values
+-- for the parameters that are not populated by UPnP Port mappings
+local upnpDefaults = {
+  Enable = "1",
+  Status = "Enabled",
+  Interface = "",
+  ExternalPortEndRange = "0",
+  RemoteHost = "",
+}
+
+-- Function to populate the UPnP portmap entries loaded from /var/upnp.leases
+-- Every line is an entry and the individual parameter fields are separated by a colon.
+local function loadUpnpPortMaps()
+  local upnpPortMaps = {}
+  local upnpMap
+  local fd = io.open("/var/upnp.leases")
+  if fd then
+    for line in fd:lines() do
+      upnpMap = {}
+      local proto, extPort, intClient, intPort, leaseTime, desc = line:match("(.*):(.*):(.*):(.*):(.*):(.*)")
+      upnpMap["Protocol"] = proto
+      upnpMap["ExternalPort"] = extPort
+      upnpMap["InternalClient"] = intClient
+      upnpMap["InternalPort"] = intPort
+      upnpMap["LeaseDuration"] = leaseTime
+      upnpMap["Description"] = desc
+      -- Add the parameters that are not populated from the above file, assign default values.
+      for param, defValue in pairs(upnpDefaults) do
+        upnpMap[param] = defValue
+      end
+      upnpPortMaps[#upnpPortMaps+1] = upnpMap
+    end
+    fd:close()
+  end
+  return upnpPortMaps
+end
+
+local function entries(mapping)
+  local PortMappings = {}
+  key2sectionname = {}
+  local redirect_sections = {}
+  local key
+  upnpPortMappings = {}
+
+  fw_binding.sectionname = "redirectsgroup"
+  foreach_on_uci(fw_binding, function(s)
+    if (s.enabled == "1") then
+      redirect_sections[#redirect_sections + 1] = s.type
+    end
+  end)
+
+  local key_generated = false
+
+  for _,v in ipairs(redirect_sections) do
+    fw_binding.sectionname = v
+    foreach_on_uci(fw_binding, function(s)
+      local proto = s.proto
+      local protocol
+      local _key = s._key
+      local _key2 = s._key
+      if proto then
+        protocol = get_proto(nil, proto)
+      end
+      if not _key then
+        fw_binding.sectionname = s[".name"]
+        _key = generate_key_on_uci(fw_binding)
+        key_generated = true
+      end
+      -- Note that on UCI you can have redirects where the 'proto' list contains more than one protocol.
+      -- At this moment we're returning these but later in get() function of the "Protocol" parameter we will return an empty string.
+      -- This is not OK. And it is same in IGD. Refer NG-19295 (IGD issue id) in Jira.
+      -- For Device2, this will be tackled in NG-28588
+      if protocol and protocol == "tcpudp" then
+        _key = "tcp" .. "|" .. _key
+        PortMappings[#PortMappings + 1] = _key
+        key2sectionname[_key] = s[".name"]
+        _key = "udp" .. "|" .. _key2
+      end
+      PortMappings[#PortMappings + 1] = _key
+      key2sectionname[_key] = s[".name"]
+    end)
+  end
+  if key_generated then
+    uci_helper.commit_keys(fw_binding)
+  end
+  -- we also include portmaps created via UPnP (sys.upnp.redirect.)
+  for _, upnpMap in ipairs(loadUpnpPortMaps()) do
+    key = string.format("%s|%s|%s|%s", upnpMap.Protocol, upnpMap.InternalPort, upnpMap.InternalClient, upnpMap.ExternalPort)
+    --PortMappings[#PortMappings + 1] = key
+   -- upnpPortMappings[key] = upnpMap
+  end
+  return PortMappings
+end
+
+local function getPortData(key)
+  local data = get_from_rule(key)
+  local src_dport = data.src_dport or '0'
+  -- the src_dport format is a number optionally followed by - or : optionally
+  -- followed by another number. Spaces may be inserted between the parts
+  -- although we never do so ourselves. The match must cover the whole string
+  local start, stop = src_dport:match("^%s*(%d+)%s*[%-:]?%s*(%d*)%s*$")
+  if not start then
+    -- it failed to match the format
+    start = "0"
+    stop = ""
+  end
+  local endrange = data.tch_map_endrange or ""
+  endrange = endrange:match("^%s*(%d+)%s*$") --make sure it is a number (as string)
+  if stop~='' then
+    if tonumber(stop) <= tonumber(start) then
+      -- invalid config
+      stop = "0"
+    end
+  else
+    if start=='0' then
+      stop = endrange or "0"
+    elseif start == endrange then
+      stop = endrange
+    else
+      stop = "0"
+    end
+  end
+  return start, stop, endrange
+end
+
+local mandatory_options = { "src", "src_dport", "dest_ip" }
+local function rule_has_missing_options(options)
+  local options_missing
+  for _, option in ipairs(mandatory_options) do
+    if not options[option] then
+      options_missing = true
+      break
+    end
+  end
+  return options_missing
+end
+
+local function getStatus(key, all_options)
+  all_options = all_options or get_from_rule(key)
+
+  if all_options.enabled == "1" then
+    if rule_has_missing_options(all_options) then
+      return "Error_Misconfigured"
+    else
+      return "Enabled"
+    end
+  end
+  return "Disabled"
+end
+
+local function getEnable(key)
+    return get_from_rule(key, "enabled", "0")
+end
+
+local function getInterface(key)
+  local interface = get_from_rule(key, "src")
+  return resolve("Device.IP.Interface.{i}.", interface) or ""
+end
+
+local function getRemoteHost(key)
+  return get_from_rule(key, "src_ip")
+end
+
+local function getInternalPort(key)
+  -- dest_port could be a range according to the documentation;
+  -- take the first port
+  local v = get_from_rule(key, "dest_port")
+  return v and match(v, "^%d+") or "0"
+end
+
+local function getProtocol (key)
+  local proto = get_proto(key)
+  if proto == "tcpudp" then
+    proto = split_key(key)
+  end
+  local proto_conv
+  if proto then
+    proto_conv = upper(proto)
+  end
+  return proto_conv or ""
+end
+
+local function getInternalClient(key)
+  return get_from_rule(key, "dest_ip")
+end
+
+local function getDescription(key)
+  return get_from_rule(key, "name")
+end
+
+local getterTable = {
+  Enable = getEnable,
+  Status = getStatus,
+  Interface = getInterface,
+  RemoteHost = getRemoteHost,
+  InternalPort = getInternalPort,
+  Protocol = getProtocol,
+  InternalClient = getInternalClient,
+  Description = getDescription
+}
+
+local function set_internal_port(value, key)
+  local v = get_from_rule(key, "src_dport")
+  -- ignore in case src_port is wildcard
+  if v == "" then
+    return
+  end
+  if tonumber(value) == 0 then
+    -- forward to the default, dest_port becomes empty
+    value = ""
+  end
+  set_on_rule(key, "dest_port", value)
+end
+
+local function set_port_data(key, new_start, new_stop)
+  if not( new_start or new_stop) then
+    return nil, "invalid usage of set_port_data"
+  end
+  local start, stop, old_endrange = getPortData(key)
+  local endrange = old_endrange
+  if new_start == "0" then
+    --goto wildcard
+    start = "0"
+    stop = "0"
+  elseif new_start then
+    --new non "0" value
+    start = new_start
+    if tonumber(stop)<tonumber(start) then
+      -- old stop no longer valid
+      stop = "0"
+      endrange = "0"
+    end
+  end
+  if new_stop then
+    if (new_stop == "0") or (tonumber(start)<=tonumber(new_stop)) then
+      stop = new_stop
+      endrange = new_stop
+    else
+      return nil, "value out of range"
+    end
+  end
+  if start=="0" then
+    delete_on_rule(key, "src_dport")
+    delete_on_rule(key, "dest_port")
+  else
+    local value = start
+    if (stop ~= "0") and (stop~=start) then
+      value = string.format("%s:%s", start, stop)
+    end
+    set_on_rule(key, 'src_dport', value)
+  end
+  if old_endrange ~= endrange then
+    if endrange~="0" then
+      set_on_rule(key, "tch_map_endrange", endrange)
+    else
+      delete_on_rule(key, "tch_map_endrange")
+    end
+  end
+end
+
+local set = {
+  Enable = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "enabled", value, key)
+    else
+      set_on_rule(key, "enabled", value)
+    end
+  end,
+  Interface = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.IP.Interface.{i}.")
+    if not rc then
+      return nil, "invalid value"
+    end
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "src", value, key)
+    else
+      set_on_rule(key, "src", value)
+    end
+  end,
+  RemoteHost = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if isValidIPAddress(value) then
+      if protocol == "tcpudp" then
+        split_uci_section(mapping, "src_ip", value, key)
+      else
+        set_on_rule(key, "src_ip", value)
+      end
+    else
+      return nil, "It's not a valid IP address"
+    end
+  end,
+  ExternalPort = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "src_dport", value, key)
+    end
+    return set_port_data(key, value)
+  end,
+  ExternalPortEndRange = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "src_dport", value, key)
+    end
+    return set_port_data(key, nil, value)
+  end,
+  InternalPort = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "dest_port", value, key)
+    end
+    return set_internal_port(value, key)
+  end,
+  Protocol = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "proto", { lower(value) }, key)
+    else
+      set_on_rule(key, "proto", { lower(value) })
+    end
+  end,
+  InternalClient = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if isValidIPAddress(value) then
+      if protocol == "tcpudp" then
+        split_uci_section(mapping, "dest_ip", value, key)
+      else
+        set_on_rule(key, "dest_ip", value)
+      end
+    else
+      return nil, "It's not a valid IP address"
+    end
+  end,
+  Description = function(mapping, param, value, key)
+    local protocol = get_proto(key)
+    if protocol == "tcpudp" then
+      split_uci_section(mapping, "name", value, key)
+    else
+      set_on_rule(key, "name", value)
+    end
+  end
+}
+
+local function delete(mapping, key)
+  delete_on_rule(key)
+  return true
+end
+
+local function commit()
+  if changes_done then
+    commit_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+local function revert()
+  if changes_done then
+    revert_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+Device_NAT_PortMapping_i_.entries = entries
+Device_NAT_PortMapping_i_.get = function(mapping,param,key)
+  if upnpPortMappings[key] then
+    return upnpPortMappings[key][param] or ""
+  end
+  if param == "LeaseDuration" then
+    return "0"
+  elseif param == "ExternalPort" then
+    return getPortData(key)
+  elseif param == "ExternalPortEndRange" then
+    local _,port = getPortData(key)
+    return port
+  else
+    return getterTable[param](key)
+  end
+end
+
+Device_NAT_PortMapping_i_.getall = function(mapping, key)
+  if upnpPortMappings[key] then
+    return upnpPortMappings[key]
+  end
+  local portmap_values = get_from_rule(key)
+  local port,endRange = getPortData(key)
+  local v = portmap_values["proto"]
+  local proto = ((type(v) == "table") and #v == 1 and v[1])
+  local protocol
+  if proto == "tcpudp" then
+    protocol = split_key(key)
+  else
+    protocol = proto
+  end
+  return {
+    Enable = portmap_values["enabled"] or "0",
+    Status = getStatus(key,portmap_values),
+    Interface = resolve("Device.IP.Interface.{i}.", portmap_values["src"]) or "",
+    LeaseDuration = "0",
+    RemoteHost = portmap_values["src_ip"] or "",
+    ExternalPort = port,
+    ExternalPortEndRange = endRange,
+    InternalPort = portmap_values["dest_port"] and match(portmap_values["dest_port"], "^%d+") or "0",
+    Protocol = protocol and upper(protocol) or "",
+    InternalClient = portmap_values["dest_ip"] or "",
+    Description = portmap_values["name"] or "",
+  }
+end
+
+Device_NAT_PortMapping_i_.set = function(mapping, param, value, key)
+  if upnpPortMappings[key] then -- The SET Functionality is currently not supported for entries populated by UPnP portmapping.
+    return nil, "Set not supported for UPnP PortMapped entries"
+  end
+  set[param](mapping, param, value, key)
+end
+
+Device_NAT_PortMapping_i_.add = add
+Device_NAT_PortMapping_i_.delete = delete
+Device_NAT_PortMapping_i_.commit = commit
+Device_NAT_PortMapping_i_.revert = revert
+
+register(Device_NAT_)
+register(Device_NAT_PortMapping_i_)
+

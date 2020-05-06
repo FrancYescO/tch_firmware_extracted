@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_DAEMONIZE=1
+export WD_UUID_FILE="/etc/txmember/radio_id"
+if [ -z "$WD_DEVICE_ID" ]; then                                      
+	facid="$(uci get env.rip.factory_id)"
+        sn="$(uci get env.rip.serial)"
+        productClass="$(uci get env.var.prod_friendly_name)"
+        oui="$(uci get env.var.oui)"
+        export WD_DEVICE_ID="${facid}${sn}||${productClass}||${oui}"
+fi
+export TDDS_IP_INTF="br-lan"
+if [ -z "$ENV_WIFI_DOCTOR_PLATFORM_VERSION" ]; then
+	export ENV_WIFI_DOCTOR_PLATFORM_VERSION="$(uci get version.@version[0].product)-$(uci get version.@version[0].version)"
+fi
+
+start() {
+        config_load txmember
+        config_get_bool enabled config enabled 0
+        [ $enabled -gt 0 ] || return 1
+        if [ ! -e "${WD_UUID_FILE}" ]; then
+          #This is an easy way to have a persistent random radio_id
+          cp /proc/sys/kernel/random/uuid "${WD_UUID_FILE}"
+        fi
+        echo "Start txmember" > /dev/console
+        service_start /usr/bin/txmember
+}
+
+stop() {
+        service_stop /usr/bin/txmember
+}
+
+reload() {
+        restart
+}

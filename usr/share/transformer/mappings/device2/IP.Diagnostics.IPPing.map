@@ -1,0 +1,186 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_IP_Diagnostics_IPPing_ = {
+  objectType = {
+    name = "Device.IP.Diagnostics.IPPing.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Canceled",
+          "Complete",
+          "Error",
+          "Error_CannotResolveHostName",
+          "Error_NoRouteToHost",
+          "Error_Internal",
+          "Error_Other",
+        },
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+      },
+      ProtocolVersion = {
+        access = "readOnly", -- readWrite not Supported
+        type = "string",
+        enumeration = {
+          "Any",
+          "IPv4",
+          "IPv6",
+        },
+      },
+      Host = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      NumberOfRepetitions = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      DataBlockSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "65535",
+          },
+        },
+      },
+      DSCP = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "63",
+          },
+        },
+      },
+      IPAddressUsed = {
+        access = "readOnly",
+        type = "string",
+      },
+      SuccessCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      FailureCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      AverageResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MinimumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MaximumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      AverageResponseTimeDetailed = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MinimumResponseTimeDetailed = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MaximumResponseTimeDetailed = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local config = "ipping"
+local user = "device2"
+
+local uci_binding = {
+  DiagnosticsState = { config = config, sectionname = user, option = "state" },
+  Interface = { config = config, sectionname = user, option = "interface" },
+  Host = { config = config, sectionname = user, option = "host" },
+  NumberOfRepetitions = { config = config, sectionname = user, option = "count" },
+  Timeout = { config = config, sectionname = user, option = "timeout" },
+  DataBlockSize = { config = config, sectionname = user, option = "size" },
+  DSCP = { config = config, sectionname = user, option = "dscp" },
+}
+
+local helper = require('transformer.shared.ippinghelper')
+local clear_ping_results = helper.clear_ping_results
+
+helper.startup(user, uci_binding)
+
+Device_IP_Diagnostics_IPPing_.get = function(mapping, pname)
+  local value
+  if pname == "AverageResponseTimeDetailed" or pname == "MinimumResponseTimeDetailed" or pname == "MaximumResponseTimeDetailed" then
+    value = helper.read_ping_results(user, pname:gsub("Detailed",""))
+    return value and tostring(value * 1000) or "0"
+  end
+  if pname == "ProtocolVersion" then
+    return "IPv4"
+  end
+  if pname == "IPAddressUsed" then
+    return helper.ipAddress or ""
+  end
+  value = helper.uci_ipping_get(user, pname)
+  if pname == "Interface" then
+    value = resolve("Device.IP.Interface.{i}.", value) or ""
+  end
+  return value
+end
+
+Device_IP_Diagnostics_IPPing_.set = function(mapping, pname, pvalue)
+  -- Interface is displayed in Device2 as path, but stored as UCI/UBUS interface in UCI, so convert it first
+  if pname == "Interface" and pvalue ~= "" then
+    local rc
+    rc, pvalue = pcall(tokey, pvalue, "Device.IP.Interface.{i}.")
+    if not rc then
+      return nil, "invalid value"
+    end
+  end
+  helper.uci_ipping_set(user, pname, pvalue, commitapply)
+end
+
+clear_ping_results(user)
+
+Device_IP_Diagnostics_IPPing_.commit = helper.uci_ipping_commit
+Device_IP_Diagnostics_IPPing_.revert = helper.uci_ipping_revert
+
+register(Device_IP_Diagnostics_IPPing_)

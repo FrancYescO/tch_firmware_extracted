@@ -1,0 +1,200 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_i_LANEthernetInterfaceConfig_i_ = {
+  objectType = {
+    name = "#ROOT.LANEthernetInterfaceConfig.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "LANEthernetInterfaceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "NoLink",
+          "Error",
+          "Disabled",
+        },
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddressControlEnabled = {
+        access = "readOnly",  -- readWrite not supported
+        type = "boolean",
+      },
+      MaxBitRate = {
+        access = "readOnly",  -- readWrite not supported
+        type = "string",
+        enumeration = {
+          "10",
+          "100",
+          "1000",
+          "Auto",
+        },
+      },
+      DuplexMode = {
+        access = "readOnly",  -- readWrite not supported
+        type = "string",
+        enumeration = {
+          "Half",
+          "Full",
+          "Auto",
+        },
+      },
+    }
+  }
+}
+
+local mapper, ipairs, commitapply =  mapper, ipairs, commitapply
+local common = mapper('nwcommon')
+local match, open, execute, pairs = string.match, io.open, os.execute, pairs
+local uciHelper = mapper('ucihelper')
+local isAlias = common.is_alias
+local netPath = "/sys/class/net/"
+
+local function firstline(filename)
+  local fd = open(filename)
+  if not fd then
+    -- you could return nil and and error message but that will abort
+    -- iterating over all parameters.
+    -- so here I opt to just return an empty string.
+    return ""
+  end
+  local result = fd:read("*l")
+  fd:close()
+  return result
+end
+
+local function entriesLANEthernet(mapping, parentkey)
+  local intf = {}
+  -- Entries for InternetGatewayDevice.LANInterfaces.LANEthernetInterfaceConfig.
+  if mapping.objectType.name:match("InternetGatewayDevice.LANInterfaces") then
+    local lanIntf = {}
+    local binding = {config="network",sectionname="interface"}
+    local wan = common.findLanWanInterfaces(true)
+    uciHelper.foreach_on_uci(binding, function(s)
+      -- iterate over the network interface and take those that have proto set to static
+      -- this should identify the LAN interfaces with an IP layer and the odds
+      -- we exclude the interface named loopback as it should not be included and will be present in every product
+      -- we also exclude all alias interfaces
+      if s['.name'] == 'loopback' or isAlias(s['.name']) then
+        return
+      end
+      for _, v in ipairs(wan) do
+        if s['.name'] == v then
+          return
+        end
+      end
+      if s['proto'] == "static" then
+        lanIntf[#lanIntf+1] = s['.name']
+      end
+    end)
+    for i, v in ipairs(lanIntf) do
+      -- Extract the interfaces whose name start with eth. Those are the ones we need to list
+      -- Also we require disabled interfaces (not status.carrier)
+      local ll_intfs = common.get_lower_layers(v)
+      for _, interface in pairs(ll_intfs) do
+        if match(interface, "eth[^%s]+") then
+          local status = common.get_ubus_device_status(interface)
+          if not status.carrier then
+            intf[#intf+1] = interface
+          end
+        end
+      end
+    end
+    return intf
+  else
+    -- Entries for InternetGatewayDevice.LANDevice.{i}.LANEthernetInterfaceConfig.
+    -- Extract the interfaces whose name start with eth. Those are the ones we need to list
+    -- Also we require active interfaces (status.carrier)
+    local ll_intfs = common.get_lower_layers(parentkey)
+    for _, interface in pairs(ll_intfs) do
+      if match(interface, "eth[^%s]+") then
+        local status = common.get_ubus_device_status(interface)
+        if status.carrier then
+          intf[#intf+1] = interface
+        end
+      end
+    end
+    return intf
+  end
+end
+
+local getLANEthernet = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Enable = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = firstline(netPath .. key .. "/carrier")
+      if carrier == "1" or carrier == "0" then
+          return "1"
+      end
+      return "0"
+  end,
+  Status = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = firstline(netPath .. key .. "/carrier")
+    if carrier == "1" then
+      return "Up"
+    end
+    if carrier == "0" then
+      return "NoLink"
+    end
+    return "Disabled"
+  end,
+  MACAddress = function(mapping, param, key)
+    return firstline(netPath .. key .. "/address")
+  end,
+  MACAddressControlEnabled = "0",
+  MaxBitRate = "Auto",
+  DuplexMode = "Auto",
+}
+
+local setLANEthernet = {
+  Enable = function(mapping, param, value, key)
+    local file_handler = open("/tmp/.lan_intf","w")
+    if file_handler then
+      if value == "0" then
+        file_handler:write("ifconfig "..key.." down")
+      else
+        file_handler:write("ifconfig "..key.." up")
+      end
+      file_handler:close()
+      commitapply:newset("LANEthernetInterfaceConfig.Enable")
+    else
+      return nil, "unexpected write error"
+    end
+  end,
+}
+
+Multi_i_LANEthernetInterfaceConfig_i_.entries = entriesLANEthernet
+Multi_i_LANEthernetInterfaceConfig_i_.get = getLANEthernet
+Multi_i_LANEthernetInterfaceConfig_i_.set = setLANEthernet
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_i_LANEthernetInterfaceConfig_i_, "#ROOT", {"InternetGatewayDevice.LANDevice.{i}", "InternetGatewayDevice.LANInterfaces"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
