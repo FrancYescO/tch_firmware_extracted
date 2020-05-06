@@ -1,0 +1,49 @@
+#Syslog Filtered Messages Network Forwarding
+# $1: ip address of remote syslog server
+# $2: udp port number of remote listening syslog server
+# $3: name of file containing filtered messages to be forwarded
+
+#As soon as the syslog interface comes up ('wan', most of the time),
+# this script is triggered indirectly through the Hotplug mechanism;
+#It takes the content of the filtered messages file (takes new lines added to the end as file grows), 
+# serializes it line by line with 'while read log_line;do echo ${log_line};done' 
+# (because remote server is not happy if all data arrives in big UDP packets, so every line in a separate UDP message),
+# and passes it to 'nc' which transmits it over the network
+
+#Measures are taken to restart it (if 'nc' exists prematurely because of network errors),
+# hence the 'while true;do' and '[ $? = 0] || break'
+#The latter breaks the 'while read line;do echo $line;done' if echoing a line to the 'nc' pipe fails because 'nc' died;
+#As a consequence, also 'tail' or 'cat' fails (exits), clean-up is done,
+# and the outer loop re-iterates, and restarts the 'tail' (or 'cat'), 'while read' and 'nc' list of commands
+#Error log file (slfwd.err) is truncated if too large (keep 100 lines: first 10 and last 90)
+#To avoid log filter file entries being send twice, they are deleted from the filtered log file once they are sent (in blocks of 50 lines to limit CPU load)
+
+filt_file=$3
+hostname_mac_ser_msg="$(uci get system.@system[0].hostname)[MAC=$(uci get env.var.local_eth_mac | tr : -)][S/N=$(uci get env.var.serial)] Forwarding: [syslog_fwd] filtered message forwarding restarted"
+
+stop_procs () {
+	tail_pid=$(ps | grep -v awk | awk -v pattn="(tail -[fF]|cat).*${filt_file}" '$0 ~ pattn {print $1}')
+	nc_pid=$(ps | grep -v awk | awk '/nc -vu/ {print $1}')
+	if [ -n "${tail_pid}" ] ; then kill -9 ${tail_pid} ; fi
+	if [ -n "${nc_pid}" ] ; then kill -9 ${nc_pid} ; fi
+	lines=`wc /var/log/slfwd.err|awk '{print $1}'`
+	let bl=10
+	let el=$lines-90
+	if [ $el -gt 0 ];then sed -i "$bl,${el}d" /var/log/slfwd.err 2>/dev/null;fi
+}
+
+
+
+while true ; do
+	let i=i+1
+	echo "fwd_process iteration $i starting 'nc'; shell_pid exit_status background_pid :  '$$' '$?' '$!'" >>/var/log/slfwd.err
+	RestartFwdMsg='<'44'>'"$(date "+%b%e %H:%M:%S") ${hostname_mac_ser_msg}"
+	echo $RestartFwdMsg | nc -w 1 -vu -p 51423 $1 $2 2>>/var/log/slfwd.err 1>&2
+	if [ -p $3 ] ; then
+		cat $3 | while read log_line;do echo ${log_line};[ $? = 0 ] || { stop_procs;break ; };sleep 0;done | nc -vu -p 51423 $1 $2 2>>/var/log/slfwd.err 1>&2
+	else
+		tail -F -n +1 $3 | while read log_line;do echo ${log_line};[ $? = 0 ] || { stop_procs;break ; };sleep 0;done | nc -vu -p 51423 $1 $2 2>>/var/log/slfwd.err 1>&2
+	fi
+	stop_procs
+	sleep 61
+done

@@ -1,0 +1,165 @@
+local config_cwmpd = "cwmpd"
+local uci_helper = mapper("ucihelper")
+
+-- uci.cwmpd
+local uci_cwmpd = mapper("uci_1to1").createConfigMap(config_cwmpd)
+register(uci_cwmpd)
+
+-- uci.cwmpd.config
+local cwmpd_config = {
+  config = config_cwmpd,
+  section = "cwmpd_config",
+  options = { "state", "acs_url", "acs_user", "acs_pass", "periodicinform_enable",
+              "periodicinform_interval", "periodicinform_time", "activenotification_throttle",
+              "connectionrequest_username", "connectionrequest_password",
+              "connectionrequest_auth", "connectionrequest_port", "connectionrequest_allowedips",
+              "interface", "upgradesmanaged", "upgrade_switchovertype", "upgrade_rollback_timeout",
+              "rollback_cwmpd", "rollback_delayed", "rollback_gui", "rollback_unknown",
+              "namespace_version", "ssl_castore", "ssl_clientfile", "ssl_ciphersuite",
+              "ssl_hostnamecheck", "ssl_verifypeer", "backoff_minwait", "backoff_multiplier",
+              "datamodel", "enforce_https"
+            },
+  lists = { 
+    "notifications", "forcedactives", "forcedinforms"
+  }
+}
+
+local uci_cwmpd_config = mapper("uci_1to1").createSimpleMap(cwmpd_config)
+
+local uci = require("uci")
+local function removeFromState(option)
+  local cursor = uci.cursor(nil,"/var/state") -- Can not use ucihelper, because it does not contain this kind of cursor.
+  cursor:revert(cwmpd_config.config, cwmpd_config.section, option)
+  cursor:close()
+end
+
+local original_set = uci_cwmpd_config.set
+local new_set = {}
+local metatable = {}
+metatable.__index = function(table, key)
+  table[key] = function(...)
+    removeFromState(key)
+    return original_set[key](...)
+  end
+  return table[key]
+end
+setmetatable(new_set, metatable)
+uci_cwmpd_config.set = new_set
+
+register(uci_cwmpd_config)
+
+mapper("uci_1to1").registerSubmaps(uci_cwmpd_config.submappings)
+
+local function get_cwmp_interface()
+  local _cwmp_intf = {}
+  local binding = {
+      config = "cwmpd",
+      sectionname = "cwmpd_config",
+      option = "interface",
+  }
+  local cwmp_intf = uci_helper.get_from_uci(binding)
+  if cwmp_intf ~= "" then
+    _cwmp_intf.interface = cwmp_intf
+  end
+
+  binding.option = "interface6"
+  local cwmp_intf6 = uci_helper.get_from_uci(binding)
+  if cwmp_intf6 ~= "" then
+     _cwmp_intf.interface6 = cwmp_intf6
+  end
+
+  return _cwmp_intf
+end
+
+local intf_info = {}
+local function get_intf_info(intf)
+  local info = intf_info[intf]
+  if not info then
+    info = {}
+    intf_info[intf] = info
+  end
+  return info
+end
+
+local conn = mapper("ubus").connect()
+
+local function get_ipv4_address_for_interface(ifname)
+  local intf = conn:call("network.interface." .. ifname, "status", { })
+  local addresses = intf and intf['ipv4-address'] or {}
+  return addresses[1] or {}
+end
+
+local function update_intf_info()
+  local cwmp_intf = get_cwmp_interface().interface
+  local addr = get_ipv4_address_for_interface(cwmp_intf)
+  
+  local info = get_intf_info(cwmp_intf)
+  if not info.ipv4 and addr.address and addr.mask then
+    info.ipv4 = addr.address
+    info.ipv4mask = addr.mask
+  end
+end
+
+local function ip_intf_event(intf, msg)
+  local trigger
+  local addresses = msg["ipv4-address"]
+  local old_ip = intf.ipv4
+  local old_mask = intf.ipv4mask
+
+  if addresses and #addresses == 1 then
+    local addr = addresses[1]
+    if old_ip and old_mask and addr.address and addr.mask then
+      trigger = (old_ip ~= addr.address) or (old_mask ~= addr.mask)
+    end
+    if addr.address and addr.mask then
+      intf.ipv4 = addr.address
+      intf.ipv4mask = addr.mask
+    end
+  elseif addresses and #addresses > 1 then
+    -- multiple addresses
+    trigger = true
+    intf.ipv4 = ""
+    intf.ipv4mask = ""
+  end
+
+  if trigger then
+    return {{ key = "", paramname = "ExternalIP" }}
+  end
+end
+
+local function network_interface_event_cb(mapping, event, msg)
+    local cwmp_intfs = get_cwmp_interface()
+    if cwmp_intfs.interface == msg.interface then
+      local intf = get_intf_info(msg.interface)
+      return ip_intf_event(intf, msg)
+    end
+end
+
+register({
+  objectType = {
+    name = "uci.cwmpd.events.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ExternalIP = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      DiagnosticsComplete = {
+        access = "readWrite",
+        type = "boolean",
+      }
+    }
+  },
+  get = function()
+    return "0"
+  end,
+  set = function()
+  end,
+  add_watchers = function(mapping)
+    local ubusEventsrc = eventsource("ubus")
+    ubusEventsrc.watch_event(mapping, network_interface_event_cb, "network.interface")
+    ubusEventsrc.watch_event(mapping, update_intf_info, "interface.up")
+  end
+})

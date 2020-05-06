@@ -1,0 +1,200 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local LANEthernetInterface = {
+  objectType = {
+    name = "#ROOT.LANEthernetInterfaceConfig.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "LANEthernetInterfaceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "NoLink",
+          "Error",
+          "Disabled",
+        },
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddressControlEnabled = {
+        access = "readOnly",  -- readWrite not supported
+        type = "boolean",
+      },
+      MaxBitRate = {
+        access = "readOnly",  -- readWrite not supported
+        type = "string",
+        enumeration = {
+          "10",
+          "100",
+          "1000",
+          "Auto",
+        },
+      },
+      DuplexMode = {
+        access = "readOnly",  -- readWrite not supported
+        type = "string",
+        enumeration = {
+          "Half",
+          "Full",
+          "Auto",
+        },
+      },
+    }
+  }
+}
+
+local mapper, ipairs, commitapply =  mapper, ipairs, commitapply
+local common = mapper('nwcommon')
+local match, open, pairs = string.match, io.open, pairs
+local ucihelper = mapper('ucihelper')
+local netPath = "/sys/class/net/"
+
+local get_uci_network
+do
+  local nw = {config="network"}
+  get_uci_network = function(section, option, default)
+    nw.sectionname = section
+    nw.option = option
+    nw.default = default
+    return ucihelper.get_from_uci(nw)
+  end
+end
+
+local function firstline(filename)
+  local result = ""
+
+  local fd = open(filename)
+  if fd then
+    result = fd:read("*l")
+    fd:close()
+  end
+
+  return result
+end
+
+local function get_pppoerelay_for_interface(ifname)
+  local relays = {}
+  local pppoerelay = get_uci_network(ifname, 'pppoerelay', {})
+  if type(pppoerelay)=='string' then
+    pppoerelay = {pppoerelay}
+  end
+  for _, n in ipairs(pppoerelay) do
+    relays[n] = true
+  end
+  return relays
+end
+
+-- entries for IGD.LANInterfaces.LANEthernetInterfaceConfig
+local function LANInterfacesEntries()
+  -- TR-098: `This object contains LAN-side layer 1/2 interfaces that are not currently connected to
+  -- the Gateway's IP router and which therefore do not currently reside within a LANDevice instance.`
+  --    => In our case, the LAN interfaces are always considered `connected`,
+  --       so no entries are instantiated under LANInterfaces
+  return {}
+end
+
+-- entries for IGD.LANDevice.LANEthernetInterfaceconfig
+local function LANDeviceEntries(mapping, parentkey)
+  local relays = get_pppoerelay_for_interface(parentkey)
+
+  local interfaces = {}
+  local entries = {}
+  for _, interface in pairs(common.get_lower_layers(parentkey) or {}) do
+    -- Instances are interfaces starting with `eth` that are not relayed.
+    if match(interface, "eth[^%s]+") and not relays[interface] then
+      if not interfaces[interface] then
+        interfaces[interface] = true
+        entries[#entries+1] = interface
+      end
+    end
+  end
+
+  return entries
+end
+
+LANEthernetInterface.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Enable = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = firstline(netPath .. key .. "/carrier")
+      if carrier == "1" or carrier == "0" then
+          return "1"
+      end
+      return "0"
+  end,
+  Status = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = firstline(netPath .. key .. "/carrier")
+    if carrier == "1" then
+      return "Up"
+    end
+    if carrier == "0" then
+      return "NoLink"
+    end
+    return "Disabled"
+  end,
+  MACAddress = function(mapping, param, key)
+    return firstline(netPath .. key .. "/address") or ""
+  end,
+  MACAddressControlEnabled = "0",
+  MaxBitRate = "Auto",
+  DuplexMode = "Auto",
+}
+
+LANEthernetInterface.set = {
+  Enable = function(mapping, param, value, key)
+    local file_handler = open("/tmp/.lan_intf","w")
+    if file_handler then
+      if value == "0" then
+        file_handler:write("ifconfig "..key.." down")
+      else
+        file_handler:write("ifconfig "..key.." up")
+      end
+      file_handler:close()
+      commitapply:newset("LANEthernetInterfaceConfig.Enable")
+    else
+      return nil, "unexpected write error"
+    end
+  end,
+}
+
+do
+  local duplicator = mapper("multiroot").duplicate
+  local duplicates = duplicator(LANEthernetInterface, "#ROOT", {
+                       "InternetGatewayDevice.LANDevice.{i}",
+                       "InternetGatewayDevice.LANInterfaces"
+                     })
+  for _, mapping in ipairs(duplicates) do
+    if mapping.objectType.name:match("InternetGatewayDevice.LANInterfaces") then
+      mapping.entries = LANInterfacesEntries
+    else
+      mapping.entries = LANDeviceEntries
+    end
+    register(mapping)
+  end
+end
