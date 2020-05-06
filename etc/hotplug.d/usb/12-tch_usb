@@ -1,0 +1,108 @@
+#!/bin/sh
+# Copyright (C) 2015 Technicolor Delivery Technologies, SAS
+
+#set -x
+EHCI_COMPANION="/sys/devices/platform/ehci-platform.0/companion"
+UCI_SET="uci -q set"
+UCI_GET="uci -q get"
+UCI_RUN_SET="uci -q -P /var/state set"
+UCI_RUN_GET="uci -q -P /var/state get"
+
+CTX=". $$"
+usb_print() {
+   logger -t usb "$1$CTX"
+   #echo -e "$1$CTX" >> /tmp/hotplug_usb
+}
+
+usb_set_ehci_companion() {
+   local v=$1
+   local trace=$2
+   local old="`cat ${EHCI_COMPANION}`"
+   echo $v > ${EHCI_COMPANION}
+   local old="`cat ${EHCI_COMPANION}`"
+   usb_print "ehci set companion : $v ($old, $new) : $trace"
+}
+
+usb_get_emi_id() {
+  local p1=$1
+  local v1
+  local v2
+  local sDEVPATH="/sys$DEVPATH"
+
+  v1="`cat ${sDEVPATH}/manufacturer`"
+  v2="`cat ${sDEVPATH}/product`"
+
+  if [ -n "$v1" -o -n "$v2" ] ; then
+      EMI_DEV_ID="$v1:$v2"
+      return 0
+  else
+    EMI_DEV_ID=""
+  fi
+  usb_print "==usb_get_emi_id :: $sDEVPATH v1=$v1 v2=$v2 emi_id=$EMI_DEV_ID"
+  return 1
+}
+
+if [ "$ACTION" == "add" -a "$DEVTYPE" == "usb_device" ] ; then
+  usb2_dev="`echo $DEVPATH | grep ehci-platform`"
+  usb1_dev="`echo $DEVPATH | grep ohci-platform`"
+
+  if [ -n "$usb2_dev" -o -n "$usb1_dev" ] ; then
+    #find /sys/devices/platform/ -name manufacturer >> /tmp/hotplug_usb
+    usb_get_emi_id
+    #usb_print "== call usb_get_emi_id :: $? EMI_DEV_ID=$EMI_DEV_ID"
+
+    if [ $(echo $DEVICENAME | sed -e "s/usb[1-9]\+/usb/g") == "usb" ] ; then
+      vDEVPATH="/devices/platform/ehci-platform.0/usb1"
+      if [ "$DEVPATH" == "$vDEVPATH" ] ; then
+        uci_print  "==boot :: check devices connected"
+        $UCI_RUN_SET usb.ehci_emi_$PORT.boot='1'
+
+      fi
+      for PORT in $(seq 1 2) ; do
+        local dev_id="`$UCI_RUN_GET usb.ehci_emi_$PORT.dev_id`"
+        local emi_dev_id="`$UCI_RUN_GET usb.ehci_emi_$PORT.emi_dev_id`"
+        if [ "$dev_id" != "$emi_dev_id" ] ; then
+          usb_print "No Device at boot, remove workaround on port $PORT"
+          v="`uci -q delete usb.ehci_emi_$PORT`"
+        fi
+      done
+      return 0
+    fi
+
+    PORT=$(echo $DEVICENAME | sed -e "s/[0-9]*\-\([0-9]*\)/\1/g")
+    usb_print "ACITVE_PORT=$PORT"
+    $UCI_RUN_SET usb.ehci_emi_$PORT.dev_id="${EMI_DEV_ID}"
+
+    EMI_ON_PORT="`dmesg | grep \"disabled by hub (EMI?), re-enabling...\" | grep $PORT | cut -f 2 -d ] | tail -n 1 | awk '{print $4}'`"
+    uci_print  "EMI detected on port (EMI_ON_PORT=$EMI_ON_PORT PORT=$PORT DEVPATH=$DEVPATH)"
+    if [ "$PORT" == "$EMI_ON_PORT" ] ; then
+      touch /etc/config/usb
+      uci set usb.ehci_emi_$PORT=ehci_emi_detect
+      uci set usb.ehci_emi_$PORT.emi_detected=1
+      uci set usb.ehci_emi_$PORT.companion="$PORT"
+      uci set usb.ehci_emi_$PORT.emi_dev_id="${EMI_DEV_ID}"
+      uci commit
+
+      usb_set_ehci_companion $v "Set FORCED"
+    fi
+
+    v="`$UCI_GET usb.ehci_emi_$PORT.companion`"
+    usb_print "UCI companion state ($PORT==$v)"
+    if [ "$v" == "$PORT" ] ; then
+
+        if [ "`$UCI_GET usb.ehci_emi_$PORT.emi_dev_id`" == "${EMI_DEV_ID}" ] ; then
+          usb_set_ehci_companion $v "Set ON_PRODUCT"
+        else
+          if [ -z "`$UCI_RUN_SET usb.ehci_emi_$PORT.boot`" ] ; then
+            usb_print "New device detected after boot"
+            usb_set_ehci_companion -$v "UnSet NEW DEVICE try High Speed"
+          else
+            usb_print "Delete workaround on port $PORT"
+            v="`uci -q delete usb.ehci_emi_$PORT`"
+          fi
+        fi
+    fi
+
+    return 0
+  fi
+fi

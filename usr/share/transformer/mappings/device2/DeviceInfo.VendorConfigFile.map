@@ -1,0 +1,93 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DeviceInfo_VendorConfigFile_i_ = {
+  objectType = {
+    name = "Device.DeviceInfo.VendorConfigFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorConfigFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      Date = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+--[[ TODO:
+      UseForBackupRestore = {
+        access = "readOnly",
+        type = "boolean",
+      },
+--]]
+    }
+  }
+}
+
+local lfs = require("lfs")
+local banks = {"bank_1", "bank_2"}
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+
+Device_DeviceInfo_VendorConfigFile_i_.entries = function(mapping)
+  local entries = {}
+  for _, bank in ipairs(banks) do
+    if lfs.attributes("/overlay/" .. bank, "mode") == "directory" then
+      entries[#entries + 1] = bank
+    end
+  end
+  return entries
+end
+
+local getVersion = function(mapping, param, key)
+  return string.sub(getFromUci( { config = "version", sectionname = "@version[0]", option = "version", extended = true } ), 1, 16)
+end
+
+local getDate = function(mapping, param, key)
+  return getFromUci( {config = "cwmpd", sectionname = "cwmpd_config", option = "firstusedate" } )
+end
+
+Device_DeviceInfo_VendorConfigFile_i_.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+
+  Version = getVersion,
+
+  Date = getDate,
+
+  Description = function(mapping, param, key)
+    return "Vendor config file is " .. key .. " configuration"
+  end,
+}
+
+Device_DeviceInfo_VendorConfigFile_i_.getall = function(mapping, key)
+  local allValues = {
+    Name = key,
+    Version = getVersion(mapping),
+    Date = getDate(mapping),
+    Description = "Vendor config file is " .. key .. " configuration"
+  }
+  return allValues
+end
+
+register(Device_DeviceInfo_VendorConfigFile_i_)

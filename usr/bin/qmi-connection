@@ -1,0 +1,104 @@
+#!/bin/sh
+
+source /lib/config/uci.sh
+
+print_usage ()
+{
+    echo "usage: $0 [COMMAND]"
+    echo "commands:"
+    echo "start"
+    echo "stop"
+    echo "status"
+    echo "bearer"
+    echo "signal-strength"
+}
+
+if [ $# -ne 1 ]; then
+    echo "error: missing arguments" 1>&2
+    print_usage
+    exit 255
+fi
+
+COMMAND=$1
+CONFIG_PATH='/etc/qmi-network.conf'
+WDM_PATH='/dev/cdc-wdm0'
+WWAN_IF='wwan0'
+
+connection_start ()
+{
+    # Get PIN from uci mobiled
+    local pin="$(uci_get mobiled.globals.pin)"
+
+    # Get APN from uci mobiled
+    local apn="$(uci_get mobiled.@profile[0].apn)"
+
+    # Prepare qmi-network.conf for qmi-network command
+    touch $CONFIG_PATH
+    echo "APN=${apn}" > $CONFIG_PATH
+
+    # Check if wdm usb device exists
+    if [ ! -e $WDM_PATH ]; then
+        echo "WDM USB device not found, driver not loaded?"
+        exit 255
+    fi
+
+    # Verify the PIN code
+    qmicli -d $WDM_PATH --dms-uim-verify-pin=PIN,${pin}
+    if [ $? -ne 0 ] ; then
+        echo "PIN not verified."
+        exit 255
+    fi
+
+    # Starting the network right after plugging in the module usually fails
+    # with error [cm] no-service.
+    # Quickfix: Retry few times until there is service. Better fix would be to
+    # check the the error of "qmi-network start" also.
+    local count=0
+    local RETRIES=4
+    until [ $count -ge $RETRIES ]
+    do
+        qmi-network $WDM_PATH start && break || {
+            count=$((count+1))
+            echo "Network start try $count failed."
+            [ $count -eq $RETRIES ] && exit 255
+            echo "Sleep & retry."
+            sleep 3
+            }
+    done
+}
+
+connection_stop ()
+{
+    ifconfig $WWAN_IF down
+    qmi-network $WDM_PATH stop
+    rm $CONFIG_PATH
+}
+
+connection_status ()
+{
+    qmi-network $WDM_PATH status
+}
+
+# Process commands
+case $COMMAND in
+    "start")
+        connection_start
+        ;;
+    "stop")
+        connection_stop
+        ;;
+    "status")
+        connection_status
+        ;;
+    "bearer")
+        qmicli -d $WDM_PATH --wds-get-current-data-bearer-technology
+        ;;
+    "signal-strength")
+        qmicli -d $WDM_PATH --nas-get-signal-strength
+        ;;
+    *)
+        echo "error: unexpected command '$COMMAND'" 1>&2
+        print_usage
+        exit 255
+        ;;
+ esac

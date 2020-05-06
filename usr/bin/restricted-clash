@@ -1,0 +1,42 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+local config = "clash"
+config_load "${config}"
+
+
+_is_tty() {
+  # Test if user is connecting through serial
+  ls -l /proc/self/fd/0 | grep -q tty
+
+  if [ "$?" -eq 0 ]; then
+    logger "User $USER is connecting through tty..."
+    return 0
+  fi
+
+  logger "User $USER is not connecting through tty..."
+  return 1
+}
+
+_verify_access() {
+  local conn=$1
+  local access=$(uci_get clash "$USER" "$conn" 0)
+
+  if [ "$access" = 1 ]; then
+    logger "User $USER access has $conn access"
+    return 0
+  fi
+
+  logger "User $USER has no $conn access"
+  return 1
+}
+
+if $(_is_tty); then
+  $(_verify_access "serial") || exit
+else
+  $(_verify_access "ssh") || exit
+fi
+
+# Start clash
+/usr/bin/clash

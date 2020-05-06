@@ -1,0 +1,195 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_IPPingDiagnostics_ = {
+  objectType = {
+    name = "InternetGatewayDevice.IPPingDiagnostics.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Complete",
+          "Error_CannotResolveHostName",
+          "Error_Internal",
+          "Error_Other",
+        },
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Host = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      NumberOfRepetitions = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      DataBlockSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "65535",
+          },
+        },
+      },
+      DSCP = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "63",
+          },
+        },
+      },
+      SuccessCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      FailureCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      AverageResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MinimumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MaximumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+local uci = mapper("ucihelper")
+local config = "ipping"
+local section = "igd"
+local match = string.match
+
+local uci_binding = {
+  DiagnosticsState = { config = config, sectionname = section, option = "state" },
+  Interface = { config = config, sectionname = section, option = "interface" },
+  Host = { config = config, sectionname = section, option = "host" },
+  NumberOfRepetitions = { config = config, sectionname = section, option = "count" },
+  Timeout = { config = config, sectionname = section, option = "timeout" },
+  DataBlockSize = { config = config, sectionname = section, option = "size" },
+  DSCP = { config = config, sectionname = section, option = "dscp" },
+}
+
+local common = mapper('nwcommon')
+local split_key = common.split_key
+local get_ubus_interface_status = common.get_ubus_interface_status
+local findLanWanInterfaces = common.findLanWanInterfaces
+local get_lower_layers = common.get_lower_layers
+local helper = require('transformer.shared.ippinghelper')
+local clear_ping_results = helper.clear_ping_results
+local startup = helper.startup
+local read_ping_results = helper.read_ping_results
+local wanconn = require("transformer.shared.wanconnection")
+
+helper.startup(section, uci_binding)
+InternetGatewayDevice_IPPingDiagnostics_.get = function(mapping, pname)
+  local value
+
+  if uci_binding[pname] then
+    value = uci.get_from_uci(uci_binding[pname])
+    if pname == "Interface" then
+      local path = ""
+      local lanInterfaces = findLanWanInterfaces(false)
+      local isLan = false
+      for _,j in pairs(lanInterfaces) do
+        if (value == j) then
+          isLan = true
+          break
+        end
+      end
+      if (isLan) then
+        path = resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', value)
+      else
+        local key, status = wanconn.get_connection_key(value)
+        if key and status then
+          if status.proto == "pppoe" or status.proto == "pppoa" then
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key)
+          else
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key)
+          end
+        end
+      end
+      value = path or ""
+    end
+
+    -- Internally, we need to distinguish between Requested and InProgress; IGD does not
+    if pname == "DiagnosticsState" and value == "InProgress" then
+      value = "Requested"
+    end
+  else
+    value = read_ping_results(section, pname)
+  end
+  return value
+end
+
+InternetGatewayDevice_IPPingDiagnostics_.set = function(mapping, pname, pvalue)
+  -- Interface is displayed in IGD as path, but stored as UCI/UBUS interface in UCI, so convert it first
+  --allow empty value
+  if pname == "Interface" and pvalue ~= "" then
+     -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
+    local value = tokey(pvalue,
+      "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.",
+      "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.",
+      "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.")
+    if value:match("|") then
+      -- Interface name is the first part of the WANDevice.WANConnectionDevice.WANIP/WANPPP key
+      pvalue = split_key(value)
+    else
+      pvalue = value
+    end
+
+    if (not pvalue) then
+      return nil, "Invalid value"
+    end
+  end
+  if pname == "NumberOfRepetitions" and tonumber(pvalue) and tonumber(pvalue) < 1 then
+    return nil, "Only value bigger than 1 is allowed"
+  end
+  helper.uci_ipping_set(section, pname, pvalue, commitapply)
+end
+
+clear_ping_results(section)
+InternetGatewayDevice_IPPingDiagnostics_.commit = helper.uci_ipping_commit
+InternetGatewayDevice_IPPingDiagnostics_.revert = helper.uci_ipping_revert
+register(InternetGatewayDevice_IPPingDiagnostics_)

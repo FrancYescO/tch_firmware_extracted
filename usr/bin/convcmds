@@ -1,0 +1,330 @@
+#!/usr/bin/lua
+local require = require
+local remove = table.remove
+local getenv = os.getenv
+local open = io.open
+local pairs = pairs
+local ipairs = ipairs
+local type = type
+local table = table
+
+local uciconv = require 'uciconv'
+
+local debugfile
+local function echo_debug(fmt, ...)
+	local s = fmt:format(...)
+	io.stderr:write(s, '\n')
+	if debugfile then
+		local f = open(debugfile, 'a')
+		if f then
+			f:write(s, '\n')
+			f:close()
+		end
+	end
+end
+
+local function setup_error()
+	debugfile = getenv('DEBUG')
+end
+
+local OPTION_REQUIRED = true
+local function split_uci_option(path, opt_required)
+	local config, section, optdot, option = path:match('^([^.]*)%.([^.]*)(%.?)([^.]*)$')
+	if config then
+		if opt_required and (not option or option=='') then
+			return
+		end
+		if optdot ~= '.' then
+			option = nil
+		end
+		return {
+			config = config,
+			section = section,
+			option = option
+		}
+	end
+end
+
+local function copy_option(cmd, args)
+	local old = split_uci_option(args[1], OPTION_REQUIRED)
+	if not old then
+		echo_debug("%s: invalid uci source path: %s", cmd, args[1])
+		return 1
+	end
+	local new = old -- by default set on same uci path
+	if args[2] then
+		new = split_uci_option(args[2], OPTION_REQUIRED)
+		if not new then
+			echo_debug("%s: invalid uci destination path: %s", cmd, args[2])
+			return 1
+		end
+	end
+
+	local uci_old = uciconv.uci('old')
+	local uci_new = uciconv.uci('new')
+
+	local cfg = uciconv.load(uci_old, old.config, old.section)
+	for _, s in ipairs(cfg.sections) do
+		local value = uci_old:get(s['.config'], s['.name'], old.option)
+		if value then
+			local sname = s['.name']
+			if old.section ~= new.section then
+				sname = new.section
+			end
+			local svalue = value
+			if type(value) == 'table' then
+				svalue = "{'"..table.concat(value, "', '").."'}"
+			end
+			echo_debug("%s: %s.%s.%s=%s", cmd, new.config, sname, new.option, svalue)
+			if not uci_new:set(new.config, sname, new.option, value) then
+				echo_debug("%s: failed to set the uci value of %s.%s.%s to %s", cmd, new.config, sname, new.option, svalue)
+				return 1
+			end
+		else
+			echo_debug("%s: could not get uci value for %s.%s.%s", cmd, s['.config'], s['.name'], old.option)
+		end
+	end
+	uci_new:save(new.config)
+end
+
+local function get_id_list(arg)
+	arg = arg and arg:match("^id=(.*)")
+	if arg then
+		local list = {}
+		for option in arg:gmatch("([^,]+)") do
+			list[#list+1] = option
+		end
+		return list
+	end
+end
+
+local function set_locator(section, idList)
+	if idList then
+		local locator = {}
+		for _, option in ipairs(idList) do
+			locator[option] = section[option] or ""
+		end
+		section['.locator'] = locator
+	end
+end
+
+local function copy_section(cmd, args)
+	local config, section, params
+	local idList = get_id_list(args[2])
+	if idList then
+		args[2] = nil
+		if #idList==0 then
+			--no options specified
+			idList = nil
+		end
+	end
+	if args[1] and args[2] then
+		-- old style, should not use
+		section = '@'..args[1]
+		config = args[2]:match('^.*/(.*)$') --extract config name from filename
+		if section and config then
+			echo_debug("%s: two argument version is deprecated", cmd)
+			echo_debug("  change %s %s to %s.%s", args[1], args[2], config, section)
+		else
+			echo_debug("%s: invalid parameter: %s, %s.", cmd, args[1], args[2])
+			return 1
+		end
+	elseif args[1] then
+		config, section, params = args[1]:match('^([^.]*)%.([^.]*)%.?(.*)$')
+		if not (config and section) then
+			echo_debug("%s: invalid argument %s.", cmd, args[1])
+			return 1
+		end
+	end
+
+	local paramList = {
+		-- default is to include all
+		params = {}
+	}
+	if params and params~="" then
+		local lst = {}
+		local exclude = false
+		if params:sub(1,1)=='-' then
+			exclude = true
+			params = params:sub(2)
+		end
+		for p in params:gmatch("([^,]+),?") do
+			lst[#lst+1] = p
+		end
+		if #lst>0 then
+			paramList.mode = exclude and "exclude" or "include"
+			paramList.params = lst
+		end
+	end
+
+	local uci_old = uciconv.uci('old')
+	local uci_new = uciconv.uci('new')
+
+	local data = uciconv.load(uci_old, config, section)
+	if paramList.mode=="exclude" then
+		data:each(function(section)
+			set_locator(section, idList)
+			for _, pname in ipairs(paramList.params) do
+				section[pname] = nil
+			end
+		end)
+	elseif paramList.mode=="include" then
+		local valid = {}
+		for _, pname in ipairs(paramList.params) do
+			valid[pname] = true
+		end
+		data:each(function(section)
+			set_locator(section, idList)
+			for pname in pairs(section) do
+				if (not pname:match("^%.")) and (not valid[pname]) then
+					-- not a special .name and not wanted
+					section[pname] = nil
+				end
+			end
+		end)
+	elseif idList then
+		--include all options, but a locator must be set
+		data:each(function(section)
+			set_locator(section, idList)
+		end)
+	end
+	uciconv.save(uci_new, data)
+	uci_new:save(config)
+end
+
+local function copy_web_users(cmd, args)
+	local uci_old = uciconv.uci('old')
+	local uci_new = uciconv.uci('new')
+
+	local oldweb = uciconv.load(uci_old, "web", "@sessionmgr", "@user")
+	local newweb = uciconv.load(uci_new, "web", "@sessionmgr", "@user")
+
+	-- list of active users that should be present after the merge
+	local users_in_use = {}
+
+	-- make sure the session managers refer to the same users
+	local oldmgrs = oldweb:bysection("sessionmgr")
+	local newmgrs = newweb:bysection("sessionmgr")
+	for _, mgr in pairs(newmgrs) do
+		echo_debug("NEW mgr: %s", mgr['.name'])
+		local oldm = oldmgrs[mgr['.name']]
+		if oldm then
+			-- merge the users
+			local users = {}
+			for _, uid in ipairs(mgr.users) do
+				users[uid] = true
+				users_in_use[uid] = true
+			end
+			for _, uid in ipairs(oldm.users) do
+				users[uid] = true
+				users_in_use[uid] = true
+			end
+			local user_list = {}
+			for uid in pairs(users) do
+				echo_debug("  USER: %s", uid)
+				user_list[#user_list+1] = uid
+			end
+			-- the session mgr for the new config should refer to these users
+			mgr.users = user_list
+		else
+			echo_debug("no matching OLD one")
+		end
+	end
+
+	-- make sure all the users are present and copy the necessary config
+	echo_debug("Update users")
+	for uid, user in pairs(oldweb:bysection('user')) do
+		if users_in_use[uid] then
+			local u = newweb:byname(uid)
+			if u then
+				-- user is present, copy the password verifiers
+				u.role = user.role
+				u.name = user.name
+				u.srp_verifier = user.srp_verifier
+				u.srp_salt = user.srp_salt
+				echo_debug("  update password for %s", uid)
+			else
+				-- user is new, copy all info
+				newweb.sections[#newweb.sections+1] = user
+				echo_debug("  add user %s", uid)
+			end
+		end
+	end
+	uciconv.save(uci_new, newweb)
+end
+
+local function uci_del(cmd, args)
+	local config_type = "old"
+	local cmd_arg = args[1]
+	if args[1]=='-new' then
+		config_type = "new"
+		cmd_arg = args[2]
+	end
+	local path = split_uci_option(cmd_arg)
+	if not path or (path.option=='') then
+		echo_debug("%s: invalid parameter: %s", cmd, args[1])
+		return 1
+	end
+
+	local uci = uciconv.uci(config_type)
+	local cfg = uciconv.load(uci, path.config, path.section)
+	for _, s in ipairs(cfg.sections) do
+		if path.option then
+			echo_debug("%s(%s): delete option %s.%s.%s%s",
+				cmd,
+				config_type,
+				path.config,
+				s['.name'],
+				path.option,
+				s[path.option] and '' or ' (not present)')
+			uci:delete(path.config, s['.name'], path.option)
+		else
+			echo_debug("%s(%s): delete section %s.%s",
+				cmd,
+				config_type,
+				path.config,
+				s['.name'])
+			uci:delete(path.config, s['.name'])
+		end
+	end
+	uci:save(path.config)
+end
+
+
+local cmdmap = {
+	uci_set = copy_option,
+	uci_list = copy_option,
+	uci_del = uci_del,
+	uci_section = copy_section,
+	copy_web_users = copy_web_users
+}
+
+local function main(args)
+	setup_error()
+	local cmd = remove(args, 1)
+	local handler = cmdmap[cmd]
+	if handler then
+		return handler(cmd, args)
+	else
+		echo_debug("invalid command")
+		return 99
+	end
+end
+
+local function _main()
+	return main(arg)
+end
+
+local function dump_error(err)
+	local tb = debug.traceback(err, 2)
+	echo_debug(tb)
+	return err
+end
+
+do
+	local ok, rv = xpcall(_main, dump_error)
+	if not ok then
+		rv = 126
+	end
+	os.exit(rv)
+end

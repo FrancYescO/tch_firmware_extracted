@@ -1,0 +1,80 @@
+local commitapply = commitapply
+local uci_helper = mapper("ucihelper")
+
+local qeo_ = {
+  objectType = {
+    name = "rpc.qeo.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Unregistered",
+          "Registered"
+        },
+        default = "Unregistered",
+      },
+      friendly_name = {
+        access = "readOnly",
+        type = "string",
+        default = "gateway",
+      },
+      rr_reset = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      }
+    },
+  }
+}
+
+local function file_exists(name)
+  local f = io.open(name,"r")
+  if f then
+    f:close()
+    return true
+  end
+  return false
+end
+
+local function get_friendly_name()
+  local str = uci_helper.get_from_uci({config="env", sectionname="var", option="prod_friendly_name", default="gateway"})
+  -- Replace all spaces with underscores because spaces are used as separator inside the qeo remote registration file
+  return str:gsub("%s+", "_") 
+end
+
+local get = {
+  status = function()
+    if file_exists("/etc/qeo/truststore.p12") then
+      return "Registered"
+    end
+    return "Unregistered"
+  end,
+  friendly_name = get_friendly_name(),
+  rr_reset = ""
+}
+
+local set = {
+  rr_reset = function()
+    -- Trigger a commit and apply rule that takes care of restarting all qeo applications
+    commitapply:newset("rpc.qeo.rr_reset")
+  end
+}
+
+local function commit()
+  -- Write the correct information inside the qeo remote registration file before we restart all qeo applications
+  local file = io.open("/var/run/qeo_rr", "w")
+  if file then 
+    file:write(get_friendly_name(), " 30\n")
+    file:close()
+  end
+end
+
+qeo_.get = get
+qeo_.set = set
+qeo_.commit = commit
+
+register(qeo_)

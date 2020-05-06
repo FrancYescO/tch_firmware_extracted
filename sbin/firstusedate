@@ -1,0 +1,20 @@
+#! /bin/sh
+
+CONFIG=/etc/config/cwmpd
+INITDAY="1970-01-01"
+DAY=$(date +"%Y-%m-%d")
+
+if [ $DAY != $INITDAY ] && !(grep -q "firstusedate" $CONFIG 2>/dev/null); then
+    TIME=$(date -u +"%Y-%m-%dT%TZ")
+    uci set cwmpd.cwmpd_config.firstusedate=$TIME
+    uci commit cwmpd
+fi
+
+#update hostmanager devices' connected time
+ubus send ntp.connected
+
+# Update kernel timezone when ntpd stepping time.
+# NTP will not change system timezone settings, but system will adjust display
+# time accroding to timezone and daylight saving settings. Run below command to
+# reflect potential daylight saving change to kernel GMT offset.
+date -k

@@ -1,0 +1,288 @@
+-- mostly Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+-- (with some additions)
+local InternetGatewayDevice_ManagementServer_ = {
+  objectType = {
+    name = "InternetGatewayDevice.ManagementServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        hidden = "true",
+        max = "256",
+      },
+      PeriodicInformEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      PeriodicInformInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      PeriodicInformTime = {
+        access = "readWrite",
+        type = "dateTime",
+      },
+      ParameterKey = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        forcedInform = "true",
+        type = "string",
+        max = "32",
+      },
+      ConnectionRequestURL = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "256",
+      },
+      ConnectionRequestUsername = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      ConnectionRequestPassword = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        max = "256",
+      },
+      UpgradesManaged = {
+        access = "readWrite",
+        type = "boolean",
+       },
+--      KickURL = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      DownloadProgressURL = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      UDPConnectionRequestAddress = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      UDPConnectionRequestAddressNotificationLimit = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--      },
+--      STUNEnable = {
+--        access = "readWrite",
+--        type = "boolean",
+--      },
+--      STUNServerAddress = {
+--        access = "readWrite",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNServerPort = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--        range = {
+--          {
+--            min = "0",
+--            max = "65535",
+--          },
+--        },
+--      },
+--      STUNUsername = {
+--        access = "readWrite",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNPassword = {
+--        access = "readWrite",
+--        hidden = "true",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNMaximumKeepAlivePeriod = {
+--        access = "readWrite",
+--        type = "int",
+--        range = {
+--          {
+--            min = "-1",
+--          },
+--        },
+--      },
+--      STUNMinimumKeepAlivePeriod = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--      },
+--      NATDetected = {
+--        access = "readOnly",
+--        type = "boolean",
+--      },
+      -- ManageableDeviceNumberOfEntries
+      -- automatically created when InternetGatewayDevice.ManagementServer.ManageableDevice.{i}. is loaded
+      ManageableDeviceNotificationLimit = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      CWMPRetryMinimumWaitInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "65535",
+          },
+        },
+      },
+      CWMPRetryIntervalMultiplier = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1000",
+            max = "65535",
+          },
+        },
+      },
+    }
+  }
+}
+
+
+local function cwmpd_config(option)
+  return {
+    config = "cwmpd",
+    sectionname = "cwmpd_config",
+    option = option,
+  }
+end
+
+local uci = require("uci")
+
+local function getPeriodicInformTime(uci_value)
+  local seconds = tonumber(uci_value)
+  if seconds then
+    return os.date("!%Y-%m-%dT%H:%M:%SZ", seconds)
+  else
+    return "0001-01-01T00:00:00Z"
+  end
+end
+
+local function removeFromState(option)
+  local cursor = uci.cursor(nil,"/var/state") -- Can not use ucihelper, because it does not contain this kind of cursor.
+  cursor:revert("cwmpd", "cwmpd_config", option)
+  cursor:close()
+end
+
+-- Returns the number of seconds that must be added to local time to yield UTC
+local function getUtcOffset(timestamp)
+  local dateWithTZ = os.date("*t", timestamp)
+  local dateUTC = os.date("!*t", timestamp)
+  -- The timestamp may correspond where DST is in effect and we must compensate for this by resetting the isdst flag.
+  dateWithTZ.isdst = false
+
+  return os.difftime(os.time(dateUTC), os.time(dateWithTZ))
+end
+
+local function setPeriodicInformTime(value)
+  removeFromState("periodicinform_time")
+
+  local date = {}
+  date.year, date.month, date.day, date.hour, date.min, date.sec = value:match("(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)Z")
+  -- os.time() yields epoch corresponding to date, as if date were in local time, but we accept it in UTC.
+  -- Hence, it will have an offset corresponding to the timezone the machine is configured to.
+  local epochWithOffset = os.time(date)
+  -- PeriodicInformTime is received and stored in UTC: apply the calculated UTC offset to compensate the offset introduced by os.time()
+  return epochWithOffset - getUtcOffset(epochWithOffset)
+end
+
+local function getSetManageableDeviceNotificationLimit(value)
+  local limit = tonumber(value)
+  if limit then
+    return tostring(limit)
+  else
+    return "0"
+  end
+end
+
+local uci_binding = {
+  URL = cwmpd_config("acs_url"),
+  Username = cwmpd_config("acs_user"),
+  Password = cwmpd_config("acs_pass"),
+  PeriodicInformEnable = cwmpd_config("periodicinform_enable"),
+  PeriodicInformInterval = cwmpd_config("periodicinform_interval"),
+  PeriodicInformTime = { get = getPeriodicInformTime, set = setPeriodicInformTime, uci_config = cwmpd_config("periodicinform_time") },
+  ParameterKey = cwmpd_config("parameter_key"),
+  ConnectionRequestURL = cwmpd_config("connectionrequest_url"),
+  ConnectionRequestUsername = cwmpd_config("connectionrequest_username"),
+  ConnectionRequestPassword = cwmpd_config("connectionrequest_password"),
+  UpgradesManaged = cwmpd_config("upgradesmanaged"),
+  ManageableDeviceNotificationLimit = { get = getSetManageableDeviceNotificationLimit, set = getSetManageableDeviceNotificationLimit, uci_config = cwmpd_config("manageabledevice_notification_limit") },
+  CWMPRetryMinimumWaitInterval = cwmpd_config("backoff_minwait"),
+  CWMPRetryIntervalMultiplier = cwmpd_config("backoff_multiplier"),
+}
+
+mapper("simpleuci").connect(InternetGatewayDevice_ManagementServer_, uci_binding)
+
+local original_set = InternetGatewayDevice_ManagementServer_.set
+local new_set = {}
+local metatable = {}
+metatable.__index = function(table, key)
+  local uci_option = (uci_binding[key] and uci_binding[key].option) or key
+  table[key] = function(...)
+    removeFromState(uci_option)
+    return original_set[key](...)
+  end
+  return table[key]
+end
+setmetatable(new_set, metatable)
+InternetGatewayDevice_ManagementServer_.set = new_set
+
+local lastTime = 0
+local ucihelper = mapper("ucihelper")
+local function ubus_event_cb(mapping, event, data)
+  local notificationLimit = ucihelper.get_from_uci(uci_binding.ManageableDeviceNotificationLimit.uci_config)
+  notificationLimit = tonumber(notificationLimit)
+
+  if not notificationLimit then
+    notificationLimit = 0
+  end
+
+  local currentTime = os.time()
+  if currentTime - lastTime >= notificationLimit then
+    lastTime = currentTime
+    return { { key = "", paramname = "ManageableDeviceNumberOfEntries" } }
+  end
+end
+
+local function translate_cb(mapping, action, config, sectiontype, sectionname, option)
+  return { { key = "", paramname = "PeriodicInformInterval" } }
+end
+
+InternetGatewayDevice_ManagementServer_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = translate_cb }, "cwmpd", nil, "cwmpd_config", "periodicinform_interval")
+
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, ubus_event_cb, "hostmanager.manageableDeviceChanged")
+end
+
+register(InternetGatewayDevice_ManagementServer_)

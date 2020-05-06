@@ -1,0 +1,41 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+unset SERVICE_MATCH_EXEC
+SERVICE_SIG_RELOAD="URG"
+
+MWAN=$IPKG_INSTROOT/usr/lib/mwan/functions.sh
+[ -e $MWAN ] && . $MWAN set_host_mark /usr/bin/cwmpd
+
+boot() {
+	/etc/init.d/cwmpdboot boot &
+}
+
+start() {
+	logger -t cwmpd "Starting cwmpd"
+	fw3 -q reload
+	service_start /usr/bin/cwmpd
+	service_start /usr/bin/cwmpevents
+}
+
+stop() {
+	logger -t cwmpd "Stopping cwmpd"
+	service_stop /usr/bin/cwmpd  && echo > /var/run/cwmpd.pid
+	service_stop /usr/bin/cwmpevents && echo > /var/run/cwmpevents.pid
+}
+
+reload() {                                 
+        logger -t cwmpd "Reloading cwmpd"
+        fw3 -q reload
+        service_reload /usr/bin/cwmpd
+        if [ $? -ne 0 ]; then
+          echo "Reload of cwmpd failed. Cwmpd not yet running?"
+        fi
+        # make sure the last statement of the reload function is always true
+        # otherwise init.d will restart cwmpd on failure of the reload function
+        # and that can lead to an unwanted racecondition during boot time
+        true
+}
+

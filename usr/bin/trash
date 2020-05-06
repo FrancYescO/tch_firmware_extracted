@@ -1,0 +1,167 @@
+#!/bin/ash
+. /etc/profile
+sleep_time=0
+builtins="cd exit pwd printf"
+autosudos="uci ubus bootp tcpdump reboot ping traceroute hostapd_cli rtfd bpmctl brctl ethctl ethswctl fapctl fcctl gmacctl iqctl pwrctl tmsctl vlanctl wlctl xdslctl xtmctl iptables ip6tables"
+menu=""
+prompt="[$USER]=>"
+
+oflt () {
+# sed -r "s/(.*((passw|key)[a-zA-Z0-9_]*[ \t=:]|set_pass\W.*\W)).*$/\1/g"
+# sed -r "s/((passw|key)[a-zA-Z0-9_]*[ \t=:]|set_pass\W.*\W).*[ \t$\n\r]+/\1 /g"
+	sed -r "s/((passw|key|_pin|secret)[a-zA-Z0-9_]*[ \t=:])([^ ]*)([ ]+|$)/\1 /g" | \
+	sed -r "s/(set_pass\W[^ ]+\W)[^ ]+/\1/g"
+}
+
+commands () {
+	echo "Supported commands :"
+	ls `grep -ve "^#" cmd_white.lst | tr [\\\n] " "` 2>/dev/null
+}
+
+helpme () {
+	cat motd
+	sed -n 1p cmd_white.lst
+	echo "Type 'commands' to get a list of allowed commands."
+}
+
+parse_cl () {
+	local i=1 lcmd="" pre_cmd="cat "
+	rcmd=""
+#	echo $0,$1,$@
+	if [ "$1" = "sed" ] ; then lcmd="$1"; fi
+	for pp ; do
+#	 	echo "Param ($i) is : ${pp}"
+	 	if [ -f ${pp} ] ; then pre_cmd="${pre_cmd}${pp} " ; else rcmd="${rcmd}${pp} " ; fi
+#	 	shift
+ 		i=$((i+1))
+	done
+	if [ $lcmd ] ; then
+		pre_cmd="${pre_cmd}|oflt|"
+		rcmd="${pre_cmd}$rcmd"
+#		echo Replaced command line : $rcmd
+	else
+		rcmd=""
+	fi
+}
+
+#####main_function () {
+
+helpme
+
+while true
+do
+
+#echo sleeping $sleep_""  time seconds
+sleep $sleep_time
+
+prompt="[$USER]=>"
+if [ $menu ]; then prompt="[$USER][$menu]=>" ; fi
+#echo -n "$prompt"
+
+read -p $prompt command_line
+rcmd=""
+parse_cl $command_line
+#command_line='ls -l'
+
+#do not allow backticks, dollar signs, parenthesis
+command_line=${command_line//[\`()$]/}
+
+#do not allow any commands with 'busybox', 'cmd_white.lst' or '-exec'
+command_line=${command_line//busybox/}
+command_line=${command_line//cmd_white*.lst/}
+command_line=${command_line//-exec*/}
+
+#do not allow any uci commands modifying handlers or paths
+command_line=${command_line//uci*set*handler*/}
+command_line=${command_line//uci*set*path*/}
+command_line=${command_line//uci*set*script[^a-zA-Z0-9]*=*/}
+
+#do not allow specific subcommands (ubus send, <xxx>ctl , ...)
+command_line=${command_line//ubus*send*/}
+
+#split command and arguments
+command=${command_line%%[ ;|><&()$\`\$]*}
+#strip off command path :
+cmnd=${command##\/*\/}
+
+args=${command_line:${#command}}
+
+#No lists, pipes or redirects for now : only the first command with options ;comment next line later, but check all commands if in white list
+args=${args%%[;|><&]*}
+
+nargs=$(echo $args | sed -r "s/([;|]|>>|>|$)/\|oflt\1/g")
+cmd="$command $nargs"
+if [ "$rcmd" != "" ] ; then cmd=$rcmd ; fi
+
+#	echo -e "        command: '$command', args: '$args' '$nargs'\n"
+#	echo -e "        cmd: '$cmd'\n"
+
+if [ "$(grep -Ee "^(/.*/)?$command$" cmd_white.lst | grep -ve "^/etc/init.d/")" != "" ] ; then
+# first for all commands with or without path prefix and in path /bin, /sbin, /usr/bin, /usr/sbin but not in /etc/init.d/
+#	echo found in path
+	#prefix with 'sudo ' for selected commands (e.g. uci,...)
+	if [ "$cmnd" != "" -a "$(echo "$autosudos" | grep -e "$cmnd")" != "" ] ; then cmd="sudo $cmd"; fi
+	run_cmd=1
+	if [ "$cmnd" = "uci" ] ; then
+		uci_cmd=${nargs%%[ ]*}
+		if [ "$uci_cmd" = "set" ] ; then
+			uci_value=$(echo ${args} | cut -d '=' -f 2-)
+			# get possible command
+			uci_value=${uci_value//[\'\"]/}
+			uci_value=$(echo $uci_value | tr ' ' | sed 's/^[ ]//g')
+			value_cmd=$(echo $uci_value | cut -d ' ' -f 0)
+
+			if [ "$(grep -Ee "^(/.*/)?$value_cmd$" cmd_white.lst)" != "" ] ; then
+				# safe command in white list
+				echo " '$value_cmd' is in white list" > /dev/null
+			elif [ "$value_cmd" = "${value_cmd##/}" ] ; then
+				# potentially executable command which not includes slash
+				if [ -e "/bin/$value_cmd" -o -e "/sbin/$value_cmd" -o -e "/usr/bin/$value_cmd" \
+					-o -e "/usr/sbin/$value_cmd" -o -e "/etc/init.d/$value_cmd" ]; then
+					run_cmd=0
+					echo "        *!*!*!*!* '$value_cmd' could not be set as value for security (cmd is possible executable) *!*!*!*!*"
+				fi
+			elif [ -e "$value_cmd" ]; then
+				# risky command includes slash
+				run_cmd=0
+				echo "        *!*!*!*!* '$value_cmd' could not be set as value for security (cmd exists) *!*!*!*!*"
+			fi
+		fi
+	fi
+	[ "$run_cmd" = 1 ] && eval $cmd
+elif [ "$(grep -e "^$command$" cmd_white.lst | grep -e "^/etc/init.d/")" != "" ] ; then
+#absolute path, starting /etc/init.d/
+#	echo "        *!*!*!*!* Command started as 'sudo $command' *!*!*!*!*"
+	cmd="sudo $cmd"
+	eval $cmd
+elif [ "$command" != "" -a "$(echo "$builtins" | grep -Fe "$command")" != "" ] ; then
+#ash built-in commands
+#  echo found built-in
+	[ "$command" = "exit" ] && exit
+	eval $cmd
+else
+#trash built-ins (functions)
+	case "$command" in
+	"help")
+		helpme
+#		echo sets : "'$-'"
+		;;
+	"commands")
+		commands
+		;;
+	"dummy")
+#		echo do whatever
+#		echo $0
+#		ash -i
+		;;
+	"")
+		;;
+	*)
+		echo "        *!*!*!*!* Command '$command' not supported *!*!*!*!*"
+		;;
+	esac
+fi
+
+done
+
+#####}

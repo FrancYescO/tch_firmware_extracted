@@ -1,0 +1,87 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+. /lib/functions/generic_access_key.sh
+
+local config="clash"
+
+local dropbear_path="dropbear.@dropbear[0]"
+
+# Not ideal, but provision.sh insists in starting to count from 500.
+_top_id=550
+
+# Close root access on closed builds.
+_close_root_access() {
+	expr `uci show version.@version[0].version | cut -d '-' -f2 | cut -c3` % 2 || {
+		# (1) Disable root login over serial by setting no shell
+		sed -i 's#\(root.*\)/bin/ash#\1/bin/false#' /etc/passwd
+		# (2) Extra security level for ssh: disable root login
+		uci set "$dropbear_path".RootLogin=0
+	}
+}
+
+# Add (restricted-)clash to /etc/shells
+_add_shell() {
+	# Shells set to /etc/passwd must be present in /etc/shells
+	grep -q "restricted-clash" /etc/shells || echo "/usr/bin/restricted-clash" >>/etc/shells
+}
+
+# Set shell to (restricted-)clash for the specified user
+_set_shell() {
+	local usr=$1
+
+	# Set the default shell to restricted-clash, which will verify some access rights
+	sed -i "s#\($usr.*\)/bin/ash#\1/usr/bin/restricted-clash#" /etc/passwd
+}
+
+# Create a new user in the OpenWRT system
+_create_clash_user() {
+	local usr="$1"
+
+	# gak_id is specified by the user which is configured in web config.
+	local gid=$(uci get ${config}.$usr.gak_id)
+
+	if [[ ! $gid ]]; then
+		logger "Error: Found no matching gak_id for user $usr in ${clash} config"
+		return 1
+	else
+		logger "Creating clash user with gak_id $gid"
+	fi
+
+	local key=$(get_key $gid)
+
+	if [[ $key ]]; then
+		create_user $usr $key
+		# Always _set_shell only AFTER create_user as the former sets the default shell to /etc/passwd which we then change to (restricted-)clash.
+		_set_shell $usr
+	else
+		logger "Error: Could not set $usr password for Clash, could not determine GAK"
+		return 1
+	fi
+}
+
+# Open dropbear and serial port login: (is already enabled on open builds; now enable on closed builds)
+_enable_dropbear() {
+	uci set "$dropbear_path".enable=1
+	uci commit dropbear
+	sed -ir "s#(\#)*(ttyS0.*)/bin/(login|false)#\2/bin/login#" /etc/inittab
+}
+
+# The entry point function which calls the helpers
+setup() {
+	config_load "clash"
+
+	# Create the users as specified in config; these should match users from web config.
+	config_foreach _create_clash_user user
+
+	# Add (restricted-)clash to shells
+	_add_shell
+
+	# Enable dropbear for closed builds
+	#_enable_dropbear
+	# Close root access for closed builds
+	_close_root_access
+}
+
+setup
+

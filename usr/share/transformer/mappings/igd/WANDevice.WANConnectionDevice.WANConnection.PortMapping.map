@@ -1,0 +1,587 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local WANIPConnection_i_PortMapping_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.PortMapping.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PortMappingNumberOfEntries",
+    enableParameter = "PortMappingEnabled",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      PortMappingEnabled = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      PortMappingLeaseDuration = {
+        access = "readOnly",  -- readWrite currently not supported
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      RemoteHost = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ExternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {  -- added manually because for some reason this is not in the spec
+          {
+            max = "65535",
+          },
+        },
+      },
+      ExternalPortEndRange = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+        range = {  -- added manually because for some reason this is not in the spec
+          {
+            max = "65535",
+          },
+        },
+      },
+      InternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {  -- added manually because for some reason this is not in the spec
+          {
+            min = "1",
+            max = "65535",
+          },
+        },
+      },
+      PortMappingProtocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      InternalClient = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+     PortMappingDescription = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+-- Automatically generated from InternetGatewayDevice:1.4
+-- using generator version 2.1
+local WANPPPConnection_i_PortMapping_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.PortMapping.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PortMappingNumberOfEntries",
+    enableParameter = "PortMappingEnabled",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      PortMappingEnabled = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      PortMappingLeaseDuration = {
+        access = "readOnly",   -- readWrite currently not supported
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      RemoteHost = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ExternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ExternalPortEndRange = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      InternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      PortMappingProtocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      InternalClient = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+      PortMappingDescription = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+
+local common = mapper("nwcommon")
+local split_key = common.split_key
+local interface2zone = common.interface2zone
+local get_lan_zones = common.get_lan_zones
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local getall_from_uci = uci_helper.getall_from_uci
+local foreach_on_uci = uci_helper.foreach_on_uci
+local generate_key_on_uci = uci_helper.generate_key_on_uci
+local commit_keys = uci_helper.commit_keys
+local commit_on_uci = uci_helper.commit
+local revert_keys = uci_helper.revert_keys
+local revert_on_uci = uci_helper.revert
+local delete_on_uci = uci_helper.delete_on_uci
+
+local ipairs, type, tonumber = ipairs, type, tonumber
+local lower, upper, match = string.lower, string.upper, string.match
+
+local fw_binding = { config = "firewall" }
+
+-- Cache that maps the generated _key of a portmap to the corresponding
+-- generated section name.
+-- Note that this cache needs to be rebuild every entries() because the
+-- generated section name changes when entries are deleted/added.
+local key2sectionname = {}
+
+local changes_done = false
+
+local function entries(mapping, parentKey)
+  local PortMappings = {}
+  key2sectionname = {}
+  local ifname = split_key(parentKey)
+  local iface_zone = interface2zone(ifname)
+  if not iface_zone then
+    return PortMappings
+  end
+  iface_zone = iface_zone.name
+  local lan_zones = get_lan_zones()
+  local redirect_sections = { "redirect" }
+
+  fw_binding.sectionname = "redirectsgroup"
+  foreach_on_uci(fw_binding, function(s)
+    if (not s.enabled or s.enabled == "1") then
+      redirect_sections[#redirect_sections + 1] = s.type
+    end
+  end)
+
+  for _, v in ipairs(redirect_sections) do
+    local key_generated = false
+    fw_binding.sectionname = v
+    local result = foreach_on_uci(fw_binding, function(s)
+      -- If a portmapping rule with proto "tcpudp" is added via GUI, those entries also will be included.
+      if s.src == iface_zone and lan_zones[s.dest] and (s.target == nil or s.target == "DNAT") and
+         (type(s.proto) == "table" and #s.proto == 1 and (lower(s.proto[1]) == "tcp" or lower(s.proto[1]) == "udp" or lower(s.proto[1]) == "tcpudp")) then
+        local key = s._key
+        if not key then
+          fw_binding.sectionname = s[".name"]
+          key = generate_key_on_uci(fw_binding)
+          key_generated = true
+        end
+        -- entries for "tcpucp" is populated by having two instances in mapping objects.
+        -- One for TCP and another for UDP. Transformer generated key will be appended to the respective protocol and that will be the key for that instance.
+        if lower(s.proto[1]) == "tcpudp" then
+          local keyTemp = key -- temporary variable that holds transformer generated key.
+          key = "tcp" .. "|" .. keyTemp
+          PortMappings[#PortMappings + 1] = key
+          key2sectionname[key] = s[".name"]
+          key = "udp" .. "|" .. keyTemp
+        end
+        PortMappings[#PortMappings + 1] = key
+        key2sectionname[key] = s[".name"]
+      end
+    end)
+    if key_generated then
+      if result then
+        uci_helper.commit_keys(fw_binding)
+      else
+        uci_helper.revert_keys(fw_binding)
+      end
+    end
+  end
+  -- TODO: we should also include portmaps created via UPnP (sys.upnp.redirect.)
+  return PortMappings
+end
+
+local function get_from_rule(key, option, default)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  fw_binding.default = default
+  if option then
+    return get_from_uci(fw_binding)
+  end
+  return getall_from_uci(fw_binding)
+end
+
+-- function to get the Protocol from respective uci section.
+local function getProto(key)
+  local value = get_from_rule(key, "proto", {})
+  if ((type(value) == "table") and #value == 1) then
+    return value[1]
+  end
+end
+
+local function get_port_data(key)
+  local data = get_from_rule(key)
+  local src_dport = data.src_dport or '0'
+  -- the src_dport format is a number optionally followed by - or : optionally
+  -- followed by another number. Spaces may be inserted between the parts
+  -- although we never do so ourselves. The match must cover the whole string
+  local start, stop = src_dport:match("^%s*(%d+)%s*[%-:]?%s*(%d*)%s*$")
+  if not start then
+    -- it failed to match the format
+    start = "0"
+    stop = ""
+  end
+  local endrange = data.tch_map_endrange or ""
+  endrange = endrange:match("^%s*(%d+)%s*$") --make sure it is a number (as string)
+  if stop~='' then
+    if tonumber(stop) <= tonumber(start) then
+      -- invalid config
+      stop = "0"
+    end
+  else
+    if start=='0' then
+      stop = endrange or "0"
+    elseif start == endrange then
+      stop = endrange
+    else
+      stop = "0"
+    end
+  end
+  return start, stop, endrange
+end
+
+local get = {
+  PortMappingEnabled = function(mapping, param, key)
+    return get_from_rule(key, "enabled", "1")
+  end,
+  PortMappingLeaseDuration = "0",  -- TODO: UPnP portmaps have a duration!
+  RemoteHost = function(mapping, param, key)
+    return get_from_rule(key, "src_ip")
+  end,
+  ExternalPort = function(mapping, param, key)
+    local port = get_port_data(key)
+    return port
+  end,
+  ExternalPortEndRange = function(mapping, param, key)
+    local _, endRange = get_port_data(key)
+    return endRange
+  end,
+  InternalPort = function(mapping, param, key)
+    -- dest_port could be a range according to the documentation;
+    -- take the first port
+    local v = get_from_rule(key, "dest_port")
+    return match(v, "^%d+") or "0"
+  end,
+  PortMappingProtocol = function(mapping, param, key)
+    local proto = getProto(key)
+    if proto == "tcpudp" then
+      proto = split_key(key)
+    end
+    return proto and upper(proto) or ""
+  end,
+  InternalClient = function(mapping, param, key)
+    return get_from_rule(key, "dest_ip")
+  end,
+
+  PortMappingDescription = function(mapping, param, key)
+    return get_from_rule(key, "name")
+  end,
+}
+
+local function set_on_rule(key, param, value)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = param
+  set_on_uci(fw_binding, value, commitapply)
+  changes_done = true
+end
+
+local function delete_on_rule(key, option)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  delete_on_uci(fw_binding, commitapply)
+  changes_done = true
+end
+
+-- function to add a new uci section for portmapping.
+-- returns the transformer generated key.
+local function add(mapping, parentKey)
+  local ifname = split_key(parentKey)
+  local iface_zone = interface2zone(ifname)
+
+  if not iface_zone then
+    return nil, "interface zone not found"
+  end
+
+  -- Discover the default "lan" zone
+  local lan_zones, nr_of_lan_zones = get_lan_zones()
+  if (nr_of_lan_zones == 0) then
+    return nil, "need one LAN zone"
+  end
+  local lan_zone = lan_zones["lan"] and "lan" or next(lan_zones)
+
+  fw_binding.sectionname = "userredirect"
+  local sectionname = uci_helper.add_on_uci(fw_binding, commitapply)
+  fw_binding.sectionname = sectionname
+  local key = uci_helper.generate_key()
+  fw_binding.option = "_key"
+  set_on_uci(fw_binding, key)
+  key2sectionname[key] = sectionname
+  fw_binding.option = "enabled"
+  set_on_uci(fw_binding, "0", commitapply)
+  fw_binding.option = "src"
+  set_on_uci(fw_binding, iface_zone.name, commitapply)
+  fw_binding.option = "proto"
+  set_on_uci(fw_binding, { "TCP" }, commitapply)
+  fw_binding.option = "dest"
+  set_on_uci(fw_binding, lan_zone, commitapply)
+  fw_binding.option = "target"
+  set_on_uci(fw_binding, "DNAT", commitapply)
+  changes_done = true
+  return key
+end
+
+local function delete(mapping, key)
+  delete_on_rule(key)
+  return true
+end
+
+-- function to split uci section into two different configurations for tcp and udp.
+-- If proto is "tcpudp" in uci and if any parameter value of the respective object in IGD is changed,
+-- then uci will be split into two sections with almost same configuration except proto value.
+local function splitUciSection(mapping, param, value, key, parentKey)
+  local portmapValues = get_from_rule(key)
+  local protoVal,keyVal = split_key(key)
+  set_on_rule(key, "proto", { protoVal })
+  set_on_rule(key, "_key", key)
+  local newSectionKey = add(mapping,parentKey)
+  local protoValNew
+  if protoVal == "tcp" then
+    protoValNew = "udp"
+  else
+    protoValNew = "tcp"
+  end
+  local changedKey = protoValNew .. "|" .. keyVal
+  set_on_rule(newSectionKey, "proto", { protoValNew })
+  set_on_rule(newSectionKey, "_key", changedKey)
+  -- Copying the old section values to the new section except proto, .anonymous and _key options.
+  for option,oldValue in pairs(portmapValues) do
+    if option ~= "proto" and option ~= ".anonymous" and option ~= "_key" and oldValue ~= "" then
+      set_on_rule(newSectionKey, option, oldValue)
+    end
+  end
+  set_on_rule(key, param, value)
+  return true
+end
+
+local function set_port_data(key, new_start, new_stop)
+  if not( new_start or new_stop) then
+    return nil, "invalid usage of set_port_data"
+  end
+
+  local start, stop, old_endrange = get_port_data(key)
+  local endrange = old_endrange
+
+  if new_start == "0" then
+    --goto wildcard
+    start = "0"
+    stop = "0"
+  elseif new_start then
+    --new non "0" value
+    start = new_start
+    if tonumber(stop)<tonumber(start) then
+      -- old stop no longer valid
+      stop = "0"
+      endrange = "0"
+    end
+  end
+
+  if new_stop then
+    if (new_stop == "0") or (tonumber(start)<=tonumber(new_stop)) then
+      stop = new_stop
+      endrange = new_stop
+    else
+      return nil, "value out of range"
+    end
+  end
+
+  if start=="0" then
+    delete_on_rule(key, "src_dport")
+    delete_on_rule(key, "dest_port")
+  else
+    local value = start
+    if (stop ~= "0") and (stop~=start) then
+      value = string.format("%s:%s", start, stop)
+    end
+    set_on_rule(key, 'src_dport', value)
+  end
+  if old_endrange ~= endrange then
+    if endrange~="0" then
+      set_on_rule(key, "tch_map_endrange", endrange)
+    else
+      delete_on_rule(key, "tch_map_endrange")
+    end
+  end
+end
+
+local function isIPValid(ip)
+  local parts = {ip:match("(%d+)%.(%d+)%.(%d+)%.(%d+)")}
+  if #parts~=4 then
+    return false
+  else
+    for i=1,4 do
+      if tonumber(parts[i])>255 then
+        return false
+      end
+    end
+  end
+  return true
+end
+
+-- If the uci proto for an object is "tcpudp", then splitUciSection is called and the uci sections will be split into two.
+-- This check is handled for all the writable paramaters in IGD.
+local set = {
+  PortMappingEnabled = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "enabled", value, key, parentKey)
+    else
+      set_on_rule(key, "enabled", value)
+    end
+  end,
+  RemoteHost = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if (value=="") or isIPValid(value) then
+      if protocol == "tcpudp" then
+        splitUciSection(mapping, "src_ip", value, key, parentKey)
+      else
+        set_on_rule(key, "src_ip", value)
+      end
+    else
+      return nil, "invalid IP value"
+    end
+  end,
+  ExternalPort = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "src_dport", value, key, parentKey)
+      return set_port_data(key, value)
+    else
+      return set_port_data(key, value)
+    end
+  end,
+  ExternalPortEndRange = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "tch_map_endrange", value, key, parentKey)
+      return set_port_data(key, nil, value)
+    else
+      return set_port_data(key, nil, value)
+    end
+  end,
+  InternalPort = function(mapping, param, value, key, parentKey)
+    local v = get_from_rule(key, "src_dport")
+    -- ignore in case src_port is wildcard
+    if v == "" then
+      return
+    end
+    if value == "0" then
+      return nil, "value must be > 0"
+    end
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "dest_port", value, key, parentKey)
+    else
+      set_on_rule(key, "dest_port", value)
+    end
+  end,
+  PortMappingProtocol = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "proto", { lower(value) }, key, parentKey)
+    else
+      set_on_rule(key, "proto", { lower(value) })
+    end
+  end,
+  InternalClient = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if (value=="") or isIPValid(value) then
+      if protocol == "tcpudp" then
+        splitUciSection(mapping, "dest_ip", value, key, parentKey)
+      else
+        set_on_rule(key, "dest_ip", value)
+      end
+    else
+      return nil, "invalid IP value"
+    end
+  end,
+  PortMappingDescription = function(mapping, param, value, key, parentKey)
+    local protocol = getProto(key)
+    if protocol == "tcpudp" then
+      splitUciSection(mapping, "name", value, key, parentKey)
+    else
+      set_on_rule(key, "name", value)
+    end
+  end
+}
+
+local function commit()
+  if changes_done then
+    commit_keys(fw_binding)
+    commit_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+local function revert()
+  if changes_done then
+    revert_keys(fw_binding)
+    revert_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+-- TODO: getall() implementation
+
+WANIPConnection_i_PortMapping_i_.entries = entries
+WANIPConnection_i_PortMapping_i_.get = get
+WANIPConnection_i_PortMapping_i_.set = set
+WANIPConnection_i_PortMapping_i_.add = add
+WANIPConnection_i_PortMapping_i_.delete = delete
+WANIPConnection_i_PortMapping_i_.commit = commit
+WANIPConnection_i_PortMapping_i_.revert = revert
+WANPPPConnection_i_PortMapping_i_.entries = entries
+WANPPPConnection_i_PortMapping_i_.get = get
+WANPPPConnection_i_PortMapping_i_.set = set
+WANPPPConnection_i_PortMapping_i_.add = add
+WANPPPConnection_i_PortMapping_i_.delete = delete
+WANPPPConnection_i_PortMapping_i_.commit = commit
+WANPPPConnection_i_PortMapping_i_.revert = revert
+
+register(WANIPConnection_i_PortMapping_i_)
+register(WANPPPConnection_i_PortMapping_i_)

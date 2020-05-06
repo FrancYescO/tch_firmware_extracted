@@ -1,0 +1,132 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+APP=mobiledongle_bg.lua
+PID_FILE=/var/run/$APP.pid
+LOG_DIR=/root/mobiledongle
+
+#set -x
+
+#logger -t mobiledongle-init.d "MBD_HOTPLUG=$MBD_HOTPLUG"
+
+MOBILEDONGLE_BOOT="/var/run/mobiledongle_boot"
+
+mbd_init() {
+  verbose=`uci get mobiledongle.config.verbose`
+  log=`uci get mobiledongle.config.log`
+  mkdir -p $LOG_DIR
+
+  LOG_FILE='/dev/null'
+  [ "x$log" = "x1" ] && {
+    LOG_DIR=/root/mobiledongle
+    mkdir -p $LOG_DIR
+    LOG_FILE=$LOG_DIR/verbose.log
+  }
+}
+
+
+mbd_load_pid () {
+  pid=`ps | egrep -e "$APP" | egrep -v "egrep"  | awk 'match($0, "[0-9]+") { print substr($0, RSTART, RLENGTH)}'`
+}
+
+mbd_get_pid () {
+  mbd_load_pid
+  pidx=
+  if [ -e $PID_FILE ]; then
+    pidx=`cat $PID_FILE`
+    #logger -t mobiledongle-init.d "@#@#@#@#@# pid=$pid pidx=$pidx"
+    if [ "x$pid" != "x$pidx" ]; then
+       logger -t mobiledongle-init.d "@#@#@#@#@# pid=$pid pidx=$pidx"
+    fi
+  else
+    if [ "x$pid" != "x" ]; then
+       logger -t mobiledongle-init.d "@#@#@#@#@# pid=$pid"
+    fi
+  fi 
+  
+}
+
+
+mbd_start_pid () {
+  $APP > /dev/null 2>&1 &
+  mbd_get_pid
+  echo $pid > $PID_FILE
+}
+
+
+start() {
+     [ -z "$ACTION" -a ! -e $MOBILEDONGLE_BOOT ] && {
+        logger -t mobiledongle-init.d "WARNING: boot ongoing or Service not enabled"
+        return 0
+     }
+
+     # check if boot is ongoing (ACTION => script called from hotplugin context)
+     [ -n "$ACTION" -a ! -e $MOBILEDONGLE_BOOT ] && {
+        return 0
+     }
+
+      mbd_init
+      mbd_get_pid
+      logger -t mobiledongle-init.d "start ($pid)"
+
+      if [ "x$pid" = "x" ]; then
+        mbd_start_pid 
+      fi
+
+        if [ $verbose = '1' ]; then
+          /usr/bin/mobiledongle.lua start | tee -a $LOG_FILE
+        else
+          /usr/bin/mobiledongle.lua start >> $LOG_FILE
+        fi
+}
+
+stop() {
+      mbd_init
+      mbd_get_pid
+
+        logger -t mobiledongle-init.d "stop ($pid, $pidx)"
+
+        if [ $verbose = '1' ]; then
+          /usr/bin/mobiledongle.lua stop | tee -a $LOG_FILE
+        else
+          /usr/bin/mobiledongle.lua stop >> $LOG_FILE
+        fi
+
+        if [ "x$pidx" != "x" ]; then
+          rm -f $PID_FILE
+        fi
+
+        if [ "x$pid" != "x" ]; then
+          kill $pid
+        fi
+        
+        
+}
+
+reload() {
+      mbd_init
+      mbd_get_pid
+
+  logger -t mobiledongle-init.d "reload ($pid, $pidx)"
+
+        if [ "x$pid" = "x" ]; then
+          mbd_start_pid 
+          logger -t mobiledongle-init.d "reload ($pid, $pidx) restart bg task"
+        fi
+        
+
+        if [ $verbose = '1' ]; then
+          /usr/bin/mobiledongle.lua reload | tee -a $LOG_FILE
+        else
+          /usr/bin/mobiledongle.lua reload >> $LOG_FILE
+        fi
+        return 0
+}
+
+boot() {
+      mbd_init
+
+      echo "`date` :auto" > $MOBILEDONGLE_BOOT
+      start
+      return 0
+}
