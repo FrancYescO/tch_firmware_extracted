@@ -1,0 +1,643 @@
+<div class="page-loading" fw-loader="isDataReady"></div>
+
+<div class="row" ng-if="isDataReady">
+  <div class="toc-container col-md-4 hidden-sm">
+    <nav class="toc">
+        <ul class="list-unstyled">
+            <li du-scrollspy="wifi_panel_1" class="hidden-xs"><a du-smooth-scroll href="#wifi_panel_1" translate>PAGES.WIFI.MAIN_NETWORK.TITLE_SHORT</a></li>
+            <li du-scrollspy="wifi_panel_2" class="hidden-xs"><a du-smooth-scroll href="#wifi_panel_2" translate>PAGES.WIFI.GUEST_NETWORK.TITLE_SHORT</a></li>
+                
+            <!-- TABS -->
+            <li ng-class="{'visible-xs': true, active: !tabSelected}" ng-click="tabSelected = switchTab(false);">
+                <a href="" translate>PAGES.WIFI.MAIN_NETWORK.TITLE_SHORT</a>
+            </li>
+            <li ng-class="{'visible-xs': true, active: tabSelected}" ng-click="tabSelected = switchTab(true);">
+                <a href="" translate>PAGES.WIFI.GUEST_NETWORK.TITLE_SHORT</a>
+            </li>
+        </ul>
+    </nav>
+  </div>
+
+  <div class="main-container col-md-8">
+    <div ng-class="{'mobile-super-wrapper': true, active: !tabSelected}">
+    <form class="form-horizontal" name="form_main_network" novalidate="" ng-submit="form_main_network.$valid && warnUserAndSubmitMainNetworkChanges()">
+      <div id="wifi_panel_1" class="panel panel-default">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.WIFI.MAIN_NETWORK.TITLE</h3>
+        </div>
+        <!--div class="panel-body"-->
+        <!-- June modify -->
+        <div ng-class="{'panel-body':true, 'loading-data':!wifi_dataReady}">
+            <div class="form-group">
+              <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate="PAGES.WIFI.MAIN_NETWORK_SHARED.{{wifi_status.enabled ? 'ENABLED':'DISABLED'}}"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="wifi_status.enabled" uib-btn-checkbox></button>
+              </div>
+            </div>
+
+            <fieldset ng-disabled="split_networks.active || !wifi_status.enabled" ng-class="{disabled: (split_networks.active || !wifi_status.enabled)}">
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_NETWORK_NAME</label>
+                <div class="col-sm-7">
+                  <input type="text" class="form-control" ng-required="!split_networks.active && wifi_status.enabled" maxlength="26" ng-model="shared_settings.SSID" />
+                </div>
+              </div>
+              <div class="form-group hidden-xs">
+                <label class="col-sm-3 col-xs-8 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_BROADCAST</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="shared_settings.broadcast" uib-btn-checkbox ng-disabled="split_networks.active"></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.WIFI_SECURITY_TYPE</label>
+                <div class="col-sm-5">
+                  <div class="btn-group" uib-dropdown>
+                    <button type="button" class="btn" uib-dropdown-toggle>
+                      <span translate="PAGES.WIFI.AUTH_TYPES.{{shared_settings.security}}">Nessuna</span> <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                      <li ng-repeat="auth_type in auth_types" role="menuitem"><a ng-click="setSecurity('shared_settings',auth_type)" href="" translate="PAGES.WIFI.AUTH_TYPES.{{auth_type}}"></a></li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 hidden-xs">
+                  <p><small translate="PAGES.WIFI.AUTH_TYPES.{{shared_settings.security}}_DESCR"></small></p>
+                </div>
+              </div>
+              <div class="form-group" ng-if="authRequiresPassword(shared_settings.security)">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD</label>
+                <div class="col-sm-7">
+                  <div class="input-group">
+                    <!--input ng-required="!split_networks.active" ng-attr-type="{{ shared_settings.showPassword ? 'text' : 'password' }}" class="form-control" ng-model="shared_settings.auth_key" validate-wifi-password="shared_settings.security"-->
+                    <!-- June modify -->
+                    <input ng-required="!split_networks.active" ng-attr-type="{{ wifi_shared_settings.showPassword ? 'text' : 'password' }}" class="form-control" ng-model="shared_settings.auth_key" validate-wifi-password="shared_settings.security" maxlength="64">
+                    <span class="input-group-btn">
+                      <button class="btn pwd-toggle" type="button" ng-model="wifi_shared_settings.showPassword" uib-btn-checkbox></button>
+                    </span>
+                  </div>
+                    <p class="hidden-xs"><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(shared_settings.auth_key)}}"></small></p>
+                </div>
+              </div>
+
+              <div ng-init="net = shared_settings" ng-if="authRequiresRadius(shared_settings.security)">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_authentication_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_authentication_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" required="required" class="form-control" validate-wifi-password="shared_settings.security" ng-model="net.radius_authentication_key"-->
+                      <!-- June modify -->
+                      <input ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" required="required" class="form-control" validate-wifi-password="shared_settings.security" ng-model="net.radius_authentication_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAuthPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_authentication_key)}}"></small></p>
+                  </div>
+                </div>
+
+                 <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_accounting_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_accounting_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" required="required" class="form-control" validate-wifi-password="shared_settings.security" ng-model="net.radius_accounting_key"-->
+                      <!-- June modify -->
+                      <input ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" required="required" class="form-control" validate-wifi-password="shared_settings.security" ng-model="net.radius_accounting_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAccountingPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_accounting_key)}}"></small></p>
+                  </div>
+                </div>
+              </div>
+
+            </fieldset>
+
+            <fieldset ng-disabled="!wifi_status.enabled " ng-class="{disabled: !wifi_status.enabled}">
+              <div class="form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.DIVIDE_BY_BANDWIDTH</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="split_networks.active" uib-btn-checkbox></button>
+                </div>
+                <p class="col-sm-7  col-sm-offset-3 col-xs-12"><small translate>PAGES.WIFI.MAIN_NETWORK_SHARED.DIVIDE_BY_BAND_DESCRIPTION</small></p>
+              </div>
+            </fieldset>
+            
+            <fieldset ng-disabled="!wifi_status.enabled || !split_networks.active" ng-class="{disabled: (!wifi_status.enabled || !split_networks.active)}">
+              <div class="form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.ACTIVE_5GHZ</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="main_network_5G.enabled" uib-btn-checkbox></button>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!main_network_5G.enabled || !wifi_status.enabled || !split_networks.active" ng-class="{disabled: (!wifi_status.enabled || !split_networks.active)}">
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.NAME_5GHZ</label>
+                <div class="col-sm-7">
+                  <input type="text" class="form-control" ng-required="main_network_5G.enabled && wifi_status.enabled && split_networks.active" maxlength="26" ng-model="main_network_5G.SSID" />
+                </div>
+              </div>
+              <div class="form-group hidden-xs">
+                <label class="col-sm-3 col-xs-8 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_BROADCAST</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="main_network_5G.broadcast" uib-btn-checkbox></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.SECURITY_5GHZ</label>
+                <div class="col-sm-5">
+                  <div class="btn-group" uib-dropdown>
+                    <button type="button" class="btn" uib-dropdown-toggle>
+                      <span translate="PAGES.WIFI.AUTH_TYPES.{{main_network_5G.security}}">Nessuna</span> <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                      <li ng-repeat="auth_type in auth_types" role="menuitem"><a ng-click="setSecurity('main_network_5G',auth_type)" href="" translate="PAGES.WIFI.AUTH_TYPES.{{auth_type}}"></a></li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 hidden-xs">
+                  <p><small translate="PAGES.WIFI.AUTH_TYPES.{{main_network_5G.security}}_DESCR"></small></p>
+                </div>
+              </div>
+              <div class="form-group" ng-if="authRequiresPassword(main_network_5G.security)">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.PASSWORD_5GHZ</label>
+                <div class="col-sm-7">
+                  <div class="input-group">
+                    <!--input ng-required="split_networks.active" ng-attr-type="{{ main_network_5G.showPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="main_network_5G.auth_key"-->
+                    <!-- June modify -->
+                    <input ng-required="split_networks.active" ng-attr-type="{{ wifi_main_network_5G.showPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="main_network_5G.auth_key" maxlength="64">
+                    <span class="input-group-btn">
+                      <button class="btn pwd-toggle" type="button" ng-model="wifi_main_network_5G.showPassword" uib-btn-checkbox></button>
+                    </span>
+                  </div>
+                    <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(main_network_5G.auth_key)}}"></small></p>
+                </div>
+              </div>
+
+              <div ng-init="net = main_network_5G" ng-if="authRequiresRadius(main_network_5G.security)">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_authentication_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_authentication_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input required="required" ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="net.radius_authentication_key"-->
+                      <!-- June modify -->
+                      <input required="required" ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="net.radius_authentication_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAuthPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_authentication_key)}}"></small></p>
+                  </div>
+                </div>
+
+                 <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_accounting_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_accounting_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input required="required" ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="net.radius_accounting_key"-->
+                      <!-- June modify -->
+                      <input required="required" ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_5G.security" ng-model="net.radius_accounting_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAccountingPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_accounting_key)}}"></small></p>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!wifi_status.enabled || !split_networks.active" ng-class="{disabled: (!wifi_status.enabled || !split_networks.active)}">
+              <div class="form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.ACTIVE_2_4GHZ</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="main_network_2G.enabled" uib-btn-checkbox></button>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!main_network_2G.enabled || !wifi_status.enabled || !split_networks.active" ng-class="{disabled: (!wifi_status.enabled || !split_networks.active)}">
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.NAME_2_4GHZ</label>
+                <div class="col-sm-7">
+                  <input type="text" class="form-control" ng-model="main_network_2G.SSID" ng-required="main_network_2G.enabled && wifi_status.enabled && split_networks.active" maxlength="26" />
+                </div>
+              </div>
+              <div class="form-group hidden-xs">
+                <label class="col-sm-3 col-xs-8 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_BROADCAST</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="main_network_2G.broadcast" uib-btn-checkbox></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.SECURITY_2_4GHZ</label>
+                <div class="col-sm-5">
+                  <div class="btn-group" uib-dropdown>
+                    <button type="button" class="btn" uib-dropdown-toggle>
+                      <span translate="PAGES.WIFI.AUTH_TYPES.{{main_network_2G.security}}">Nessuna</span> <span class="caret"></span>
+                    </button>
+                    <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                      <li ng-repeat="auth_type in auth_types" role="menuitem"><a ng-click="setSecurity('main_network_2G',auth_type)" href="" translate="PAGES.WIFI.AUTH_TYPES.{{auth_type}}"></a></li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 hidden-xs">
+                  <p><small translate="PAGES.WIFI.AUTH_TYPES.{{main_network_2G.security}}_DESCR"></small></p>
+                </div>
+              </div>
+              <div class="form-group" ng-if="authRequiresPassword(main_network_2G.security)">
+                <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.PASSWORD_2_4GHZ</label>
+                <div class="col-sm-7">
+                  <div class="input-group">
+                    <!--input ng-required="split_networks.active" ng-attr-type="{{ main_network_2G.showPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="main_network_2G.auth_key"-->
+                    <!-- June modify -->
+                    <input ng-required="split_networks.active" ng-attr-type="{{ wifi_main_network_2G.showPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="main_network_2G.auth_key" maxlength="64">
+                    <span class="input-group-btn">
+                      <button class="btn pwd-toggle" type="button" ng-model="wifi_main_network_2G.showPassword" uib-btn-checkbox></button>
+                    </span>
+                  </div>
+                  <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(main_network_2G.auth_key)}}"></small></p>
+                </div>
+              </div>
+
+              <div ng-init="net = main_network_2G" ng-if="authRequiresRadius(main_network_2G.security)">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_authentication_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_authentication_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_AUTHENTICATION_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input required="required" ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="net.radius_authentication_key"-->
+                      <!-- June modify -->
+                      <input required="required" ng-attr-type="{{ net.showRadiusAuthPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="net.radius_authentication_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAuthPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_authentication_key)}}"></small></p>
+                  </div>
+                </div>
+                 <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_IPADDR</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="net.radius_accounting_ipaddr" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_PORT</label>
+                  <div class="col-sm-7">
+                    <input type="text" class="form-control" ng-required="true" ng-model="net.radius_accounting_port" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.RADIUS_ACCOUNTING_KEY</label>
+                  <div class="col-sm-7">
+                    <div class="input-group">
+                      <!--input required="required" ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="net.radius_accounting_key"-->
+                      <!-- June modify -->
+                      <input required="required" ng-attr-type="{{ net.showRadiusAccountingPassword ? 'text' : 'password' }}" class="form-control" validate-wifi-password="main_network_2G.security" ng-model="net.radius_accounting_key" maxlength="64">
+                      <span class="input-group-btn">
+                        <button class="btn pwd-toggle" type="button" ng-model="net.showRadiusAccountingPassword" uib-btn-checkbox></button>
+                      </span>
+                    </div>
+                      <p><small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small> <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calcStrength(net.radius_accounting_key)}}"></small></p>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!wifi_status.enabled || !canEnableWPS()" ng-class="{disabled: !wifi_status.enabled}">
+              <div class="form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>WPS</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="wps_enabled.enabled" uib-btn-checkbox></button>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 hidden-xs">
+                  <p>
+                      <small translate="PAGES.WIFI.MAIN_NETWORK.WPS_DESCRIPTION" translate-values="{ssid_value: main_network_2G.SSID}"></small>
+                  </p>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div class="col-sm-offset-3 col-sm-7">
+                  <button type="button" ng-disabled="!wps_enabled.enabled || !canTriggerWPS()" ng-click="triggerWPS()" class="btn btn-default" translate>PAGES.WIFI.MAIN_NETWORK.ACTIVATE_WPS_NOW</button>
+                  <p><small translate>PAGES.WIFI.MAIN_NETWORK.ACTIVATE_WPS_DESCRIPTION</small></p>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!wifi_status.enabled">
+              <div class="mobile-form-separator">
+                  <span class="icon leaf"></span>
+                  <span translate>PAGES.WIFI.MAIN_NETWORK.AUTO_SHUTDOWN</span>
+              </div>
+              <div class="form-group visible-xs">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate="PAGES.WIFI.MAIN_NETWORK.{{eco.enabled ? 'ACTIVE':'INACTIVE'}}"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="eco.enabled" uib-btn-checkbox></button>
+                </div>
+              </div>
+              <div class="form-group hidden-xs">
+                <label class="col-sm-3 col-xs-8 control-label" translate>PAGES.WIFI.MAIN_NETWORK.AUTO_SHUTDOWN</label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="eco.enabled" uib-btn-checkbox></button>
+                </div>
+              </div>
+
+              <fieldset ng-disabled="!eco.enabled" ng-class="{disabled: !eco.enabled, 'force-dimm-xs': true}">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.DURATION</label>
+                  <div class="col-sm-7">
+                    <div class="form-group">
+                      <div class="col-xs-6">
+                        <div class="btn-group" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                            <span><span translate>FORMS.FROM_TIME</span> {{eco.start_time}}</span> <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <!--li ng-repeat="hh in eco.hh_ranges" role="menuitem"><a ng-click="eco.start_time = hh" href="">{{hh}}</a></li-->
+                            <!-- June modify -->
+                            <li ng-repeat="hh in eco.hh_ranges" role="menuitem"><a ng-click="eco.start_time = hh; checkEndTime();" href="">{{hh}}</a></li>
+                          </ul>
+                        </div>
+                      </div>
+                      <div class="col-xs-6">
+                        <div class="btn-group" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                            <span><span translate>FORMS.TO_TIME</span> {{eco.end_time}}</span> <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <!--li ng-repeat="hh in eco.hh_ranges" role="menuitem"><a ng-click="eco.end_time = hh" href="">{{hh}}</a></li-->
+                            <!-- June modify -->
+                            <li ng-repeat="hh in eco.hh_ranges" role="menuitem" ng-if="!(hh==eco.start_time)"><a ng-click="eco.end_time = hh" href="">{{hh}}</a></li>
+                          </ul>
+                        </div>
+                      </div>
+                      <div class="spacer"></div>
+                      <div class="col-xs-12">
+                        <div class="btn-group" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                            <span translate="PAGES.WIFI.ECO_RANGES.{{eco.selected_days_label(eco.selected_days)}}"></span> <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <li ng-repeat="rng in eco.day_ranges" role="menuitem">
+                              <a ng-click="eco.selected_days=rng" href="" translate="PAGES.WIFI.ECO_RANGES.{{eco.selected_days_label(rng)}}"></a>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </fieldset>
+              <fieldset>
+                <div class="form-group">
+                    <div class="col-sm-7 col-sm-offset-3">
+                      <p>
+                          <small translate="PAGES.WIFI.MAIN_NETWORK.AUTO_SHUTDOWN_DESCRIPTION"></small>
+                      </p>
+                    </div>
+                </div>
+              </fieldset>
+                
+            </fieldset>
+        </div>
+      </div>
+
+      <div class="button-container">
+        <button type="submit" ng-disabled="!form_main_network.$valid" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button>
+        <button type="button" ng-disabled="false" class="btn btn-default" ng-click="revertMainNetworkChanges()" translate>FORMS.CANCEL</button>
+      </div>
+    </form>
+        
+    <!-- TABS -->
+    </div>
+    <div ng-class="{'mobile-super-wrapper': true, active: tabSelected}">
+    <!-- /TABS -->
+
+    <form class="form-horizontal">
+      <div id="wifi_panel_2" class="panel panel-default">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.WIFI.GUEST_NETWORK.TITLE</h3>
+        </div>
+        <!--div class="panel-body"-->
+        <!-- June modify -->
+        <div ng-class="{'panel-body':true, 'loading-data':!wifi_guest_dataReady}">
+
+          <div class="form-group">
+            <!--label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.WIFI.MAIN_NETWORK_SHARED.ENABLED</label-->
+            <!-- June modify -->
+            <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate="PAGES.WIFI.MAIN_NETWORK_SHARED.{{guest_network.enabled?'ENABLED':'DISABLED'}}"></label>
+            <div class="col-sm-7 col-xs-4 text-right-xs">
+              <button type="button" class="btn btn-toggle" ng-model="guest_network.enabled" uib-btn-checkbox></button>
+            </div>
+          </div>
+
+          <fieldset ng-disabled="!guest_network.enabled" ng-class="{disabled: !guest_network.enabled}">
+            <div class="form-group">
+              <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_NETWORK_NAME</label>
+              <div class="col-sm-7">
+                <span class="form-control">{{guest_network.SSID}}</span>
+              </div>
+            </div>
+            <div class="form-group hidden-xs">
+              <label class="col-sm-3 col-xs-8 control-label" translate>PAGES.WIFI.MAIN_NETWORK.SSID_BROADCAST</label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="guest_network.broadcast" uib-btn-checkbox></button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.WIFI_SECURITY_TYPE</label>
+              <div class="col-sm-5">
+                <div class="btn-group" uib-dropdown>
+                  <button type="button" class="btn" uib-dropdown-toggle>
+                    <span translate="PAGES.WIFI.AUTH_TYPES.{{guest_network.security}}">------</span> <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                    <li ng-repeat="auth_type in guest_auth_types" role="menuitem"><a ng-click="setSecurity('guest_network',auth_type)" href="" translate="PAGES.WIFI.AUTH_TYPES.{{auth_type}}"></a></li>
+                  </ul>
+                </div>
+              </div>
+              <div class="col-sm-7 col-sm-offset-3 hidden-xs">
+                <p><small translate="PAGES.WIFI.AUTH_TYPES.{{guest_network.security}}_DESCR"></small></p>
+              </div>
+            </div>
+            <div class="form-group" ng-if="authRequiresPassword(guest_network.security)">
+              <label class="col-sm-3 control-label" translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD</label>
+              <div class="col-sm-5" fw-loader="!generating_password" hidelabel="true">
+                <div class="input-group">
+                  <span class="form-control">{{guest_network.auth_key}}</span>
+                </div>
+              </div>
+              <div class="col-sm-offset-3 col-sm-7">
+                <p>
+                    <small translate>PAGES.WIFI.GUEST_NETWORK.PASSWORD_WILL_BE_REGENERATED</small>
+                    <a ng-click="show_qrcode_toggle()" href="" translate="PAGES.WIFI.GUEST_NETWORK.SHOW_QR_CODE"></a>
+                </p>
+                
+                <div class="qrcode-wrapper" ng-if="show_qrcode.visible">
+                    <qrcode size="220" data="{{'WIFI:S:'+guest_network.SSID+';T:'+(guest_network.security === 'WEP'? 'WEP' : 'WPA')+';P:'+guest_network.auth_key+';'+(guest_network.broadcast? 'H:true;' : '')}}"></qrcode>
+                    <br /><br />
+                </div>
+              </div>
+              <div class="col-sm-offset-3 col-sm-7">
+                <button ng-click="generate_password_for_guest()" type="button" ng-disabled="!guest_network.enabled || generating_password" class="btn btn-default" translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_GENERATE_NOW</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+            <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.WIFI.GUEST_NETWORK.RESTRICTIONS</label>
+            <div class="col-sm-7 col-xs-4 text-right-xs">
+              <button type="button" class="btn btn-toggle" ng-model="guest_network.restrictions" uib-btn-checkbox></button>
+            </div>
+          </div>
+
+          <fieldset ng-disabled="!guest_network.restrictions">
+            <div class="form-group">
+              <label class="col-sm-3 control-label" translate>PAGES.WIFI.GUEST_NETWORK.MAX_TIME</label>
+              <div class="col-sm-3">
+                <div class="btn-group" uib-dropdown>
+                  <button type="button" class="btn" uib-dropdown-toggle>
+                    <span ng-if="guest_network.timeout != '-1'">{{guest_network.limit_ranges | labelForKey:guest_network.timeout}}</span>
+                    <span ng-if="guest_network.timeout == '-1'" translate="PAGES.WIFI.GUEST_NETWORK.NO_MAX_TIME"></span> <span class="caret"></span>
+                    <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                    <li ng-repeat="interval in guest_network.limit_ranges" role="menuitem">
+                      <a ng-click="guest_network.timeout = interval[0]" href="">
+                        <span ng-if="interval[0] != '-1'">{{interval[1]}}</span>
+                        <span ng-if="interval[0] == '-1'" translate="PAGES.WIFI.GUEST_NETWORK.NO_MAX_TIME"></span>
+                      </a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+              <div class="col-sm-2">
+                <p ng-if="guest_network.remaining_time >= 0" class="control-label">{{ guest_network.remaining_time }}' <span translate="PAGES.WIFI.GUEST_NETWORK.TIME_LEFT">restanti</span></p>
+              </div>
+              <div class="col-sm-offset-3 col-sm-7">
+                <p><small translate>PAGES.WIFI.GUEST_NETWORK.DEVICES_WILL_BE_DISCONNECTED</small></p>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="col-sm-3 control-label" translate>PAGES.WIFI.GUEST_NETWORK.FILTERING</label>
+              <div class="col-sm-5">
+                <div class="btn-group" uib-dropdown>
+                  <button type="button" class="btn" uib-dropdown-toggle>
+                    <span translate="PAGES.WIFI.GUEST_NETWORK.FILTERING_{{guest_network.filtering | uppercase}}"></span> <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                    <li ng-repeat="filter in guest_network.filtering_values" role="menuitem">
+                      <a ng-click="guest_network.filtering = filter" href="" translate="PAGES.WIFI.GUEST_NETWORK.FILTERING_{{filter | uppercase}}"></a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+          </fieldset>
+          </fieldset>
+
+        </div><!--end .panel-body-->
+      </div><!--end .panel-->
+      <div class="button-container">
+        <button type="submit" ng-click="submitGuestNetworkChanges()" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button>
+        <button type="button" class="btn btn-default" ng-click="revertGuestNetworkChanges()" translate>FORMS.CANCEL</button>
+      </div>
+    </form>
+    </div> <!-- FINE TABS --> 
+  </div><!--end .main-container-->
+</div>
+
+<!-- A MODAL SHOWN WHEN USER TRIGGER A WPS COMMAND -->
+<script type="text/ng-template" id="modal_trigger_wps.html">
+    <div class="modal-header">
+        <h3 ng-if="!ctrl.is_timer_expired" class="modal-title" translate="PAGES.WIFI.MODAL_WPS.TITLE_0"></h3>
+        <h3 ng-if="ctrl.is_timer_expired && ctrl.has_client_assoc" class="modal-title" translate="PAGES.WIFI.MODAL_WPS.TITLE_1"></h3>
+        <h3 ng-if="ctrl.is_timer_expired && !ctrl.has_client_assoc" class="modal-title" translate="PAGES.WIFI.MODAL_WPS.TITLE_2"></h3>
+    </div>
+    <div class="modal-body">
+      <div ng-if="!ctrl.is_timer_expired">
+        <div timer class="text-center countdown" finish-callback="ctrl.onTimerExpire()" countdown="121" interval="1000">
+          <p>{{countdown}}</p>
+          <p class="small" translate>PAGES.WIFI.MODAL_WPS.REMAINING</p>
+        </div>
+        <div class="hide-loading-message text-center" ng-include="'views/partials/loader.html'"></div>
+      </div>
+
+      <div ng-if="ctrl.is_timer_expired">
+        <div class="text-center countdown-expired">
+          <p class="strong" ng-if="ctrl.has_client_assoc" translate="PAGES.WIFI.MODAL_WPS.STATUS_SUCCESS"></p>
+          <p class="strong" ng-if="!ctrl.has_client_assoc" translate="PAGES.WIFI.MODAL_WPS.STATUS_FAILED"></p>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div class="text-center">
+        <button ng-if="!ctrl.is_timer_expired" class="btn btn-default" type="button" ng-click="ctrl.cancel()" translate="">FORMS.CANCEL</button>
+        <button ng-if="ctrl.is_timer_expired" class="btn btn-default" type="button" ng-click="ctrl.cancel()" translate="">FORMS.CLOSE</button>
+      </div>
+    </div>
+</script>

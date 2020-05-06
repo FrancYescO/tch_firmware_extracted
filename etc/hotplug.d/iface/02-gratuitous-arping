@@ -1,0 +1,105 @@
+#!/bin/sh
+
+garping=$(uci -q get fastweb.garp.arping_enable)
+[ -n "$garping" ] && [ "$garping" = "0" ] && exit 0
+
+ifname=$(uci -q get network.${INTERFACE}.ifname)
+[ -z "$ifname" ] && exit 0
+
+if [ ${ifname:0:1} = "@" ]; then
+  interface=$(uci -q get network.${ifname#*@}.ifname)
+else
+  interface=$ifname
+fi
+
+sfpip=$(uci -q get network.sfp.ipaddr)
+
+garp_mgmtip=$(uci -q get fastweb.garp.mgmt)
+garp_loopbackip=$(uci -q get fastweb.garp.loopback)
+loopbackip=$(uci -q get network.wan.ipaddr)
+
+save_garp() {
+  local ipaddr="$1"
+
+  if [ -z $(uci -q get fastweb.garp) ]; then
+    uci -q add fastweb garp
+    uci -q rename fastweb.@garp[-1]=garp
+  fi
+
+  if [ -n $loopbackip ] && [ "${ipaddr}" = "${loopbackip}" ]; then
+    uci -q set fastweb.garp.loopback=$ipaddr
+  else
+    uci -q set fastweb.garp.mgmt=$ipaddr
+  fi
+}
+
+if [ "${ACTION}" = "ifup" ]; then
+  ipshow=$(ip addr show ${DEVICE})
+
+
+  ip1=${ipshow#*inet\ }
+  ip2=${ip1#*inet\ }
+  ip3=${ip2#*inet\ }
+  ip4=${ip3#*inet\ }
+
+  if [ ${DEVICE:0:3} = "ppp" ]; then
+    ip1=${ip1%%\ peer*}
+    ip2=${ip2%%\ peer*}
+    ip3=${ip3%%\ peer*}
+    ip4=${ip4%%\ peer*}
+
+    iplink=$(ip link show ${interface})
+    wanmac=${iplink#*link\/ether\ }
+    wanmac=${wanmac%%\ brd*}
+  else
+    ip1=${ip1%%\/*brd*}
+    ip2=${ip2%%\/*brd*}
+    ip3=${ip3%%\/*brd*}
+    ip4=${ip4%%\/*brd*}
+
+    wanmac=${ipshow#*link\/ether\ }
+    wanmac=${wanmac%%\ brd*}
+  fi
+
+  [ ${ip4} = ${ip3} ] && ip4=""
+  [ ${ip3} = ${ip2} ] && ip3=""
+  [ ${ip2} = ${ip1} ] && ip2=""
+
+  if [ -n "$ip1" ]; then
+    ipprefix=`expr substr $ip1 1 7`
+    [ "${ipprefix}" = "192.168" ] && ip1=""
+    [ "${ipprefix}" = "127.0.0" ] && ip1=""
+    [ "${ip1}" = "${sfpip}" ] && ip1=""
+  fi
+
+  if [ -n "$ip2" ]; then
+    ipprefix=`expr substr $ip2 1 7`
+    [ "${ipprefix}" = "192.168" ] && ip2=""
+    [ "${ipprefix}" = "127.0.0" ] && ip2=""
+    [ "${ip2}" = "${sfpip}" ] && ip2=""
+  fi
+
+  if [ -n "$ip3" ]; then
+    ipprefix=`expr substr $ip3 1 7`
+    [ "${ipprefix}" = "192.168" ] && ip3=""
+    [ "${ipprefix}" = "127.0.0" ] && ip3=""
+    [ "${ip3}" = "${sfpip}" ] && ip3=""
+  fi
+
+  if [ -n "$ip4" ]; then
+    ipprefix=`expr substr $ip4 1 7`
+    [ "${ipprefix}" = "192.168" ] && ip4=""
+    [ "${ipprefix}" = "127.0.0" ] && ip4=""
+    [ "${ip4}" = "${sfpip}" ] && ip4=""
+  fi
+
+  [ -n "$ip1" ] && [ "${ip1}" != "${garp_loopbackip}" ] && [ "${ip1}" != "${garp_mgmtip}" ] && save_garp $ip1 && arping $ip1 -I $interface -s $ip1 -c 6
+  [ -n "$ip2" ] && [ "${ip2}" != "${garp_loopbackip}" ] && [ "${ip2}" != "${garp_mgmtip}" ] && save_garp $ip2 && arping $ip2 -I $interface -s $ip2 -c 6
+  [ -n "$ip3" ] && [ "${ip3}" != "${garp_loopbackip}" ] && [ "${ip3}" != "${garp_mgmtip}" ] && save_garp $ip3 && arping $ip3 -I $interface -s $ip3 -c 6
+  [ -n "$ip4" ] && [ "${ip4}" != "${garp_loopbackip}" ] && [ "${ip4}" != "${garp_mgmtip}" ] && save_garp $ip4 && arping $ip4 -I $interface -s $ip4 -c 6
+
+  uci -q set fastweb.garp.wanmac=$wanmac
+  uci commit fastweb
+
+fi
+

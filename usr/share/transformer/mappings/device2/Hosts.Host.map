@@ -1,0 +1,946 @@
+local format, gsub, match, find = string.format, string.gsub, string.match, string.find
+local mapper, os, pairs, resolve, next, string = mapper, os, pairs, resolve, next, string
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local nwCommon = mapper("nwcommon")
+local foreachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local deleteOnUci = uciHelper.delete_on_uci
+local setOnUci = uciHelper.set_on_uci
+local integratedQtnMAC = string.lower(getFromUci({config = "env", sectionname = "var", option = "qtn_eth_mac"}))
+local insert = table.insert
+
+local mt = { __index = function() return "" end }
+
+local Device_Hosts_Host_i_ = {
+  objectType = {
+    name = "Device.Hosts.Host.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "HostNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        status = "deprecated",
+        type = "string",
+        max = "64",
+      },
+      PhysAddress = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      IPAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      --[[ Deprecated
+        AddressSource = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "string",
+        enumeration = {
+          "DHCP",
+          "Static",
+          "AutoIP",
+          "None",
+        },
+      },
+      --]]
+      DHCPClient = {
+        access = "readOnly",
+        list = true,
+        maxItems = "2",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.DHCPv4.Server.Pool.{i}.Client.{i}. Device.DHCPv6.Server.Pool.{i}.Client.{i}.",
+      },
+      LeaseTimeRemaining = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AssociatedDevice = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      Layer1Interface = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      Layer3Interface = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+      },
+      --[[ Removed as the Status attribute is deprecated
+        VendorClassID = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "string",
+        max = "255",
+      },
+      ClientID = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "hexBinary",
+        max = "65535",
+      },
+      UserClassID = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "hexBinary",
+        max = "65535",
+      },
+      --]]
+      HostName = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      X_FASTWEB_GroupName = {
+        access = "readWrite",
+        type = "string",
+        max = "20",
+      },
+      X_FASTWEB_Icon = {
+        access = "readWrite",
+        type = "string",
+        max = "30",
+      },
+      X_FASTWEB_ParentalControlEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_RestrictedAccessEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_RoutineEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_Modified = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      ActiveLastChange = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      X_FASTWEB_RestrictedAccessEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      -- IPv4AddressNumberOfEntries
+      -- automatically created when Device.Hosts.Host.{i}.IPv4Address.{i}. is loaded
+      -- IPv6AddressNumberOfEntries
+      -- automatically created when Device.Hosts.Host.{i}.IPv6Address.{i}. is loaded
+    }
+  }
+}
+
+local hostGroupnameMapToGUI= {
+  ["Family"]   = "family",
+  ["Other"]    = "other",
+}
+
+local hostGroupnameMapToDev= {
+  ["family"]   = "Family",
+  ["other"]    = "Other",
+}
+
+local icon_map = {
+  "Console",
+  "Printer",
+  "Computer",
+  "Laptop",
+  "Smartphone",
+  "Tablet",
+  "TV",
+  "Other",
+  "Hard disk",
+}
+
+local icon_map_to_num = {
+  ["Console"] = "0",
+  ["Printer"] = "1",
+  ["Computer"] = "2",
+  ["Laptop"] = "3",
+  ["Smartphone"] = "4",
+  ["Tablet"] = "5",
+  ["TV"] = "6",
+  ["Other"] = "7",
+  ["Hard disk"] = "8",
+}
+
+local init_telemangement = {
+  host_groupname = "other",
+  host_icon = "7",
+  host_parentalcontrol = "0",
+  host_restrictedaccess = "0",
+  host_routine_enable = "0",
+  host_boost = "0",
+  host_boost_lease = "0",
+  host_boost_start = "00:00",
+  host_boost_freq = "Daily",
+  host_stop = "0",
+  host_stop_lease = "0",
+  host_stop_start = "00:00",
+  host_stop_freq = "Daily",
+}
+
+-- "0" device is in the ubus list but not lan device
+-- "1" device is in the ubus list and belongs to lan
+-- "2" device is not in the ubus list and added by acs
+local DEV_OTHER = "0"
+local DEV_LAN = "1"
+local DEV_ADD = "2"
+local devs = {}
+local ufnBinding = {config = "user_friendly_name"}
+
+local function get_dev_key()
+  local all = {}
+  local id
+  for k,v in pairs(devs) do
+    id = tonumber(k:match("^dev(%d+)"))
+    if id then
+      all[id+1] = id
+    end
+  end
+  return format("dev%d",#all)
+end
+
+Device_Hosts_Host_i_.entries = function(mapping)
+  local data = conn:call("hostmanager.device", "get", { }) or {}
+  local entries = {}
+  local dev_macs = {}
+  devs = {}
+
+  local lanInterfaces = {}
+  for _,y in pairs(nwCommon.findLanWanInterfaces(false)) do
+    lanInterfaces[y] = true
+  end
+  -- if host interface is LAN and host mac-address is mac of integrated quatenna AP device, skip
+  -- show only valid hosts, which has valid l2interface - technology derived from l2interface
+  for k,v in pairs(data) do
+    if lanInterfaces[v.interface] and  v["mac-address"] ~= integratedQtnMAC and (v["technology"] == "wireless" or v["technology"] == "ethernet") then
+      entries[#entries + 1] = k
+      devs[k] = DEV_LAN
+      dev_macs[v["mac-address"]] = k
+    else
+      devs[k] = DEV_OTHER
+    end
+  end
+
+  ufnBinding.sectionname = "name"
+  ufnBinding.option = nil
+  local binding = {config = "user_friendly_name"}
+  foreachOnUci(ufnBinding, function(s)
+    binding.sectionname = s[".name"]
+    if not s.mac or not dev_macs[s.mac] then
+      local sname = get_dev_key()
+      if sname ~= s[".name"] then
+        uciHelper.rename_on_uci(binding, sname)
+      end
+      devs[sname] = DEV_ADD
+      entries[#entries + 1] = sname
+    else
+      local sname = format("lan_%s", dev_macs[s.mac])
+      uciHelper.rename_on_uci(binding, sname)
+    end
+  end)
+  uciHelper.commit(binding)
+  return entries
+end
+
+local ethernetBinding = { config = "ethernet", sectionname = "mapping" }
+local function wlanRemotePort()
+  local port
+  foreachOnUci( ethernetBinding, function(s)
+    if s.wlan_remote == "1" then
+      port = s.port
+      return false
+    end
+  end)
+  return port
+end
+
+local wlanPort = wlanRemotePort()
+
+local function getDataForHost(hostKey)
+  local data = setmetatable({},mt)
+  if devs[hostKey] == DEV_LAN then
+    local devices = conn:call("hostmanager.device", "get", { name = hostKey }) or {}
+    data = devices[hostKey] or {}
+  else
+    ufnBinding.sectionname = hostKey
+    ufnBinding.option = nil
+    local device = uciHelper.getall_from_uci(ufnBinding)
+    data["mac-address"] = device["mac"]
+    data["user-friendly-name"] = device["name"]
+    data["device-type"] = device["type"]
+    data["connected_time"] = 0
+    data["ipv4"] = {}
+    data["ipv6"] = {}
+  end
+  return data
+end
+
+local function add_elements(section, option, value)
+  local binding = {config = "tod"}
+  binding.sectionname = section
+  binding.option = option
+  local elements = getFromUci(binding)
+  if type(elements) ~= "table" then
+    elements = {value}
+  end
+  setOnUci(binding, elements, commitapply)
+  return tostring(#elements)
+end
+
+local function getLeaseTime(addr,hostData)
+  local leaseTime = 0
+  if addr.configuration == "dynamic" then
+    local f = io.open("/tmp/dhcp.leases","r")
+    if f then
+      for line in f:lines() do
+        local remaining, mac = match(line, "^(%d+)%s+([%x:]+)")
+        if mac == hostData["mac-address"] then
+          leaseTime = os.difftime(tonumber(remaining),os.time())
+          if leaseTime < 0 then
+            leaseTime = 0
+          end
+          break
+        end
+      end
+      f:close()
+    end
+  end
+  return tostring(leaseTime)
+end
+
+local function getPrimaryAddress(hostData)
+  local primaryAddress = {}
+  if next(hostData['ipv4']) ~= nil then
+    for _,n in pairs(hostData["ipv4"]) do
+      if n["state"] == "connected" then
+        primaryAddress = n
+      end
+    end
+  elseif next(hostData['ipv6']) ~= nil then
+    for _,n in pairs(hostData["ipv6"]) do
+      if n["state"] == "connected" then
+        primaryAddress  = n
+      end
+    end
+  end
+  return primaryAddress  or {}
+end
+
+local wirelessBinding = { config = "wireless" }
+local function getLayer1Interface(ifName)
+  if not ifName or ifName == "" then
+    return ""
+  end
+  local ethInterface = resolve("Device.Ethernet.Interface.{i}.", ifName)
+  if ethInterface then
+    return ethInterface
+  end
+  local externalRadio
+  if wlanPort and wlanPort == ifName then
+    wirelessBinding.sectionname = "wifi-device"
+    foreachOnUci(wirelessBinding, function(s)
+      if s.type == "quantenna" then
+        externalRadio = s[".name"]
+        return false
+      end
+    end)
+    if externalRadio then
+      wirelessBinding.sectionname = "wifi-iface"
+      foreachOnUci(wirelessBinding, function(s)
+        if s.device == externalRadio then
+          ifName = s[".name"]
+        end
+      end)
+    else
+      return ""
+    end
+  end
+  wirelessBinding.sectionname = ifName
+  wirelessBinding.option = "device"
+  local wirelessDevice = getFromUci(wirelessBinding)
+  return resolve("Device.WiFi.Radio.{i}.", wirelessDevice) or ""
+end
+
+-- Function Description: To find the AP associated to a specific macaddr.
+-- Input  : macaddr <MAC Address of the connected device>
+-- Output : return AP or "" <AP to which the device is currently Associated>
+
+local function getAP(macaddr)
+  if macaddr then
+    local data = conn:call("wireless.accesspoint.station", "get", { }) or {}
+    for ap, mactable in pairs(data) do
+      mactable = mactable or {}
+      for mac,sta in pairs(mactable) do
+        if mac == macaddr and sta["state"] and sta["state"]:match("Associated") then
+          return ap
+        end
+      end
+    end
+  end
+  return ""
+end
+
+local configChanged ={}
+local host_uci_set
+local host_uci_get
+local binding = {}
+do
+  host_uci_get = function(config, sectionname, option, default)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    binding.default = default
+    return getFromUci(binding)
+  end
+  host_uci_set = function(config, sectionname, option, value)
+    binding.config = config
+    binding.sectionname = sectionname
+    binding.option = option
+    configChanged[config] = true
+    return setOnUci(binding, value, commitapply)
+  end
+end
+
+local function host_get_RestrictedAccess(hostData)
+  local restricted = "0"
+  local restrictedBinding = { config = "firewall", sectionname = "rule" }
+  foreachOnUci( restrictedBinding, function(s)
+    if s.src_mac == hostData["mac-address"] and (s.name and (s.name:match("Dev_") or s.name == "ACCEPT" or s.name == "DROP"))then
+      if s.enabled == "1" then
+        restricted = "1"
+      end
+      return false
+    end
+  end)
+  return restricted
+end
+
+
+local function host_get_RoutineEnable(hostData)
+  local routine_enable = "0"
+  local mac_index = gsub(hostData["mac-address"] , ":","_")
+  local devicetype = hostData["device-type"]
+  local tod_binding = { config = "tod" }
+  tod_binding.option = "routine"
+  tod_binding.sectionname = format("boost_routine_%s", mac_index)
+  local routine = getFromUci(tod_binding)
+
+  if devicetype and devicetype:find("family") and routine == "1" then
+    routine_enable = "1"
+  end
+  return routine_enable
+end
+
+local function host_modify_check(hostData)
+  local familyType, icon, parentalTag = hostData["device-type"] and hostData["device-type"]:match("^(.*):(%d*):(%d*)$")
+  for k,v in pairs(init_telemangement) do
+    if k == "host_groupname" then
+      if familyType and familyType ~= "" and familyType ~= v then return "1" end
+    elseif k == "host_icon" then
+      if icon and icon ~= "" and icon ~= v then  return "1" end
+    elseif k == "host_parentalcontrol" then
+      if parentalTag and parentalTag ~= "" and parentalTag ~= v then  return "1" end
+    elseif k == "host_restrictedaccess" then
+      local enable = host_get_RestrictedAccess(hostData)
+      if enable ~= v  then  return "1" end
+    elseif k == "host_routine_enable" then
+      local enable = host_get_RoutineEnable(hostData)
+      if enable ~= v then return "1" end
+    elseif k == "host_boost" then
+      local mac_index = gsub(hostData["mac-address"] , ":","_")
+      local routine_boost_index = "boost_action_online_" .. mac_index
+      local boost =  host_uci_get("tod", routine_boost_index, "enabled", "0")
+      if boost ~= "0" then  return "1" end
+    elseif k == "host_stop" then
+      local mac_index = gsub(hostData["mac-address"] , ":","_")
+      local routine_stop_index = "stop_action_online_" .. mac_index
+      local stop = host_uci_get("tod", routine_stop_index, "enabled", "0")
+      if stop ~= "0" then  return "1" end
+    end
+  end
+  return "0"
+end
+
+Device_Hosts_Host_i_.get = {
+  Active = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return (hostData["state"] == "connected") and "1" or "0"
+  end,
+
+  PhysAddress = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return hostData["mac-address"]
+  end,
+
+  IPAddress = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local addr = getPrimaryAddress(hostData)
+    return addr.address or ""
+  end,
+
+  AssociatedDevice = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local macAddress = hostData["mac-address"] or ""
+    local ap = getAP(macAddress)
+    return (resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' , ap .. "|" .. macAddress) or "")
+  end,
+
+  HostName = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local macAddress = hostData["mac-address"] or ""
+    return hostData["user-friendly-name"] or hostData["hostname"]  or "unknown-" .. macAddress
+  end,
+
+  X_FASTWEB_GroupName = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local device_type = hostData["device-type"] or ""
+    local familyType = device_type:match("^(.*):.*:.*")
+    return (familyType and familyType ~="") and hostGroupnameMapToDev[familyType]  or "Other"
+  end,
+
+  X_FASTWEB_Icon = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local device_type = hostData["device-type"] or ""
+    local icon = device_type:match("^.*:(%d*):%d*$")
+    return (icon and icon ~="") and icon_map[icon+1] or icon_map[8]
+  end,
+
+  X_FASTWEB_ParentalControlEnable = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return hostData["device-type"] and hostData["device-type"]:match(".*:(%d*)$") or "0"
+  end,
+
+  X_FASTWEB_RestrictedAccessEnable = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return host_get_RestrictedAccess(hostData)
+  end,
+
+  X_FASTWEB_RoutineEnable = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return host_get_RoutineEnable(hostData)
+  end,
+
+  X_FASTWEB_Modified = function(mapping, param, key)
+    local hostData = getDataForHost(key)
+    return host_modify_check(hostData)
+  end,
+
+  DHCPClient = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return (resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..key) or "")
+  end,
+
+  LeaseTimeRemaining = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    local addr = getPrimaryAddress(hostData)
+    return getLeaseTime(addr,hostData)
+  end,
+
+  Layer1Interface = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return getLayer1Interface(hostData["l2interface"])
+  end,
+
+  Layer3Interface = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return resolve("Device.IP.Interface.{i}.",hostData["interface"]) or ""
+  end,
+
+  ActiveLastChange = function(mapping,param,key)
+    local hostData = getDataForHost(key)
+    return os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or ""
+  end,
+}
+
+Device_Hosts_Host_i_.getall = function(mapping,key)
+  local hostData = getDataForHost(key)
+  local macAddress = hostData["mac-address"] or ""
+  local ap = getAP(macAddress)
+  local addr = getPrimaryAddress(hostData)
+  local device_type = hostData["device-type"] or ""
+  local familyType, icon, parentalTag = device_type:match("^(.*):(%d*):(%d*)$")
+  return {
+    Active = hostData["state"] == "connected" and "1" or "0",
+    PhysAddress = macAddress,
+    IPAddress = addr.address or "",
+    AssociatedDevice = resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' ,ap .. "|" .. macAddress) or "",
+    HostName = hostData["user-friendly-name"] or hostData["hostname"] or "unknown-" .. macAddress,
+    X_FASTWEB_GroupName = (familyType and familyType~="") and hostGroupnameMapToDev[familyType] or "Other",
+    X_FASTWEB_Icon  = (icon and icon~="") and icon_map[icon+1] or icon_map[8],
+    X_FASTWEB_ParentalControlEnable = (parentalTag and parentalTag~="") and parentalTag or "0",
+    X_FASTWEB_RestrictedAccessEnable = host_get_RestrictedAccess(hostData),
+    X_FASTWEB_RoutineEnable = host_get_RoutineEnable(hostData),
+    X_FASTWEB_Modified = host_modify_check(hostData),
+    DHCPClient = resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..key) or "",
+    LeaseTimeRemaining = getLeaseTime(addr,hostData),
+    Layer1Interface =  getLayer1Interface(hostData["l2interface"]),
+    Layer3Interface = resolve("Device.IP.Interface.{i}.",hostData["interface"]) or "",
+    ActiveLastChange = os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or "",
+  }
+end
+
+local function setDevOption(hostData, mac_index)
+  local dev_options = {
+    dest_port = 80,
+    name = "Dev_Deny_Access",
+    src="lan",
+    target = "DROP",
+    src_mac = hostData["mac-address"]
+  }
+  for k,v in pairs(dev_options) do
+    host_uci_set("firewall", mac_index, k, v)
+  end
+end
+
+local function setTailOption(restrictedBinding, tail_index)
+  restrictedBinding["sectionname"] = tail_index
+  deleteOnUci(restrictedBinding, commitapply)
+  local tail_options = {
+    target = "DROP",
+    name = "Dev_Deny_Access",
+    enabled = "1",
+    dest_port = "80",
+    src="lan"
+  }
+  restrictedBinding["sectionname"] = "Dev_restricted_tail"
+  setOnUci(restrictedBinding, "rule", commitapply)
+  for k,v in pairs(tail_options) do
+    host_uci_set("firewall", "Dev_restricted_tail", k, v)
+  end
+end
+
+local function disableHostRoutine(hostData)
+  local enabled = "0"
+  local macIndex = gsub(hostData["mac-address"] , ":","_")
+  local boostIndex = "boost_action_routine_" .. macIndex
+  local stopIndex = "stop_action_routine_" .. macIndex
+  host_uci_set("tod", boostIndex, "enabled", enabled)
+  host_uci_set("tod", stopIndex, "enabled", enabled)
+  host_uci_set("tod", "boost_routine_"..macIndex, "routine", enabled)
+  host_uci_set("tod", "stop_routine_"..macIndex, "routine", enabled)
+end
+
+local function setActionInfo(action, mode, mac_index, object, routine)
+  local action_index = "_action_" .. mode .. "_" .. mac_index
+  local timer_index = "_" .. mode .. "_" .. mac_index
+
+  local stimer = action .. timer_index
+  local saction = action .. action_index
+
+  if host_uci_get("tod", stimer) == "" then
+    host_uci_set("tod", stimer, nil, "timer")
+  end
+  if host_uci_get("tod", saction) == "" then
+    host_uci_set("tod", saction, nil, "action")
+    host_uci_set("tod", saction, "object", object)
+    add_elements(saction, "timers", stimer)
+  end
+  host_uci_set("tod", action .. "_routine_"..mac_index, "routine", routine)
+end
+
+local function setDeviceType(key, macAddress, deviceType)
+  if devs[key] == DEV_LAN then
+    conn:call("hostmanager.device", "set", { ["mac-address"] = macAddress, ["device-type"] = deviceType })
+  else
+    ufnBinding.sectionname = key
+    ufnBinding.option = "type"
+    setOnUci(ufnBinding, deviceType, commitapply)
+    configChanged[ufnBinding.config] = true
+  end
+end
+
+local function setHostName(key, macAddress, hostName)
+  if devs[key] == DEV_LAN then
+    conn:call("hostmanager.device", "set", { ["mac-address"] = macAddress, ["user-friendly-name"] = hostName })
+  else
+    ufnBinding.sectionname = key
+    ufnBinding.option = "name"
+    setOnUci(ufnBinding, hostName, commitapply)
+    configChanged[ufnBinding.config] = true
+  end
+end
+
+local parental_binding = { config = "parental" }
+local function foreach_urlfilter(f)
+  parental_binding.sectionname="URLfilter"
+  return foreachOnUci(parental_binding, f)
+end
+
+local function get_parental_hosts()
+  local hosts = {}
+  local binding = {config="user_friendly_name", sectionname="name"}
+  foreachOnUci(binding, function(s)
+    if s.type and s.type:match(":([^:]*)$") == "1" then
+      hosts[s.mac] = true
+    end
+  end)
+  return hosts
+end
+
+local function set_urlfilter(id, site, action, mac)
+  local name
+  if mac then
+    name = format("URL_%d_%s", id, mac:gsub(":","_"))
+  else
+    name = format("URL_%d", id)
+  end
+  parental_binding.sectionname = name
+  parental_binding.option = nil
+  -- add one section
+  setOnUci(parental_binding, "URLfilter", commitapply)
+  parental_binding.option = "action"
+  setOnUci(parental_binding, action, commitapply)
+  parental_binding.option = "site"
+  setOnUci(parental_binding, site, commitapply)
+  if mac then
+    parental_binding.option = "mac"
+    setOnUci(parental_binding, mac, commitapply)
+  end
+end
+
+local function updateParentalControl(enable, mac)
+  if enable == "0" then  -- delete URL sections when ParentalControlEnable changes from "1" to "0"
+    parental_binding.option = nil
+    foreach_urlfilter(function(s)
+      if s['mac'] == mac then
+        parental_binding.sectionname = s['.name']
+        deleteOnUci(parental_binding, commitapply)
+      end
+    end)
+  else  -- add and rename the URL sections(like X_FASTWEB_ParentalControl.ApplyTo("Selected devices"))
+    local urls = {}
+    local id = 1
+    parental_binding.option = nil
+    foreach_urlfilter(function(s)
+      if s.site then
+        if not urls[s.site] then
+          urls[s.site] = s.action or ""
+        end
+        parental_binding.sectionname = s['.name']
+        deleteOnUci(parental_binding, commitapply)
+      end
+    end)
+    local hosts = get_parental_hosts()
+    hosts[mac] = true
+    for site, action in pairs(urls) do
+      for mac in pairs(hosts) do
+        set_urlfilter(id, site, action, mac)
+      end
+      id = id + 1
+    end
+  end
+  configChanged[parental_binding.config] = true
+end
+
+Device_Hosts_Host_i_.set = {
+  IPAddress = function(mapping, param, value, key)
+    return true
+  end,
+  HostName = function(mapping, param, value, key)
+    local hostData = getDataForHost(key)
+    local macAddress = hostData["mac-address"] or ""
+    setHostName(key, macAddress, value)
+    return true
+  end,
+  PhysAddress = function(mapping, param, value, key)
+    if not value:match("%x%x:%x%x:%x%x:%x%x:%x%x:%x%x") then
+      return nil, "The format of physical address is wrong."
+    end
+    if devs[key] == DEV_ADD then
+      ufnBinding.sectionname = key
+      ufnBinding.option = "mac"
+      uciHelper.set_on_uci(ufnBinding, value, commitapply)
+      configChanged[ufnBinding.config] = true
+    end
+    return true
+  end,
+  X_FASTWEB_GroupName = function(mapping, param, value, key)
+    local hostData = getDataForHost(key)
+    local valueToGUI = hostGroupnameMapToGUI[value]
+    if valueToGUI ~= "family" then
+      disableHostRoutine(hostData)
+    end
+    if valueToGUI then
+      local macAddress = hostData["mac-address"] or ""
+      local deviceType = (hostData["device-type"] and hostData["device-type"] ~= "") and hostData["device-type"]:gsub("^[^:]*", valueToGUI) or format("%s:7:0", valueToGUI)
+      setDeviceType(key, macAddress, deviceType)
+    end
+  end,
+  X_FASTWEB_Icon = function(mapping, param, value, key)
+    local valueToGUI = icon_map_to_num[value]
+    if valueToGUI then
+      local hostData = getDataForHost(key)
+      local macAddress = hostData["mac-address"] or ""
+      local deviceType = (hostData["device-type"] and hostData["device-type"] ~= "") and hostData["device-type"]:gsub(":(%d*):",":"..valueToGUI..":") or format("other:%s:0", valueToGUI)
+      setDeviceType(key, macAddress, deviceType)
+    end
+  end,
+  X_FASTWEB_ParentalControlEnable = function(mapping, param, value, key)
+    local hostData = getDataForHost(key)
+    local deviceType = hostData["device-type"]
+    local preEnable = deviceType and deviceType:match(".*:(%d*)$") or "0"
+    if deviceType and deviceType ~= "" then
+      deviceType = gsub(deviceType, "%d$", value, 1)
+    else
+      deviceType = format("%s%d", "::", value)
+    end
+    local macAddress = hostData["mac-address"]
+    setDeviceType(key, macAddress, deviceType)
+
+    if preEnable ~= value then
+      local control_binding = { config = "fastweb", sectionname = "webui", option = "parental_control_mode"}
+      local mode = getFromUci(control_binding)
+      if mode == '1' then
+        updateParentalControl(value, macAddress)
+      end
+    end
+  end,
+
+  X_FASTWEB_RestrictedAccessEnable = function(mapping, param, value, key)
+    local index, tail_index  = "", ""
+    local hostData = getDataForHost(key)
+    if hostData["mac-address"] == "" then
+      return nil, "Please firstly set device's PhysAddress."
+    end
+    if (host_get_RestrictedAccess(hostData) ~= value) then
+      local restrictedBinding = { config = "firewall", sectionname = "rule" }
+      foreachOnUci(restrictedBinding, function(s)
+        if s.name and (s.name:match("Dev_") or s.name == "ACCEPT" or s.name == "DROP") then
+          if s.src_mac and s.src_mac == hostData["mac-address"] then
+            index = s[".name"]
+          elseif s.src_mac == nil then
+            tail_index = s[".name"]
+          end
+        end
+      end)
+
+      local mac_index = "Dev_" .. gsub(hostData["mac-address"] , ":","_")
+
+      -- if rule "dev_*" exist but dosen't have section name, delete this rule and create it.
+      -- if rule "dev_*" dosen't exist, create it
+      -- after rule "dev_*" is created, if restricted behavior is allow, then delete rule "Dev_restricted_tail" and recreated it
+      if index:match("Dev_") == nil then
+        if index ~= "" then
+          restrictedBinding["sectionname"] = index
+          deleteOnUci(restrictedBinding, commitapply)
+        end
+        restrictedBinding["sectionname"] = mac_index
+        setOnUci(restrictedBinding, "rule", commitapply)
+        setDevOption(hostData, mac_index)
+
+        --When Allow, re-create rule "Dev_restricted_tail" to make sure "Dev_restricted_tail" allways at the bottom of firewall rule list
+        if tail_index ~= "" then
+          setTailOption(restrictedBinding, tail_index)
+        end
+      end
+      host_uci_set("firewall", mac_index, "enabled", value)
+      if tail_index ~= "" then
+        host_uci_set("firewall", mac_index, "target", "ACCEPT")
+        host_uci_set("firewall", mac_index, "name", "Dev_Allow_Access")
+        host_uci_set("firewall", tail_index, "enabled", "1")
+      end
+    end
+  end,
+
+  X_FASTWEB_RoutineEnable = function(mapping, param, value, key)
+    local hostData = getDataForHost(key)
+    if hostData["mac-address"] == "" then
+      return nil, "Please firstly set device's PhysAddress."
+    end
+    local bfamily = hostData["device-type"] and hostData["device-type"]:find("family")
+
+    if value == "1" and not bfamily then
+      return nil, "The setting is invalid because the device is not In-family."
+    end
+    local mac = hostData["mac-address"]
+    local mode = "online"
+    local object = format("0|%s", mac)
+
+    if value == "1" then
+      mode = "routine"
+      object = format("1|%s", mac)
+    end
+
+    local mac_index = gsub(mac , ":","_")
+    setActionInfo("boost", mode, mac_index, object, value)
+    setActionInfo("stop", mode, mac_index, object, value)
+
+    if value == "0" and bfamily then
+      disableHostRoutine(hostData)
+    end
+  end,
+  X_FASTWEB_Modified = function(mapping, param, value, key)
+    return true
+  end,
+}
+
+Device_Hosts_Host_i_.add = function(mapping)
+  Device_Hosts_Host_i_.entries()
+  local key = get_dev_key()
+  ufnBinding.sectionname = key
+  ufnBinding.option = nil
+  uciHelper.set_on_uci(ufnBinding, "name", commitapply)
+  configChanged[ufnBinding.config] = true
+  return key
+end
+
+Device_Hosts_Host_i_.delete = function(mapping, key)
+  if devs[key] == DEV_ADD then
+    ufnBinding.sectionname = key
+    ufnBinding.option = nil
+    uciHelper.delete_on_uci(ufnBinding, commitapply)
+    configChanged[ufnBinding.config] = true
+    devs[key] = nil
+  end
+  return true
+end
+
+Device_Hosts_Host_i_.commit = function()
+  local conf_binding = {}
+  for config in pairs(configChanged) do
+    conf_binding.config = config
+    uciHelper.commit(conf_binding)
+  end
+  configChanged = {}
+end
+
+Device_Hosts_Host_i_.revert = function()
+  local config_binding = {}
+  for config in pairs(configChanged) do
+    config_binding.config = config
+    uciHelper.revert(config_binding)
+  end
+  configChanged = {}
+end
+
+register(Device_Hosts_Host_i_)
+

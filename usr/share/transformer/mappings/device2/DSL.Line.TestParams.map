@@ -1,0 +1,328 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_DSL_Line_i_TestParams_ = {
+  objectType = {
+    name = "Device.DSL.Line.{i}.TestParams.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      HLOGGds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      HLOGGus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      HLOGpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2559",
+        type = "string",
+      },
+      HLOGpsus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2559",
+        type = "string",
+      },
+      HLOGMTds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      HLOGMTus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      QLNGds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      QLNGus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      QLNpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2047",
+        type = "string",
+      },
+      QLNpsus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2047",
+        type = "string",
+      },
+      QLNMTds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      QLNMTus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      SNRGds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      SNRGus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      SNRpsds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2047",
+        type = "string",
+      },
+      SNRpsus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "2047",
+        type = "string",
+      },
+      SNRMTds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      SNRMTus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      LATNds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "24",
+        type = "string",
+      },
+      LATNus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "24",
+        type = "string",
+      },
+      SATNds = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "24",
+        type = "string",
+      },
+      SATNus = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        max = "24",
+        type = "string",
+      },
+    }
+  }
+}
+
+local xdslctl = require('transformer.shared.xdslctl')
+local register = register
+local gmatch = string.gmatch
+
+-- keys to retrieve for getall (xdslctl info --show)
+local xdslInfoGetAllKeys = {
+  "HLOGG",
+  "HLOGps",
+  "HLOGMT",
+  "QLNps",
+  "QLNMT",
+  "SNRG",
+  "SNRps",
+  "SNRMT",
+  "LATN",
+  "SATN",
+}
+
+local function convertMultiply10(str)
+    -- for VDSL, the str format likes " N/A, 0.3, 1.1, 2.7"
+    -- for ADSL, the str format is " 0.8"
+    local value = str ..","
+    local retValue = ""
+    for subValue in gmatch(value,"(%S-),") do
+      if retValue ~= "" then
+        retValue = retValue .. ","
+      end
+      local number = tonumber(subValue)
+      if number then
+        subValue = number * 10
+      end
+      retValue = retValue .. subValue
+    end
+    return retValue
+end
+
+local function getRawValue(name, value)                         
+  if name == "QLNG" then                                        
+    return tonumber((-2 * value) - 46)                          
+  elseif name == "SNRG" then                                                                                         
+    return value ~= 0 and tonumber((2 * value) + 64) or 255                         
+  elseif name == "HLOGG" then                                                                                   
+    return value ~= -96 and tonumber((-10 * value) + 60) or 1023                                                        
+  end                                                            
+end     
+
+local function getGdsValue(gdsName, val, key)
+  local is35bProfile = xdslctl.infoValue("vdsl2profile","","",key) == "35b"
+  if is35bProfile and gdsName == "HLOGG" and val == "ds" then
+    return 16
+  elseif is35bProfile and gdsName == "HLOGG" and val == "us"  then
+    return 8
+  else
+    return xdslctl.infoValue(gdsName, val , 1 , key) or 1
+  end
+end
+
+local function calculateValue(dslData, gdsName, val, key)
+  local result = {}
+  local total = 0
+  local gdsValue = getGdsValue(gdsName, val, key)
+  local index = 1
+  for value in dslData:gmatch("[^,]+") do
+    if #result <= 512 then
+      total = tonumber(total + value)
+      if index % gdsValue == 0 then
+        local avg = total / gdsValue
+        avg = math.ceil(getRawValue(gdsName, avg))
+        if gdsName == "HLOGG" then
+          result[#result + 1] = avg <= 1023 and avg or 1023
+        else
+          result[#result + 1] = avg <= 255 and avg or 255
+        end
+        total = 0
+      end
+      index = index + 1
+    end
+  end
+  return table.concat(result, " ")
+end
+
+local function getdslData(dslInfo, val, default, key)
+  local dslData = xdslctl.infoValue(dslInfo, val, default, key) or 0
+  if dslInfo == "QLNps" then
+    return calculateValue(dslData, "QLNG", val, key)
+  elseif dslInfo == "SNRps" then
+    return calculateValue(dslData, "SNRG", val, key)
+  elseif dslInfo == "HLOGps" then
+    return calculateValue(dslData, "HLOGG", val, key)
+  end
+end
+
+Device_DSL_Line_i_TestParams_.get = {
+  HLOGGds = function (mapping, param, key)
+    return xdslctl.infoValue("HLOGG", "ds", "", key) or "0"
+  end,
+  HLOGGus = function (mapping, param, key)
+    return xdslctl.infoValue("HLOGG", "us", "", key) or "0"
+  end,
+  HLOGpsds = function (mapping, param, key)
+    return getdslData("HLOGps", "ds", "", key) or "0"
+  end,
+  HLOGpsus = function (mapping, param, key)
+    return getdslData("HLOGps", "us", "", key) or "0"
+  end,
+  HLOGMTds = function (mapping, param, key)
+    return xdslctl.infoValue("HLOGMT", "ds", "", key) or "0"
+  end,
+  HLOGMTus = function (mapping, param, key)
+    return xdslctl.infoValue("HLOGMT", "us", "", key) or "0"
+  end,
+  QLNGds = "0",
+  QLNGus = "0",
+  QLNpsds = function (mapping, param, key)
+    return getdslData("QLNps", "ds", "", key) or "0"
+  end,
+  QLNpsus = function (mapping, param, key)
+    return getdslData("QLNps", "us", "", key) or "0"
+  end,
+  QLNMTds = function (mapping, param, key)
+    return xdslctl.infoValue("QLNMT", "ds", "", key) or "0"
+  end,
+  QLNMTus = function (mapping, param, key)
+    return xdslctl.infoValue("QLNMT", "us", "", key) or "0"
+  end,
+  SNRGds = function (mapping, param, key)
+    return xdslctl.infoValue("SNRG", "ds", "", key) or "0"
+  end,
+  SNRGus = function (mapping, param, key)
+    return xdslctl.infoValue("SNRG", "us", "", key) or "0"
+  end,
+  SNRpsds = function (mapping, param, key)
+    return getdslData("SNRps", "ds", "", key) or "0"
+  end,
+  SNRpsus = function (mapping, param, key)
+    return getdslData("SNRps", "us", "", key) or "0"
+  end,
+  SNRMTds = function (mapping, param, key)
+    return xdslctl.infoValue("SNRMT", "ds", "", key) or "0"
+  end,
+  SNRMTus = function (mapping, param, key)
+    return xdslctl.infoValue("SNRMT", "us", "", key) or "0"
+  end,
+  LATNds = function (mapping, param, key)
+    return convertMultiply10(xdslctl.infoValue("LATN", "ds", "", key) or "0")
+  end,
+  LATNus = function (mapping, param, key)
+    return convertMultiply10(xdslctl.infoValue("LATN", "us", "", key) or "0")
+  end,
+  SATNds = function (mapping, param, key)
+    return convertMultiply10(xdslctl.infoValue("SATN", "ds", "", key) or "0")
+  end,
+  SATNus = function (mapping, param, key)
+    return convertMultiply10(xdslctl.infoValue("SATN", "us", "", key) or "0")
+  end,
+}
+
+Device_DSL_Line_i_TestParams_.getall = function (mapping, key)
+  -- get all required values from xdslctl info --show, xdslctl info --stats
+  local xdslInfoValues = xdslctl.infoValueList(xdslInfoGetAllKeys, key)
+  return {
+    HLOGGds = xdslInfoValues["HLOGG"]["ds"] or "0",
+    HLOGGus = xdslInfoValues["HLOGG"]["us"] or "0",
+    HLOGpsds = getdslData("HLOGps", "ds", "", key) or "0",
+    HLOGpsus = getdslData("HLOGps", "us", "", key) or "0",
+    HLOGMTds = xdslInfoValues["HLOGMT"]["ds"] or "0",
+    HLOGMTus = xdslInfoValues["HLOGMT"]["us"] or "0",
+    QLNpsds = getdslData("QLNps", "ds", "", key) or "0",
+    QLNpsus = getdslData("QLNps", "us", "", key) or "0",
+    QLNMTds = xdslInfoValues["QLNMT"]["ds"] or "0",
+    QLNMTus = xdslInfoValues["QLNMT"]["us"] or "0",
+    SNRGds = xdslInfoValues["SNRG"]["ds"] or "0",
+    SNRGus = xdslInfoValues["SNRG"]["us"] or "0",
+    SNRpsds = getdslData("SNRps", "ds", "", key) or "0",
+    SNRpsus = getdslData("SNRps", "us", "", key) or "0",
+    SNRMTds = xdslInfoValues["SNRMT"]["ds"] or "0",
+    SNRMTus = xdslInfoValues["SNRMT"]["us"] or "0",
+    LATNds = convertMultiply10(xdslInfoValues["LATN"]["ds"] or "0"),
+    LATNus = convertMultiply10(xdslInfoValues["LATN"]["us"] or "0"),
+    SATNds = convertMultiply10(xdslInfoValues["SATN"]["ds"] or "0"),
+    SATNus = convertMultiply10(xdslInfoValues["SATN"]["us"] or "0"),
+  }
+end
+
+register(Device_DSL_Line_i_TestParams_)
