@@ -1,0 +1,348 @@
+local pairs = pairs
+local setmetatable = setmetatable
+local format, find, match = string.format, string.find, string.match
+local concat, sort = table.concat, table.sort
+local uci = mapper("ucihelper")
+local commitapply = commitapply
+local parental_binding = { config = "parental" }
+local control_binding = { config = "fastweb", sectionname = "webui", option = "parental_control_mode"}
+
+local transactions = {}
+
+local function finalize_transactions(action)
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    action(binding)
+  end
+  transactions = {}
+end
+
+local function commit()
+  finalize_transactions(uci.commit)
+end
+
+local function revert()
+  finalize_transactions(uci.revert)
+end
+
+local uci_urlfilter = { config="parental", sectionname="URLfilter"}
+local function foreach_urlfilter(f)
+  return uci.foreach_on_uci(uci_urlfilter, f)
+end
+
+local function get_control_status()
+  local hosts = {}
+  local binding = {config="user_friendly_name", sectionname="name"}
+  uci.foreach_on_uci(binding, function(s)
+    if s.type and s.type:match(":([^:]*)$") == "1" then
+      hosts[s.mac] = true
+    end
+  end)
+  return hosts
+end
+
+local function get_url_prefix()
+  local all = {}
+  local id
+  foreach_urlfilter(function(s)
+    id = tonumber(s['.name']:match("^URL_(%d+)"))
+    if id then
+      all[id] = id
+    end
+  end)
+
+  return format("URL_%d", #all+1) or nil, #all+1
+end
+
+local function modify_section_name(s, prekey)
+  parental_binding.sectionname = s['.name']
+  parental_binding.option = "_key"
+  uci.delete_on_uci(parental_binding)
+  local key = prekey
+  if s.mac then
+    key = format("%s_%s", prekey, s.mac:gsub(":", "_"))
+  end
+  parental_binding.option = nil
+  uci.rename_on_uci(parental_binding, key)
+end
+
+local mt = { __index = function() return "" end }
+
+local control_mode_map = setmetatable({
+  ["1"] = "Selected devices",
+  ["0"] = "Whole network",
+}, mt)
+
+local rev_control_mode_map = setmetatable({
+  ["Whole network"] = "0",
+  ["Selected devices"] = "1",
+},mt)
+
+local Device_X_FASTWEB_ParentalControl_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_ParentalControl.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      ApplyTo = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+Device_X_FASTWEB_ParentalControl_.get = {
+  Enabled = function(mapping, paramname, key)
+    parental_binding.sectionname = "general"
+    parental_binding.option = "enable"
+    return uci.get_from_uci(parental_binding)
+  end,
+  ApplyTo = function(mapping, paramname, key)
+    local mode = uci.get_from_uci(control_binding) or "0"
+    mode = mode~="" and mode or "0"
+    return control_mode_map[mode]
+  end,
+}
+
+local function set_urlfilter(id, site, action, mac)
+  local name
+  if mac then
+    name = format("URL_%d_%s", id, mac:gsub(":","_"))
+  else
+    name = format("URL_%d", id)
+  end
+  parental_binding.sectionname = name
+  parental_binding.option = nil
+  -- add one section
+  uci.set_on_uci(parental_binding, "URLfilter", commitapply)
+  parental_binding.option = "action"
+  uci.set_on_uci(parental_binding, action, commitapply)
+  parental_binding.option = "site"
+  uci.set_on_uci(parental_binding, site, commitapply)
+  if mac then
+    parental_binding.option = "mac"
+    uci.set_on_uci(parental_binding, mac, commitapply)
+  end
+end
+
+Device_X_FASTWEB_ParentalControl_.set = {
+  Enabled =  function(mapping, paramname, value, key)
+    parental_binding.sectionname = "general"
+    parental_binding.option = "enable"
+    uci.set_on_uci(parental_binding, value, commitapply)
+    transactions[parental_binding.config] = true
+    return true
+  end,
+  ApplyTo = function(mapping, paramname, value, key)
+    if rev_control_mode_map[value] == "" then
+      return nil, "The value is invalid."
+    end
+    local mode = rev_control_mode_map[value]
+    local premode = uci.get_from_uci(control_binding)
+    if mode ~= premode then
+      uci.set_on_uci(control_binding, mode, commitapply)
+      parental_binding.option = nil
+      local urls = {}
+      local id = 1
+      foreach_urlfilter(function(s)
+        if s.site then
+          if not urls[s.site] then
+            urls[s.site] = s.action
+          end
+          parental_binding.sectionname = s['.name']
+          uci.delete_on_uci(parental_binding)
+        end
+      end)
+      for site, action in pairs(urls) do
+        if mode == "1" then
+          for mac in pairs(get_control_status()) do
+            set_urlfilter(id, site, action, mac)
+          end
+        else
+          set_urlfilter(id, site, action)
+        end
+        id = id + 1
+      end
+      transactions[control_binding.config] = true
+      transactions[parental_binding.config] = true
+    end
+    return true
+  end,
+}
+
+Device_X_FASTWEB_ParentalControl_.commit = commit
+Device_X_FASTWEB_ParentalControl_.revert = revert
+
+register(Device_X_FASTWEB_ParentalControl_)
+
+local Device_X_FASTWEB_ParentalControl_URL_i_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_ParentalControl.URL.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "URLNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      BlocksEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      BlocksURL = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+
+-- sorted by number
+local function nsort(a,b)
+  local na = tonumber(match(a, ".*_(%d+)$"))
+  local nb = tonumber(match(b, ".*_(%d+)$"))
+  return na < nb
+end
+
+local content = {}
+
+Device_X_FASTWEB_ParentalControl_URL_i_.entries = function(mapping, parent)
+  local url_map = {}
+  local keys = {}
+  local key
+  local id = 0
+  content = {}
+  foreach_urlfilter(function(s)
+    local key = url_map[s.site]
+    if not key then
+      if s[".anonymous"] or not s['.name']:match("^URL_%d+") then
+        if id == 0 then
+          -- Only get the first index when bulk modify name, due to the name modification is not immediately.
+          key, id = get_url_prefix()
+        else
+          id = id + 1
+          key = format("URL_%d", id)
+        end
+      else
+        key = s['.name']:match("^(URL_%d+)")
+      end
+      if s.site then
+        url_map[s.site] = key
+      end
+    end
+    if s[".anonymous"] or not s['.name']:match("^URL_%d+") then
+      modify_section_name(s, key)
+    end
+    if not find(concat(keys, ""), key) then
+      content[key] = s
+      keys[#keys+1] = key
+    end
+  end)
+  uci.commit(parental_binding)
+  sort(keys, nsort)
+  return keys
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.get = {
+  BlocksEnable = function(mapping, paramname, key)
+    local enable = "0"
+    local s = content[key]
+    if type(s) == 'table' and s.action and s.action == "DROP" then
+      enable = "1"
+    end
+    return enable
+  end,
+  BlocksURL = function(mapping, paramname, key)
+    return content[key] and content[key].site or ""
+  end,
+}
+
+Device_X_FASTWEB_ParentalControl_URL_i_.set = function(mapping, param, value, key)
+  local option = {}
+  if param == "BlocksEnable" then
+    local action = (value == "1") and "DROP" or "ACCEPT"
+    option.name = "action"
+    option.value = action
+  elseif param == "BlocksURL" then
+    option.name = "site"
+    option.value = value
+  else
+    return nil, "Not support the parameter!"
+  end
+
+  parental_binding.sectionname = key
+  local mode = uci.get_from_uci(control_binding)
+  mode = mode~="" and mode or "0"
+  if mode ~= "0" then
+    local hosts = get_control_status()
+    if next(hosts) then
+      -- delete the section added by add() action
+      parental_binding.option = nil
+      uci.delete_on_uci(parental_binding, commitapply)
+    else
+      parental_binding.option = option.name
+      uci.set_on_uci(parental_binding, option.value, commitapply)
+    end
+
+    for mac in pairs(hosts) do
+      local name = format("%s_%s", key, mac:gsub(":","_"))
+      parental_binding.sectionname = name
+      parental_binding.option = nil
+      -- check whether the section is existed or not
+      if uci.get_from_uci(parental_binding) == "" then
+        -- add one when the section is not existed
+        uci.set_on_uci(parental_binding, "URLfilter", commitapply)
+      end
+
+      -- check mac option
+      parental_binding.option = "mac"
+      if uci.get_from_uci(parental_binding) == "" then
+        uci.set_on_uci(parental_binding, mac, commitapply)
+      end
+      parental_binding.option = option.name
+      uci.set_on_uci(parental_binding, option.value, commitapply)
+    end
+  else
+    -- set option
+    parental_binding.option = option.name
+    uci.set_on_uci(parental_binding, option.value, commitapply)
+  end
+  transactions[parental_binding.config] = true
+  return true
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.add = function(mapping)
+  local key = get_url_prefix()
+  parental_binding.sectionname = key
+  parental_binding.option = nil
+  uci.set_on_uci(parental_binding, "URLfilter", commitapply)
+  transactions[parental_binding.config] = true
+  return key
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.delete = function(mapping, key)
+  local names = {}
+  foreach_urlfilter(function(s)
+    if s['.name']:match(key) then
+      names[s['.name']] = true
+    end
+  end)
+  parental_binding.option = nil
+  for name in pairs(names) do
+    parental_binding.sectionname = name
+    uci.delete_on_uci(parental_binding, commitapply)
+  end
+  transactions[parental_binding.config] = true
+  return true
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.commit = commit
+Device_X_FASTWEB_ParentalControl_URL_i_.revert = revert
+
+register(Device_X_FASTWEB_ParentalControl_URL_i_)

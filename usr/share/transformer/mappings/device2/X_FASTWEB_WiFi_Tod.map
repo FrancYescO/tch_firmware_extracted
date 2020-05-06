@@ -1,0 +1,176 @@
+local Telemanagement_WiFi_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_WiFi.",
+    access = "readOnly",
+    description = "To get wifi switchoff parameters Enable, Start, End, Frequency.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+register(Telemanagement_WiFi_)
+
+local ubus_connect = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+local isConfigChanged
+
+local Telemanagement_Wifi_tod_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_WiFi.SwitchOff.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+      End = {
+        access = "readWrite",
+        type = "string",
+      },
+      Frequency = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local uci_tod_set
+local uci_tod_get
+local binding = { config="tod" }
+do
+  uci_tod_get = function(sectionname, option)
+    binding.sectionname = sectionname
+    binding.option = option
+    return uci_helper.get_from_uci(binding)
+  end
+  uci_tod_set = function(sectionname, option, value)
+    binding.sectionname = sectionname
+    binding.option = option
+    isConfigChanged = true
+    return uci_helper.set_on_uci(binding, value, commitapply)
+  end
+end
+
+local function convert2Sec(value)
+  if value == nil or value == "" then return -1 end
+  local  hour, min = value:match("(%d+):(%d+)")
+  local secs = hour*3600 + min*60
+  return tonumber(secs)
+end
+
+local function WifiTodGetValue(mapping, paramname, paramvalue)
+  if paramname == "Enable" then
+    local enable = uci_tod_get("action_wifidisable", "enabled")
+    return enable or "0"
+  end
+  if paramname == "Start" then
+    local time = uci_tod_get("timer_wifidisable", "start_time")
+    time = string.match(time, "%d%d:%d%d")
+    return time or ""
+  end
+  if paramname == "End" then
+    local time = uci_tod_get("timer_wifidisable", "stop_time")
+    time = string.match(time, "%d%d:%d%d")
+    return time or ""
+  end
+  if paramname == "Frequency" then
+    local time = uci_tod_get("timer_wifidisable", "start_time")
+    if string.find(time , "All") then
+      return "Daily"
+    end
+    time = uci_tod_get("timer_wifidisable_workend", "start_time")
+    if time and time ~= "" then
+      return "Working days"
+    end
+    time = uci_tod_get("timer_wifidisable_weekend", "start_time")
+    if time and time ~= "" then
+      return "Weekends"
+    end
+    return "Do not repeat"
+  end
+end
+
+
+local function WifiTodSetValue(mapping, paramname, paramvalue)
+  if paramvalue == nil or paramvalue == "" then
+    return false
+  end
+  if paramname == "Enable" then
+    uci_tod_set("action_wifidisable", "enabled", paramvalue)
+    return true
+  end
+  local periodic = 1
+  local freq = WifiTodGetValue(mapping, "Frequency", paramvalue)
+  local start_time =  WifiTodGetValue(mapping, "Start", paramvalue)
+  local stop_time = WifiTodGetValue(mapping, "End", paramvalue)
+  local tod_start_time, tod_stop_time, workend_start_time, workend_stop_time, weekend_start_time, weekend_stop_time = "", "", "", "", "" , ""
+  if paramname == "Frequency" then
+    freq = paramvalue
+  elseif paramname == "Start" then
+    start_time = paramvalue
+  elseif paramname == "End" then
+    stop_time = paramvalue
+  end
+  local dayoverflow = (convert2Sec(start_time) > convert2Sec(stop_time)) and "1" or "0"
+  if freq == "Daily" then
+    tod_start_time = "All:" .. start_time
+    tod_stop_time = "All:" .. stop_time
+  elseif freq:find("Working") then
+    tod_start_time = "Mon,Tue,Wed,Thu:" .. start_time
+    tod_stop_time = "Mon,Tue,Wed,Thu:" .. stop_time
+    stop_time = (dayoverflow == "1") and "24:00" or stop_time
+    workend_start_time = "Fri:" .. start_time
+    workend_stop_time = "Fri:" .. stop_time
+  elseif freq == "Weekends" then
+    local nextday = (dayoverflow == "1") and "Sun:" or "Sat:"
+    tod_start_time = "Sat:" .. start_time
+    tod_stop_time = nextday .. stop_time
+    weekend_start_time = "Sun:" .. start_time
+    weekend_stop_time = (dayoverflow == "1") and "Sun:24:00" or ("Sun:" .. stop_time)
+  else
+    local weekstr_start = os.date("%a", os.time()) .. ":"
+    local weekstr_stop = (dayoverflow == "1") and (os.date("%a", os.time() + 24*3600) .. ":") or (os.date("%a", os.time()) .. ":")
+    tod_start_time = weekstr_start .. start_time
+    tod_stop_time = weekstr_stop .. stop_time
+    periodic = "0"
+  end
+  local workend_enabled = (workend_start_time ~= "") and "1" or "0"
+  local weekend_enabled = (weekend_start_time ~= "") and "1" or "0"
+  uci_tod_set("timer_wifidisable", "start_time",  tod_start_time)
+  uci_tod_set("timer_wifidisable", "stop_time", tod_stop_time)
+  uci_tod_set("timer_wifidisable", "periodic", periodic)
+  uci_tod_set("timer_wifidisable_workend", "start_time", workend_start_time)
+  uci_tod_set("timer_wifidisable_workend", "stop_time", workend_stop_time)
+  uci_tod_set("timer_wifidisable_workend", "enabled", workend_enabled)
+  uci_tod_set("timer_wifidisable_weekend", "start_time", weekend_start_time)
+  uci_tod_set("timer_wifidisable_weekend", "stop_time", weekend_stop_time)
+  uci_tod_set("timer_wifidisable_weekend", "enabled", weekend_enabled)
+  return true
+end
+
+Telemanagement_Wifi_tod_.get = WifiTodGetValue
+Telemanagement_Wifi_tod_.set = WifiTodSetValue
+
+Telemanagement_Wifi_tod_.commit = function()
+  if isConfigChanged then
+    uci_helper.commit(binding)
+    isConfigChanged = false
+  end
+end
+
+Telemanagement_Wifi_tod_.revert = function()
+  if isConfigChanged then
+    uci_helper.revert(binding)
+    isConfigChanged = false
+  end
+end
+
+register(Telemanagement_Wifi_tod_)

@@ -1,0 +1,412 @@
+local Device_Hosts_Host_i_BS_ = {
+  objectType = {
+    name = "Device.Hosts.Host.{i}.#TYPE.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ScheduledEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Lease = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "0h 00'",
+          "0h 30'",
+          "1h 00'",
+          "1h 30'",
+          "2h 00'",
+          "4h 00'",
+          "",
+        },
+      },
+      Frequency = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Weekends",
+          "Working days",
+          "Daily",
+          "",
+        },
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local match, format, gsub, find  = string.match, string.format, string.gsub, string.find
+local mod, modf = math.mod, math.modf
+local date, time = os.date, os.time
+local uci = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local commitapply = commitapply
+local qos_binding = { config = "qos", sectionname = "classify" }
+local host_binding = { config = "tod", sectionname = "host" }
+local tod_binding = { config = "tod" }
+
+local transactions = {}
+
+local function finalize_transactions(action)
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    action(binding)
+  end
+  transactions = {}
+end
+
+local function commit()
+  finalize_transactions(uci.commit)
+end
+
+local function revert()
+  finalize_transactions(uci.revert)
+end
+
+local ufn_binding = {config = "user_friendly_name"}
+
+local function get_device_info(device)
+  local info = {}
+  local devices = conn:call("hostmanager.device", "get", { name = device })
+  if devices and devices[device] then
+    info = devices[device]
+  else
+    ufn_binding.sectionname = device
+    ufn_binding.option = nil
+    local data = uci.getall_from_uci(ufn_binding)
+    info["mac-address"] = data["mac"] or ""
+    info["user-friendly-name"] = data["name"] or ""
+    info["device-type"] = data["type"] or "other:7:0"
+  end
+  return info
+end
+
+local function get_mapping_type(mapping)
+  return (mapping.objectType.name):find("X_FASTWEB_Boost") and "boost" or "stop"
+end
+
+local function get_online_status(mac, maptype)
+  local status = "0"
+  local status_binding = qos_binding
+  if maptype == "stop" then
+    status_binding = host_binding
+  end
+  uci.foreach_on_uci(status_binding, function(s)
+    if s.srcmac == mac or (s.id == mac and s.enabled == "1") then
+      status = "1"
+      return false
+    end
+  end)
+  return status
+end
+
+local function set_boost(mac, enable)
+  local binding = {}
+  binding.config = qos_binding.config
+  local sectionname
+  uci.foreach_on_uci(qos_binding, function(s)
+    if s.srcmac == mac then
+      sectionname = s[".name"]
+      return false
+    end
+  end)
+  if enable == true or enable == "1" then
+    if not sectionname then
+      sectionname = uci.add_on_uci(qos_binding, commitapply)
+      binding.sectionname = sectionname
+      binding.option = "srcmac"
+      uci.set_on_uci(binding, mac, commitapply)
+      binding.option = "order"
+      uci.set_on_uci(binding, "5", commitapply)
+      binding.option = "target"
+      uci.set_on_uci(binding, "Boost", commitapply)
+      transactions[qos_binding.config] = true
+    end
+  else
+    if sectionname then
+      binding.sectionname = sectionname
+      binding.option = nil
+      uci.delete_on_uci(binding, commitapply)
+      transactions[qos_binding.config] = true
+    end
+  end
+end
+
+local function set_stop(mac, enable)
+  local enabled = "0"
+  local sectionname
+  uci.foreach_on_uci(host_binding, function(s)
+    if s.id == mac then
+      sectionname = s[".name"]
+      return false
+    end
+  end)
+  local binding = {}
+  binding.config = host_binding.config
+  if enable == true or enable == "1" then
+    enabled = "1"
+    if not sectionname then
+      sectionname = uci.add_on_uci(host_binding, commitapply)
+      binding.sectionname = sectionname
+      binding.option = "id"
+      uci.set_on_uci(binding, mac, commitapply)
+      binding.option = "type"
+      uci.set_on_uci(binding, "mac", commitapply)
+      binding.option = "mode"
+      uci.set_on_uci(binding, "block", commitapply)
+      transactions[host_binding.config] = true
+    end
+  end
+  if sectionname then
+    binding.sectionname = sectionname
+    binding.option = "enabled"
+    uci.set_on_uci(binding, enabled, commitapply)
+    transactions[host_binding.config] = true
+  end
+end
+
+local function set_online_status(mac, maptype, enable)
+  if maptype == "boost" then
+    set_boost(mac, enable)
+    if enable == true or enable == "1" then
+      set_stop(mac, false)
+    end
+  else
+    set_stop(mac, enable)
+    if enable == true or enable == "1" then
+      set_boost(mac, false)
+    end
+  end
+end
+
+-- Check the current datamodel represents routine or online mode
+-- return: routine or online
+local function check_mode(devinfo)
+  local mac = gsub(devinfo["mac-address"] , ":","_")
+  local devicetype = devinfo["device-type"]
+  tod_binding.option = "routine"
+  tod_binding.sectionname = format("boost_routine_%s", mac)
+  local routine = uci.get_from_uci(tod_binding)
+
+  if devicetype and devicetype:find("family") and routine == "1" then
+    return "routine"
+  else
+    return "online"
+  end
+end
+
+local function get_section_names(devinfo, maptype, mode)
+  local mac = gsub(devinfo["mac-address"] , ":","_")
+
+  local stimer = format("%s_%s_%s", maptype, mode, mac)
+  local saction = format("%s_action_%s_%s", maptype, mode, mac)
+  return saction, stimer
+end
+
+local map = {
+  Enable = "enabled",
+  ScheduledEnable = "enabled",
+  Lease = "lease",
+  Start = "start",
+  Frequency = "frequency",
+}
+
+Device_Hosts_Host_i_BS_.get = function(mapping, param, key)
+  local devinfo = get_device_info(key)
+  local maptype = get_mapping_type(mapping)
+  local mode = check_mode(devinfo)
+
+  if mode == "online" and param == "Start" then
+    return ""
+  end
+
+  local saction, stimer = get_section_names(devinfo, maptype, mode)
+  tod_binding.sectionname = stimer
+  if param == "Enable" then
+    return get_online_status(devinfo["mac-address"], maptype)
+  end
+
+  if param == "ScheduledEnable" then
+    saction = get_section_names(devinfo, maptype, "routine")
+    tod_binding.sectionname = saction
+    tod_binding.default = "0"
+  end
+  if map[param] then
+    tod_binding.option = map[param]
+    local ret = uci.get_from_uci(tod_binding)
+    tod_binding.default = nil
+    if param == "Lease" and ret == "" then
+      return "0h 00'"
+    else
+      return ret
+    end
+  end
+end
+
+local function get_stop_time(start, lease)
+  local sh, sm = start:match("(%d+):(%d+)")
+  local lh, lm = lease:match("(%d+)h (%d+)'")
+  local m = tonumber(sm)+tonumber(lm)
+  local h = tonumber(sh)+tonumber(lh)
+  local offset = 0
+  if m >= 60 then
+    m = m - 60
+    h = h + 1
+  end
+  if h >= 24 then
+    h = h - 24
+    offset = 86400-1
+  end
+  return format("%02d:%02d", h, m), offset
+end
+
+local function create_sections(devinfo, maptype, mode)
+  local object = format("1|%s", devinfo["mac-address"])
+  if mode == "online" then
+    object = format("0|%s", devinfo["mac-address"])
+  end
+
+  local saction, stimer = get_section_names(devinfo, maptype, mode)
+  tod_binding.sectionname = stimer
+  tod_binding.option = nil
+  if uci.get_from_uci(tod_binding) == "" then
+    uci.set_on_uci(tod_binding, "timer", commitapply)
+  end
+  tod_binding.sectionname = saction
+  if uci.get_from_uci(tod_binding) == "" then
+    uci.set_on_uci(tod_binding, "action", commitapply)
+    tod_binding.option = "object"
+    uci.set_on_uci(tod_binding, object, commitapply)
+    tod_binding.option = "timers"
+    uci.set_on_uci(tod_binding, {stimer}, commitapply)
+  end
+end
+
+local frequency = {
+  ["Weekends"] = "Sat,Sun",
+  ["Working days"] = "Mon,Tue,Wed,Thu,Fri",
+  ["Daily"] = "All",
+}
+
+Device_Hosts_Host_i_BS_.set = function(mapping, param, value, key)
+  local devinfo = get_device_info(key)
+  local mac = devinfo["mac-address"]
+  if mac == "" then
+    return nil, "Please firstly set device's PhysAddress."
+  end
+  local maptype = get_mapping_type(mapping)
+  local mode = check_mode(devinfo)
+  local setting = {
+    timer = {},
+    action = {}
+  }
+
+  if ((param == "Lease" and (value == "" or value == "0h 00'")) or (param == "Frequency" and value == "") or (param == "Start" and value == "")) then
+    return true
+  end
+
+  if mode == "online" then
+    if (param == "Start" or param == "Frequency") then
+      return true
+    elseif param == "ScheduledEnable" then
+      if value == "1" then
+        return nil, "The ScheduledEnable value is invalid. The ScheduledEnable only can be set as '0' when RoutineEnable is '0'."
+      else
+        create_sections(devinfo, maptype, "routine")
+        setting.routine = {}
+        local routineaction = get_section_names(devinfo, maptype, "routine")
+        setting.routine.sectionname = routineaction
+        setting.routine.enabled = value
+      end
+    end
+    create_sections(devinfo, maptype, mode)
+  else
+    if param == "Start" then
+      local h, m = value:match("^(%d+):(%d+)$")
+      if not h or not m or tonumber(h) > 23 or (not m:match("00") and not m:match("30")) then
+        return nil, "The time format is wrong."
+      end
+    elseif param == "Enable" then
+      if value == "1" then
+        return nil, "The Enable value is invalid. The Enable only can be set as '0' when RoutineEnable is '1'."
+      else
+        create_sections(devinfo, maptype, "online")
+        setting.online = {}
+        local onlineaction = get_section_names(devinfo, maptype, "online")
+        setting.online.sectionname = onlineaction
+        setting.online.enabled = value
+      end
+    end
+  end
+
+  local saction, stimer = get_section_names(devinfo, maptype, mode)
+  setting.timer.sectionname = stimer
+  setting.action.sectionname = saction
+
+  if (param == "ScheduledEnable" and mode == "routine") or (param == "Enable" and mode == "online") then
+    setting.action.enabled = value
+  end
+
+  if map[param] ~= "enabled" then
+    setting.timer[map[param]] = value
+    --When Lease, Start, Frequency are set completed, set all the ToD information
+    tod_binding.sectionname = setting.timer.sectionname
+    tod_binding.option = nil
+    local content = uci.getall_from_uci(tod_binding)
+    content[map[param]] = value
+    if content.lease and content.lease ~= "" then
+      setting.action.script = format("%stodscript", maptype)
+      setting.timer.enabled = "1"
+      --Deal with routine
+      if mode == "routine" and content.frequency and content.frequency ~= ""
+        and content.start and content.start ~= "" then
+        content.stop = get_stop_time(content.start, content.lease)
+        setting.timer.start_time = format("%s:%s",frequency[content.frequency], content.start)
+        setting.timer.stop_time = format("%s:%s",frequency[content.frequency], content.stop)
+      elseif mode == "online" then --Deal with online
+        local current = time()
+        local offset = 0
+        content.start = date("%H:%M", current)
+        content.stop, offset = get_stop_time(content.start, content.lease)
+        setting.timer.periodic = "0"
+        setting.timer.start = content.start
+        setting.timer.start_time = format("%s:%s", date("%a", current+offset), content.stop)
+      end
+    end
+  end
+  for k, v in pairs(setting) do
+    tod_binding.sectionname = v.sectionname
+    for option, ov in pairs(v) do
+      if option ~= "sectionname" then
+        tod_binding.option = option
+        uci.set_on_uci(tod_binding, ov, commitapply)
+        transactions[tod_binding.config] = true
+      end
+    end
+  end
+
+  -- Set boost or stop enable on CPE
+  if param == "Enable" then
+    set_online_status(mac, maptype, value)
+  end
+  return true
+end
+
+Device_Hosts_Host_i_BS_.commit = commit
+Device_Hosts_Host_i_BS_.revert = revert
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Device_Hosts_Host_i_BS_, "#TYPE", {"X_FASTWEB_Boost", "X_FASTWEB_Stop"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
