@@ -1,0 +1,948 @@
+<div class="row">
+  <div class="col-md-4 toc-container hidden-sm">
+      <nav class="toc">
+          <ul>
+            <li du-scrollspy="parental_control" class="hidden-xs">
+                <a href="#parental_control" translate du-smooth-scroll>PAGES.ADVANCED.PARENTAL.TITLE</a>
+            </li>
+            <li class="hidden-xs" du-scrollspy="access_restrictions"><a href="#access_restrictions" translate du-smooth-scroll>PAGES.ADVANCED.RESTRICTIONS.TITLE</a></li>
+            <li du-scrollspy="port_conf_simple" class="hidden-xs">
+                <a href="#port_conf_simple" translate du-smooth-scroll>PAGES.ADVANCED.PORT_CONF_EASY.TITLE</a>
+            </li>
+            <li class="hidden-xs" du-scrollspy="port_conf_manual"><a href="#port_conf_manual" translate du-smooth-scroll>PAGES.ADVANCED.PORT_CONF_MAN.TITLE</a></li>
+            <li class="hidden-xs" du-scrollspy="usb_conf"><a href="#usb_conf" translate du-smooth-scroll>PAGES.ADVANCED.USB_CONF.TITLE</a></li>
+            <li class="hidden-xs" du-scrollspy="lan_conf"><a href="#lan_conf" translate du-smooth-scroll>PAGES.ADVANCED.LAN_CONF.TITLE</a></li>
+            
+            <!-- TABS -->
+            <li ng-class="{'visible-xs': true, active: !tabSelected}" ng-click="tabSelected = switchTab(false);">
+                <a href="" translate>PAGES.ADVANCED.PARENTAL.TITLE</a>
+            </li>
+            <li ng-class="{'visible-xs': true, active: tabSelected}" ng-click="tabSelected = switchTab(true);">
+                <a href="" translate>PAGES.ADVANCED.PORT_CONF_EASY.TITLE_MOBILE</a>
+            </li>
+          </ul>
+      </nav>
+  </div>
+
+  <div class="col-md-8 main-container">
+    <div ng-class="{'mobile-super-wrapper': true, active: !tabSelected}">  
+      <div id="parental_control"> 
+        <div ng-include="'views/partials/widget_parental_control.html'"></div>
+        <div ng-class="{'panel':true, 'panel-body':true, 'loading-data':!pc_dataReady}">
+            <form novalidate="" class="form-horizontal">
+              <div class="form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate="FORMS.{{parental.parental_enabled ? 'ENABLED':'DISABLED'}}"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="parental.parental_enabled" uib-btn-checkbox></button>
+                </div>
+              </div>
+              <fieldset class="no-animate">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label col-xs-5 text-left-xs" translate="PAGES.ADVANCED.PARENTAL.FORM.APPLY_TO.TITLE"></label>
+                  <div class="col-sm-7 col-xs-7 text-right-xs">
+                      <div class="btn-group" uib-dropdown>
+                        <button type="button" class="btn" uib-dropdown-toggle>
+                          <span translate="PAGES.ADVANCED.PARENTAL.FORM.APPLY_TO.{{parental.single_devices? 'SINGLE' : 'ALL'}}"></span> <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                          <li role="menuitem"><a href="" ng-click="parental.single_devices = true" translate="PAGES.ADVANCED.PARENTAL.FORM.APPLY_TO.SINGLE"></a></li>
+                          <li role="menuitem"><a href="" ng-click="parental.single_devices = false" translate="PAGES.ADVANCED.PARENTAL.FORM.APPLY_TO.ALL"></a></li>
+                        </ul>
+                      </div>
+                  </div>
+                  
+                  <div class="col-sm-7 col-sm-offset-3 col-xs-12">
+                    <p><small translate="PAGES.ADVANCED.PARENTAL.FORM.APPLY_TO.DESCRIPTION"></small></p>
+                  </div>
+                </div>
+                  
+                <div class="mobile-form-separator widget visible-xs">
+                  <span class="icon parental"></span>
+                  <div>
+                      <span translate="PAGES.ADVANCED.PARENTAL.{{parental.parental_enabled && parental.single_devices ? 'PC_ACTIVE' : (parental.parental_enabled? 'PC_ALL' : 'PC_INACTIVE')}}" translate-values="{dev_num: parental.blocks_list_dev.length}"></span>
+                  </div>
+                </div>
+                  
+                <div ng-class="{'form-group visible-xs': true, 'disabled': parental.parental_enabled && parental.single_devices == 0}" ng-if="parental.parental_enabled">
+                    <div class="mobile-adv-list">
+                        <div>
+                            <span class="icon icon-numeric">{{parental.blocks_list_dev.length}}</span>
+                            <span translate>PAGES.ADVANCED.PARENTAL.PROTECTED_DEVICES</span>
+                        </div>
+                        <div ng-repeat="dev in parental.blocks_list_dev">
+                            <span ng-class="{'icon':true, 'icon-{{dev.icon}}':true, active:true}"></span>
+                            <span>{{dev.name}}</span>
+                        </div>
+                    </div>
+                </div>
+                <br />
+                <div class="form-group visible-xs">
+                  <div class="button-container text-right-xs">
+                    <button ng-disabled="parental.parental_enabled && parental.single_devices == 0" class="btn btn-default" ng-click="openAddDevices()" type="button" translate>WIDGETS.PARENTAL_CONTROL.ADD</button>
+                    <button ng-disabled="parental.parental_enabled && parental.single_devices == 0" class="btn btn-default" ng-click="openRemoveDevices()" type="button" translate>WIDGETS.PARENTAL_CONTROL.REMOVE</button>
+                  </div>
+                </div>
+                <br />
+                <div class="form-group">
+                  <label class="col-sm-3 control-label hidden-xs" translate="PAGES.ADVANCED.PARENTAL.FORM.BLOCKS.TITLE"></label>
+                  <div class="col-sm-9">
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th>URL</th>
+                          <th translate>FORMS.STATUS</th>
+                          <th translate>FORMS.DELETE</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat="block in parental.blocks_list_uri">
+                          <td>{{block.url}}</td>
+                          <td>
+                            <button type="button" class="btn btn-toggle" ng-model="block.active" uib-btn-checkbox></button>
+                          </td>
+                          <td><a href="" ng-click="deleteParentalUrl(block)" class="icon icon-delete"></a></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </fieldset>
+              <div class="form-group">
+                <div class="col-sm-9 col-sm-offset-3 col-xs-12">
+                  <button type="button" ng-click="openParentalAddUrl()" class="btn btn-default" translate>PAGES.ADVANCED.PARENTAL.ADD_NEW</button>
+                </div>
+              </div>
+            </form>
+        </div>
+      </div>
+      <div class="button-container text-right">
+        <button type="button" ng-click="updateParentalChanges()" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button>
+        <button type="button" ng-click="revertParentalStatus()" class="btn btn-default" translate>FORMS.CANCEL</button>
+      </div><br />
+    </div>
+
+    <!-- CONFIGURATION WRAPPER (for mobile) -->
+    <div ng-class="{'mobile-super-wrapper': true, active: tabSelected}">
+     
+      <!-- ACCESS RESTRICTIONS -->
+      <form class="form-horizontal" ng-submit="update_restrictions(restrict)">  
+        <div id="access_restrictions" class="panel">
+
+          <div class="panel-heading panel-heading-xs">
+            <h3 class="panel-title" translate>PAGES.ADVANCED.RESTRICTIONS.TITLE</h3>
+          </div>
+          <!--div class="panel-body"-->              
+          <!-- June modify -->
+          <div ng-class="{'panel-body':true, 'loading-data':!rs_dataReady}">              
+            <fieldset>
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate="PAGES.ADVANCED.RESTRICTIONS.BEHAVIOUR.TITLE"></label>
+                  <div class="col-sm-7">
+                      <div class="btn-group" uib-dropdown>
+                        <button type="button" class="btn" uib-dropdown-toggle>
+                          <span translate="PAGES.ADVANCED.RESTRICTIONS.BEHAVIOUR.{{restrict.behaviour? 'ALLOW' : 'DENY'}}"></span> <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                          <li role="menuitem"><a ng-click="restrict.behaviour = true" href="" translate="PAGES.ADVANCED.RESTRICTIONS.BEHAVIOUR.ALLOW"></a></li>
+                          <li role="menuitem"><a ng-click="restrict.behaviour = false" href="" translate="PAGES.ADVANCED.RESTRICTIONS.BEHAVIOUR.DENY"></a></li>
+                        </ul>
+                      </div>
+                  </div>
+                  
+                  <div class="col-sm-7 col-sm-offset-3 col-xs-12">
+                    <p><small translate="PAGES.ADVANCED.RESTRICTIONS.BEHAVIOUR.DESCRIPTION"></small></p>
+                  </div>
+                </div>
+                
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate="PAGES.ADVANCED.RESTRICTIONS.LIST.TITLE"></label>
+                  <div class="col-sm-9" fw-loader="restrict.devices">
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th translate="FORMS.NAME"></th>
+                          <th translate="PAGES.ADVANCED.RESTRICTIONS.LIST.MAC"></th>
+                          <th translate="FORMS.STATUS"></th>
+                          <th translate="FORMS.DELETE"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat="dev in restrict.devices" ng-if="dev.restrict_action != 'delete' && dev.restrict_action != 'none'">
+                          <td>{{dev.name}}</td>
+                          <td>{{dev.mac}}</td>
+                          <td>
+                            <button type="button" class="btn btn-toggle" ng-model="dev.active" uib-btn-checkbox></button>
+                          </td>
+                          <td><a class="icon icon-delete" ng-click="delete_device(dev.mac)"></a></td>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+            </fieldset>                
+            <div class="row">
+              <div class="col-sm-offset-3 col-sm-7"><button type="button" class="btn btn-default" ng-click="openRestrictionsAddDevices()" translate>PAGES.ADVANCED.RESTRICTIONS.ADD_NEW</button></div>
+            </div> 
+           
+          </div>
+        </div>
+        <div class="button-container text-right hidden-xs">
+          <button type="submit" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button>
+          <button type="button" class="btn btn-default" ng-click="revertRestrictions()" translate>FORMS.CANCEL</button>
+        </div><br />
+      </form>
+      
+      <!-- SIMPLE PORT CONFIGURATION -->
+      <form novalidate="" class="form-horizontal">
+        <div id="port_conf_simple" class="panel">
+          <div class="panel-heading panel-heading-xs">
+            <h3 class="panel-title" translate>PAGES.ADVANCED.PORT_CONF_EASY.TITLE</h3>
+          </div>
+          <div ng-class="{'panel-body':true, 'loading-data':!spc_dataReady}">
+            <fieldset>
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-change="update_upnp_status()" ng-model="spc.upnp" uib-btn-checkbox></button>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 col-xs-12 hidden-xs">
+                  <p><small translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DESC"></small></p>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset ng-disabled="!spc.upnp" ng-class="{'hidden-xs': true, disabled: !spc.upnp}">
+              <div class="form-group">
+                  <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.TITLE"></label>
+                  <div class="col-sm-9">
+                    <table class="table table-condensed no-animate">
+                      <thead>
+                        <tr>
+                          <!-- SHOULD WE HAVE DESTINATION? -->
+                          <!--th translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.DEST"></th-->
+                          <th translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.DESC"></th>
+                          <th translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.PROT"></th>
+                          <th translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.INT_PORT"></th>
+                          <th translate="PAGES.ADVANCED.PORT_CONF_EASY.UPNP_DET.EXT_PORT"></th>
+                          <th>&nbsp;</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat-start="det in spc.upnp_details">
+                          <!--td>{{det.destination}}</td-->
+                          <td>{{det.descr}}</td>
+                          <td>{{det.proto}}</td>
+                          <td>{{det.int_port}}</td>
+                          <td>{{det.ext_port}}</td>
+                          <td style="cursor:pointer" ng-class="{'dropup':upnp_det.isExpanded}" ng-click="upnp_det.isExpanded=!upnp_det.isExpanded">
+                              <span class="caret"></span>
+                          </td>
+                        </tr>
+                        <tr class="expanded_details" ng-repeat-end>
+                            <td ng-if="upnp_det.isExpanded" colspan="5">
+                                <div class="col-8-fixed-container" style="padding: 0 0 0 3px">
+                                  <div class="row">
+                                    <!--label class="col-xs-3 control-label text-right">IP</label-->
+                                    <div class="col-xs-3 col-xs-offset-9">
+                                       <span class="small">{{det.ip}}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                            </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <div class="form-group">
+                  <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_EASY.MAPPING.CONSOLE.TITLE"></label>
+                  <div class="col-sm-9">
+                    <table class="table table-condensed spc">
+                      <thead>
+                        <tr>
+                          <th translate="FORMS.NAME"></th>
+                          <th class="th-7" translate="FORMS.STATUS"></th>
+                          <th class="th-6" translate="FORMS.DELETE"></th>
+                          <th class="th-2">&nbsp;</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat-start="rule in spc.consoles">
+                          <td><strong>{{rule.name}}</strong></td>
+                          <td>
+                            <!--button ng-click="updateSpcRuleStatus(rule)" type="button" class="btn btn-toggle" ng-model="rule.active" btn-checkbox-false="'0'" btn-checkbox-true="'1'" uib-btn-checkbox></button-->
+                            <!-- June modify -->
+                            <button ng-click="updateSpcRuleStatus(rule)" type="button" class="btn btn-toggle" ng-model="rule.active" uib-btn-checkbox ng-click="rule.active == '1' ? '0' : '1'" btn-checkbox-true="'1'" btn-checkbox-false="'0'"></button>
+                          </td>
+                          <td class=""><a ng-click="removeSpcRule(rule, 'consoles')" class="icon icon-delete"></a></td>
+                          <td style="cursor:pointer" ng-class="{'dropup':spc_rule.isExpanded}" ng-click="spc_rule.isExpanded=!spc_rule.isExpanded">
+                              <span class="caret"></span>
+                          </td>
+                        </tr>
+                        <tr class="expanded_details" ng-repeat-end>
+                          <td ng-if="spc_rule.isExpanded" colspan="4">
+                            <div class="col-8-fixed-container">
+                              <div class="row">
+                                <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_EASY.MAPPING.CONSOLE.ID"></label>
+                                <!-- June modify start -->
+                                <!--
+                                <div class="col-xs-4">
+                                    <span class="icon icon-consolle active"></span><span>{{rule.name}}</span>
+                                </div>
+                                <div class="col-xs-5">
+                                   <span class="small">{{rule.ip}}</span>
+                                </div>
+                                -->
+                                <div class="col-xs-3">
+                                    <span class="icon icon-consolle active"></span><span>{{rule.name}}</span>
+                                </div>
+                                <div class="col-xs-3">
+                                   <span class="small">{{rule.hostname}}</span>
+                                </div>
+                                <div class="col-xs-3">
+                                   <span class="small">{{rule.ip}}</span>
+                                </div>
+                                <!-- June modify end -->
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div class="button-container">
+                      <button type="button" ng-click="openSpcModalAddRule('consoles')" class="btn btn-default" translate>PAGES.ADVANCED.PORT_CONF_EASY.MAPPING.CONSOLE.ADD_NEW</button>
+                    </div>
+                  </div>
+              </div>
+
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_EASY.MAPPING.SERVICE.TITLE"></label>
+                <div class="col-sm-9">
+                  <table class="table table-condensed">
+                    <thead>
+                      <tr>
+                        <th translate="FORMS.NAME"></th>
+                        <th class="th-7" translate="FORMS.STATUS"></th>
+                        <th class="th-6" translate="FORMS.DELETE"></th>
+                        <th class="th-2">&nbsp;</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr ng-repeat-start="rule in spc.services">
+                        <td><strong>{{rule.name}}</strong></td>
+                        <td>
+                          <!--button ng-click="updateSpcRuleStatus(rule)" type="button" class="btn btn-toggle" ng-model="rule.active" uib-btn-checkbox></button-->
+                          <!-- June modify -->
+                          <button ng-click="updateSpcRuleStatus(rule)" type="button" class="btn btn-toggle" ng-click="rule.enabled == '1' ? '0' : '1'" ng-model="rule.active" btn-checkbox-false="'0'" btn-checkbox-true="'1'" uib-btn-checkbox></button>
+                        </td>
+                        <td class=""><a ng-click="removeSpcRule(rule, 'services')" class="icon icon-delete"></a></td>
+                        <td style="cursor:pointer" ng-class="{'dropup':spc_service_rule.isExpanded}" ng-click="spc_service_rule.isExpanded=!spc_service_rule.isExpanded">
+                            <span class="caret"></span>
+                        </td>
+                      </tr>
+                      <tr class="expanded_details" ng-repeat-end>
+                        <td ng-if="spc_service_rule.isExpanded" colspan="4">
+                          <div class="col-8-fixed-container">
+                            <div class="row">
+                              <label class="col-xs-3 control-label text-right">Info</label>
+                              <!-- June modify start -->
+                              <!--
+                              <div class="col-xs-4">
+                                  <span>{{rule.name}}</span>
+                              </div>
+                              <div class="col-xs-5">
+                                  <small>{{rule.ip}}</small>
+                              </div>
+                              -->
+                              <div class="col-xs-3">
+                                  <span>{{rule.name}}</span>
+                              </div>
+                              <div class="col-xs-3">
+                                  <small>{{rule.hostname}}</small>
+                              </div>
+                              <div class="col-xs-3">
+                                  <small>{{rule.ip}}</small>
+                              </div>
+                              <!-- June modify end -->
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div class="button-container">
+                    <button type="button" ng-click="openSpcModalAddRule('services')" class="btn btn-default" translate>PAGES.ADVANCED.PORT_CONF_EASY.MAPPING.SERVICE.ADD_NEW</button>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+          </div>
+        </div>
+      </form>
+    </div>
+  
+  <!-- MANUAL PORT CONFIGURATION -->
+    <form novalidate="" class="form-horizontal hidden-xs" name="form_port_conf" ng-submit="form_port_conf.$valid && update_port_settings(mpc)">
+      <div id="port_conf_manual" class="panel">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.ADVANCED.PORT_CONF_MAN.TITLE</h3>
+        </div>
+        <div ng-class="{'panel-body':true, 'loading-data':!mpc_dataReady}">
+          <fieldset>
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.PORT_CONF_MAN.FIREWALL"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="mpc.enabled" uib-btn-checkbox></button>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 col-xs-12">
+                  <p><small translate="PAGES.ADVANCED.PORT_CONF_MAN.FW_DESC"></small></p>
+                </div>
+              </div>
+
+              <!-- June modify -->
+              <fieldset ng-disabled="!mpc.enabled" ng-class="{disabled: !mpc.enabled}">
+              <div class="form-group">
+                  <label class="col-sm-3 control-label text-right col-xs-7 text-left-xs" translate="PAGES.ADVANCED.PORT_CONF_MAN.LEVEL.TITLE"></label>
+                  <div class="col-sm-4 col-xs-5 text-right-xs">
+                      <div class="btn-group" uib-dropdown>
+                        <button type="button" class="btn" uib-dropdown-toggle>
+                          <span translate="PAGES.ADVANCED.PORT_CONF_MAN.LEVEL.NAME_{{mpc.level}}"></span> <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                          <li role="menuitem" ng-repeat="(key, value) in mpc.level_list">
+                            <a ng-click="mpc.level = value" href="" translate="PAGES.ADVANCED.PORT_CONF_MAN.LEVEL.NAME_{{value}}"></a>
+                          <li>
+                        </ul>
+                      </div>
+                  </div>
+                  <div class="col-sm-7 col-sm-offset-3 col-xs-12">
+                    <p><small translate="PAGES.ADVANCED.PORT_CONF_MAN.LEVEL.DESC_{{mpc.level}}"></small></p>
+                  </div>
+              </div>
+              <!-- June modify -->
+              </fieldset>
+              
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.PORT_CONF_MAN.DMZ"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="mpc.dmz.enabled" uib-btn-checkbox></button>
+                </div>
+                <div class="col-sm-7 col-sm-offset-3 col-xs-12">
+                  <p><small translate="PAGES.ADVANCED.PORT_CONF_MAN.DMZ_DESC"></small></p>
+                </div>
+              </div>
+
+              <fieldset ng-disabled="!mpc.dmz.enabled" ng-class="{disabled: !mpc.dmz.enabled}">
+                <div class="form-group">
+                  <label class="col-sm-3 control-label" translate>IP client DMZ</label>
+                  <div class="col-sm-5">
+                    <input type="text" class="form-control" ng-required="mpc.dmz.enabled" placeholder="Es. 192.168.1.234" ng-pattern="validatorPatterns.IP" ng-model="mpc.dmz.server"/>
+                  </div>
+                </div>
+              </fieldset>
+              
+              
+              <!-- MAPPING -->
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.TITLE"></label>
+                <div class="col-sm-9">
+                    
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.SERVICE"></th>
+                          <th translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.IP"></th>
+                          <th translate="FORMS.STATUS"></th>
+                          <th translate="FORMS.DELETE"></th>
+                          <th>&nbsp;</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat-start="(key, dev) in mpc.mapping track by $index">
+                          <td>{{dev.descr}}</td>
+                          <td>{{dev.ip}}</td>
+                          <td>
+                            <button type="button" class="btn btn-toggle" ng-model="dev.enabled" uib-btn-checkbox ng-click="dev.enabled == '1' ? '0' : '1'" uib-btn-checkbox btn-checkbox-true="'1'" btn-checkbox-false="'0'"></button>
+                          </td>
+                          <td class=""><a class="icon icon-delete" ng-click="port_mapping_delete(dev)" href=""></a></td>
+                          <td style="cursor:pointer" ng-class="{'dropup': portMappingIsExpanded.index == $index}" ng-click="setPortMappingIsExpanded($index)">
+                              <span class="caret"></span>
+                          </td>
+                        </tr>
+                        <tr class="expanded_details" ng-repeat-end>
+                          <td ng-if="portMappingIsExpanded.index == $index" colspan="4">
+                              <div class="col-8-fixed-container">
+                                  <div class="form-group">
+                                      <label class="col-xs-3 control-label text-right" translate="FORMS.NAME"></label>
+                                      <div class="col-xs-4">
+                                          <input type="text" class="form-control" ng-required="true" ng-model="dev.descr">
+                                      </div>
+                                  </div>
+                                  <div class="form-group">
+                                      <label class="col-xs-3 control-label text-right"  translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.IP"></label>
+                                      <div class="col-xs-4">
+                                          <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="dev.ip">
+                                      </div>
+                                  </div>
+                                  <div class="form-group">
+                                      <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.PROT"></label>
+                                      <div class="col-xs-4">
+                                         <span class="form-control">{{dev.proto == 'UDP'? 'UDP' : 'TCP/IP'}}</span>
+                                        <!--div class="btn-group" uib-dropdown>
+                                          <button type="button" class="btn" uib-dropdown-toggle>
+                                            <span>{{dev.proto == 'UDP'? 'UDP' : 'TCP/IP'}}</span> <span class="caret"></span>
+                                          </button>
+                                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                                            <li role="menuitem"><a ng-click="dev.proto = 'UDP'; dev.isModified = true" href="">UDP</a></li>
+                                            <li role="menuitem"><a ng-click="dev.proto = 'TCP'; dev.isModified = true" href="">TCP/IP</a></li>
+                                          </ul>
+                                        </div-->
+                                      </div>
+                                  </div>
+                                  <div class="form-group">
+                                      <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.EXT_PORT"></label>
+                                      <!--div class="col-xs-3">
+                                          <input type="number" class="form-control" ng-required="true" ng-change="autoFillIntPort(dev)" ng-change="dev.isModified = true" ng-min="port_range.min" ng-max="port_range.max" ng-model="dev.ext_port_start">
+                                      </div>
+                                      <div class="col-xs-3">
+                                          <input type="number" class="form-control" ng-required="true" ng-change="dev.isModified = true" ng-min="dev.ext_port_start" ng-max="port_range.max" ng-model="dev.ext_port_end">
+                                      </div-->
+                                      <div class="col-xs-9">
+                                        <span class="form-control">{{dev.ext_port_start}} - {{dev.ext_port_end}}</span>
+                                      </div>
+                                  </div>
+                                  <div class="form-group">
+                                      <label class="col-xs-3 control-label number-right" translate="PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.INT_PORT"></label>
+                                      <!--div class="col-xs-3">
+                                          <input type="number" class="form-control" ng-required="true" ng-change="dev.isModified = true" ng-min="port_range.min" ng-max="port_range.max" ng-model="dev.int_port_start">
+                                      </div>
+                                      <div class="col-xs-3">
+                                          <input type="number" readonly="" class="form-control" ng-required="true" ng-min="port_range.min" ng-max="port_range.max" ng-value="getPortMappingEndPort(dev)">
+                                      </div-->
+                                      <div class="col-xs-9">
+                                        <span class="form-control">{{dev.int_port_start}} - {{getPortMappingEndPort(dev)}}</span>
+                                      </div>
+                                  </div>
+                                  <!-- June modify start -->
+                                  <div class="form-group" ng-if="!checkPortValid(portMappingIsExpanded.index)">
+                                      <label class="col-xs-3"></label>
+                                      <div class="col-xs-6">
+                                          <p class="hidden-xs"><small translate="">PAGES.ADVANCED.PORT_CONF_MAN.PORT_INVALID</small></p>
+                                      </div>
+                                      <div class="col-xs-3"></div>
+                                  </div>
+                                  <!-- June modify end -->
+                              </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-sm-9 col-sm-offset-3">                          
+                  <button type="button" class="btn btn-default" ng-disabled="!mpc_dataReady || mpc.mapping.length >= 32" ng-click="openPortSettingsAddPortMapping()" translate>PAGES.ADVANCED.PORT_CONF_MAN.MAPPING.ADD_NEW</button>
+                </div>
+              </div>
+          </fieldset>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-sm-12">
+         <div class="button-container text-right hidden-xs">
+          <button type="submit" class="btn btn-default" ng-disabled="!mpc_dataReady || !checkPortValidAll() || !checkPortRangeAll() || (mpc.dmz.enabled && !dmzcfg_valid())" translate>FORMS.SAVE_CHANGES</button>
+          <button type="button" class="btn btn-default" ng-disabled="!mpc_dataReady" ng-click="port_settings_cancel()" translate>FORMS.CANCEL</button>
+        </div><br />
+        </div>   
+      </div>
+    </form>
+
+  <!-- USB CONFIGURATION -->
+    <!--form novalidate class="form-horizontal"-->
+    <!-- June modify -->
+    <form novalidate class="form-horizontal" name="form_usb_config">
+      <div id="usb_conf" class="panel hidden-xs">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.ADVANCED.USB_CONF.TITLE</h3>
+        </div>
+        <!--div class="panel-body"-->
+        <!-- June modify -->
+        <div ng-class="{'panel-body':true, 'loading-data':!usb_dataReady}">
+          <fieldset>
+            <div class="form-group">
+              <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.USB_CONF.DLNA"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="usb.dlna_enabled" uib-btn-checkbox></button>
+              </div>
+              <div class="col-sm-7 col-sm-offset-3">
+                <p><small translate="PAGES.ADVANCED.USB_CONF.DLNA_DESC"></small></p>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.USB_CONF.PRINT_SERVER"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="usb.printserver_enabled" uib-btn-checkbox></button>
+              </div>
+              <div class="col-sm-7 col-sm-offset-3">
+                <p><small translate="PAGES.ADVANCED.USB_CONF.PRINT_SERVER_DESC"></small></p>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.USB_CONF.FILE_SHARE"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="usb.samba_enabled" uib-btn-checkbox></button>
+              </div>
+              <div class="col-sm-7 col-sm-offset-3">
+                <p><small translate="PAGES.ADVANCED.USB_CONF.FILE_SHARE_DESC"></small></p>
+              </div>
+            </div>
+            
+            <fieldset ng-class="{disabled:!usb.samba_enabled}" ng-disabled="!usb.samba_enabled">
+              <!-- DISKS -->
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.DISKS.TITLE"></label>
+                <div class="col-sm-9">
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th translate="FORMS.NAME"></th>
+                          <th translate="PAGES.ADVANCED.USB_CONF.DISKS.FS"></th>
+                          <th translate="PAGES.ADVANCED.USB_CONF.DISKS.TOT_SPACE"></th>
+                          <th translate="PAGES.ADVANCED.USB_CONF.DISKS.FREE_SPACE"></th>
+                          <th translate="PAGES.ADVANCED.USB_CONF.DISKS.EJECT"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr ng-repeat="disk in usb.disks">
+                          <td>{{disk.name}}</td>
+                          <td>{{disk.fs}}</td>
+                          <td>{{disk.size}}</td>
+                          <td>{{disk.available}}</td>
+                          <td><button ng-disabled="usb.umounting" ng-click="umount_usb_device(disk)" class="btn btn-white" translate="PAGES.ADVANCED.USB_CONF.DISKS.EJECT_B"></button></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                </div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.SERVER_NAME"></label>
+                  <div class="col-xs-5">
+                      <!--input type="text" class="form-control" ng-model="usb.samba_server"-->
+                      <!-- June modify -->
+                      <input type="text" class="form-control" ng-model="usb.samba_server" ng-maxlength="15" ng-pattern="/[0-9a-zA-Z]$/">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.WORKGROUP"></label>
+                  <div class="col-xs-5">
+                      <input type="text" class="form-control" ng-model="usb.samba_workgroup">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <!-- INTERFACE -->
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.INTERFACE.TITLE"></label>
+                  <div class="col-xs-4">
+                      <div class="no-animate btn-group" uib-dropdown>
+                        <button type="button" class="btn" uib-dropdown-toggle>
+                          <span ng-if="usb.samba_share_on != 'wan'" translate>PAGES.ADVANCED.USB_CONF.INTERFACE.LAN</span>
+                          <span ng-if="usb.samba_share_on == 'wan'" translate>PAGES.ADVANCED.USB_CONF.INTERFACE.LANWAN</span>
+                          <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                          <li role="menuitem"><a ng-click="usb.samba_share_on = 'lan'" href="" translate>PAGES.ADVANCED.USB_CONF.INTERFACE.LAN</a></li>
+                          <li role="menuitem"><a ng-click="usb.samba_share_on = 'wan'; usb.disk_protected = true" href="" translate>PAGES.ADVANCED.USB_CONF.INTERFACE.LANWAN</a></li>
+                        </ul>
+                      </div>
+                  </div>
+              </div>
+              
+              <div class="form-group">
+                <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.USB_CONF.DISK_PROTECTION"></label>
+                <div class="col-sm-7 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-click="usb.disk_protected = usb.samba_share_on == 'wan' ? true : usb.disk_protected" ng-model="usb.disk_protected" uib-btn-checkbox></button>
+                </div>
+              </div>
+              
+              <fieldset ng-disabled="!usb.disk_protected">
+                <div class="form-group">
+                    <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.ID"></label>
+                    <div class="col-xs-5">
+                        <!--input type="text" class="form-control" ng-model="usb.disk_username" ng-required="usb.disk_protected"-->
+			                  <!-- June modify -->
+                        <input type="text" class="form-control" ng-model="usb.disk_username" ng-required="usb.disk_protected" readonly>
+                    </div>
+                    <div class="col-xs-4"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.PASS"></label>
+                    <div class="col-xs-5">
+                        <input type="password" class="form-control" ng-model="usb.disk_password" ng-required="usb.disk_protected" maxlength="32">
+                        <p class="hidden-xs">
+                            <small translate>PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY_LABEL</small>
+                            <small translate="PAGES.WIFI.MAIN_NETWORK.PASSWORD_SECURITY.{{calSmbPwdStrength(usb.disk_password)}}"></small>
+                        </p>
+                    </div>
+                    <div class="col-xs-4"></div>
+                </div>
+              </fieldset>
+            </fieldset>
+            <hr />
+            <div class="form-group">
+              <label class="col-sm-3 col-xs-8 control-label text-right text-left-xs" translate="PAGES.ADVANCED.USB_CONF.MOBIL_BKUP"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="usb['3g_fallback']" uib-btn-checkbox></button>
+              </div>
+              <div class="col-sm-7 col-sm-offset-3">
+                <p><small translate="PAGES.ADVANCED.USB_CONF.MOBIL_BKUP_DESC"></small></p>
+              </div>
+            </div>
+            
+            <div ng-class="{'panel-body':true, 'loading-data':!mobile_dataReady}">
+            <fieldset ng-disabled="!usb['3g_fallback']">
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.CONN_STATUS"></label>
+                  <div class="col-xs-9 no-animate">
+                      <p class="form-control-static" ng-if="usb['3g_connection_status']"><span class="icon-bullet active"></span><span translate>FORMS.CONNECTED</span></p>
+                      <p class="form-control-static" ng-if="!usb['3g_connection_status']"><span class="icon-bullet"></span><span translate>FORMS.DISCONNECTED</span></p>
+                  </div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.SIM_PIN"></label>
+                  <div class="col-xs-5">
+                      <input type="password" class="form-control" ng-model="usb['3g_pin']">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.APN"></label>
+                  <div class="col-xs-5">
+                      <input type="text" class="form-control" ng-model="usb['3g_apn']">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.USER"></label>
+                  <div class="col-xs-5">
+                      <input type="text" class="form-control" ng-model="usb['3g_username']">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.PASS"></label>
+                  <div class="col-xs-5">
+                      <input type="password" class="form-control" ng-model="usb['3g_password']">
+                  </div>
+                  <div class="col-xs-4"></div>
+              </div>
+              
+              <!-- ACTIVATION TYPE -->
+              <div class="form-group">
+                  <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.TITLE"></label>
+                  <div class="col-sm-6 col-xs-9">
+                      <div class="btn-group no-animate" uib-dropdown>
+                        <button type="button" class="btn" uib-dropdown-toggle>
+                          <span ng-if="usb['3g_activation'] == 0" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN</span>
+                          <span ng-if="usb['3g_activation'] == 1" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN2</span>
+                          <span ng-if="usb['3g_activation'] == 2" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.AUTO</span> <span class="caret"></span>
+                        </button>
+                        <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                          <li role="menuitem"><a href="" ng-click="usb['3g_activation'] = '0'" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN</a></li>
+                          <li role="menuitem"><a href="" ng-click="usb['3g_activation'] = '1'" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN2</a></li>
+                          <li role="menuitem"><a href="" ng-click="usb['3g_activation'] = '2'" translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.AUTO</a></li>
+                        </ul>
+                      </div>
+                  </div>
+                  <!--div class="col-sm-7 col-sm-offset-3 col-xs-12  no-animate">
+                      <p ng-if="usb['3g_activation'] == 0"><small translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN_DESC</small></p>
+                      <p ng-if="usb['3g_activation'] == 1"><small translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.MAN2_DESC</small></p>
+                      <p ng-if="usb['3g_activation'] == 2"><small translate>PAGES.ADVANCED.USB_CONF.ACTIV_TYPE.AUTO_DESC</small></p>
+                  </div-->
+              </div>
+              
+              <!-- Connect Backup button -->
+              <div class="form-group">
+                  <div class="col-sm-9 col-sm-offset-3">
+                      <button ng-disabled="usb.connecting" ng-click="connect_to_mobile_data()" type="button" class="btn btn-default" translate>PAGES.ADVANCED.USB_CONF.CONNECT_BK</button>
+                  </div>
+              </div>
+              
+              <!-- DEACTIVATE AFTER -->
+              <fieldset ng-disabled="usb['3g_activation'] != 1">
+                <div class="form-group">
+                    <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.USB_CONF.DEACTIVATE_AFTER"></label>
+                    <div class="col-xs-6">
+                        <div class="btn-group no-animate" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                            <span>{{usb['3g_timeout']}}'</span> <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <li role="menuitem"><a ng-click="usb['3g_timeout'] = '30'" href="">30'</a></li>
+                            <li role="menuitem"><a ng-click="usb['3g_timeout'] = '60'" href="">60'</a></li>
+                          </ul>
+                        </div>
+                    </div>
+                </div>
+              </fieldset>
+            </fieldset>
+            </div> <!-- mobile_dataReady -->
+          </fieldset>
+        </div>
+      </div>
+      <div class="button-container text-right hidden-xs">
+        <!--button type="button" ng-click="update_usb_status()" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button-->
+        <!-- June modify -->
+        <button type="button" ng-click="update_usb_status()" class="btn btn-default" ng-disabled="!form_usb_config.$valid" translate>FORMS.SAVE_CHANGES</button>
+        <button type="button" ng-click="revert_usb_status()" class="btn btn-default" translate>FORMS.CANCEL</button>
+      </div>
+    </form>
+
+  <!-- LAN CONFIGURATION -->
+    <div class="nav_helper">
+      <form novalidate="" class="form-horizontal" name="frm_lan_config" ng-submit="frm_lan_config.$valid && update_lan_status(lan)">
+        <div id="lan_conf" class="panel hidden-xs">
+          <div class="panel-heading">
+            <h3 class="panel-title" translate>PAGES.ADVANCED.LAN_CONF.LONG_TITLE</h3>
+          </div>
+          <!--div class="panel-body"-->
+          <!-- June modify -->
+          <div ng-class="{'panel-body':true, 'loading-data':!lan_dataReady}">
+              
+              <fieldset>
+                  
+                  <div class="form-group">
+                      <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.LAN_CONF.FASTGATE_IP"></label>
+                      <div class="col-xs-5">
+                          <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="lan.ip">
+                      </div>
+                      <div class="col-xs-4"></div>
+                  </div>
+                  
+                  <div class="form-group">
+                      <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.LAN_CONF.MASK"></label>
+                      <div class="col-xs-5">
+                          <input type="text" class="form-control" ng-required="true" ng-pattern="validatorPatterns.IP" ng-model="lan.netmask">
+                      </div>
+                      <div class="col-xs-4"></div>
+                  </div>
+                  
+                  <div class="form-group">
+                    <label class="col-sm-3 control-label text-right col-xs-8 text-left-xs" translate="PAGES.ADVANCED.LAN_CONF.DHCP"></label>
+                    <div class="col-sm-7 col-xs-4 text-right-xs">
+                      <button type="button" class="btn btn-toggle" ng-model="lan.DHCP.enabled" uib-btn-checkbox></button>
+                    </div>
+                  </div>
+                  <fieldset ng-disabled="!lan.DHCP.enabled">
+                    <div class="form-group">
+                        <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.LAN_CONF.DHCP_POOL_RANGE"></label>
+                        <div class="col-xs-4">
+                          <div class="input-group">
+                            <span class="input-group-addon" translate="FORMS.RANGE_FROM">da</span>
+                            <input type="text" class="form-control" ng-required="lan.DHCP.enabled"  ng-pattern="validatorPatterns.IP" ng-model="lan.DHCP.start">
+                          </div>
+                        </div>
+                        <div class="col-xs-4">
+                          <div class="input-group">
+                            <span class="input-group-addon" translate="FORMS.RANGE_TO">a</span>
+                            <input type="text" class="form-control" ng-required="lan.DHCP.enabled" ng-pattern="validatorPatterns.IP" ng-model="lan.DHCP.end">
+                          </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DHCP LEASING -->
+                    <div class="form-group">
+                        <label class="col-xs-3 control-label text-right" translate="PAGES.ADVANCED.LAN_CONF.VALIDITY"></label>
+                        <div class="col-xs-4">
+                            <div class="btn-group" uib-dropdown>
+                              <button type="button" class="btn" uib-dropdown-toggle >
+                                <span>{{lan.DHCP.duration}} h</span> <span class="caret"></span>
+                              </button>
+                              <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                                <li role="menuitem" ng-repeat="opt in lan.validity_options"><a ng-click="lan.DHCP.duration = opt" href="">{{opt}} h</a></li>
+                              </ul>
+                            </div>
+                        </div>
+                        <div class="col-xs-4"></div>
+                    </div>
+                    
+                    
+                    <!-- DHCP LIST -->
+                    <div class="form-group">
+                      <label class="col-sm-3 control-label text-right" translate="PAGES.ADVANCED.LAN_CONF.DHCP_DETAILS.TITLE"></label>
+                      <div class="col-sm-9" fw-loader="lan.DHCP_list">
+                          <table class="table table-condensed">
+                            <thead>
+                              <tr>
+                                <th translate="PAGES.ADVANCED.LAN_CONF.IP"></th>
+                                <th translate="PAGES.ADVANCED.LAN_CONF.DHCP_DETAILS.MAC"></th>
+                                <th translate="FORMS.DELETE"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr ng-if="lan.DHCP_list.length > 0 && d.restrict_action != 'delete' && d.restrict_action != 'none'" ng-repeat="d in lan.DHCP_list">
+                                <td>{{d.ip}}</td>
+                                <td>{{d.mac}}</td>
+                                <td><a href="" ng-click="deleteLanStatusDHCP(d.mac)" class="icon icon-delete"></a></td>
+                              </tr>
+                              <tr ng-if="lan.DHCP_list.length == 0">
+                                <td><strong>---</strong></td>
+                                <td><strong>---</strong></td>
+                                <td></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                      </div>
+                      <div class="col-sm-9 col-sm-offset-3">
+                        <!--button type="button" class="btn btn-default" ng-click="openLanStatusAddDHCP()" translate>PAGES.ADVANCED.LAN_CONF.DHCP_DETAILS.ADD_NEW</button-->
+                        <!-- June modify -->
+                        <button type="button" class="btn btn-default" ng-disabled="addDHCPbtn_disabled" ng-click="openLanStatusAddDHCP()" translate>PAGES.ADVANCED.LAN_CONF.DHCP_DETAILS.ADD_NEW</button>
+                      </div>
+                    </div>
+                  </fieldset>
+                  
+                  <div class="form-group">
+                    <label class="col-sm-3 control-label col-xs-8 text-right text-left-xs" translate="PAGES.ADVANCED.LAN_CONF.IPV6_PREFIX"></label>
+                    <div class="col-sm-7 col-xs-4 text-right-xs">
+                      <p class="form-control-static">{{lan.IPV6.prefix_6rd || '------'}}</p>
+                    </div>
+                  </div>
+                  
+                <fieldset ng-disabled="!lan.IPV6.prefix_6rd"> <!-- June modify -->
+                  <div class="form-group">
+                    <label class="col-sm-3 col-xs-8 control-label text-right text-left-xs" translate="PAGES.ADVANCED.LAN_CONF.ENABLE_IPV6"></label>
+                    <div class="col-sm-7 col-xs-4 text-right-xs">
+                      <!--p class="form-control-static" translate="PAGES.ADVANCED.LAN_CONF.IPV6_{{lan.IPV6.on_LAN ? 'ON': 'OFF'}}">{{lan.IPV6.on_LAN}}</p-->
+                      <!-- June modify -->
+                      <button type="button" class="btn btn-toggle" ng-model="lan.IPV6.on_LAN" uib-btn-checkbox></button>
+                    </div>
+                  </div>
+                </fieldset> <!-- June modify -->
+              </fieldset>
+              
+          </div>
+        </div>
+        <div class="button-container text-right hidden-xs">
+          <!--button type="submit" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button-->
+          <!-- June modify -->
+          <button type="submit" class="btn btn-default" ng-disabled="!frm_lan_config.$valid || !lancfg_valid()" translate>FORMS.SAVE_CHANGES</button>
+          <button type="button" class="btn btn-default" ng-click="revertLanStatus()" translate>FORMS.CANCEL</button>
+        </div><br />
+      </form>
+    </div>
+  </div>
+</div>
