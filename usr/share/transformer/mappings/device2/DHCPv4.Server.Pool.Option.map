@@ -1,0 +1,182 @@
+local ipairs, mapper, string = ipairs, mapper, string
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DHCPv4_Server_Pool_i_Option_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Server.Pool.{i}.Option.{i}.",
+    access = "readOnly", --readOnly is supported, since add/delete is not implemented
+    numEntriesParameter = "OptionNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+--[[ TODO :
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+]]
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Tag = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "254",
+          },
+        },
+      },
+      Value = {
+        access = "readWrite",
+        type = "hexBinary",
+        min = "0",
+        max = "255",
+        default = "",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local splitKey = mapper("nwcommon").split_key
+local dhcpBinding = { config = "dhcp"}
+local isConfigChanged = false
+local commitApply = commitapply
+local tagAndValue = {}
+
+local function toHex(str)
+  return (str:gsub('.', function (c)
+    return string.format('%02X', string.byte(c))
+  end))
+end
+
+local function getUciParam(key)
+  local k = splitKey(key)
+  dhcpBinding.sectionname = k
+  dhcpBinding.option = "dhcp_option"
+  local result = getFromUci(dhcpBinding)
+  return result
+end
+
+Device_DHCPv4_Server_Pool_i_Option_i_.entries = function(mapping,key)
+  local entries = {}
+  local count = 1
+  dhcpBinding.sectionname = nil
+  dhcpBinding.option  = nil
+  uciHelper.foreach_on_uci(dhcpBinding, function(s)
+    if((s['.name'] == key)) then
+      if(s.dhcp_option) then
+        for _,v in pairs(s['dhcp_option']) do
+          local _key = key .. "|" ..count  --This key scheme will break should be taken care while implementing add/delete.
+          entries[#entries + 1] = _key
+          tagAndValue[_key] = v
+          count = count + 1
+        end
+      end
+    end
+  end)
+  return entries
+end
+
+Device_DHCPv4_Server_Pool_i_Option_i_.get = {
+    Tag = function(mapping, param, key)
+    local tagval = tagAndValue[key]
+    local tag = string.match(tagval,"%d+,(%d+)")
+    return tag or ""
+  end,
+
+ Value = function(mapping, param, key)
+    local tagval = tagAndValue[key]
+    local _,val = string.match(tagval, "([\"’])(.-)%1")
+    if(val) then
+      return toHex(val)
+    else
+      return ""
+    end
+  end
+}
+
+Device_DHCPv4_Server_Pool_i_Option_i_.getall = function(mapping,key)
+  local tagval = tagAndValue[key]
+  local tag, tagvalue = tagval:match("[^,]+,[^,]+,([^,]+),([^,]+)")
+  local value = ""
+  if(tagvalue) then
+    local tagvalue1 = tagvalue:match("([^\"]+)")
+    if(tagvalue1) then
+      value = toHex(tagvalue1)
+    end
+  end
+  local allValues = {
+    Tag = tag,
+    Value =  value,
+  }
+  return allValues
+end
+
+Device_DHCPv4_Server_Pool_i_Option_i_.set = {
+  Tag = function(mapping,param,value,key)
+    local tagval = tagAndValue[key]
+    local result = getUciParam(key)
+    local tagval1 = tagval:match("[^,]+,[^,]+,([^,]+)")
+    local dhcpOption = {}
+    if result ~= "" then
+      for _,j in ipairs(result) do
+        local val1= string.match(j,"%d+,(%d+)")
+        if val1 == tagval1 then
+          j = j:match("([^,]+,[^,]+,)")
+          j = j..value..","
+        end
+        dhcpOption[#dhcpOption + 1] = j
+      end
+    end
+    setOnUci(dhcpBinding,dhcpOption,commitApply)
+    isConfigChanged = true
+  end,
+  Value = function(mapping,param,value,key)
+    local tagval = tagAndValue[key]
+    local result = getUciParam(key)
+    local tagval1 = tagval:match("[^,]+,[^,]+,([^,]+)")
+    local dhcpOption = {}
+    if result ~= "" then
+      for _,j in ipairs(result) do
+        local val1 = string.match(j,"%d+,(%d+)")
+        if val1 == tagval1 then
+          j = j:match("([^,]+,[^,]+,[^,]+,)")
+          value = "\""..value.."\""
+          j = j..value
+        end
+        dhcpOption[#dhcpOption + 1] = j
+      end
+    end
+    setOnUci(dhcpBinding,dhcpOption,commitApply)
+    isConfigChanged = true
+  end,
+}
+
+Device_DHCPv4_Server_Pool_i_Option_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(dhcpBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_DHCPv4_Server_Pool_i_Option_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(dhcpBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_DHCPv4_Server_Pool_i_Option_i_)
+
+

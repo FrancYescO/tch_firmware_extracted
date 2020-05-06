@@ -1,0 +1,223 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_IP_Interface_i_IPv4Address_i_ = {
+  objectType = {
+    name = "Device.IP.Interface.{i}.IPv4Address.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "IPv4AddressNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", --Enable parameter cannot be implemented as set, since disabling this will remove the interface.
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      IPAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      SubnetMask = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      AddressingType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "DHCP",
+          "IKEv2",
+          "AutoIP",
+          "IPCP",
+          "Static",
+        },
+        default = "Static",
+      },
+    }
+  }
+}
+
+local format, match = string.format, string.match
+local uciHelper = mapper("ucihelper")
+local commitApply = commitapply
+local nwCommon = mapper("nwcommon")
+local netmaskToMask = nwCommon.netmask2mask
+local ubusConnection = mapper("ubus").connect()
+local protoToAddrType = {static = "Static", dhcp = "DHCP", pppoe = "IPCP", pppoa = "IPCP"}
+local networkBinding = {config="network"}
+local isConfigChanged = false
+
+local ipcache = {}
+local emptyCacheEntry = {}
+local function getCachedIp(key, parentkey)
+  local iplist = ipcache[parentkey]
+  if iplist then
+    return iplist[key] or emptyCacheEntry
+  end
+  return emptyCacheEntry
+end
+
+Device_IP_Interface_i_IPv4Address_i_.entries = function(mapping, parentkey)
+  local keys = {}
+  local cache = {}
+  local ubusStatus = ubusConnection:call("network.interface." .. parentkey , "status", {})
+  local iplist = ubusStatus and ubusStatus["ipv4-address"] or {}
+  for idx, ip in ipairs(iplist) do
+    -- the key for the first IP address does not include the index to be consistent with
+    -- previous versions of this mapping.
+    local key = idx==1 and parentkey or (parentkey..'|'..idx)
+    cache[key] = {up=ubusStatus.up, ip=ip.address, mask=ip.mask, proto=ubusStatus.proto}
+    keys[#keys+1] = key
+  end
+  if #keys==0 then
+    -- there appear to be no ip addresses, present a Disable one
+    keys[1] = parentkey
+    cache[parentkey] = {up=ubusStatus.up, proto=ubusStatus.proto}
+  end
+  ipcache[parentkey] = cache
+  return keys
+end
+
+local function getEnable(key, parentKey, cachedIp)
+  local ip = cachedIp or getCachedIp(key, parentKey)
+  return (ip.ip and ip.up) and "1" or "0"
+end
+
+local function getStatus(key, parentKey, cachedIp)
+  local ip = cachedIp or getCachedIp(key, parentKey)
+  return (ip.ip and ip.up) and "Enabled" or "Disabled"
+end
+
+local function getIPAddress(key, parentKey, cachedIp)
+  local ip = cachedIp or getCachedIp(key, parentKey)
+  return ip.ip or ""
+end
+
+local function getSubnet(key, parentKey, cachedIp)
+  local ip = cachedIp or getCachedIp(key, parentKey)
+  return ip.mask and netmaskToMask(ip.mask) or ""
+end
+
+local function getAddressType(key, parentKey, cachedIp)
+  local ip = cachedIp or getCachedIp(key, parentKey)
+  return protoToAddrType[ip.proto] or ""
+end
+
+local getterTable = {
+  Enable = getEnable,
+  Status = getStatus,
+  IPAddress = getIPAddress,
+  SubnetMask = getSubnet,
+  AddressingType = getAddressType
+}
+
+Device_IP_Interface_i_IPv4Address_i_.get = function(mapping, param, key, parentKey)
+  return getterTable[param](key, parentKey)
+end
+
+Device_IP_Interface_i_IPv4Address_i_.getall = function(mapping, key, parentKey)
+  local ip = getCachedIp(key, parentKey)
+  local allValues = {
+    Enable = getEnable(key, parentKey, ip),
+    Status = getStatus(key, parentKey, ip),
+    IPAddress = getIPAddress(key, parentKey, ip),
+    SubnetMask = getSubnet(key, parentKey, ip),
+    AddressingType = getAddressType(key, parentKey, ip)
+  }
+  return allValues
+end
+
+local function isValidIPAddress(value)
+  local v = {match(value or "", "^(%d+)%.(%d+)%.(%d+)%.(%d+)$")}
+  if #v == 4 then
+    for _, val in ipairs(v) do
+      if tonumber(val)>255 then
+        return
+      end
+    end
+    return true
+  end
+end
+
+local function setUciParam(paramName, value, key)
+  networkBinding.sectionname=key
+  networkBinding.option=paramName
+  uciHelper.set_on_uci(networkBinding, value, commitApply)
+  isConfigChanged = true
+end
+
+Device_IP_Interface_i_IPv4Address_i_.set = {
+  IPAddress = function(mapping, param, value, key, parentKey)
+    local ip = getCachedIp(key, parentKey)
+    if ip.proto == "static" then
+      if isValidIPAddress(value) then
+        setUciParam("ipaddr",value,key)
+      else
+        return nil,format("%s is not a valid IP address",value or "nil")
+      end
+    else
+      return nil,format("setting IP address is not allowed: AddressingType is not Static")
+    end
+  end,
+
+  SubnetMask = function(mapping, param, value, key, parentKey)
+    local ip = getCachedIp(key, parentKey)
+    if ip.proto == "static" then
+      if isValidIPAddress(value) then
+        setUciParam("netmask",value,key)
+      else
+        return nil,format("%s is not a valid Subnet mask", value)
+      end
+    else
+      return nil,format("setting Subnet mask is not allowed: AddressingType is not Static")
+    end
+  end
+}
+
+Device_IP_Interface_i_IPv4Address_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_IP_Interface_i_IPv4Address_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+local function setUbusEvent(mapping, action, data)
+  if data["ipv4-address"] then
+    return { { key = data["interface"], paramname = "IPAddress" } }
+  end
+end
+
+Device_IP_Interface_i_IPv4Address_i_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, setUbusEvent, "network.interface")
+end
+
+register(Device_IP_Interface_i_IPv4Address_i_)
+
