@@ -1,0 +1,615 @@
+#!/bin/sh /etc/rc.common
+
+source $IPKG_INSTROOT/lib/functions/functions-tch.sh
+source $IPKG_INSTROOT/lib/functions/mmpbx-config-dump.sh
+
+START=99
+STOP=02
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+#SERVICE_STOP_TIME=60
+export MMPBX_SO_DIR=/usr/lib/mmpbx
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${MMPBX_SO_DIR}
+APP=led-fw-interface.lua
+PID_FILE=/var/run/$APP.pid
+EXECUTE_LOCK=/tmp/.execute.lock
+QUEUE_FILE_LOCK=/tmp/.mmpbxd.queue.lock
+QUEUE_FILE=/tmp/mmpbx.queue
+DIAGNOSTICS_CONFIG=/tmp/mmpbx_dump
+POLLING_TIME=0
+
+MMPBX_CHAIN="MMPBX"
+
+do_firewall_stop() {
+  # flush the MMPBX chains
+  iptables -t nat -F "${MMPBX_CHAIN}" 2>/dev/null
+  iptables -t filter -F "${MMPBX_CHAIN}" 2>/dev/null
+  ip6tables -t filter -F "${MMPBX_CHAIN}" 2>/dev/null
+}
+
+do_polling_start() {
+  i=1;
+  while [[ $i -le 5 ]]; do
+    sleep 2
+    do_polling="0"
+    ubus -t 2 call mmpbx.profile get >& /dev/null
+    if ! [ $? == "0" ] ; then
+      continue
+    fi
+    ubus -t 2 call mmpbx.device get >& /dev/null
+    if [ $? == "0" ] ; then
+      do_polling="1"
+      POLLING_TIME=`expr $i \* 2`
+      break
+    fi
+    ((i++))
+  done
+  if [ "$do_polling" == "1" ] ; then
+    start-stop-daemon -S -x $APP -p $PID_FILE -m -b
+  fi
+}
+
+do_polling_stop() {
+    start-stop-daemon -K -p $PID_FILE -s KILL
+    rm -rf $PID_FILE
+}
+
+remove_module_without_config() {
+  local uciconfig="$1"
+  local filename="$2"
+  if uci get $uciconfig 2>/dev/null; then
+    # Restore if file was deleted
+    ln -s /rom/usr/lib/mmpbx/$filename /usr/lib/mmpbx/$filename 2>/dev/null
+  else
+    rm -f /usr/lib/mmpbx/$filename
+  fi
+}
+
+# On platforms without i.e. dect (config) remove the .so file.
+# Once we can customize by removing packages, this can be removed
+remove_modules_without_config() {
+  remove_module_without_config mmpbxbrcmdectdev libmmpbxbrcmdect.so
+  remove_module_without_config mmpbxbrcmfxonet libmmpbxbrcmfxo.so
+  remove_module_without_config mmpbxbrcmfxsdev libmmpbxbrcmfxs.so
+  remove_module_without_config mmpbxinternalnet libmmpbxinternalnet.so
+  remove_module_without_config mmpbxrvsipnet libmmpbxrvsipnet.so
+  remove_module_without_config mmpbxrvsipdev libmmpbxrvsipdev.so
+  remove_module_without_config mmpbxmobilenet libmmpbxmobilenet.so
+}
+
+usb_interrupts_smp_affinity() {
+   irqNumList=$(cat /proc/interrupts | grep -e "hcd:usb" | awk '{print $1}' | sed 's/://g')
+   for irqNum in $irqNumList
+   do
+     echo $1 >/proc/irq/${irqNum}/smp_affinity
+   done
+}
+
+mmpbxd_start() {
+  config_load "mmswitch"
+  config_get mmswitchRtPriority global rt_priority 76
+  config_get mmswitchAvailable global ms_available 1
+  config_get mmswitchWaitForThreads global wait_for_threads 1
+
+  config_load "mmtonegen"
+  config_get mmtonegenRtPriority global rt_priority 76
+  config_get mmtonegenAvailable global tg_available 1
+  config_get mmtonegenWaitForThreads global wait_for_threads 1
+
+  config_load "mmpbx"
+  config_get sysLogPriority syslog syslog_priority 7
+  config_get_bool enabled global enabled 0
+  config_get traceLevel global trace_level 2
+  config_get mmpbxdPriority global mmpbxd_priority 75
+
+  config_load "mmpbxbrcmcountry"
+  config_get hcas_pri taskpri hcas_pri ""
+  config_get hrtbeat_pri taskpri hrtbeat_pri ""
+  config_get vrgdisp_pri taskpri vrgdisp_pri ""
+  config_get htsk_pri taskpri htsk_pri ""
+  config_get istw_pri taskpri istw_pri ""
+  config_get aort_pri taskpri aort_pri ""
+  config_get pstn_pri taskpri pstn_pri ""
+  config_get init_pri taskpri init_pri 99
+
+  touch /var/state/mmpbx
+  uci -P /var/state set mmpbx.state="STARTING"
+  logger -p $sysLogPriority "Mmpbx starting mmpbx.state=STARTING"
+  local args="-q"
+  local radvisionTraceLevel
+  local brcmTraceLevel
+
+  # check if dect emission is enabled / disabled and take appropriate action of back-up or restore if needed
+  $IPKG_INSTROOT/usr/lib/parameter_conversion/mmpbx_dectemission.sh
+
+  remove_modules_without_config
+
+  config_load "env"
+  local mac
+  config_get mac rip eth_mac ""
+  export MACADDR=$mac
+  local serial
+  config_get serial rip serial ""
+  export SERIAL=$serial
+
+  if [ $enabled -eq 0 ];
+  then
+    ubus send mmpbx.profilestate '{"voice":"NA@init_start"}'
+    logger -p $sysLogPriority "Mmpbx not enabled by config not starting, mmpbx.state=NA@init_start"
+    uci -P /var/state set mmpbx.state="NA"
+    return 0
+  fi
+
+  ubus send mmpbx.profilestate '{"voice":"ENABLED"}'
+
+  # Start mmdbd process
+  local mmdbd_path="/etc/lasdb.db"
+  local mmdbd_args="-p $mmdbd_path"
+  service_start /usr/bin/mmdbd $mmdbd_args
+
+  check_insert_module endpointdd.ko endpointdd
+  check_insert_module dsphal.ko dsphal
+  check_insert_module slicslac.ko slicslac
+  if [ $mmswitchAvailable -eq 1 ]
+  then
+    check_insert_module modmmswitch.ko modmmswitch
+  fi
+  check_insert_module mod_rv_rtp.ko  mod_rv_rtp
+  if [ $mmtonegenAvailable -eq 1 ];
+  then
+    check_insert_module modmmtonegen.ko modmmtonegen
+  fi
+  check_insert_module modmmconnkernelbrcm.ko modmmconnkernelbrcm
+
+  if [ $mmswitchWaitForThreads -eq 1 ];
+  then
+    while :
+      do
+        up=$(ps | grep mmswitchsock_w | grep -v grep)
+        if [ "$up" != "" ] ; then
+            break
+        fi
+      done
+    #Voice socket TX thread
+    setrtprio mmswitchsock_w $mmswitchRtPriority
+    while :
+      do
+        up=$(ps | grep mmswitchsock_r | grep -v grep)
+        if [ "$up" != "" ] ; then
+          break
+        fi
+      done
+    #Voice socket RX thread
+    setrtprio mmswitchsock_r $mmswitchRtPriority
+    while :
+      do
+        up=$(ps | grep mmswitch_wq | grep -v grep)
+        if [ "$up" != "" ] ; then
+          break
+        fi
+      done
+    #Work Queue thread
+    setrtprio mmswitch_wq $mmswitchRtPriority
+  fi
+
+  if [ $mmtonegenWaitForThreads -eq 1 ];
+  then
+    while :
+      do
+        up=$(ps | grep mmtonegen | grep -v grep)
+        if [ "$up" != "" ] ; then
+          break
+        fi
+      done
+    #Voice tone generator thread
+    setrtprio mmtonegen $mmtonegenRtPriority
+  fi
+
+  ([ $traceLevel -lt 0 ] || [ $traceLevel -gt 4 ]) && logger -p $sysLogPriority "Invalid tracelevel: $traceLevel"
+  args="$args -t $traceLevel"
+  ([ $mmpbxdPriority -ge 1 ] && [ $mmpbxdPriority -le 99 ]) && args="$args -p $mmpbxdPriority"
+
+  rm /tmp/mmpbx*.log 2>/dev/null
+
+  config_load "mmpbxbrcmfxsdev"
+  config_get brcmTraceLevel global trace_level 0
+  config_load "mmpbxrvsipnet"
+  config_get radvisionTraceLevel global radvision_trace_level 0
+
+  if [ $radvisionTraceLevel -gt 0 ];
+  then
+    export MMSIP_SIPLOGPATH=/tmp/mmpbx_sip.log
+    export MMSIP_MTFLOGPATH=/tmp/mmpbx_mtf.log;
+  fi
+  if [ $brcmTraceLevel -gt 2 ];
+  then
+    [ -f /proc/bcmlog ] && echo "l ept 3" > /proc/bcmlog
+  else
+    [ -f /proc/bcmlog ] && echo "l ept 0" > /proc/bcmlog
+  fi
+
+  # Reload firewall
+  fw3 -q reload
+
+  #  max contact number
+  mmdbd_max_contact_number=`uci get mmdbd.global.max_contact_number 2>/dev/null`
+  mmpbxbrcmdect_max_contact_number=`uci get mmpbxbrcmdectdev.global.max_contact_number 2>/dev/null`
+
+  if [ -n "${mmdbd_max_contact_number}" ] ;
+  then
+    if [ -n "${mmpbxbrcmdect_max_contact_number}" ] && [ ${mmpbxbrcmdect_max_contact_number} -eq ${mmdbd_max_contact_number} ] ;
+    then
+      logger -p $sysLogPriority "the 2 values of max contact are equal"
+    else
+      uci set mmpbxbrcmdectdev.global.max_contact_number=${mmdbd_max_contact_number}
+      uci commit
+    fi
+  elif [ -n "${mmpbxbrcmdect_max_contact_number}" ] ;
+  then
+    uci set mmdbd.global.max_contact_number=${mmpbxbrcmdect_max_contact_number}
+    uci commit
+  else
+    logger -p $sysLogPriority "the 2 values of max contact do not exist!"
+  fi
+
+  # temporary workaround to avoid the GW crash due to OoM, by limiting stack size
+  ulimit -S -s 1024
+  service_start /usr/bin/mmpbxd $args
+
+  # for now prevent multiple instance by checking PID file
+  if ! [ -e $PID_FILE ] ; then
+    do_polling_start
+  fi
+
+  # Let mmpbx fully start, UBUS object may get publish and then destoryed,
+  # if mmpbx self destruct, then UBUS command will catch these error.
+  if [[ $POLLING_TIME -lt 20 ]]; then
+    sleep `expr 20 - $POLLING_TIME`
+  fi
+
+  do_cleanup="0"
+  while :
+  do
+  ubus -t 60 call mmpbx.device get > /dev/null
+  if ! [ $? == "0" ] ; then
+    do_cleanup="1"
+    break
+  fi
+  ubus -t 60 call mmpbx.profile get > /dev/null
+  if ! [ $? == "0" ] ; then
+    do_cleanup="1"
+    break
+  fi
+  do_cleanup="0"
+  break
+  done
+
+  if [ "$do_cleanup" == "1" ] ; then
+     logger -p $sysLogPriority "Mmpbx failed to start, cleanup and stopping"
+     mmpbxd_stop
+     # state should have already been set by mmpbxd_stop
+  else
+     ubus send mmpbx.profilestate '{"voice":"RUNNING"}'
+     logger -p $sysLogPriority "Mmpbx is started, mmpbx.state=RUNNING !"
+     uci -P /var/state set mmpbx.state="RUNNING"
+  fi
+
+  #Check endpoint driver exists:
+  ls /lib/modules/*/endpointdd.ko > /dev/null 2>&1
+  if [ $? -eq "0" ] ; then
+    #Check if endpoint driver is loaded:
+    lsmod |grep -w endpointdd > /dev/null 2>&1
+    if [ $? -eq "0" ] ; then
+      if [ "$(process_exists voice-HCAS)" = "1" ] ; then
+        if [ "$hcas_pri" != "" ] ; then
+          setrtprio voice-HCAS $hcas_pri
+        fi
+      fi
+
+      if [ "$(process_exists voice-HRTBEAT)" = "1" ] ; then
+        if [ "$hrtbeat_pri" != "" ] ; then
+          setrtprio voice-HRTBEAT $hrtbeat_pri
+        fi
+      fi
+
+      if [ "$(process_exists voice-HTSK)" = "1" ] ; then
+        if [ "$htsk_pri" != "" ] ; then
+          setrtprio voice-HTSK $htsk_pri
+        fi
+        dsp_mask=`setcpumask voice-HTSK | head -1 | cut -d " " -f6`
+        setcpumask voice-EPINIT $dsp_mask
+        setcpumask mmswitchsock_w $dsp_mask
+        setcpumask mmswitchsock_r $dsp_mask
+        setcpumask mmswitch_wq $dsp_mask
+        setcpumask mmtonegen $dsp_mask
+        #USB interrupts affect voice related interrupt process on same core, so set USB interrupts to other core.
+        usb_interrupts_smp_affinity $((${dsp_mask}^3))
+        #setting all mmpbx threads affinity as Voice-HTSK affinity
+        mmpbx_pid=$(ps | grep -e "[/]usr/bin/mmpbxd" | awk '{ print $1}')
+        mmpbx_pids=$(ls /proc/${mmpbx_pid}/task)
+        for pid in $mmpbx_pids
+        do
+        taskset -p $dsp_mask "$pid"
+        done
+      fi
+
+      if [ "$(process_exists voice-EPINIT)" = "1" ] ; then
+        if [ "$init_pri" != "" ] ; then
+          chrt -p -f $init_pri `pidof voice-EPINIT`
+        fi
+      fi
+
+      if [ "$(process_exists voice-VRGDISP)" = "1" ] ; then
+        if [ "$vrgdisp_pri" != "" ] ; then
+          setrtprio voice-VRGDISP $vrgdisp_pri
+        fi
+      fi
+
+      if [ "$(process_exists voice-ISTW)" = "1" ] ; then
+    if [ "$istw_pri" != "" ] ; then
+      setrtprio voice-ISTW $istw_pri
+    fi
+      fi
+
+      if [ "$(process_exists voice-aoRT)" = "1" ] ; then #Check endpoint kernel task start
+    if [ "$aort_pri" != "" ] ; then
+      setrtprio voice-aoRT $aort_pri
+    fi
+      fi
+
+      if [ "$(process_exists voice-PSTN)" = "1" ] ; then
+    if [ "$pstn_pri" != "" ] ; then
+      setrtprio voice-PSTN $pstn_pri
+    fi
+      fi
+    fi
+  fi
+
+  #Check if dsphal driver exists (applicable to BRCM 5.02L0x delivery):
+  ls /lib/modules/*/dsphal.ko > /dev/null 2>&1
+  if [ $? -eq "0" ] ; then
+    #Check if endpoint driver is loaded:
+    lsmod |grep -w dsphal > /dev/null 2>&1
+    if [ $? -eq "0" ] ; then
+       cpu_type=`uname -m`
+       if [ "$cpu_type" = "armv7l" ] || [ "$cpu_type" = "aarch64" ]; then
+         dsp_mask=1
+         #setting all mmpbx threads affinity as dsp_mask affinity
+         mmpbx_pid=$(ps | grep -e "[/]usr/bin/mmpbxd" | awk '{ print $1}')
+         mmpbx_pids=$(ls /proc/${mmpbx_pid}/task)
+         for pid in $mmpbx_pids
+         do
+           taskset -p $dsp_mask "$pid"
+         done
+       else
+         dsp_mask=2
+       fi
+       setcpumask mmswitchsock_w $dsp_mask
+       setcpumask mmswitchsock_r $dsp_mask
+       setcpumask mmswitch_wq $dsp_mask
+       setcpumask mmtonegen $dsp_mask
+       #USB interrupts affect voice related interrupt process on same core, so set USB interrupts to other core.
+       usb_interrupts_smp_affinity $((${dsp_mask}^3))
+    else
+       logger -p $sysLogPriority "dsphal.ko is not loaded, Failed to set mmpbx processes affinities"
+    fi
+  fi
+
+  uci set mmpbx.voipdiagnostics.action=idle
+  uci commit
+  is_diagnostics_enabled=`uci get mmpbx.voipdiagnostics.enabled`
+  if [ -n "${is_diagnostics_enabled}" ] && [ ${is_diagnostics_enabled} -eq 1 ] ; then
+    collect_config_dump "$DIAGNOSTICS_CONFIG"
+  fi
+
+}
+
+mmpbxd_stop() {
+  config_load "mmswitch"
+  config_get mmswitchAvailable global ms_available 1
+
+  config_load "mmtonegen"
+  config_get mmtonegenAvailable global tg_available 1
+
+  config_load "mmpbx"
+  config_get sysLogPriority syslog syslog_priority 7
+
+  uci -P /var/state set mmpbx.state="STOPPING"
+  logger -p $sysLogPriority "Mmpbx stopping, mmpbx.state=STOPPING"
+  do_polling_stop
+
+  while :
+    do
+    up=$(ps|grep $APP | grep -v grep)
+    if [ "$up" == "" ] ; then
+        break
+    fi
+    kill -9 `ps | grep $APP | awk '{print $1}'`
+  done
+  # This acts to kick Voice LED and DECT LED to go off and so at start Status LED can be GREEN.
+  ubus send mmpbx.profilestate '{"voice":"NA@init_stop"}'
+  logger -p $sysLogPriority "Mmpbx service_stop voice=NA@init_stop"
+  service_stop /usr/bin/mmpbxd
+  logger -p $sysLogPriority "Mmpbx service_stop done"
+
+  service_stop /usr/bin/mmdbd
+
+  # Quick fix to still make the Voice LED and DECT LED go off when mmpbxd stop is done
+  ubus send mmpbx.dectled.status '{"dect_dev":"unregistered_unusable"}'
+
+  # This callback function is called for each configured fxs device
+  # It switches of the led for the fxs
+  # First it compses the command, for each device, adding a comma if needed
+  # then, it add the 'ubus ...' prefix and then it executes it (with eval for not interpreting the "")
+  switchOffLedForFXSDevice()
+  {
+      if [ "$addComma" == "" ]; then
+        thisCommand='"'$1'":"IDLE"'
+        addComma="1"
+      else
+        thisCommand=', "'$1'":"IDLE"'
+      fi
+      ubusCommand=$ubusCommand$thisCommand
+  }
+  config_load mmpbxbrcmfxsdev
+  ubusCommand=""
+  addComma=""
+  config_foreach switchOffLedForFXSDevice device
+  ubusCommand="ubus send mmpbx.voiceled.status '{ $ubusCommand }'"
+  eval $ubusCommand
+
+  if ! cat /etc/banner | grep "Product: gant-j" > /dev/null;
+  then
+    #Without a reload, the endpoint driver will crash on the next mmpbx start
+
+    count="0"
+    while [ $count -lt 5 ] ;
+    do
+        up=$(ps|grep /usr/bin/mmpbxd|grep -v grep)
+        if [ "$up" == "" ] ; then
+            break
+        fi
+        sleep 2
+        logger -p $sysLogPriority "Mmpbx processes still alive"
+        count=$(( $count + 1 ))
+    done
+
+    #Wait for the MMPBX and Endpoint Driver resources to be cleaned up properly.
+    check_remove_module modmmconnkernelbrcm
+    check_remove_module endpointdd
+#   check_remove_module dsphal
+    check_remove_module slicslac
+    check_remove_module dect
+    if [ $mmtonegenAvailable -eq 1 ];
+    then
+      check_remove_module modmmtonegen
+    fi
+    check_remove_module mod_rv_rtp
+    if [ $mmswitchAvailable -eq 1 ];
+    then
+       check_remove_module modmmswitch
+    fi
+  fi
+  do_firewall_stop
+  uci -P /var/state set mmpbx.state="NA"
+  logger -p $sysLogPriority "Mmpbx stopped, mmpbx.state=NAstopped"
+  if [ -f $DIAGNOSTICS_CONFIG ] ; then
+     rm -rf $DIAGNOSTICS_CONFIG
+  fi
+}
+
+# takes the lock execution lock
+# reads the queue, empty the queue and execute
+# after execution, check if queue has something more
+# if something is put into queue checks if last execution is same as new
+# if yes skips execution and empty queue.
+# release lock
+execute_queue() {
+  lock $EXECUTE_LOCK
+
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    func=$(cat $QUEUE_FILE)
+    rm $QUEUE_FILE
+  fi
+  lock -u $QUEUE_FILE_LOCK
+
+  case "$func" in
+    "mmpbxd_start")
+      mmpbxd_stop
+      mmpbxd_start
+    ;;
+    "mmpbxd_stop")
+      mmpbxd_stop
+    ;;
+    "mmpbxd_restart")
+      mmpbxd_stop
+      mmpbxd_start
+    ;;
+  esac
+
+  lock -u $EXECUTE_LOCK
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+restart() {
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_restart > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+start() {
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_start > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+stop(){
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_stop > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this entry point could be accessed only after EXTRA_COMMANDS env is set
+# right now only called by sysupgrade script to terminate voice normally before reboot
+stop_run_in_foreground(){
+  lock $QUEUE_FILE_LOCK
+  echo mmpbxd_stop > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  execute_queue
+}
+
+# This function check the module presence and insmod the module
+# How to call this function?  check_insert_module <KO file>  <Module Name>
+check_insert_module(){
+  ko=$1
+  mod=$2
+  ls /lib/modules/*/$ko > /dev/null 2>&1
+  ret=$(echo $?)
+  if [ $ret -eq "0" ]; then
+    modprobe $mod
+  fi
+}
+
+# This function remove the module if is already inserted using insmod
+# How to call this function? check_remove_module <Module Name>
+check_remove_module() {
+  mod=$1
+  lsmod | grep -w $mod  > /dev/null 2>&1
+  ret=$(echo $?)
+  if [ $ret -eq 0 ]; then
+    rmmod $mod
+  fi
+}

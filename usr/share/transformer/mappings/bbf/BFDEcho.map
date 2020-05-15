@@ -1,0 +1,184 @@
+local Multi_IP_Diagnostics_BFDEcho_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Complete",
+          "Error",
+          "Error_Other",
+          "Error_InterfaceDown",
+          "Error_NoIPAddress",
+          "Error_NoNextHop",
+          "Error_NoDestMac",
+          "Error_UnexpectedCmdReturn",
+          "Error_Internal",
+        },
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      ProtocolVersion = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "IPv4",
+          "IPv6",
+        },
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      DSCP = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "63",
+          },
+        },
+      },
+      IPAddressUsed = {
+        access = "readOnly",
+        type = "string",
+      },
+      DiagnosticsResult = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+local mapper, pairs, ipairs = mapper, pairs, ipairs
+local resolve, tokey = resolve, tokey
+local nwCommon = mapper('nwcommon')
+local splitKey = nwCommon.split_key
+local findLanWanInterfaces = nwCommon.findLanWanInterfaces
+local bfdEchoHelper = require('transformer.shared.bfdechohelper')
+local wanConn = require("transformer.shared.wanconnection")
+local network = require("transformer.shared.common.network")
+local allowed_dscp = {[10] = "AF11", [12] = "AF12", [14] = "AF13",
+                      [18] = "AF21", [20] = "AF22", [22] = "AF23",
+                      [26] = "AF31", [28] = "AF32", [30] = "AF33",
+                      [34] = "AF41", [36] = "AF42", [38] = "AF43",
+                      [0] = "CS0", [8] = "CS1", [16] = "CS2", [24] = "CS3", [32] = "CS4", [40] = "CS5", [48] = "CS6", [56] = "CS7",
+                      [46] = "EF",
+                      [4] = "lowdelay",
+                      [2] = "throughput",
+                      [1] = "reliability"}
+
+Multi_IP_Diagnostics_BFDEcho_.get = function(mapping, pname)
+  local value
+  if mapping._uciBinding[pname] then
+    value = bfdEchoHelper.uci_bfdecho_get(mapping._section, pname)
+    if pname == "Interface" then
+      local path = ""
+      local lanInterfaces = findLanWanInterfaces(false)
+      local isLan = false
+      for _,j in pairs(lanInterfaces) do
+        if (value == j) then
+          isLan = true
+          break
+        end
+      end
+      if mapping._section == "device2" then
+        path = resolve("Device.IP.Interface.{i}.", value)
+      else
+        if (isLan) then
+          path = resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', value)
+        else
+          local key, status = wanConn.get_connection_key(value)
+          if key and status then
+            if status.proto == "pppoe" or status.proto == "pppoa" then
+              path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key)
+            else
+              path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key)
+            end
+          end
+        end
+      end
+      value = path or ""
+    end
+  elseif pname == "IPAddressUsed" or pname == "DiagnosticsResult" then
+    value = bfdEchoHelper.read_bfdecho_results(mapping._section, pname)
+    local state = bfdEchoHelper.uci_bfdecho_get(mapping._section, "DiagnosticsState")
+    return state == "Complete" and value or ""
+  else
+    return nil, "invalid parameter"
+  end
+  return value
+end
+
+Multi_IP_Diagnostics_BFDEcho_.set = function(mapping, pname, pvalue)
+  -- Interface is displayed in IGD/DEV2 as path, but stored as UCI/UBUS interface in UCI, so convert it first
+  -- allow empty value
+  if pname == "Interface" and pvalue ~= "" then
+    -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
+    if mapping._section == "device2" then
+      pvalue = tokey(pvalue, "Device.IP.Interface.{i}.")
+    else
+      local value = tokey(pvalue,
+        "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.",
+        "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.",
+        "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.")
+      -- Update the interface name from WANDevice.WANConnectionDevice.WANIP/WANPPP key
+      if value then
+        local ifname
+        pvalue, ifname = splitKey(value)
+        if pvalue then
+	  if pvalue == "ACTIVE" then
+	    pvalue = ifname
+          end
+        else
+          pvalue = value
+        end
+      else
+        return nil, "Invalid value"
+      end
+    end
+    if (not pvalue) then
+      return nil, "Invalid value"
+    end
+  end
+  if pname == "DSCP" and allowed_dscp[tonumber(pvalue)] == nil then
+    return nil, "Invalid value, allowed dscp: 0,1,2,4,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,46,48,56"
+  end
+  return bfdEchoHelper.uci_bfdecho_set(mapping._section, pname, pvalue, commitapply)
+end
+
+Multi_IP_Diagnostics_BFDEcho_.commit = bfdEchoHelper.uci_bfdecho_commit
+Multi_IP_Diagnostics_BFDEcho_.revert = bfdEchoHelper.uci_bfdecho_revert
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_IP_Diagnostics_BFDEcho_, "#ROOT", {"Device.IP.Diagnostics.X_000E50_BFDEcho", "InternetGatewayDevice.X_000E50_BFDEchoDiagnostics"})
+for _, dupli in ipairs(duplicates) do
+  dupli._section = network.getMappingType(dupli)
+  dupli._uciBinding = {
+    DiagnosticsState = { config = "bfdecho", sectionname = dupli._section, option = "state" },
+    Interface = { config = "bfdecho", sectionname = dupli._section, option = "interface" },
+    ProtocolVersion = { config = "bfdecho", sectionname = dupli._section, option = "iptype" },
+    Timeout = { config = "bfdecho", sectionname = dupli._section, option = "timeout" },
+    DSCP = { config = "bfdecho", sectionname = dupli._section, option = "dscp" },
+  }
+  bfdEchoHelper.startup(dupli._section, dupli._uciBinding)
+  bfdEchoHelper.clear_bfdecho_results(dupli._section)
+  register (dupli)
+end

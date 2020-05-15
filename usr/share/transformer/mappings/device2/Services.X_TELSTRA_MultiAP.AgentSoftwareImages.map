@@ -1,0 +1,207 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_MultiAP.AgentSoftwareImages.{i}.",
+    access = "readWrite",
+    description = "Agent software images parameters",
+    minEntries = 0,
+    maxEntries = 100,
+    parameters = {
+      SoftwareVersion = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "The software image version that this image definition entry applies to",
+      },
+      EligibleModel = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "The Multi-AP Agent Device model number that is eligible for this software version",
+      },
+      EligibleHardwareVersion = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "The Multi-AP Agent device hardware version that is eligible for this software version",
+      },
+      EligibleSoftwareVersion = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "The Multi-AP Agent device software version that is eligible for this software version",
+      },
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "The FW image source location in HTTP or HTTPS",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "Username to be used by the CPE to authenticate with the file server.  This string is set to empty string if no authentication is required",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "Password to be used by the CPE to authenticate with the file server.  This string is set to empty string if no authentication is required",
+      },
+      FileSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The size of the file to be downloaded in bytes",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local configChanged = false
+local veBinding = { config = "vendorextensions" }
+
+local paramToOption = {
+  SoftwareVersion = "software_version",
+  EligibleModel = "eligible_model",
+  EligibleHardwareVersion = "eligible_hardware_version",
+  EligibleSoftwareVersion = "eligible_software_version",
+  URL = "url",
+  Username = "username",
+  Password = "password",
+  FileSize = "file_size",
+}
+
+local paramDefaults = {
+  SoftwareVersion = "",
+  EligibleModel = "",
+  EligibleHardwareVersion = "",
+  EligibleSoftwareVersion = "",
+  URL = "",
+  Username = "",
+  Password = "",
+  FileSize = "0",
+}
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.entries = function()
+  local entries = {}
+  veBinding.sectionname = "agent_sw_image"
+  uciHelper.foreach_on_uci(veBinding, function(s)
+    entries[#entries + 1] = s['.name']
+  end)
+  return entries
+end
+
+local function getUciParam(_, param, key)
+  veBinding.sectionname = key
+  veBinding.option = paramToOption[param]
+  veBinding.default = paramDefaults[param]
+  return uciHelper.get_from_uci(veBinding)
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.get = {
+  SoftwareVersion = getUciParam,
+  EligibleModel = getUciParam,
+  EligibleHardwareVersion = getUciParam,
+  EligibleSoftwareVersion = getUciParam,
+  URL = getUciParam,
+  Username = getUciParam,
+  Password = getUciParam,
+  FileSize = getUciParam,
+}
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.getall = function(_, key)
+  veBinding.sectionname = key
+  local agentSwImage = uciHelper.getall_from_uci(veBinding)
+  return {
+    SoftwareVersion = agentSwImage[paramToOption.SoftwareVersion] or "",
+    EligibleModel = agentSwImage[paramToOption.EligibleModel] or "",
+    EligibleHardwareVersion = agentSwImage[paramToOption.EligibleHardwareVersion] or "",
+    EligibleSoftwareVersion = agentSwImage[paramToOption.EligibleSoftwareVersion] or "",
+    URL = agentSwImage[paramToOption.URL] or "",
+    Username = agentSwImage[paramToOption.Username] or "",
+    Password = agentSwImage[paramToOption.Password] or "",
+    FileSize = agentSwImage[paramToOption.FileSize] or "0",
+  }
+end
+
+local function setUciParam(_, param, value, key)
+  veBinding.sectionname = key
+  veBinding.option = paramToOption[param]
+  uciHelper.set_on_uci(veBinding, value, commitapply)
+  configChanged = true
+end
+
+local function setURL(_, param, value, key)
+  if not string.match(value, "^[hH][tT][tT][pP][sS]?://") then
+    return nil, "Invalid URL"
+  end
+  setUciParam(_, param, value, key)
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.set = {
+  SoftwareVersion = setUciParam,
+  EligibleModel = setUciParam,
+  EligibleHardwareVersion = setUciParam,
+  EligibleSoftwareVersion = setUciParam,
+  URL = setURL,
+  Username = setUciParam,
+  Password = setUciParam,
+  FileSize = setUciParam,
+}
+
+local function duplicateCheck(sectionName)
+  veBinding.sectionname = sectionName
+  local result = uciHelper.getall_from_uci(veBinding)
+  if next(result) then
+    return true
+  end
+end
+
+local function generatesectionName()
+  local key = uciHelper.generate_key()
+  key = string.sub(key, 1, 8)
+  return "agent_sw_image_" .. key
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.add = function()
+  local section, isDuplicateSection
+  repeat
+    section = generatesectionName()
+    isDuplicateSection = duplicateCheck(section)
+  until not isDuplicateSection
+  uciHelper.set_on_uci({config = "vendorextensions", sectionname = section}, "agent_sw_image", commitapply)
+  configChanged = true
+  return section
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.delete = function(_, key)
+  if key:match("^static*") then
+    return nil, "Cannot delete static software image instances"
+  end
+  veBinding.sectionname = key
+  veBinding.option = nil
+  uciHelper.delete_on_uci(veBinding, commitapply)
+  veBinding.section = nil
+  configChanged = true
+  return true
+end
+
+local function endTransaction(action)
+  if configChanged then
+    action(veBinding)
+  end
+  configChanged = false
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.commit = function()
+  endTransaction(uciHelper.commit)
+end
+
+Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_.revert = function()
+  endTransaction(uciHelper.revert)
+end
+
+register(Device_Services_X_TELSTRA_MultiAP_AgentSoftwareImages_i_)

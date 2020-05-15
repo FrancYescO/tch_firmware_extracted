@@ -1,0 +1,224 @@
+local lfs = require("lfs")
+if lfs.attributes("/etc/config/supervision", "mode") ~= "file" then
+  return
+end
+
+local Multi_Services_X_TELSTRA_SUPERVISION_ = {
+  objectType = {
+    name = "#ROOT.Services.X_TELSTRA_SUPERVISION.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "1",
+      },
+      Mode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "BFD",
+          "DNS",
+        },
+      },
+      PollInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      FailedLimit = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      MaxDelay = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      IPv4Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "1",
+      },
+      IPv6Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "1",
+      },
+    }
+  }
+}
+
+local Multi_Services_X_TELSTRA_PRESENCE_ = {
+  objectType = {
+    name = "#ROOT.Services.X_TELSTRA_PRESENCE.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      PollInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      IPv4Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "1",
+      },
+      IPv6Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "1",
+      },
+      DomainName = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uci_helper = mapper("ucihelper")
+local binding = { config = "supervision", sectionname = "", option = "" }
+local supervision_cfg = { }
+local configChanged = false
+local newMode = ""
+
+local function getUCIParam(section, param)
+  binding.sectionname = section
+  binding.option = param
+  binding.default = ""
+  return uci_helper.get_from_uci(binding)
+end
+
+local function setUCIParam(section, param, value)
+  binding.sectionname = section
+  binding.option = param
+  uci_helper.set_on_uci(binding, value, commitapply)
+  configChanged = true
+end
+
+local supervision_map = {
+  Enable = "enabled",
+  Mode = "mode",
+  PollInterval = "poll_interval",
+  FailedLimit = "failed_limit",
+  Timeout = "timeout",
+  MaxDelay = "delay",
+  IPv4Enable = "ipv4_enabled",
+  IPv6Enable = "ipv6_enabled",
+}
+
+Multi_Services_X_TELSTRA_SUPERVISION_.get = function(mapping, param, key)
+  if supervision_map[param] then
+    if param == "Enable" or param == "Mode" then
+      return getUCIParam("global", supervision_map[param])
+    else
+      local mode = getUCIParam("global", "mode")
+      if mode ~= "Disabled" then
+        -- get supervision configuration according to supervision mode
+        return getUCIParam((mode == "BFD") and "bfdecho_config" or "dns_config", supervision_map[param])
+      end
+    end
+  end
+
+  return ""
+end
+
+Multi_Services_X_TELSTRA_SUPERVISION_.set = function(mapping, param, value)
+  if supervision_map[param] then
+    if param == "Enable" or param == "Mode" then
+      setUCIParam("global", supervision_map[param], value)
+    else
+      configChanged = true
+      supervision_cfg[supervision_map[param]] = value
+    end
+  end
+end
+
+Multi_Services_X_TELSTRA_SUPERVISION_.commit = function()
+  -- set supervision configuration according to new/old supervision mode
+  local section = ""
+  if newMode == "" then
+    local mode = getUCIParam("global", "mode")
+    if mode ~= "Disabled" then
+      section = (mode == "BFD") and "bfdecho_config" or "dns_config"
+    end
+  elseif newMode ~= "Disabled" then
+    section = (newMode == "BFD") and "bfdecho_config" or "dns_config"
+  end
+  if section ~= "" then
+    for k, v in pairs(supervision_cfg) do
+      if v ~= "" then
+        setUCIParam(section, k, v)
+      end
+    end
+  end
+
+  if configChanged then
+    uci_helper.commit(binding)
+    configChanged = false
+  end
+
+  newMode = ""
+  supervision_cfg = { }
+end
+
+Multi_Services_X_TELSTRA_SUPERVISION_.revert = function()
+  if configChanged then
+    uci_helper.revert(binding)
+    configChanged = false
+  end
+end
+
+local presence_map = {
+  PollInterval = "poll_interval",
+  IPv4Enable = "ipv4_enabled",
+  IPv6Enable = "ipv6_enabled",
+  DomainName = "domain_name",
+}
+
+Multi_Services_X_TELSTRA_PRESENCE_.get = function(mapping, param, key)
+  if presence_map[param] then
+    return getUCIParam("heartbeat_config", presence_map[param])
+  else
+    return ""
+  end
+end
+
+Multi_Services_X_TELSTRA_PRESENCE_.set = function(mapping, param, value)
+  if presence_map[param] then
+    setUCIParam("heartbeat_config", presence_map[param], value)
+  end
+end
+
+Multi_Services_X_TELSTRA_PRESENCE_.commit = function()
+  if configChanged then
+    uci_helper.commit(binding)
+    configChanged = false
+  end
+end
+
+Multi_Services_X_TELSTRA_PRESENCE_.revert = function()
+  if configChanged then
+    uci_helper.revert(binding)
+    configChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_SUPERVISION_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local duplicates = duplicator(Multi_Services_X_TELSTRA_PRESENCE_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

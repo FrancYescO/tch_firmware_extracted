@@ -1,0 +1,94 @@
+
+local Device_X_TELSTRA_ThermalProtection_ = {
+  objectType = {
+    name = "Device.X_TELSTRA_ThermalProtection.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      UpperThreshold = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      LowerThreshold = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      State = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Recurrence = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "5",
+      },
+    }
+  }
+}
+
+local mapper, string = mapper, string
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local thermalProtectionBinding = {config = "thermal_protection", sectionname = "thermalprotection" }
+local tolower = string.lower
+local commitApply = commitapply
+local isConfigChanged = false
+
+-- thermalState is temp variable stored in /var/state, so new initialize the cursor to manipulate
+local cursor = require("uci").cursor(UCI_CONFIG, "/var/state")
+
+local function getThermalState()
+    local config = thermalProtectionBinding.config
+    local section =thermalProtectionBinding.sectionname
+    cursor:load(config)
+    local state = cursor:get(config, section, "state")
+    cursor:unload(config)
+    return state or "0"
+end
+
+Device_X_TELSTRA_ThermalProtection_.get = function(mapping, param, key)
+    thermalProtectionBinding.option = tolower(param)
+	if thermalProtectionBinding.option == "state" then
+        return getThermalState()
+	else
+        return getFromUci(thermalProtectionBinding)
+	end
+end
+
+Device_X_TELSTRA_ThermalProtection_.set = function(mapping, param, value, key)
+  thermalProtectionBinding.option = tolower(param)
+  setOnUci(thermalProtectionBinding,value,commitApply)
+  isConfigChanged = true
+end
+
+Device_X_TELSTRA_ThermalProtection_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(thermalProtectionBinding)
+  end
+  isConfigChanged = false
+end
+
+Device_X_TELSTRA_ThermalProtection_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(thermalProtectionBinding)
+  end
+  isConfigChanged = false
+end
+
+local function setUciEvent(mapping, action, config, sectionType, sectionName, option)
+  return { { key = "", paramname = "State" } }
+end
+
+Device_X_TELSTRA_ThermalProtection_.add_watchers = function(mapping, param, key)
+  local uciEventSource = eventsource("uci")
+  uciEventSource.watch(mapping, { set = setUciEvent }, "thermal_protection", nil,"thermalprotection","state")
+end
+
+register(Device_X_TELSTRA_ThermalProtection_)
