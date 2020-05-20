@@ -1,0 +1,27 @@
+#!/bin/sh
+
+CHANGED=0
+
+restore() {
+  local path=$1
+  local value="$2"
+  local current=$(uci get $path)
+  if [ "$current" != "$value" ]; then
+    uci set $path="$value"
+    CHANGED=1
+  fi
+}
+
+for f in /etc/rtfd/data/*; do
+  if [ -x $f ]; then
+    $f && CHANGED=1
+  else
+    . $f
+  fi
+done
+
+if [ $CHANGED -ne 0 ]; then
+  uci commit
+fi
+
+rm -f /etc/rtfd/data/*

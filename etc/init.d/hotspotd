@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+
+hotspot_control() {
+    [ -e "$IPKG_INSTROOT/usr/lib/hotspot/control.sh" ] && $IPKG_INSTROOT/usr/lib/hotspot/control.sh $*
+}
+
+boot() {
+    hotspot_control boot
+    start "$@"
+}
+
+portal_url_replace_random_hash() {
+        config_get portalurl redirect url
+        config_get portaltemplateurl redirect templateurl
+        if [ -n "${portalurl}" ] || [ -n "${portaltemplateurl}" ]
+        then
+                hash=$(cat /dev/urandom | tr -cd '0-9a-f' | head -c 40)
+                [ -n "${portalurl}" ] && uci set hotspotd.redirect.url=$(echo "${portalurl}" | sed "s/\/[a-f0-9]\{40,40\}$/\/${hash}/g")
+                [ -n "${portaltemplateurl}" ] && uci set hotspotd.redirect.templateurl=$(echo "${portaltemplateurl}" | sed "s/\/[a-f0-9]\{40,40\}$/\/${hash}/g")
+                uci commit
+        fi
+}
+
+start() {
+        hotspot_control start
+        config_load hotspotd
+        config_get_bool enable main enable 0
+        if [ "${enable}" -eq 1 ]
+        then
+                portal_url_replace_random_hash
+                config_get hotspotd_options main hotspotd_options
+                service_start /usr/sbin/hotspotd ${hotspotd_options}
+        fi
+}
+
+stop() {
+        hotspot_control stop
+        service_stop /usr/sbin/hotspotd
+}
+
+reload() {
+        hotspot_control reload
+        service_reload /usr/sbin/hotspotd
+}
+

@@ -1,0 +1,134 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_MultiAP.Agent.{i}.STA.{i}.",
+    access = "readOnly",
+    description = "This object is an Associated Device of the Multi-AP Agent",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = 17,
+        description = "MAC address of an associated device",
+      },
+      OperatingStandard = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "b",
+          "a",
+          "g",
+          "n",
+          "ac",
+          "an",
+        },
+        description = "The operating standard that this associated device is connected with",
+      },
+      AuthenticationState = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether an associated device has authenticated (true) or not (false)"
+      },
+      LastDataDownlinkRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The data transmit rate in kbps that was most recently used for transmission from the access point to the associated device",
+      },
+      LastDataUplinkRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The data transmit rate in kbps that was most recently used for transmission from the associated device to the access point"
+      },
+      SignalStrength = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-200",
+            max = "0",
+          },
+        },
+        description = "An indicator of radio signal strength of the uplink from the associated device to the access point, measured in dBm, as an average of the last 100 packets received from the device"
+      },
+      Retransmissions = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+        description = "The number of packets that had to be re-transmitted, from the last 100 packets sent to the associated device. Multiple re-transmissions of the same packet count as one"
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether or not this node is currently present in the WiFi AccessPoint network"
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local veBinding = { config = "vendorextensions" }
+local conn = mapper("ubus").connect()
+local stationData = {}
+
+local function wifiStdToList(std)
+  local standard = {}
+  for v in std:gmatch("[abgn]c?") do
+    standard[#standard+1] = v
+  end
+  return standard
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  stationData = {}
+  veBinding.sectionname = parentKey
+  veBinding.option = "aleMac"
+  local parentKeyMac = uciHelper.get_from_uci(veBinding)
+  local stationInfo = conn:call("mapVendorExtensions.agent.station", "get", { device = parentKeyMac }) or {}
+  for mac, staData in pairs(stationInfo) do
+    if staData.Active == "1" then
+      local key = parentKeyMac .. "|" .. mac .. "|" .. parentKey
+      entries[#entries + 1] = key
+      stationData[key] = staData
+    end
+  end
+  return entries
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_.get = {
+  MACAddress = function(mapping, param, key)
+    return stationData[key] and stationData[key][param] and tostring(stationData[key][param]) or ""
+  end,
+  OperatingStandard = function(mapping, param, key)
+    local standard = stationData[key] and stationData[key][param] and stationData[key][param]:match("802.11(%a+)") or ""
+    return table.concat(wifiStdToList(standard))
+  end,
+  AuthenticationState = function(mapping, param, key)
+    return stationData[key] and stationData[key]["Active"] and tostring(stationData[key]["Active"]) or "0"
+  end,
+  LastDataDownlinkRate = function(mapping, param, key)
+    return stationData[key] and stationData[key][param] and tostring(stationData[key][param]) or "0"
+  end,
+  LastDataUplinkRate = function(mapping, param, key)
+    return stationData[key] and stationData[key][param] and tostring(stationData[key][param]) or "0"
+  end,
+  SignalStrength = function(mapping, param, key)
+    return stationData[key] and stationData[key][param] and tostring(stationData[key][param]) or "0"
+  end,
+  Retransmissions = function(mapping, param, key)
+    return stationData[key] and stationData[key]["RetransCount"] and tostring(stationData[key]["RetransCount"]) or "0"
+  end,
+  Active = function(mapping, param, key)
+    return stationData[key] and stationData[key][param] and tostring(stationData[key][param]) or "0"
+  end
+}
+
+register(Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_)

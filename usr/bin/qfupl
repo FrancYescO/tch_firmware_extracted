@@ -1,0 +1,56 @@
+#!/usr/bin/env lua
+
+local atchannel = require("atchannel")
+local timeout = 60 -- 1 minute
+
+local source_path, device_path, destination_file = unpack(arg)
+if type(source_path) ~= "string" or type(device_path) ~= "string" or type(destination_file) ~= "string" then
+	print(string.format("USAGE: %s <source path> <device path> <destination file>", arg[0]))
+	os.exit(1)
+end
+
+local connection, err_msg = atchannel.open(device_path)
+if not connection then
+	print(string.format("Error: cannot open %s: %s", device_path, err_msg))
+	os.exit(1)
+end
+
+local data_source
+if source_path:match("^https?://") then
+	data_source, err_msg = atchannel.http_source(source_path)
+else
+	data_source, err_msg = atchannel.file_source(source_path)
+end
+if not data_source then
+	print(string.format("Error: cannot open %s: %s", source_path, err_msg))
+	os.exit(1)
+end
+
+local checksum_source
+checksum_source, err_msg = atchannel.checksum_source(data_source)
+if not checksum_source then
+	print(string.format("Error: cannot calculate checksum: %s", err_msg))
+	os.exit(1)
+end
+
+local upload_command = string.format('AT+QFUPL="%s",%d,%d', destination_file, data_source.size, timeout)
+local upload_result
+upload_result, err_msg = atchannel.send_singleline_command(connection, upload_command, '+QFUPL:', timeout * 1000, checksum_source)
+if not upload_result then
+	print(string.format("Error: cannot upload file: %s", err_msg))
+	os.exit(1)
+end
+
+local size, checksum = upload_result:match("^%s*%+QFUPL:%s*(%d+)%s*,%s*(%x+)%s*$")
+if not checksum then
+	print("Error: invalid AT+QFUPL response")
+	os.exit(1)
+end
+if tonumber(size, 10) ~= data_source.size then
+	print("Error: size mismatch")
+	os.exit(1)
+end
+if tonumber(checksum, 16) ~= checksum_source.checksum then
+	print("Error: checksum mismatch")
+	os.exit(1)
+end

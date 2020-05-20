@@ -1,0 +1,251 @@
+#!/usr/bin/lua
+
+local ubus, uloop, uci = require('ubus'), require('uloop'), require('uci')
+local logger = require('tch.logger')
+local posix = require("tch.posix")
+local log
+
+local intercept = {
+	config_file = "intercept",
+	config = {
+		retry_interval = 10
+	},
+	status = {
+		active = false,
+		reasons = {},
+		action_queue = {}
+	}
+}
+
+local function get_boolean(config_item, default)
+	if not config_item then return default end
+	return config_item ~= '0' and config_item ~= 'false' and config_item ~= false
+end
+
+function intercept:cleanup()
+	log:info("Stopping...")
+	self:disable_intercept()
+	self.ubus:close()
+	uloop.cancel()
+end
+
+function intercept:reloadconfig()
+	log:info("Reloading config")
+	self:load_config()
+	if not self.config.enabled then
+		self:cleanup()
+	end
+end
+
+function intercept:load_config()
+	local cursor = uci.cursor()
+	local c = cursor:get(self.config_file, "config", "tracelevel")
+	self.config.tracelevel = tonumber(c) or 6
+	self.config.enabled = get_boolean(cursor:get(self.config_file, "config", "enabled"), true)
+
+	if not log then
+		logger.init("intercept", self.config.tracelevel, posix.LOG_PID)
+		log = logger
+	else
+		log:set_log_level(self.config.tracelevel)
+	end
+
+	-- Load all persistent intercept reasons
+	cursor:foreach(self.config_file, "reason", function(reason)
+		self.status.reasons[reason['.name']] = { persist = true, duration = reason.duration }
+	end)
+	cursor:close()
+	self:queue_action("setup")
+end
+
+function intercept:action_completed(action, return_code)
+	log:debug("Intercept %s finished with return code %d", action, return_code)
+
+	if action == "start" and return_code == 0 then
+		self.status.active = true
+	elseif action == "stop" and return_code == 0 then
+		self.status.active = false
+	elseif action == "setup" and return_code == 0 then
+		self.status.active = false
+		-- Give the plugins some time to register their reasons
+		if not self.backoff_timer then
+			self.backoff_timer = uloop.timer(function()
+				self.backoff_timer:cancel()
+				self.backoff_timer = nil
+				self:verify_reasons()
+			end, 2000)
+		end
+	end
+
+	self.status.running_action = nil
+
+	if return_code ~= 0 then
+		log:debug("Retrying %s in %d seconds", action, self.config.retry_interval)
+		table.insert(self.status.action_queue, 1, action)
+		if not self.retry_timer then
+			self.retry_timer = uloop.timer(function()
+				self.retry_timer:cancel()
+				self.retry_timer = nil
+				while not self:run_next_action() do end
+			end, self.config.retry_interval * 1000)
+		end
+		return
+	end
+
+	while not self:run_next_action() do end
+end
+
+function intercept:run_next_action()
+	if not self.status.running_action then
+		local action = table.remove(self.status.action_queue, 1)
+		if action then
+			if (action == "start" and self.status.active) then
+				action = "update"
+			end
+			if (action == "stop" and not self.status.active) then
+				log:debug("Already configured. Skipping \"%s\"", action)
+				return nil, "Already configured"
+			end
+			log:debug("Running %s", action)
+			local env = {}
+			if self.config.tracelevel >= 6 then
+				table.insert(env, "INTERCEPT_DEBUG=1")
+			end
+			uloop.process("/usr/lib/intercept/intercept.sh", {action}, env, function(...) self:action_completed(action, ...) end)
+			self.status.running_action = action
+		end
+	end
+	return true
+end
+
+function intercept:queue_action(action)
+	table.insert(self.status.action_queue, action)
+	while not self:run_next_action() do end
+end
+
+function intercept:has_reason()
+	if next(self.status.reasons) then
+		return true
+	end
+	return false
+end
+
+function intercept:store_reasons()
+	local cursor = uci.cursor()
+	cursor:foreach(self.config_file, "reason", function(reason)
+		if not self.status.reasons[reason['.name']] or not self.status.reasons[reason['.name']].persist then
+			cursor:delete(self.config_file, reason['.name'])
+		end
+	end)
+	for name, reason in pairs(self.status.reasons) do
+		if reason.persist then
+			cursor:set(self.config_file, name, "reason")
+			for k, v in pairs(reason) do
+				cursor:set(self.config_file, name, k, tostring(v))
+			end
+		end
+	end
+	cursor:commit(self.config_file)
+	cursor:close()
+end
+
+function intercept:verify_reasons()
+	if self:has_reason() then
+		self:enable_intercept()
+	else
+		self:disable_intercept()
+	end
+end
+
+function intercept:enable_intercept()
+	self:queue_action("start")
+end
+
+function intercept:disable_intercept()
+	self:queue_action("stop")
+end
+
+function intercept:add_reason(_, data)
+	if data.reason then
+		log:info("Adding intercept reason: \"%s\"", data.reason)
+		if not self.status.reasons[data.reason] then
+			self.status.reasons[data.reason] = {
+				persist = get_boolean(data.persist, false),
+				duration = tonumber(data.duration)
+			}
+		else
+			-- If a reason is ever activated with the persist option, it needs to be cleared first before this can be modified
+			if data.persist then
+				self.status.reasons[data.reason].persist = get_boolean(data.persist, false)
+			end
+			if data.duration then
+				self.status.reasons[data.reason].duration = tonumber(data.duration)
+			end
+		end
+		self:store_reasons()
+		self:enable_intercept()
+	end
+end
+
+function intercept:del_reason(_, data)
+	if data.reason then
+		log:info("Removing intercept reason: \"%s\"", data.reason)
+		self.status.reasons[data.reason] = nil
+		self:store_reasons()
+		self:verify_reasons()
+	end
+end
+
+function intercept:flush_reasons()
+	self.status.reasons = {}
+	self:store_reasons()
+	self:disable_intercept()
+end
+
+function intercept:get_status(req)
+	self.ubus:reply(req, self.status)
+end
+
+function intercept:init()
+	uloop.init()
+
+	self:load_config()
+	if not self.config.enabled then
+		return nil, "Intercept disabled"
+	end
+
+	self.ubus = ubus.connect()
+	if not self.ubus then
+		return nil, "Failed to connect to UBUS"
+	end
+
+	local ubus_methods = {
+		['intercept'] = {
+			add_reason = {
+				function(...) self:add_reason(...) end, {reason = ubus.STRING, persist = ubus.BOOLEAN, duration = ubus.INT32}
+			},
+			del_reason = {
+				function(...) self:del_reason(...) end, {reason = ubus.STRING}
+			},
+			flush_reasons = {
+				function(...) self:flush_reasons(...) end, {}
+			},
+			status = {
+				function(...) self:get_status(...) end, {}
+			},
+			reload = {
+				function(...) self:reloadconfig(...) end, {}
+			}
+		}
+	}
+	self.ubus:add(ubus_methods)
+
+	return true
+end
+
+if not intercept:init() then
+	os.exit(-1)
+end
+
+uloop.run()
+intercept:cleanup()
