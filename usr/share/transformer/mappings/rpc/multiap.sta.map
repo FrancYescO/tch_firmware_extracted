@@ -1,0 +1,107 @@
+-- Manuall generated
+local multiap_sta = {
+  objectType = {
+    name = "rpc.multiap.sta.@.",
+    numEntriesParameter = "STANumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      mac = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_bss = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_agent_mac = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_since = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      dl_mac_rate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      ul_mac_rate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rssi = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txbytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxbytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txpkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxpkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txpkterrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxpkterrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      retransmission_cnt = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+local paramMap = {
+  assoc_bss = "associated_bssid_mac",
+  assoc_agent_mac = "associated_agent_mac",
+  assoc_since = "since_assoc_time",
+  dl_mac_rate = "dlmac_datarate",
+  ul_mac_rate = "ul_mac_rate",
+  rssi = "rssi",
+  txbytes = "txbytes",
+  rxbytes = "rxbytes",
+  txpkts = "txpkts",
+  rxpkts = "rxpkts",
+  txpkterrors = "txpkterrrors",
+  rxpkterrors = "rxpkterrors",
+  retransmission_cnt = "retransmission_cnt",
+}
+
+multiap_sta.entries = function()
+  local entries = {}
+  local data = conn:call("multiap.controller.station", "list", {}) or {}
+  for mac in pairs(data) do
+    entries[#entries + 1] = mac
+  end
+  return entries
+end
+
+multiap_sta.get = function(mapping, param, key)
+  if param == "mac" then
+    return key
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.station", "list", {}) or {}
+    local result = data[key] and data[key][paramMap[param]] or ""
+    return tostring(result)
+  end
+end
+
+register(multiap_sta)

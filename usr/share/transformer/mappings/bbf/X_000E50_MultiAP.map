@@ -1,0 +1,151 @@
+-- Manuall generated
+
+local Multi_X_000E50_MultiAP_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_MultiAP.",
+    access = "readOnly",
+    description = "MultiAP agent and connected station information.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {},
+  }
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_MultiAP_, "#ROOT", { "InternetGatewayDevice", "Device", "rpc" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_X_000E50_MultiAP_Device_i_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_MultiAP.Device.{i}.",
+    numEntriesParameter = "ExtenderNumberOfEntries",
+    access = "readOnly",
+    description = "This object represents the associated Extenders of Multi-AP.",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      ALMAC = {
+        access = "readOnly",
+        type = "string"
+      },
+      IPAddress = {
+        access = "readOnly",
+        type = "string"
+      },
+      State = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      BackhaulInterfaceType = {
+        access = "readOnly",
+        type = "string"
+      },
+      Parent = {
+        access = "readOnly",
+        type = "string"
+      },
+      Neighbors = {
+        access = "readOnly",
+        type = "string"
+      },
+      ManufacturerName = {
+        access = "readOnly",
+        type = "string"
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string"
+      },
+      RSSI = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      Phyrate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RadioCount = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      DeviceName = {
+        access = "readOnly",
+        type = "string"
+      },
+    },
+  }
+}
+
+local lower, concat = string.lower, table.concat
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local multiapBinding = { config = "multiap" }
+local data
+
+local paramMap = {
+  State = "status",
+  BackhaulInterfaceType = "backhaul_info",
+  Parent = "parent",
+  Neighbors = "neighbors",
+  ManufacturerName = "manufacturer_name",
+  SerialNumber = "serial_number",
+  RSSI = "rssi",
+  Phyrate = "phyrate",
+  RadioCount = "radio_count",
+}
+
+local function getUciParam(sectionName)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = "macaddress"
+  return uciHelper.get_from_uci(multiapBinding)
+end
+
+Multi_X_000E50_MultiAP_Device_i_.entries = function()
+  local entries = {}
+  data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  local agentMac = lower(getUciParam("agent"))
+  local controllerMac = lower(getUciParam("controller"))
+  for mac in pairs(data) do
+    if mac ~= agentMac and mac ~= controllerMac then
+      entries[#entries + 1] = mac
+    end
+  end
+  return entries
+end
+
+Multi_X_000E50_MultiAP_Device_i_.get = function(mapping, param, key)
+  if param == "ALMAC" then
+    return key
+  elseif param == "DeviceName" then
+    local agentMac = key:match("([^%:]+)$") or ""
+    return "agent_" .. agentMac
+  elseif param == "IPAddress" then
+    local interfaces = data[key]["local_interfaces"] or {}
+    local ipaddr = {}
+    for _, mac in ipairs(interfaces) do
+      local hostData = conn:call("hostmanager.device", "get", { ["mac-address"] = mac }) or {}
+      for ip in pairs(hostData) do
+        for _, idx in pairs(hostData[ip]["ipv4"]) do
+          ipaddr[#ipaddr+1] = idx["address"] or ""
+        end
+      end
+    end
+    return concat(ipaddr,",")
+  elseif paramMap[param] then
+    local result = data[key] and data[key][paramMap[param]] or ""
+    if param == "State" then
+      return result == "ONBOARDED" and "1" or "0"
+    elseif param == "BackhaulInterfaceType" and result then
+      return result["interface_type"] or ""
+    end
+    return type(result) == "table" and concat(result, ",") or tostring(result)
+  end
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_X_000E50_MultiAP_Device_i_, "#ROOT", { "InternetGatewayDevice", "Device", "rpc" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

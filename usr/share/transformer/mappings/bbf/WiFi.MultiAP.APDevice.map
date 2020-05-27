@@ -1,0 +1,158 @@
+-- Manually generated
+local Multi_MultiAP_APDevice_i_ = {
+  objectType = {
+    name = "#ROOT.MultiAP.APDevice.{i}.",
+    numEntriesParameter = "APDeviceNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17",
+      },
+      Manufacturer = {
+        access = "readOnly",
+        type = "string"
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      BackhaulLinkType = {
+        access = "readOnly",
+        type = "string"
+      },
+      ManufacturerOUI = {
+        access = "readOnly",
+        type = "string",
+        min = "6",
+        max = "6"
+      },
+      ProductClass = {
+        access = "readOnly",
+        type = "string",
+        max = "64"
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64"
+      },
+      LastContactTime = {
+        access = "readOnly",
+        type = "dateTime"
+      },
+      BackhaulMACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17"
+      },
+      BackhaulBytesSent = {
+        access = "readOnly",
+        type = "unsignedLong"
+      },
+      BackhaulBytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong"
+      },
+      BackhaulLinkUtilization = {
+        access = "readOnly",
+        type = "unsignedInt",
+        max = "100"
+      },
+      BackhaulSignalStrength = {
+        access = "readOnly",
+        type = "unsignedInt",
+        max = "225"
+      },
+      -- RadioNumberOfEntries
+      -- automatically created when #ROOT.MultiAP.APDevice.{i}.Radio.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local tostring = tostring
+local host_data
+
+local paramMap = {
+  Manufacturer = "manufacturer_name",
+  SerialNumber = "serial_number",
+  ProductClass = "product_type",
+  SoftwareVersion = "os_version",
+  LastContactTime = "time_since_query",
+}
+
+local BackhaulParams = {
+  BackhaulLinkType = "interface_type",
+  BackhaulMACAddress = "interface_mac",
+  BackhaulBytesSent = "bytes_sent",
+  BackhaulBytesReceived = "bytes_recvd",
+  BackhaulLinkUtilization = "link_utilisation",
+  BackhaulSignalStrength = "rssi"
+}
+
+Multi_MultiAP_APDevice_i_.entries = function()
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  host_data = conn:call("hostmanager.device", "get", {}) or {}
+  for mac in pairs(cacheData) do
+    entries[#entries + 1] = mac
+  end
+  return entries
+end
+
+local function getManufacturerOui(key)
+  for _, host in pairs(host_data) do
+    local mac = host["mac-address"]
+    local agent_mac = cacheData[key] and cacheData[key]["local_interfaces"]
+    for param, value in pairs(agent_mac or {}) do
+      if mac and mac == value then
+        for _, ipdata in pairs(host["ipv4"]) do
+          if ipdata["dhcp"] then
+            return ipdata["dhcp"]["manufacturer-oui"] and ipdata["dhcp"]["manufacturer-oui"] or ""
+          end
+        end
+      end
+    end
+  end
+  return ""
+end
+
+Multi_MultiAP_APDevice_i_.get = function(mapping, param, key)
+  if param == "MACAddress" then
+     return key
+  elseif param == "ManufacturerOUI" then
+     return getManufacturerOui(key)
+  elseif param:match("^Backhaul") then
+     return cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams[param]]) or ""
+  end
+  return cacheData[key] and tostring(cacheData[key][paramMap[param]]) or ""
+end
+
+Multi_MultiAP_APDevice_i_.getall = function(mapping, key)
+  local allValues = {}
+  allValues.MACAddress = key
+  for param, option in pairs(paramMap) do
+    if param == "ManufacturerOUI" then
+       allValues[param] = getManufacturerOui(key)
+    else
+       allValues[param] = cacheData[key] and tostring(cacheData[key][option]) or ""
+    end
+  end
+  for param, option in pairs(BackhaulParams) do
+    allValues[param] = cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][option]) or ""
+  end
+  return allValues
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_APDevice_i_, "#ROOT", { "Device.WiFi", "rpc.X_000E50_MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

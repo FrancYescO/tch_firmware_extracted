@@ -1,0 +1,269 @@
+#!/bin/sh /etc/rc.common
+
+#Start After the Hostapd so that Other Agents can start communication
+PROCD_DEBUG=1
+USE_PROCD=1
+START=95
+
+PID_FILE=/var/run/multiap_controller.pid
+RUNNING_FILE=/var/run/controllerd_running
+
+
+get_if_data() {
+## get device name and mode for multiap configured wireless interfaces
+for i in $(echo $interfaces | tr "," "\n")
+do
+  if [ "$i" = "${1}" ]; then
+     config_get md ${1} mode
+     config_get dev ${1} device
+     modes="$modes${1}:$md,"
+     devs="$devs${1}:$dev,"
+  fi
+done
+}
+
+parse_wl_ap() {
+  local ap="$1"
+  config_get iface "$ap" iface
+
+  if [ "$iface" = "$2" ] ; then
+    apname=$ap
+  fi
+}
+
+update_controller_al_mac() {
+  ## Local ethernet interface mac will be used as a controller al mac
+  eth_mac=`uci get env.var.local_eth_mac`
+
+  ## Get the existing controller AL MAC
+  config_get al_mac controller macaddress
+
+  ## Update only when there is a mismatch
+  if [ "$al_mac" != "$eth_mac" ] ; then
+    uci_set "multiap" "controller" "macaddress" "$eth_mac"
+    uci commit
+  fi
+}
+
+update_1905_interface_list() {
+  # Get the interface list from UCI
+  uci_if_list=`uci get multiap.al_entity.interfaces`
+
+  # Get the interface list from bridge
+  br_if_list=$(echo `ls /sys/class/net/br-lan/brif` | sed 's/[ \t]+*/,/g')
+
+  # Get the bss list from UCI
+  bss_if_list=`uci get multiap.agent.bss_list`
+
+  #Merge the br interface list and bss interface list
+  if_list=`printf "$br_if_list,$bss_if_list"`
+
+  # Add the missing interfaces to uci_if_list from if_list
+  for iface in $(echo $if_list | tr "," "\n")
+  do
+    ## Skip wds interfaces
+    eval "echo \$iface | grep -q \"wds\""
+    if [ "$?" -eq "0" ]; then
+      continue
+    fi
+
+    # Add Missing interfaces
+    eval "echo \$uci_if_list | grep -q $iface"
+    if [ "$?" -eq "1" ]; then
+      if [ -z "$uci_if_list" ] ; then
+        uci_if_list="$iface"
+      else
+        uci_if_list=`printf "$uci_if_list,$iface"`
+      fi
+    fi
+  done
+
+  # Add wds* as a special interface for once
+  eval "echo \$uci_if_list | grep -q wds*"
+  if [ "$?" -eq "1" ]; then
+    uci_if_list=`printf "$uci_if_list,wds*"`
+  fi
+
+  # Update the Final list of interface to UCI
+  uci set multiap.al_entity.interfaces=$uci_if_list
+  uci commit
+  interfaces="$uci_if_list"
+}
+
+update_local_agent_al_mac() {
+  ## Update the local wifi interface mac as agent AL mac
+  wifi_mac=`uci get env.var.local_wifi_mac`
+
+  ## Get the existing agent AL MAC
+  config_get al_mac agent macaddress
+
+  ## Update agent AL mac only when it is null in config
+  if [ -z "$al_mac"] ; then
+    uci_set "multiap" "agent" "macaddress" "$wifi_mac"
+    uci commit
+  fi
+}
+
+setup_local_agent_config() {
+
+  ## Check if the local agent enabled or not.
+  config_get_bool map_agent_enabled agent enabled
+  [ $map_agent_enabled -eq 1 ] && [ $map_ctrl_enabled -eq 1 ]
+  if [ "$?" -eq "0" ]; then
+      ## Update local agent AL mac address
+      update_local_agent_al_mac
+
+      ## Add "lo" interface if both ctrller, agent is enabled
+      eval "echo \$interfaces | grep \"lo\" | grep -v \"grep\""
+      if [ "$?" -eq "1" ]; then
+          interfaces=`printf "lo,$interfaces"`
+          uci set multiap.al_entity.interfaces=$interfaces
+          uci commit
+      fi
+  else
+      ##Remove "lo" interface if only one map soln is present
+      interfaces=`echo $interfaces | sed 's/lo,//g'`
+      uci set multiap.al_entity.interfaces=$interfaces
+      uci commit
+  fi
+}
+
+start_service() {
+
+
+  ##dirty hack to run the firstboot script every time so the config and stuff will be okay so we can enable easymesch on the fly
+  #BOARD=`uci get env.rip.board_mnemonic`
+
+  #/rom/etc/boards/$BOARD/config/etc/uci-defaults/tch_0099-wifi_multiap
+  ## end of dirty hack; fix this after the poc into a proper method
+
+  config_load multiap
+
+  ## Check if multiap controller is enabled
+  config_get_bool map_ctrl_enabled controller enabled
+  if [ -z "$map_ctrl_enabled" ] || [ $map_ctrl_enabled -eq 0 ] ; then
+    return 0
+  fi
+
+  procd_open_instance
+  echo "Multiap Controller Start" > /dev/console
+
+  ## Update the controller AL MAC address
+  update_controller_al_mac
+
+  ## Add the system interfaces to 1905 interface list
+  update_1905_interface_list
+
+  # Setup a minimum required agent config required for controller
+  setup_local_agent_config
+
+  ## Get platform_int variables and set as env
+  config_load multiap
+  config_get map_controller_macaddress controller macaddress
+  config_get map_agent_macaddress agent macaddress
+  config_get map_agent_bsslist agent bss_list
+  config_get map_controller_freq_2_4g controller_capabilities freq_2_4g
+  config_get map_controller_freq_5g controller_capabilities freq_5g
+  config_get map_controller_freq_60g controller_capabilities freq_60g
+  config_get map_controller_preferred_bh_interface controller preferred_bh_iface
+  config_get al_entity_interfaces al_entity interfaces
+  config_get al_entity_topology_discovery_interval al_entity topology_discovery_interval
+  config_get al_entity_lldp_bridge_discovery_interval al_entity lldp_bridge_discovery_interval
+  config_get map_controller_mgmt_ipc_report_interval controller mgmt_ipc_report_interval
+  config_get map_controller_link_metric_query_interval controller link_metric_query_interval
+  config_get map_controller_topology_query_interval controller topology_query_interval
+  config_get map_controller_channel_selection_enabled controller channel_selection_enabled
+  config_get map_controller_dead_agent_detection_interval controller dead_agent_detection_interval
+  config_get map_controller_configure_BH_STA controller configure_BH_STA
+  config_get map_controller_library_log_level logging library
+  config_get map_controller_ieee1905_log_level logging ieee1905
+  config_get map_controller_log_level logging controller
+  config_get map_controller_vendor_ipc_log_level logging vendor_ipc
+  config_get map_agent_log_level logging agent
+
+  ## Set WEE-BHS module config as env
+  config_get wee_bhs_enabled wee_bhs enabled
+  config_get wee_bhs_uplink_rssi_threshold wee_bhs uplink_rssi_threshold
+  config_get wee_bhs_health_check_interval wee_bhs health_check_interval
+  config_get wee_bhs_steering_hold_duration wee_bhs steering_hold_duration
+  config_get wee_bhs_dead_agent_retention_period wee_bhs dead_agent_retention_period
+
+  config_load wireless
+
+  ## Get device name and mode from wireless
+  config_foreach get_if_data wifi-iface 
+
+  ## Get box related info from env
+  config_load env
+  config_get model_name var prod_friendly_name
+  len=${#model_name}
+  if [ $len -ge 36 ]; then
+    config_get model_name var prod_name
+  fi
+  config_get model_name var prod_friendly_name
+  config_get manufacturer_name var company_name
+  config_get model_number var prod_number
+  config_get serial_number var serial
+
+  echo $model_name $manufacturer_name $model_number $serial_number
+  echo $devs
+  echo $modes
+
+  procd_set_param env MAP_CONTROLLER_ENABLED=$map_ctrl_enabled
+  procd_append_param env MAP_CONTROLLER_MACADDRESS=$map_controller_macaddress
+  procd_append_param env MAP_CONTROLLER_FREQ_2_4_GHZ=$map_controller_freq_2_4g
+  procd_append_param env MAP_CONTROLLER_FREQ_5_GHZ=$map_controller_freq_5g
+  procd_append_param env MAP_CONTROLLER_FREQ_60_GHZ=$map_controller_freq_60g
+  procd_append_param env MAP_CONTROLLER_PREFERRED_BH_IFACE=$map_controller_preferred_bh_interface
+  procd_append_param env MAP_AGENT_ENABLED=$map_agent_enabled
+  procd_append_param env MAP_AGENT_MACADDRESS=$map_agent_macaddress
+  procd_append_param env AL_ENTITY_INTERFACES=$al_entity_interfaces
+  procd_append_param env AL_ENTITY_TOPOLOGY_DISCOVERY_INTERVAL=$al_entity_topology_discovery_interval
+  procd_append_param env AL_ENTITY_LLDP_BRIDGE_DISCOVERY_ENV_INTERVAL=$al_entity_lldp_bridge_discovery_interval
+  procd_append_param env MAP_LIB_LOG_LEVEL=$map_controller_library_log_level
+  procd_append_param env MAP_1905_LOG_LEVEL=$map_controller_ieee1905_log_level
+  procd_append_param env MAP_CONTROLLER_LOG_LEVEL=$map_controller_log_level
+  procd_append_param env MAP_VENDOR_IPC_LOG_LEVEL=$map_controller_vendor_ipc_log_level
+  procd_append_param env MAP_AGENT_LOG_LEVEL=$map_agent_log_level
+
+  procd_append_param env MAP_INTERFACES=$interfaces
+  procd_append_param env MAP_MODEL_NAME=$model_name
+  procd_append_param env MAP_MODEL_NUMBER=$model_number
+  procd_append_param env MAP_SERIAL_NUMBER=$serial_number
+  procd_append_param env MAP_MANUFACTURER_NAME=$manufacturer_name
+  procd_append_param env MAP_DEV_NAMES=$devs
+  procd_append_param env MAP_DEV_MODES=$modes
+  procd_append_param env MGMT_IPC_REPORT_INTERVAL=$map_controller_mgmt_ipc_report_interval
+  procd_append_param env MAP_CONTROLLER_LINK_METRIC_QUERY_INTERVAL=$map_controller_link_metric_query_interval
+  procd_append_param env MAP_CONTROLLER_TOPOLOGY_QUERY_INTERVAL=$map_controller_topology_query_interval
+  procd_append_param env MAP_CONTROLLER_CHANNEL_SELECTION_ENABLED=$map_controller_channel_selection_enabled
+  procd_append_param env MAP_CONTROLLER_DEAD_AGENT_DETECTION_INTERVAL=$map_controller_dead_agent_detection_interval
+  procd_append_param env MAP_CONTROLLER_CONFIGURE_BH_STA=$map_controller_configure_BH_STA
+
+  procd_append_param env WEE_BHS_ENABLED=$wee_bhs_enabled
+  procd_append_param env WEE_BHS_UPLINK_RSSI_THRESHOLD=$wee_bhs_uplink_rssi_threshold
+  procd_append_param env WEE_BHS_HEALTH_CHECK_INTERVAL=$wee_bhs_health_check_interval
+  procd_append_param env WEE_BHS_STEERING_HOLD_DURATION=$wee_bhs_steering_hold_duration
+  procd_append_param env WEE_BHS_DEAD_AGENT_RETENTION_PERIOD=$wee_bhs_dead_agent_retention_period
+
+  ## Optionally add conductor config 
+  if [ -f /lib/wifi-conductor/libwifi-conductor-uci-to-procd-env ]; then
+     . /lib/wifi-conductor/libwifi-conductor-uci-to-procd-env
+  fi
+
+  ## Add rule to process 1905 Multicast packets
+  ebtables -t broute -D BROUTING -p 0x893a -d 1:80:c2:0:0:13 -j  DROP
+  ebtables -t broute -I BROUTING 1 -p 0x893a -d 1:80:c2:0:0:13 -j  DROP
+
+  ebtables -t broute -D BROUTING -p 0x893a -d $map_controller_macaddress -j  DROP
+  ebtables -t broute -I BROUTING 1 -p 0x893a -d $map_controller_macaddress -j  DROP
+
+  #To be removed
+  sleep 60
+  echo "Multiap Controller Start after sleep" > /dev/console
+
+  procd_set_param command /usr/bin/multiap_controller -m ubus
+  procd_set_param limits core="unlimited"  # If you need to set ulimit for your process
+  procd_set_param pidfile /var/run/multiap_controller.pid # write a pid file on instance start and remote it on stop
+  procd_close_instance
+}

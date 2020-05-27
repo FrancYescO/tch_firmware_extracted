@@ -1,0 +1,179 @@
+-- Manually generated
+
+local Device_Services_X_000E50_IGMPProxy_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_IGMPProxy.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Configure the wan interface of igmp proxy",
+    parameters = {
+      WanInterface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        description = "Upstream interface of IGMP proxy",
+      },
+      State = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables or disables IGMP feature",
+      },
+    }
+  }
+}
+
+local commitapply, mapper, register, resolve = commitapply, mapper, register, resolve
+local uciHelper = mapper("ucihelper")
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local configChanged
+local igmpProxyBinding = { config = "igmpproxy" }
+
+local function getFromUci(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setUciValue(key, option, value)
+  igmpProxyBinding.sectionname = key
+  igmpProxyBinding.option = option
+  setOnUci(igmpProxyBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_Services_X_000E50_IGMPProxy_.get = {
+  WanInterface = function(mapping, param)
+    local interface
+    igmpProxyBinding.sectionname = "interface"
+    forEachOnUci(igmpProxyBinding, function(s)
+      if s.state == "upstream" then
+	interface = s[".name"]
+	return false
+      end
+    end)
+    return interface and resolve("Device.IP.Interface.{i}.", interface) or ""
+  end,
+  State = function()
+    return getFromUci(igmpProxyBinding, "globals", "state", "0")
+  end,
+}
+
+Device_Services_X_000E50_IGMPProxy_.set = {
+  WanInterface = function(mapping, param, value)
+
+    local wanInterface = {}
+    local rc
+    igmpProxyBinding.sectionname = "interface"
+    forEachOnUci(igmpProxyBinding, function(s)
+      if s.state == "upstream" then
+        wanInterface = s
+        return false
+      end
+    end)
+
+    rc, value = pcall(tokey, value, "Device.IP.Interface.{i}.")
+    if not rc then
+      return nil, "Invalid value"
+    end
+    setUciValue(value, "state", "upstream")
+    if next(wanInterface) then
+      for oldOption, oldValue in pairs(wanInterface) do
+        if not string.match(oldOption, "^%.") then
+          setUciValue(value, oldOption, oldValue)
+        end
+      end
+
+      igmpProxyBinding.sectionname = wanInterface[".name"]
+      igmpProxyBinding.option = nil
+      uciHelper.delete_on_uci(igmpProxyBinding, commitapply)
+    end
+  end,
+  State = function(_, _, value)
+    setUciValue("globals", "state", value)
+  end
+}
+
+Device_Services_X_000E50_IGMPProxy_.commit = function()
+  if configChanged then
+    uciHelper.commit(igmpProxyBinding)
+    configChanged = false
+  end
+end
+
+Device_Services_X_000E50_IGMPProxy_.revert = function()
+  if configChanged then
+    uciHelper.revert(igmpProxyBinding)
+    configChanged = false
+  end
+end
+
+register(Device_Services_X_000E50_IGMPProxy_)
+
+local Device_Services_X_000E50_IGMPProxy_IGMPSummary_i_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_IGMPProxy.IGMPSummary.{i}.",
+    access = "readOnly",
+    description = "Object that contains IGMP Snooping Information for group",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      GroupAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      LastReporter = {
+        access = "readOnly",
+        type = "string",
+      },
+      Timeout = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local ubusConnection = mapper("ubus").connect()
+local data = {}
+
+Device_Services_X_000E50_IGMPProxy_IGMPSummary_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  data = ubusConnection:call("igmpproxy.interface", "get",  {["interface"]="lan"}) or {}
+    for _, v in pairs(data) do
+      for _, groupSummary in pairs(v["group-info"] or {}) do
+        entries[#entries + 1] = groupSummary["group"]
+      end
+    end
+  return entries
+end
+
+local function getUbusData(_, param, key)
+  for _, v in pairs(data) do
+    for _, groupSummary in pairs(v["group-info"] or {}) do
+      if groupSummary["group"] == key and param == "Timeout" then
+        return tostring(groupSummary["timeout"]) or ""
+      elseif groupSummary["group"] == key and param == "LastReporter" then
+        local hosts = {}
+        for _, hostDetails in pairs (groupSummary["host-info"]) do
+          hosts[#hosts+1] = tostring(hostDetails["address"])
+        end
+        return table.concat(hosts, ",") or ""
+      end
+    end
+  end
+end
+
+Device_Services_X_000E50_IGMPProxy_IGMPSummary_i_.get = {
+  GroupAddress = function(mapping, param, key)
+    return key or ""
+  end,
+  Timeout = getUbusData,
+  LastReporter = getUbusData,
+}
+
+register(Device_Services_X_000E50_IGMPProxy_IGMPSummary_i_)
