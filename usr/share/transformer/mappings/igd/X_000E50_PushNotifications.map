@@ -1,0 +1,96 @@
+-- Manually generated
+local InternetGatewayDevice_X_000E50_PushNotifications_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_000E50_PushNotifications.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Root object for Generic PNP config",
+    parameters = {
+    }
+  }
+}
+
+register(InternetGatewayDevice_X_000E50_PushNotifications_)
+
+local InternetGatewayDevice_X_000E50_PushNotifications_Provider_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_000E50_PushNotifications.Provider.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Generic PNP Server configuration object",
+    parameters = {
+      Token = {
+        access = "readWrite",
+        type = "string",
+        max = "200",
+        description = "CPE authentication token for PNP server",
+      },
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "URL of the PNP server",
+      },
+    },
+  },
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local commitapply = commitapply
+local uciHelper = mapper("ucihelper")
+local binding = { config = "generic_app", sectionname = "pnpserver" }
+local configChanged = false
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local function uciValueOf(optionName)
+  binding.option = optionName
+  binding.default = nil
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setUciValueFor(optionName, value)
+  binding.option = optionName
+  uciHelper.set_on_uci(binding, value, commitapply)
+  configChanged = true
+end
+
+InternetGatewayDevice_X_000E50_PushNotifications_Provider_.get = {
+  Token = function(mapping, param)
+    return uciValueOf("token")
+  end,
+  URL = function(mapping, param)
+    return uciValueOf("url")
+  end
+}
+
+InternetGatewayDevice_X_000E50_PushNotifications_Provider_.set = {
+  Token = function(mapping, param, value)
+    setUciValueFor("token", value)
+  end,
+  URL = function(mapping, param, value)
+    setUciValueFor("url", value)
+  end
+}
+
+InternetGatewayDevice_X_000E50_PushNotifications_Provider_.commit = function()
+  if configChanged then
+    uciHelper.commit(binding)
+    configChanged = false
+  end
+end
+
+InternetGatewayDevice_X_000E50_PushNotifications_Provider_.revert = function()
+  if configChanged then
+    uciHelper.revert(binding)
+    configChanged = false
+  end
+end
+
+register(InternetGatewayDevice_X_000E50_PushNotifications_Provider_)
+
