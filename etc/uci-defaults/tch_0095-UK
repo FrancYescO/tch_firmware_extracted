@@ -1,0 +1,72 @@
+#!/bin/sh
+# UK Env Vars
+uci set env.custovar=envvars
+uci set env.custovar.first='1'
+uci set env.custovar.WS='0'
+uci set env.custovar.mtu_adsl='1500'
+uci set env.custovar.mtu_vdsl='1500'
+uci set env.custovar.mtu_eth='1500'
+uci set env.custovar.vpi='0'
+uci set env.custovar.vci='38'
+uci set env.custovar.enc='vcmux'
+uci set env.custovar.ulp='ppp'
+uci set env.custovar.wan_vlan_enabled='1'
+uci set env.custovar.wan_vlan_default='101'
+uci set env.custovar.wan_vlan='101'
+uci set env.custovar.setup='VDSL'
+uci set env.custovar.ISP='your ISP'
+uci set env.custovar.URL='www.technicolor.com'
+uci set env.custovar.cwmpd_enabled='1'
+uci set env.custovar.usbpower='1'
+uci set env.custovar.upgraded=0
+uci set env.var.provisioning_code='Netlynk MST'
+uci set env.var.rtfds='1'
+
+#Fix OUI 
+uci set env.var.oui="000E50"
+
+uci commit env
+
+#FW SUFFIX
+#uci set versioncusto.override=override
+#uci set versioncusto.override.fwversion_suffix="-MST_1"
+#uci commit versioncusto
+
+#Samba 
+uci set samba.samba.description="Technicolor Gateway"
+uci set samba.samba.enabled="$(uci get env.custovar.usbpower)"
+uci commit samba
+
+#PrinterSharing
+#uci set printersharing.config.enabled="$(uci get env.custovar.usbpower)"
+#uci commit printersharing
+
+#MiniDLNA
+uci set dlnad.config.friendly_name="Technicolor DLNA Server"
+uci set dlnad.config.enabled="$(uci get env.custovar.usbpower)"
+uci commit minidlna
+
+
+#Systemlog
+uci set system.@system[0].log_prefix="$(uci get env.rip.factory_id)$(uci get env.rip.serial)"
+uci commit system
+
+#mobiled
+uci set mobiled.device_defaults.enabled="$(uci get env.custovar.usbpower)"
+uci set mobiled.platform.power_on="$(uci get env.custovar.usbpower)"
+uci commit mobiled
+
+#lte-doctor
+uci set ltedoctor.logger.enabled="$(uci get env.custovar.usbpower)"
+uci commit ltedoctor
+
+#Enable cwmpd
+xdslfile=/etc/config/xdsl
+if ! [ -f $xdslfile ]; then
+	uci set cwmpd.cwmpd_config.state="$(uci get env.custovar.cwmpd_enabled)"
+	uci commit cwmpd
+fi
+
+uci set web.uidefault.nsplink='http://www.technicolor.com'
+
+uci commit web

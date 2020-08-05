@@ -1,0 +1,274 @@
+#Internal Classification Labels
+
+config label 'Normal'
+	option trafficid '1'
+
+config label 'Interactive'
+	option trafficid '2'
+
+config label 'Network_Control'
+	option trafficid '3'
+
+config label 'Video_Data'
+	option trafficid '4'
+
+config label 'Video_Sig'
+	option trafficid '5'
+
+config label 'Management'
+	option trafficid '6'
+
+config label 'Voice_Data'
+	option trafficid '7'
+
+config label 'Voice_Sig'
+	option trafficid '8'
+
+config label 'Multicast'
+	option trafficid '9'
+
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'W_Q0'
+	option priority '0'
+
+config class 'W_Q1'
+	list trafficid '2'
+	option priority '1'
+
+config class 'W_Q2'
+	list trafficid '3'
+	option priority '2'
+
+config class 'W_Q3'
+	list trafficid '4'
+	list trafficid '9'
+	option priority '3'
+
+config class 'W_Q4'
+	list trafficid '5'
+	option priority '4'
+
+config class 'W_Q5'
+	list trafficid '6'
+	option priority '5'
+
+config class 'W_Q6'
+	list trafficid '7'
+	option priority '6'
+
+config class 'W_Q7'
+	list trafficid '8'
+	option priority '7'
+
+#TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '4'
+	list trafficid '5'
+	list trafficid '9'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '6'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '3'
+
+#TO_WLAN (priorities are fixed for WMM queues)
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	list trafficid '4'
+	list trafficid '9'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '5'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '6'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+	option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+# Fixed order, relates to hardcoded priorities
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+
+# Since QoSv2.1 it's preferred to set classgroup on device level
+config device 'atm0'
+	option classgroup 'TO_WAN'
+	
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+	
+config device 'eth4'
+	option classgroup 'TO_WAN'
+	
+config device 'eth0'
+	option classgroup 'TO_LAN'
+
+config device 'eth1'
+	option classgroup 'TO_LAN'
+
+config device 'eth2'
+	option classgroup 'TO_LAN'
+
+config device 'eth3'
+	option classgroup 'TO_LAN'
+
+config device 'eth5'
+	option classgroup 'TO_LAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+config device 'wl1'
+	option classgroup 'TO_WLAN'
+
+
+# Rule type priority
+# L2classify < Host < Classify < Reclassify
+
+# Classify/Reclassify get applied in the order according to these principles :
+#
+#   - Reclassify after Classify
+#   - from lower to higher order value
+#   - for rules with order = 0 :
+#     1. rules without source or destination interface
+#     2. rules with source interface but no destination interface
+#     3. rules with destination interface but no source interface
+#     4. rules with source interface AND destination interface
+#   - as a last option, according to the order they are defined in UCI config (currently true but not guaranteed in the future)
+
+config rule
+	option target 'Interactive'
+	option proto 'tcp'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+
+config rule
+	option target 'Interactive'
+	option proto 'udp'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+
+config rule
+	option target 'Interactive'
+	option proto 'tcp'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+
+config rule
+	option target 'Interactive'
+	option proto 'udp'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+
+config rule
+	option target 'Network_Control'
+	option proto 'icmp'
+	option proto_option 'icmp-type=redirect'
+
+config rule
+	option target 'Network_Control'
+	option proto 'igmp'
+
+config rule
+	option target 'Network_Control'
+	option proto 'tcp'
+	option dstports '22,23,53,67,68,123'
+
+config rule
+	option target 'Network_Control'
+	option proto 'udp'
+	option dstports '22,23,53,67,68,123'
+
+config rule
+	option target 'Network_Control'
+	option proto 'esp'
+
+config rule
+	option target 'Network_Control'
+	option proto 'ah'
+
+#VPN's
+config rule
+	option target 'Network_Control'
+	option proto 'gre'
+
+# linked to rtsp helper (child connections will inherit the trafficid)
+config rule
+	option target 'Video_Sig'
+	option proto 'tcp'
+	option dstports '554'
+
+# overrule inherited trafficid (helper match automatically implies reclassify)
+config rule
+	option target 'Video_Data'
+	option helper 'rtsp'
+
+# linked to sip helper (child connections will inherit the trafficid)
+config rule
+	option target 'Voice_Sig'
+	option proto 'tcp'
+	option dstports '5060'
+
+config rule
+	option target 'Voice_Sig'
+	option proto 'udp'
+	option dstports '5060'
+
+# overrule inherited trafficid (helper match automatically implies reclassify)
+config rule
+	option target 'Voice_Data'
+	option helper 'sip'
+
+# multicast rules with higher order to get priority over standard rules that might overlap (i.e. dstports)
+config rule
+	option order '1'
+	option target 'Multicast'
+	option dsthost '224.0.0.0/4'
+
+config rule
+	option order '1'
+	option target 'Multicast'
+	option dsthost 'ff00::/8'
+
+# Host-application rule replaces the old rule with dport 7547 for cwmpd
+# (which would be broken once acs url is provisioned using another port via dhcpv4 option 43)
+config host
+	option target 'Management'
+	option path '/usr/bin/cwmpd'
+

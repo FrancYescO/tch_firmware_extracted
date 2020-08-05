@@ -1,0 +1,106 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+STOP=36
+USE_PROCD=1
+
+add_mcast_fwd_firewall_rule() {
+	json_add_object ""
+	json_add_string type rule
+	json_add_string src "$upzone"
+	json_add_string dest "$downzone"
+	json_add_string family ipv4
+	json_add_string proto udp
+	json_add_string dest_ip "224.0.0.0/4"
+	json_add_string target ACCEPT
+	json_close_object
+}
+
+setup_mcast_fwd_firewall_rules() {
+	local iface="$1"
+
+	local state
+	config_get state "$iface" state
+
+	[ "$state" = "downstream" ] || return 0
+
+	local downzone
+	downzone=$(fw3 -q network "$iface")
+
+	[ -n "$downzone" ] || return 0
+
+	local zone
+	for zone in $HANDLED_DOWNZONES; do
+		[ "$zone" = "$downzone" ] && return 0
+	done
+
+	add_mcast_fwd_firewall_rule
+
+	HANDLED_DOWNZONES="$HANDLED_DOWNZONES $downzone"
+}
+
+add_igmp_input_firewall_rule() {
+	json_add_object ""
+	json_add_string type rule
+	json_add_string src "$upzone"
+	json_add_string proto igmp
+	json_add_string target ACCEPT
+	json_close_object
+}
+
+setup_firewall_rules() {
+	local iface="$1"
+
+	local state
+	config_get state "$iface" state
+
+	[ "$state" = "upstream" ] || return 0
+
+	local upzone
+	upzone=$(fw3 -q network "$iface")
+
+	[ -n "$upzone" ] || return 0
+
+	local zone
+	for zone in $HANDLED_UPZONES; do
+		[ "$zone" = "$upzone" ] && return 0
+	done
+
+	HANDLED_DOWNZONES=
+
+	add_igmp_input_firewall_rule
+	config_foreach setup_mcast_fwd_firewall_rules interface
+
+	HANDLED_UPZONES="$HANDLED_UPZONES $upzone"
+}
+
+start_service() {
+	logger -t igmpproxy "Starting igmpproxy"
+	config_load "igmpproxy"
+
+	procd_open_instance
+	procd_set_param command /usr/bin/igmpproxy
+	procd_set_param respawn
+
+	config_get_bool enabled globals state 0
+
+	[ "$enabled" = "1" ] && {
+		procd_open_data
+
+		json_add_array firewall
+		config_foreach setup_firewall_rules interface
+		json_close_array
+
+		procd_close_data
+	}
+
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger "igmpproxy"
+}
+
+service_started() {
+	procd_set_config_changed firewall
+}

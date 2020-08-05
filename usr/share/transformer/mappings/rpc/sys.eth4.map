@@ -1,0 +1,78 @@
+local popen = io.popen
+local string, format = string, string.format
+local register = register
+local logger = require("transformer.logger")
+local log = logger.new("sys.eth4", 2)
+
+local sys_eth4_ = {
+    objectType = {
+        name = "sys.eth4.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Link = {
+                access = "readOnly",
+                type = "boolean"
+            },
+            Speed = {
+                access = "readOnly",
+                type = "string"
+            },
+            Mode = {
+                access = "readOnly",
+                type = "string"
+            },
+        },
+    }
+}
+
+local function ETH4()
+   local readport = popen("/usr/bin/ethctl eth4 media-type 2>&1")
+    
+    local returnvars = {}
+    returnvars["Link"] = "0"
+    returnvars["Speed"] = "0"
+    returnvars["Mode"] = "None"
+    if readport == nil then
+        return returnvars
+    end
+    for line in readport:lines() do
+      local words = {}
+      for word in string.gmatch(line, "%a+") do
+         words[#words+1]= word
+      end
+      --log:error(format("ETH4:%s",words[3]))
+      if words[2] == "autonegotiated" then
+           returnvars["Speed"] = string.match(line, "%d+")
+           returnvars["Mode"] = words[6]
+      elseif words[2] == "fixed" then
+           returnvars["Speed"] = string.match(line, "%d+")
+           returnvars["Mode"] = words[6]
+      end
+      if words[1] == "Link" then
+        if words[3] == "up" then
+           returnvars["Link"] = "1"
+        end
+      end
+    end
+    return returnvars
+
+end
+
+
+sys_eth4_.get = {
+  Speed = function(mapping, param, key)
+    return ETH4().Speed
+  end,
+  Mode = function(mapping, param, key)
+    return ETH4().Mode
+  end,
+  Link = function(mapping, param, key)
+    return ETH4().Link
+  end,
+}
+
+
+ 
+register(sys_eth4_)

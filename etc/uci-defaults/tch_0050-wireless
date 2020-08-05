@@ -1,0 +1,69 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+# To make sure it is set to the correct vendor
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+  
+  uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`-5G
+  
+  uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s0`
+  
+  uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+  
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+  
+  uci set wireless.ap1_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+fi
+
+uci commit wireless
+
+
+#/*******************************************************************/
+#/*             datamodel ordering for wireless devices             */
+#/*******************************************************************/
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.wlandevices=ordering
+uci set dmordering.wlandevices.name='InternetGatewayDevice.WLANDevices.{i}.'
+# devices that are instantiated under `InternetGatewayDevice.LANDevice`:
+uci add_list dmordering.wlandevices.order=wl0
+
+DUMMY=`uci get wireless.radio_5G`
+if [ "$?" == "0" ] ; then
+  uci add_list dmordering.wlandevices.order=wl1
+fi
+
+# devices that are instantiated under `InternetGatewayDevice.LANInterfaces`:
+uci add_list dmordering.wlandevices.order=wl0_1
+
+DUMMY=`uci get wireless.radio_5G`
+if [ "$?" == "0" ] ; then
+  uci add_list dmordering.wlandevices.order=wl1_1
+fi
+
+uci add_list dmordering.wlandevices.order=wl1_remote
+uci commit dmordering
+
+

@@ -1,0 +1,59 @@
+local open = io.open
+local popen = io.popen
+local string, format = string, string.format
+local register = register
+
+local sys_dsldiag_ = {
+    objectType = {
+        name = "sys.dsldiag.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean"
+            },
+        },
+    }
+}
+
+local function getall(mapping, key)
+  local returnvars = {}
+  local pid = ""
+  local exe = io.popen("pidof dsldiagd")
+  for l in exe:lines() do 
+    pid = pid .. l
+  end
+  exe:close()
+  if pid == "" then 
+    returnvars["Enable"] = "0"
+  else
+    returnvars["Enable"] = "1"
+  end
+  return returnvars
+end
+
+
+local function get(mapping, paramName, key)
+   local value = getall(mapping, key)
+   return value[paramName]
+end
+
+
+local set = {
+  Enable = function(mapping, param, value)
+    if value == "1" then
+        local exe = io.popen("dsldiagd")
+        exe:close()
+    elseif value == "0" then
+        local exe = io.popen("killall -9 dsldiagd")
+        exe:close() 
+    end
+    return true
+  end
+}
+
+sys_dsldiag_.get = get
+sys_dsldiag_.set = set
+register(sys_dsldiag_)
