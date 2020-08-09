@@ -1,0 +1,154 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/cron.html"> <dom-module id="benchmark-schedules"> <template> <style include="iron-flex iron-flex-alignment"> :host .wrapper{
+        max-height: 30em;
+        display: block;
+        overflow-y: auto;
+        overflow-x: hidden;
+        width: 100%;
+      }
+      .time-desc {
+        color: var(--secondary-text-color);
+      }
+      .schedule-row {
+        white-space: nowrap;
+        margin-bottom: 0.5em;
+      }
+      .scroller .grow {
+        flex: 1 1 auto;
+      } </style> <div class="layout vertical"> <div class="layout horizontal"> <paper-toggle-button></paper-toggle-button> <span>Enable Scheduled Tests</span> </div> <div class="wrapper"> <div class="layout vertical scroller"> <template is="dom-repeat" items="[[schedules]]" as="schedule" sort="_scheduleSort"> <div class="layout horizontal schedule-row justified"> <div class="layout vertical center-center"> <div class="layout vertical"> <!-- <div>[[schedule.time]]</div> --> <template is="dom-if" if="[[schedule.repeat]]"> <iron-icon icon="schedule"></iron-icon> </template> <template is="dom-if" if="[[!schedule.repeat]]"> <iron-icon icon="blank"></iron-icon> </template> </div> </div> <div class="layout vertical grow"> <div class="layout vertical start-justified time-desc"> <div class="layout horizontal"> <div>[[schedule.date]]</div> </div> <div> <div>Next: [[_getNext(schedule.next)]]</div> </div> </div> </div> <div class="layout vertical"> <div class="layout horizontal"> <template is="dom-if" if="[[schedule.failed]]"> <paper-icon-button class="end-icon" icon="info"></paper-icon-button> </template> <template is="dom-if" if="[[!schedule.failed]]"> <paper-icon-button class="end-icon" icon="image:edit" on-tap="_editClick" schedule="[[schedule]]"></paper-icon-button> </template> <!-- <paper-icon-button class="end-icon" icon="delete" on-tap="_deleteClick" schedule="[[schedule]]"></paper-icon-button> --> </div> </div> </div> </template> </div> </div> <paper-icon-button icon="add" on-click="add_test">Add Test</paper-icon-button> </div> </template> <script> Polymer(
+    {
+      is: 'benchmark-schedules',
+      properties:
+      {
+        // {
+        //   time: "19:00",
+        //   date: "Daily | Every Tuesday | Mo Tu Th Fr | 19/10",
+        //   repeat: false,
+        //   failed: false,
+        //   id: ""
+        // }
+        schedules: {
+          type: Array,
+          value: []
+        },
+      },
+
+      _scheduleSort: function(a,b){
+        if(!a.next) return 1;
+        if(!b.next) return -1;
+        return a.next.getTime() - b.next.getTime();
+      },
+
+      _deleteClick: function(e){
+        console.log("DELETE",e)
+      },
+      _editClick: function(e){
+        var schedule = $(e.target).closest("paper-icon-button")[0].schedule;
+        this.add_schedule.open(schedule.rule.id,this.reload_schedules.bind(this));
+      },
+
+      ready: function(){
+        this.add_schedule = $(this).closest("duma-panel").parent().children("benchmark-add-scheduled")[0];
+        this.reload_schedules();
+      },
+
+      _getNext: function(next){
+        if(!next) return "Over a year"
+        return next.toLocaleString({},{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
+      },
+        
+      reload_schedules: function(){
+        long_rpc_promise("com.netdumasoftware.benchmark","get_cron_rules",[]).done(function(result){
+          result = result[0] ? JSON.parse(result[0]) : [];
+          var keys = Object.keys(result);
+          var schedules = [];
+          for(var i = 0; i < keys.length; i ++){
+            var rule = result[keys[i]];
+            schedules.push(this.makeSchedule(rule.schedule, !rule.one_time, rule.failed, rule));
+          }
+          this.set("schedules",schedules);
+        }.bind(this));
+      },
+
+      add_test: function(){
+        this.add_schedule.open(null,this.reload_schedules.bind(this));
+      },
+
+      makeSchedule: function(cron, repeat, failed, rule){
+        var newEntry = {
+          time: "",
+          date: "",
+          repeat: repeat,
+          failed: failed,
+          rule: rule,
+          next: (new Cron(rule.schedule)).next(24 * 3600 * 366 * 1000)
+        }
+        if(typeof(cron) === "string") cron = new Cron(cron);
+        var hour = 0;
+        for(var i = 0; i < cron.hours.length; i++){
+          if(cron.hours[i]){
+            hour = i;
+          }
+        }
+        hour = hour < 10 ? "0" + hour.toString() : hour.toString();
+        newEntry.time = hour + ":00";
+
+        var daysShort = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+        var days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+        var activeDays = [];
+        for(var i = 0; i < cron.weekdays.length; i++){
+          if(cron.weekdays[i]){
+            activeDays.push([daysShort[i],days[i]]);
+          }
+        }
+        if(activeDays.length === 7){
+          var months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+          var monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          var activeMonths = [];
+          var activeDates = [];
+          var dateGaps = [];
+          for(var m = 0; m < cron.months.length; m ++){
+            if(cron.months[m]) activeMonths.push([monthsShort[m],months[m]]);
+          }
+          for(var d = 0; d < cron.days.length;d ++){
+            if(cron.days[d]){
+              if(activeDates.length){
+                dateGaps.push(d - activeDates[activeDates.length-1]);
+              }
+              activeDates.push(d + 1);
+            }
+          }
+          for(var i = 1; i < dateGaps.length; i++){
+            if(dateGaps[i] !== dateGaps[i-1]){
+              dateGaps = -1;
+              break;
+            }
+          }
+          if(typeof(dateGaps) !== "number") dateGaps = dateGaps[0];
+
+          if(activeMonths.length === 12){
+            if(activeDates.length === 31)
+              newEntry.date = "Daily";
+            else if(dateGaps){
+              newEntry.date = "Every " + dateGaps + " days";
+            }else{
+              newEntry.date = "Every month on " + (activeDates[0] < 10 ? "0" + activeDates[0].toString() : activeDates[0].toString());
+            }
+          }else{
+            newEntry.date = newEntry.next.toLocaleString({},{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit", year:"2-digit"});
+          }
+        }else if(activeDays.length === 1){
+          newEntry.date = "Every " + activeDays[0][1];
+        // }else if(activeDays.length === 2 && activeDays[0][0] === "Su" && activeDays[1][0] === "Sa"){
+        //   newEntry.date = "Every Weekend";
+        // }else if(activeDays.length === 5 && activeDays[0][0] === "Mo" && activeDays[4][0] === "Fr"){
+        //   newEntry.date = "Every Weekday";
+        }else{
+          var dateString = "Every ";
+          for(var i = 0; i < activeDays.length; i ++){
+            dateString += activeDays[i][0] + (i + 1 < activeDays.length ? ", " : "");
+          }
+          newEntry.date = dateString;
+        }
+        return newEntry;
+      }
+    }); </script> </dom-module> 

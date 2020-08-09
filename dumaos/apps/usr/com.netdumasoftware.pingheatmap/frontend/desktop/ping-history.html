@@ -1,0 +1,222 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="ping-history"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        @apply(--layout-flex-none);
+      }
+      .time-slider-wrapper {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex-wrap: nowrap;
+      }
+      .time-slider-wrapper > div {
+        display: flex;
+        justify-content: flex-start;
+      }
+      .time-slider-wrapper > *:first-child{
+        flex-grow: 2;
+      }
+      .date-display {
+        white-space: nowrap;
+      }
+      #timeSlider {
+        --paper-slider-knob-start-color: var(--primary-color);
+        --paper-slider-knob-start-border-color: var(--primary-color);
+        margin: 0em 2em;
+      } </style> <div class="inner layout horizontal time-slider-wrapper"> <div> <paper-slider id="timeSlider" min="0" max="[[_sliderLen]]" immediate-value="{{sliderVal}}" disabled="[[!_enabled(_history,_sliderScale)]]"></paper-slider> </div> <div> <paper-dropdown-menu dynamic-align disabled="[[!_enabled(_history,_sliderScale)]]" label="Slider Timespan"> <paper-listbox class="dropdown-content" selected="{{timeSelected}}"> <template is="dom-repeat" items="[[timeOptions]]" as="time"> <paper-item time="[[time.t]]">[[time.text]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div>  </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-history",
+
+      properties: {
+        timeSelected: {
+          type: Number,
+          value: 2
+        },
+        timeOptions: {
+          type: Array,
+          notify: true,
+          value: [
+            { t: 3600, text: "1 Hour" },
+            { t: 21600, text: "6 Hours" },
+            { t: 86400, text: "24 Hours" },
+            { t: 604800, text: "1 Week" },
+            { t: 1209600, text: "2 Weeks" },
+            { t: 2592000, text: "1 Month" }
+          ]
+        },
+        sliderVal: {
+          type: Number,
+          value: 0,
+          observer: "_sliderChange"
+        },
+        _sliderLen: Number,
+        _history: {
+          type: Array,
+          value: []
+        },
+        _sliderScale: {
+          type: Number,
+          value: 1
+        },
+        pindisplay: {
+          type: String,
+          value: "Now"
+        }
+      },
+
+      observers: [
+        "_refresh(_history,timeOptions,timeSelected)"
+      ],
+      ready: function () {
+        this._callback = null;
+        this._knob = $(document.createElement("span"));
+        $(this.$.timeSlider).find(".slider-knob-inner").append(this._knob);
+        this._knob.addClass("date-display")
+          .css({
+            "white-space": "nowrap",
+            "position": "absolute",
+            "left": "50%",
+            "top": "-0.7em",
+            "transform": "translateX(-50%)"
+          });
+        this.load();
+      },
+      attached: function(){
+        this.load();
+      },
+      load: function(){
+        var digitEx = new RegExp("\\d+");
+        var time_drop = duma.storage(packageId,"time_drop");
+        if(time_drop && time_drop.match(digitEx)){
+          this.timeSelected = parseInt(time_drop);
+        }else{
+          this.timeSelected = 2;
+        }
+      },
+      save: function(){
+        if($(this).closest("duma-panel").prop("loaded")){
+          duma.storage(packageId,"time_drop",this.timeSelected);
+        }
+      },
+      _sliderToUnix: function(sliderVal){
+        return Date.now() - ( ((this._sliderLen - sliderVal) * this._sliderScale) * 1000 );
+      },
+      _pinDisplay: function(display){
+        if(this._knob && this._knob[0]){
+          this._knob.text(display);
+        }
+      },
+      _preLatestTime: 0,
+      _sliderChange: function(sliderVal){
+        var slider_time = this._sliderToUnix(sliderVal);
+        if(this._sliderLen === sliderVal){
+          this._pinDisplay("Now");
+          this._preLatestTime = Date.now();
+          this._call(null);
+          return;
+        }
+        var latest_time = 0;
+        var ret = [];
+        for(var k in this._history){
+          var ser = this._history[k];
+          var final = null;
+          for(var i = ser.short_snapshots.length - 1; i >= 0; i --){
+            var snap = ser.short_snapshots[i];
+            if(snap.time * 1000 > slider_time) continue;
+            final = snap.ping
+            if(snap.time > latest_time) latest_time = snap.time;
+            break;
+          }
+          if(final){
+            ret.push({
+              server: ser.server,
+              ping: final
+            });
+          }
+        }
+        if(latest_time > 0){
+          var slider_date = new Date(latest_time * 1000);
+          this._pinDisplay(slider_date.toLocaleDateString([], {day:'numeric', month: 'numeric'}) + " " + slider_date.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'}));
+        }else{
+          this._pinDisplay("No Ping Data");
+        }
+        if(latest_time !== this._preLatestTime){
+          this._call(ret);
+        }
+        this._preLatestTime = latest_time;
+      },
+
+      _refresh: function () {
+        var timeData = this.timeOptions[this.timeSelected];
+        if(this._sliderScale){
+          var len = (timeData.t / this._sliderScale)
+          this._sliderLen = len;
+          this.$.timeSlider.value = len;
+        }
+        var start_time = this._sliderToUnix(0);
+        for(var k in this._history){
+          var ser = this._history[k];
+          ser.short_snapshots = [];
+          for(var i = 0; i < ser.snapshots.length; i ++){
+            var snap = ser.snapshots[i];
+            if(snap.time * 1000 >= start_time){
+              ser.short_snapshots.push(snap);
+            }
+          }
+        }
+        this.save();
+      },
+      _enabled: function(history,sliderScale){
+        return history.length > 0 && sliderScale;
+      },
+
+      /**
+       * historyData - Array of objects:
+       * {
+       *  server: the server
+       *  snapshots: [
+       *    time: the time of the snapshot
+       *    ping: ping at the snapshot
+       *  ]
+       * } 
+       */
+      setHistory: function (servers, historyData, callback) {
+        var joint = [];
+        var i,s,t = 0;
+        forObject(historyData,function(ip,data){
+          var hist = {
+            server: null,
+            snapshots: []
+          };
+          forObject(servers,function(skey, serv){
+            if(serv.ip === ip){
+              hist.server = serv;
+            }
+          });
+          if(hist.server === null){
+            console.error('IP Address '+ ip +' cannot find a server');
+            return false;
+          }
+          forObject(data,function(time,ping){
+            if(time === "references") return;
+            hist.snapshots.push({
+              time: parseInt(time),
+              ping: ping
+            });
+          });
+          hist.snapshots.sort(function(a,b) {return a.time - b.time; });
+          joint.push(hist);
+        },true);
+        this._history = joint;
+        this._callback = callback;
+      },
+      _call: function(data){
+        if(this._callback){
+          this._callback(data);
+        }
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

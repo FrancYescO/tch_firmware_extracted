@@ -1,0 +1,86 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/duma-map/duma-map.html"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html"> <link rel="import" href="/custom-elements/iron-icons/maps-icons.html"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/d3.html"> <link rel="import" href="/libs/moment.html"> <link rel="import" href="/libs/devices.html"> <link rel="import" href="/libs/colours.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/ping-log.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/ping-history.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/set-tracking.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/ping-custom-list.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/ping-servers-svg.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <style is="custom-style" include="duma-theme iron-flex"> .horizontal-wrapper {
+    height: 100%;
+    min-height: 256px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .horizontal-wrapper > *:nth-child(1) {
+    flex-grow: 1;
+  }
+  .pingmap-wrapper {
+    height: 100%;
+    min-height: 256px;
+    position:relative;
+    @apply(--layout-flex);
+  }
+
+  .ping-top-bar {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .targeter-wrapper {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    flex-grow: 1;
+  }
+  .targeter-wrapper > *:nth-child(n+1) {
+    padding-left: 1em;
+  }
+  .track-wrapper {
+    overflow: hidden;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 100%;
+    transition: width 1s;
+  }
+  .track-wrapper > * {
+    margin-right: 1em;
+  }
+  .track-wrapper paper-checkbox span, #reping-button span, #set-track-button span, #time-until {
+    white-space: nowrap !important;
+  }
+  #reping-button, #set-track-button {
+    flex-shrink: 0;
+  }
+  #time-until {
+    color: var(--secondary-text-color);
+  }
+  #time-until span{
+    margin-left: 0.3em;
+  }
+  .default-title {
+    margin-top: 1em;
+    margin-bottom: 0.1em;
+  }
+  #ping-targets ::content paper-listbox ::content paper-item * {
+    white-space: pre;
+  }
+  .top-bar paper-icon-button:hover ::content iron-icon {
+    /* stroke: var(--primary-color) !important; */
+    fill: var(--primary-color) !important;
+  }
+
+  .ping-top-bar .legend-wrapper {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    flex-grow: 1;
+    padding-right: 0.5em;
+  }
+  .ping-top-bar .gradient {
+    background: linear-gradient(to right, <%= theme.RATING_APLUS %>, <%= theme.RATING_A %>, <%= theme.RATING_B %>, <%= theme.RATING_C %>, <%= theme.RATING_D %>);
+    min-width: 100px;
+    max-width: 50%;
+    width: 42%;
+    height: 6px;
+    margin: 0 0.4em;
+  } </style> <duma-panel header="Ping Heatmap" show-pin show-help show-help-tip show-drawer> <div help-content> <p> <!-- TODO move to translations --> Ping Heatmap shows your ping to game servers all around the world, and allows you to track that ping over time. Select a game from the Select Ping Target drop down. Once selected, the map will fill with servers. Click Set Tracking to ping these servers at an interval, in order to build up a history. Click on a Ping Cluster to expand it, and click on a Server to open it in the Ping History panel below. </p> </div> <div help-tip> If Tracking is enabled, you will be able to go back in time using the slider at the bottom. You can now compare the server pings over time. </div> <div drawer> <div class="layout vertical"> <div class="default-title">Ping Cluster Default</div> <div class="cluster-toggle-wrapper layout horizontal"> <paper-toggle-button></paper-toggle-button><p></p> </div> <div class="default-title">Save Manual Pings</div> <div class="manual-toggle-wrapper layout horizontal"> <paper-toggle-button checked="checked"></paper-toggle-button><p></p> </div> <paper-button id="add-custom-list" background>Add custom list</paper-button> <paper-button id="force-cloud-update-button">Force Cloud Update</paper-button> </div> </div> <div main class="horizontal-wrapper"> <div class="layout vertical"> <div class="ping-top-bar"> <div class="layout horizontal targeter-wrapper"> <paper-dropdown-menu id="ping-targets" label="Select Ping Target"> <paper-listbox class="dropdown-content"></paper-listbox> </paper-dropdown-menu> <div class="track-wrapper"> <paper-button id="reping-button" background disabled="disabled"><span>Ping Again</span></paper-button> <paper-icon-button id="set-track-button" icon="schedule" background disabled="disabled"></paper-icon-button> <paper-tooltip position="bottom" for="set-track-button" animation-delay="0" offset="0">Schedule Tracking</paper-tooltip> <div id="time-until"> <span>Next ping</span><span id="time-until-span"></span> </div> </div> </div> <div class="legend-wrapper"> <div> &lt;15 ms </div> <div class="gradient"></div> <div> &gt;200 ms </div> </div> </div> <div class="pingmap-wrapper"> <duma-map prevent-radial-animation></duma-map> <ping-servers-svg></ping-servers-svg> </div> <ping-history></ping-history> </div> <ping-log></ping-log> <duma-alert></duma-alert> <ping-custom-list></ping-custom-list> <set-tracking></set-tracking> </div> </duma-panel> <script src="/apps/com.netdumasoftware.pingheatmap/desktop/ping-map.js"></script> 

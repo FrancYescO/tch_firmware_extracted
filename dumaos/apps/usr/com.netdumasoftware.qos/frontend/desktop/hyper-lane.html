@@ -1,0 +1,48 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <%
+require "libos"
+local platform = os.platform_information()
+%> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/duma-device-selector/duma-device-selector.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/custom-elements/granite-led/granite-led.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/cycle.html"> <link rel="import" href="/libs/devices.html"> <style is="custom-style" include="iron-flex iron-positioning duma-theme"> #auto-hyperlane .subtitle {
+    display: block;
+    font-size: 0.8em;
+    margin-top: 2px;
+    max-width: 150px;
+  }
+
+  #auto-hyperlane {
+    align-self: center;
+    --paper-checkbox-label-spacing: 0;
+    --paper-checkbox-margin: 8px 16px 8px 0;
+    --paper-checkbox-vertical-align: top;
+  }
+  #devices td {
+    width: auto !important;
+  }
+  td div.packets {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+  }
+  
+
+  paper-dialog ::content #speeds-input-div {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-evenly;      
+  }
+
+  paper-dialog ::content paper-input.isp-speed-input {
+    width: 10em;
+  }
+
+  paper-dialog ::content paper-input.isp-speed-input paper-input-container input[type=number]::-webkit-inner-spin-button,
+  paper-dialog ::content paper-input.isp-speed-input paper-input-container input[type=number]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    margin: 0; 
+    display: none;
+  } </style> <link rel="import" href="/apps/com.netdumasoftware.qos/desktop/qos.html"> <% if platform.vendor == "TELSTRA" then %> <duma-panel header="<%= i18n.header %>" show-pin id="qos-hyperlane-panel" show-help show-drawer> <div drawer> <div class="layout horizontal"> <paper-toggle-button id="hardware-acc-toggle"><%= i18n.fullQoS %></paper-toggle-button> <paper-spinner-lite id="harware-acc-spinner" hidden></paper-spinner-lite> </div> </div> <% else %> <duma-panel header="<%= i18n.header %>" show-pin id="qos-hyperlane-panel" show-help> <% end %> <div help-content> <p> <%= i18n.helpContent1 %> </p> <figure> <img src="/apps/com.netdumasoftware.qos/desktop/help-images/hyper-lane-1.svg"> <figcaption> <%= i18n.helpContentCaption1 %> </figcaption> </figure> <figure> <img src="help-images/hyper-lane-2.svg"> <figcaption> <%= i18n.helpContentCaption2 %> </figcaption> </figure> <p> <%= i18n.helpContent2 %> </p> </div> <div main class="vertical"> <table class="flex-none"> <thead> <tr> <th></th> <th><%= i18n.name %></th> <th><%= i18n.service %></th> <th><%= i18n.downloadPackets %></th> <th><%= i18n.uploadPackets %></th> <th></th> </tr> </thead><thead> </thead><tbody id="devices"> <tr> <td> <paper-toggle-button id="auto-hyperlane"></paper-toggle-button> </td> <td><%= i18n.allDevices %></td> <td><%= i18n.dumaosClassifiedGames %></td> <td> <div class="packets download"> <granite-led></granite-led> <div>0</div> </div> </td> <td> <div class="packets upload"> <granite-led></granite-led> <div>0</div> </div> </td> <!-- <td><paper-icon-button icon="delete-forever"></paper-icon-button></td> --> </tr> </tbody> </table> <div class="buttons inner"> <paper-button background id="add-device"><%= i18n.addDevice %></paper-button> </div> <paper-dialog id="hyperlane-loader-dialog" modal> <h2><%= i18n.applyingSettings %></h2> <div class="layout horizontal center-justified"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-device-selector header="<%= i18n.trafficPrioritisationSelectionHeader %>"></duma-device-selector> <duma-alert id="hyperlane-duma-alert"></duma-alert> <% if platform.vendor == "TELSTRA" then %> <paper-dialog id="full-qos-dialog" modal> <h2>Disable Full QoS?</h2> <p> Are you sure you want to disable Full QoS? Disabling Full QoS removes the Congestion Control and Bandwidth Allocation features and is only recommended if your bandwidth speeds are more than 150mbps (almost all users have lower). </p> <p> If you change your mind, you can re-enable Full QoS at any time. </p> <p> Would you like to disable Full QoS? </p> <div class="buttons"> <paper-button id="cancel">No</paper-button> <paper-button id="confirm">Yes</paper-button> </div> </paper-dialog> <paper-dialog id="speeds-dialog" modal> <h2><%= i18n.enterYourSpeeds %></h2> <div class="inner"> <p> <%= i18n.welcomeQoS %> </p> <p> <%= i18n.enterBandwidth %>: </p> <div id="speeds-input-div"> <div> <paper-input label="<%= i18n.download %>" prevent-invalid-input pattern="^[0-9]+$" allowed-pattern="^[0-9]+$" auto-validate step="10" min="0" value="100" class="isp-speed-input" id="isp-download-speed-input"> <div suffix><%= i18n.Mbps %></div> </paper-input> </div> <div> <paper-input label="<%= i18n.upload %>" prevent-invalid-input pattern="^[0-9]+$" allowed-pattern="^[0-9]+$" auto-validate step="10" min="0" value="100" class="isp-speed-input" id="isp-upload-speed-input"> <div suffix><%= i18n.Mbps %></div> </paper-input> </div> </div> </div> <div class="buttons"> <paper-button id="done-button"><%= i18n.done %></paper-button> </div> </paper-dialog> <paper-dialog id="high-speeds-dialog" modal> <h2><%= i18n.highSpeedSetup %></h2> <div class="inner"> <p> <%= i18n.qosLimits %> </p> <p> <%= i18n.changeAtAnyTime %> </p> <paper-radio-group selected="on" id="hardware-radio"> <paper-radio-button name="on"><%= i18n.yesDisable %></paper-radio-button> <paper-radio-button name="off"><%= i18n.noEnable %></paper-radio-button> </paper-radio-group> </div> <div class="buttons"> <paper-button id="done-button"><%= i18n.done %></paper-button> </div> </paper-dialog> <% end %> </div> </duma-panel> <script src="/apps/com.netdumasoftware.qos/desktop/hyper-lane.js"></script> </duma-panel>

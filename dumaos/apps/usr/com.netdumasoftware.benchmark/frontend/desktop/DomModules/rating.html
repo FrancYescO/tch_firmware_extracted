@@ -1,0 +1,277 @@
+<link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="duma-rating"> <template> <style include="duma-theme"> :host {
+        display: block;
+        padding: 8px;
+      }
+      .circle_wrapper{
+        position: relative;
+       }
+
+      .circle {
+        display: block;
+        fill: none;
+        stroke-linecap: round;
+      }
+      .transparent {
+        stroke-opacity: 0.25;
+      }
+
+      .label_wrapper {
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        position: absolute;
+        font-weight: bold;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-center-justified);
+      }
+
+      .label {
+        font-size: 14px;
+        text-transform: uppercase;
+        @apply(--paper-font-body2);
+      }
+      .circle_wrapper svg {
+        height: 100%;
+        width: 100%;
+        display: block;
+      }
+
+      .circle_wrapper:hover #tooltip {
+        visibility: visible;
+      }
+
+      .circle_wrapper #tooltip {
+        visibility: hidden;
+        width: 120px;
+        background-color: black;
+        color: #fff;
+        text-align: center;
+        padding: 5px 0;
+        border-radius: 6px;
+
+        /* Position the tooltip text - see examples below! */
+        position: absolute;
+        z-index: 100;
+
+        top: -10px;
+        left: 105%;
+      }
+
+      .circle_wrapper #tooltip::after
+      {
+        content: " ";
+        position: absolute;
+        top: 50%;
+        right: 100%; /* To the left of the tooltip */
+        margin-top: -10px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: transparent black transparent transparent;
+      } </style> <!-- local DOM HTML --> <div class="circle_wrapper" style$="width: [[size]]px; height: [[size]]px"> <svg viewbox$="0 0 [[size]] [[size]]"> <circle cx$="[[centre]]" cy$="[[centre]]" r$="[[radius]]" style="stroke-width: [[thickness]];" class="circle transparent" stroke="#666666"/> <path id="arc" class="circle" style="stroke-width: [[thickness]];" stroke$="[[colour]]"/> </svg> <div class="label_wrapper"> <span class="label" style$="color: [[colour]]">[[rating]]</span> </div> <paper-tooltip position="right" class="layout vertical"> <div class="layout horizontal"> <iron-icon icon="[[tooltipIcons.0]]"></iron-icon> [[tooltip.line0]] </div> <div class="layout horizontal"> <iron-icon icon="[[tooltipIcons.1]]"></iron-icon> [[tooltip.line1]] </div> <div class="layout horizontal"> <iron-icon icon="[[tooltipIcons.2]]"></iron-icon> [[tooltip.line2]] </div> </paper-tooltip> </div> </template> <script> Polymer(
+    {
+      is: 'duma-rating',
+      properties:
+      {
+        animated:
+        {
+          type: Boolean,
+          value: false,
+        },
+        size:
+        {
+          type: Number,
+          value: 32,
+        },
+        thickness:
+        {
+          type: Number,
+          value: 3,
+        },
+        animationTime:
+        {
+          type: Number,
+          value: 750,
+        },
+        centre:
+        {
+          type: Number,
+          computed: "getCircleCentre(size)",
+        },
+        radius:
+        {
+          type: Number,
+          computed: "getRadius(centre, thickness)",
+        },
+        thresholds:
+        {
+          type: Object,
+          value:
+          {
+            max: 5,
+
+            limits:
+            [
+              {
+                letter: "D",
+                limit: 1,
+                colour: "#FF0000",
+              },
+              {
+                letter: "C",
+                limit: 2,
+                colour: "#FFA500",
+              },
+              {
+                letter: "B",
+                limit: 3,
+                colour: "#FFFF00",
+              },
+              {
+                letter: "A",
+                limit: 4,
+                colour: "#008800",
+              },
+              {
+                letter: "A+",
+                limit: 5,
+                colour: "#00FF00",
+              }
+            ],
+          }
+        },
+        value:
+        {
+          type: Number,
+          value: 0,
+        },
+        rating:
+        {
+          type: String,
+          value: "-",
+        },
+        colour:
+        {
+          type: String,
+          value: "#FFFFFF"
+        },
+        tooltip:
+        {
+          type: Object,
+          value: function ()
+          {
+            return {
+              line0: "",
+              line1: "",
+              line2: "",
+            };
+          },
+        },
+        tooltipIcons:
+        {
+          type: Object,
+          value:
+          {
+            0: "",
+            1: "",
+            2: "",
+          },
+        },
+      },
+      ready: function ()
+      {
+        if (this.value != 0)
+          this.setRating(this.value);
+      },
+
+      setRating: function (value)
+      {
+        this.value = value;
+
+        var rating = this.getRating(this.value);
+        this.rating = rating[1].letter;
+        this.colour = rating[1].colour;
+
+        var angle = (rating[0] >= this.thresholds.limits.length - 1) ?
+                     this.getAngle(this.thresholds.max, this.thresholds.max) :
+                     this.getAngle(this.value, this.thresholds.max);
+
+        if (this.animated)
+        {
+          var from = { property: 0 };
+          var to   = { property: angle };
+          var local = this; // So the animation can access this
+
+          jQuery(from).animate(to,
+          {
+            duration: this.animationTime,
+            easing: "swing",
+            step: function () { local.$.arc.setAttribute("d", local.describeArc(local, this.property)) },
+          });
+        }
+        else
+        {
+          this.$.arc.setAttribute("d", this.describeArc(this, angle));
+        }
+      },
+
+      reset: function ()
+      {
+        this.value = 0;
+
+        this.rating = "-";
+        this.colour = "#FFFFFF";
+
+        this.$.arc.setAttribute("d", "");
+      },
+
+      getAngle(value, max)
+      {
+        return (Math.min(value, max) / max) * 360;
+      },
+
+      getRating(value)
+      {
+        var i;
+
+        for (var i = 0; i < this.thresholds.limits.length - 1; i++)
+          if (value < this.thresholds.limits[i].limit)
+            break;
+
+        return [i, this.thresholds.limits[i]];
+      },
+
+      getCircleCentre(size)
+      {
+        return (size / 2);
+      },
+
+      getRadius(centre, thickness)
+      {
+        return centre - thickness;
+      },
+
+      polarToCartesian(center, radius, angleInDegrees)
+      {
+        var angleInRadians = (angleInDegrees-90) * Math.PI / 180.0;
+
+        return {
+          x: center + (radius * Math.cos(angleInRadians)),
+          y: center + (radius * Math.sin(angleInRadians)),
+        };
+      },
+
+      describeArc(local, endAngle)
+      {
+        var start = local.polarToCartesian(local.centre, local.radius, endAngle);
+        var end   = local.polarToCartesian(local.centre, local.radius, 1);
+
+        var largeArcFlag = endAngle <= 180 ? "0" : "1";
+
+        return [
+          "M", start.x, start.y,
+          "A", local.radius, local.radius, 0, largeArcFlag, 0, end.x, end.y
+        ].join(" ");
+      }
+    }); </script> </dom-module> 

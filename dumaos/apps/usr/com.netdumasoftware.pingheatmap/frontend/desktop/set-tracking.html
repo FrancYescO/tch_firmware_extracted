@@ -1,0 +1,164 @@
+<link rel="import" href="/libs/cron.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="set-tracking"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> .buttons {
+        display: flex;
+        flex-direction: row;
+        align-content: flex-end;
+        justify-content: space-between;
+      }
+      .days-wrapper paper-checkbox {
+        text-transform: capitalize;
+      } </style> <paper-dialog id="dialog"> <div class="inner"> <h2>Tracking</h2> <div class="main-util layout vertical"> <paper-dropdown-menu> <paper-listbox class="dropdown-content" selected="{{selected}}"> <template is="dom-repeat" items="[[options]]"> <paper-item>[[item.display]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="layout vertical days-wrapper"> <template id="checkboxesRepeat" is="dom-repeat" items="[[days]]"> <paper-checkbox checked="{{item.checked}}" on-checked-changed="_notifyDays" disabled="[[!_allowDays(selected,_update)]]">[[item.display]]</paper-checkbox> </template> </div> <div class="buttons"> <template is="dom-if" if="[[canCancel]]"> <paper-button on-click="cancel">Cancel</paper-button> </template> <paper-button id="saveButton" background on-click="_save" disabled="[[_saveDisabled(selected,days,_update)]]"> <template is="dom-if" if="[[canCancel]]">Save</template> <template is="dom-if" if="[[!canCancel]]">Done</template> </paper-button> </div> </div> </paper-dialog> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "set-tracking",
+
+      properties: {
+        options: {
+          type: Array,
+          value: [
+            {cron:false, display:"Off"}, // on 30th of february - so never
+            // {cron:new Cron("0,5,10,15,20,25,30,35,40,45,50,55 * * * *"),display:"Every 5 Minutes"},
+            {cron:new Cron("0,10,20,30,40,50 * * * *"), display:"Every 10 Minutes"},
+            {cron:new Cron("0,30 * * * *"), display:"Every 30 Minutes"},
+            {cron:new Cron("0 * * * *"), display:"Every Hour"},
+            {cron:new Cron("0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"), display:"Every 2 Hours"},
+            {cron:new Cron("0 0,4,8,12,16,20 * * *"), display:"Every 4 Hours"},
+            {cron:new Cron("0 0,6,12,18 * * *"), display:"Every 6 Hours"},
+            {cron:new Cron("0 0,12 * * *"), display:"Every 12 Hours"},
+            {cron:new Cron("0 0 * * *"), display:"Daily"},
+            {cron:new Cron("0 0 * * 0"), display:"Weekly"}
+          ]
+        },
+        selected: {
+          type: Number,
+          value: 1
+        },
+        days: {
+          type: Array,
+          value: [
+            {display: "sunday", checked: true},
+            {display: "monday", checked: true},
+            {display: "tuesday", checked: true},
+            {display: "wednesday", checked: true},
+            {display: "thursday", checked: true},
+            {display: "friday", checked: true},
+            {display: "saturday", checked: true}
+          ]
+        },
+        canCancel: {
+          type: Boolean,
+          value: true
+        },
+        _update: {
+          type: Number,
+          value: 0
+        },
+        existing_rule: {
+          type: Object,
+          value: null
+        },
+        category: {
+          type: String,
+          value: null
+        }
+      },
+
+      _displayText: function(options, slider){
+        return options[slider-1].display;
+      },
+
+      _allowDays: function(selected){
+        return selected !== 0 && selected !== 10;
+      },
+      _saveDisabled: function(selected, days, update){
+        var hasTrue = false;
+        for(var i = 0; i < days.length; i ++){
+          hasTrue = hasTrue || days[i].checked;
+        }
+        return this._allowDays(selected) ? !hasTrue : false;
+      },
+      _notifyDays: function(){
+        this.set('_update',this._update + 1);
+      },
+      _setDay: function(index,val){
+        this.set('days.'+index+'.checked',val);
+      },
+
+      _reset: function(){
+        this.selected = 0;
+        this.existing_rule = null;
+        for(var i = 0; i < this.days.length; i ++){
+          this._setDay(i,true);
+        }
+      },
+
+      open: function(category, callback, allowCancel=false){
+        this._reset();
+        this.category = category;
+        if(category){
+          long_rpc_promise(packageId, "get_scheduling_rules", []).done(function(result){
+            result = JSON.parse(result[0]);
+            forObject(result, function(id,schedule){
+              if(schedule === null) return;
+              var cron = new Cron(schedule.schedule);
+              if(schedule.category === category){
+                if(schedule.schedule === "0 0 * * 0"){
+                  this.selected = 10; //SET TO WEEKLY TO AVOID DAY DECIPHERING
+                }else{
+                  for(var t = 0; t < this.options.length; t ++){
+                    var time = this.options[t];
+                    if(!time.cron) continue;
+                    var matches = cron.matches(time.cron);
+                    if(matches.minutes && matches.hours && matches.days && matches.months){
+                      this.selected = t;
+                      break;
+                    }
+                  }
+                  for(var d = 0; d < cron.weekdays.length; d ++){
+                    this._setDay(d,cron.weekdays[d]);
+                  }
+                }
+                this.existing_rule = schedule;
+                return;
+              }
+            }.bind(this));
+            this.$.dialog.open();
+          }.bind(this));
+        }else{
+          // new rule
+          this.$.dialog.open()
+        }
+        this.canCancel = allowCancel;
+        this._callback = callback;
+      },
+
+      _close: function(){
+        this.$.dialog.close();
+      },
+
+
+      _save: function(){
+        var cron = this.options[this.selected].cron;
+        if(cron && this._allowDays(this.selected)){
+          var days = new Array(this.days.length);
+          for(var i = 0; i < this.days.length; i++){
+            days[i] = this.days[i].checked;
+          }
+          cron.setWeekdays(days);
+        }
+        if(this._callback)
+          this._callback(this.category, cron ? cron.toString() : false, this.existing_rule);
+
+        this._close();
+      },
+
+      cancel: function(){
+        if(this._callback)
+          this._callback(this.category, null, null);
+
+        this._close();
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

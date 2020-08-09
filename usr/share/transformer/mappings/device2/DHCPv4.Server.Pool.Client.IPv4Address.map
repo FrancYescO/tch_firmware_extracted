@@ -1,0 +1,80 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_DHCPv4_Server_Pool_i_Client_i_IPv4Address_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Server.Pool.{i}.Client.{i}.IPv4Address.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "IPv4AddressNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      LeaseTimeRemaining = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+    }
+  }
+}
+
+local mapper, os, open = mapper, os, io.open
+local ubus = mapper("ubus").connect()
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+local pairs, match = pairs, string.match
+
+Device_DHCPv4_Server_Pool_i_Client_i_IPv4Address_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local devices = ubus:call("hostmanager.device", "get",  {})
+  local intf, dev = splitKey(parentkey)
+  local l3Intf = nwCommon.getIntfName(intf)
+  local deviceInfo = devices[dev]
+  if deviceInfo and deviceInfo.l3interface == l3Intf and deviceInfo.state == "connected" and deviceInfo["ipv4"] then
+    for _, v in pairs(deviceInfo["ipv4"]) do
+      if v.state == "connected" then
+        entries[#entries+1] = deviceInfo["mac-address"] .. "|" .. deviceInfo.connected_time
+      end
+    end
+  end
+  return entries or {}
+end
+
+local function dhcpLease(mac)
+  local lease
+  local fd = open("/tmp/dhcp.leases", "r")
+  if fd then
+    for line in fd:lines() do
+      local leasetime, macaddr = line:match("(%d+)%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+")
+      if mac == macaddr then
+        lease = leasetime
+        break
+      end
+    end
+    fd:close()
+  end
+  return lease or "0"
+end
+
+local function getLeaseRemaining(key)
+  local leaseTimeLeft = 0
+  local macadd, time = splitKey(key)
+  local lease = dhcpLease(macadd)
+  if lease ~= "0" then
+    -- Leasetimeleft has been calculated as, LeaseTimeRemaining = ((Connectedtime + LeaseTime) - CurrentTime)
+    leaseTimeLeft = (time + lease) - os.time()
+    -- The while loop was added inorder to adjust the renewal offset.
+    while leaseTimeLeft < 0 do
+      leaseTimeLeft = leaseTimeLeft + lease
+    end
+  elseif lease == "0" then
+    return "0"
+  end
+  return tostring(os.date("%FT%TZ", leaseTimeLeft)) or "0"
+end
+
+Device_DHCPv4_Server_Pool_i_Client_i_IPv4Address_i_.get = {
+  LeaseTimeRemaining = function(mapping, param, key)
+    return getLeaseRemaining(key)
+  end
+}
+
+register(Device_DHCPv4_Server_Pool_i_Client_i_IPv4Address_i_)

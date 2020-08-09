@@ -1,0 +1,129 @@
+<!--
+  (C) 2019 NETDUMA Software
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/custom-elements/duma-legend/duma-legend.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <script src="/apps/com.netdumasoftware.adblocker/desktop/Scripts/utillity.js"></script> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-status"> <template> <style include="duma-theme iron-flex"> :host {
+        display: block;
+        width: 100%;
+      }
+      ::content > div,
+      ::content duma-chart {
+        height: 100%;
+      } </style> <div class="layout horizontal"> <div> <duma-legend vertical id="statusLegend" legend-stats="[[legendStats]]"></duma-legend> </div> <duma-chart id="graph" type="doughnut"></duma-chart> </div> </template> <script> Polymer(
+    {
+      is: 'adblock-status',
+      properties:
+      {
+        legendStats:
+        {
+          type: Array,
+          value:
+          [
+            {
+              label: "Total Queries",
+              result: "-",
+              visible: false,
+              disableClick: true,
+            },
+            {
+              label: "Queries Allowed",
+              result: "-",
+              visible: true,
+              disableClick: true,
+            },
+            {
+              label: "Queries Blocked",
+              result: "-",
+              visible: true,
+              disableClick: true,
+            },
+          ]
+        },
+      },
+      setLegendColour(index, colour)
+      {
+        var indexStr = index.toString();
+        this.set(`legendStats.${indexStr}.colour`, colour);
+        this.set(`legendStats.${indexStr}.bgColour`, colour);
+      },
+      setLegendResult(index, value)
+      {
+        var indexStr = index.toString();
+        this.set(`legendStats.${indexStr}.result`, AddThousandsSeparators(value));
+      },
+      ready: function ()
+      {
+        // Colour selection
+        var cgen = getColourGenerator();
+        let colours = [cgen(), cgen(), '#FFFFFF'];
+        this.setLegendColour(0, colours[2]);
+        this.setLegendColour(1, colours[1]);
+        this.setLegendColour(2, colours[0]);
+
+        this.updateCount = 0;
+        this.loaded = false;
+
+        setInterval(function()
+        {
+          long_rpc_promise("com.netdumasoftware.adblocker", "static_history", []).done(function(data)
+          {
+            var parsedData = JSON.parse(data[0]);
+            var allowedQueries = parsedData.total_queries- parsedData.total_blocked_queries;
+            this.setLegendResult(0, parsedData.total_queries);
+            this.setLegendResult(1, allowedQueries);
+            this.setLegendResult(2, parsedData.total_blocked_queries);
+
+            this.$.graph.data.datasets[0].data = [parsedData.total_blocked_queries, allowedQueries];
+            this.$.graph.update();
+
+            if (this.loaded == false)
+            {
+              $(this).closest("duma-panel").prop("loaded", true);
+              this.loaded = true;
+            }
+          }.bind(this));
+        }.bind(this), 1000);
+
+        var data = [0, 0]
+
+        var config =
+        {
+          data:
+          {
+            datasets:
+            [
+              {
+                data: data,
+                backgroundColor: colours,
+                borderColor: "#00000000",
+                label: 'Dataset 1',
+                hoverBorderWidth: 0,
+              },
+            ],
+            labels: [colours[0], colours[1]],
+          },
+          options:
+          {
+            responsive: true,
+            legend:
+            {
+              display: false,
+            },
+            title:
+            {
+              display: false,
+            },
+            animation:
+            {
+              animateScale: true,
+              animateRotate: true,
+            },
+            tooltips:
+            {
+              enabled: false,
+            },
+          }
+        };
+
+        this.$.graph.options = config.options;
+        this.$.graph.data = config.data;
+      },
+    }); </script> </dom-module> 

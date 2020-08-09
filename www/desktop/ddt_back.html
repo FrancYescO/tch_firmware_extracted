@@ -1,0 +1,62 @@
+#!/usr/bin/haserl --shell=lua
+<%
+require "libos"
+local platform = os.platform_information()
+
+local tracedir = "/tmp/nddotr/"     -- netduma DumaOS trace directory
+local enabledir
+if platform.model == "XR1000" then
+  enabledir = "/misc2/ddt/"    -- directory used for enable/disable files
+else
+  enabledir = "/dumaos/ddt/"    -- directory used for enable/disable files not read only
+end
+
+local function read_file(path)
+  local f = io.open(path,"r")
+  if not f then
+    return ""
+  end
+  local out = f:read("*all")
+  f:close()
+  return out
+end
+local function write_file(path,str)
+  local f = io.open(path,"w")
+  if not f then
+    return
+  end
+  f:write(str)
+  f:close()
+end
+local function get_cmd_output(...)
+  local p = io.popen(string.format(...),"r")
+  if not p then
+    return
+  end
+  local out = p:read("*all")
+  p:close()
+  return out
+end
+local function valid_rapp(rapp)
+  return rapp:find("^[%a%.]+$")
+end
+local methods = {
+  set_trace = function(rapp,is_tracing)
+    if valid_rapp(rapp) then
+      write_file(enabledir .. rapp, tostring(is_tracing == true or is_tracing == "true"))
+      print(true)
+    else
+      print(false)
+    end
+  end,
+  get_log = function()
+    local out = get_cmd_output("cat %s*",tracedir)
+    -- local out = get_cmd_output("cat $(find " .. tracedir .. " -type f -a -not -name 'com.*')")
+    print(out)
+  end
+}
+local m = methods[POST.method]
+if m then
+  m(FORM.rapp,FORM.is_tracing)
+end
+%>

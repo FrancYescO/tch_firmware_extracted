@@ -1,0 +1,123 @@
+<link rel="import" href="/libs/score-util.html"> <script> var constants = {
+    /* host type classification */
+    GEO_CSTATE_HOST_PEER: 0,      // host is peer (default for code to work)
+    GEO_CSTATE_HOST_DEDI: 1,      // host is server
+
+    /* generic verdicts */
+    GEO_CSTATE_VERDICT_NO: 0,     // no verdict set yet
+    GEO_CSTATE_VERDICT_WDIST: 1,  // allowed by distance
+    GEO_CSTATE_VERDICT_BDIST: 2,  // disallowed by distance
+    GEO_CSTATE_VERDICT_RTT: 3,    // allowed due to rtt below threshold
+
+    /* peer verdicts */
+    GEO_CSTATE_VERDICT_USER_ALLOW: 4, // allowed by user whitelist
+    GEO_CSTATE_VERDICT_USER_DENY: 5,  // disallowed by user blacklist
+
+    /* dedi verdicts */
+    GEO_CSTATE_VERDICT_WHITELIST: 4,
+    GEO_CSTATE_VERDICT_BAN: 5,
+    GEO_CSTATE_VERDICT_ALLOW: 6,
+
+    // Shifts
+    TYPE_SHIFT: 3,
+    VERDICT_SHIFT: 0,
+
+    ALIVE_TIMEOUT: 10 * 1000,
+    MAXIMUM_CONNECTIONS: 3
+  };
+  /* Icon mappings */
+  var dedi_icons = [];
+  var peer_icons = [];
+
+  dedi_icons[constants.GEO_CSTATE_VERDICT_NO] = "Server.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_WDIST] = "Server.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_BDIST] = "Server_Blocked_By_Distance.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_RTT] = "Server_Ping_Assist.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_WHITELIST] = "Server_Whitelisted.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_BAN] = "Server_Blacklisted.svg";
+  dedi_icons[constants.GEO_CSTATE_VERDICT_ALLOW] = "Server_Whitelisted.svg";
+
+  peer_icons[constants.GEO_CSTATE_VERDICT_NO] = "Peer.svg";
+  peer_icons[constants.GEO_CSTATE_VERDICT_WDIST] = "Peer.svg";
+  peer_icons[constants.GEO_CSTATE_VERDICT_BDIST] = "Peer_Blocked_By_Distance.svg";
+  peer_icons[constants.GEO_CSTATE_VERDICT_RTT] = "Peer_Ping_Assist.svg";
+  peer_icons[constants.GEO_CSTATE_VERDICT_USER_ALLOW] = "Peer_Whitelisted.svg";
+  peer_icons[constants.GEO_CSTATE_VERDICT_USER_DENY] = "Peer_Blacklisted.svg";
+
+  var host_icons = [ peer_icons, dedi_icons ];
+  var packageID = "com.netdumasoftware.pingheatmap";
+
+  function record(func){
+    var startTime = Date.now();
+    func.call();
+    console.log("START END DIFF", startTime, Date.now(), Date.now() - startTime);
+  }
+
+  function forObject(obj, func, sortFunc=null){
+    if(typeof(obj) !== "object") return
+    var keys = Object.keys(obj);
+    if(sortFunc){
+      if(sortFunc === true){
+        keys.sort();
+      }else{
+        keys.sort(sortFunc);
+      }
+    }
+    for(var i = 0; i < keys.length; i ++){
+      var k = keys[i];
+      var ret = func(k, obj[k], i);
+      if(ret !== undefined && ret !== null){
+        return ret;
+      }
+    }
+  }
+
+  function titleCase(str) {
+    var splitStr = str.toLowerCase().split(' ');
+    for (var i = 0; i < splitStr.length; i++) {
+      // You do not need to check if i is larger than splitStr length, as your for does that for you
+      // Assign it back to the array
+      if(splitStr[i] === "us"){
+        splitStr[i] = "US";
+        continue;
+      }
+      splitStr[i] = splitStr[i].charAt(0).toUpperCase() + splitStr[i].substring(1);
+    }
+    // Directly return the joined string
+    return splitStr.join(' ');
+  }
+  
+
+  function getFilePath(file) {
+    return "/apps/" + packageId + "/desktop/" + file;
+  }
+  
+  function getGridstackOptions(panel){
+    var panels = $("duma-panels");
+    if(panels[0]){
+      var all_panels = panels[0].list();
+      for(var i = 0; i < all_panels.length; i ++){
+        var get_panel = $(all_panels[i].element).find("duma-panel");
+        if(get_panel[0]){
+          if (get_panel[0] === panel || get_panel[0]._file === panel){
+            return all_panels[i];
+          }
+        }
+      }
+    }
+    return {};
+  }
+
+  function reload_panel(panel, newdata, defaultOptions){
+    var panels = $("duma-panels")[0];
+    var options = Object.assign({},getGridstackOptions(panel));
+    if(Object.keys(options).length > 0){
+      if(typeof panel === "string") panel = $(options.element).find("duma-panel")[0];
+      if(!newdata) newdata = panel.data;
+      delete options.element;
+      options._desktop = panel.hasOwnProperty("desktop") ? panel.desktop : false;
+      
+      panels.remove(panel);
+      panels.add(panel._file, panel._package, newdata, options);
+    }
+  } </script> 

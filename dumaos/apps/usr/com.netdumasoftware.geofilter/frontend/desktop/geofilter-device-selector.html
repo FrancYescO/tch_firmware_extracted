@@ -1,0 +1,195 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html"> <link rel="import" href="/libs/devices.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="geofilter-device-selector"> <style is="custom-style" include="duma-theme"></style> <template> <paper-dialog modal> <h2>[[ header ]]</h2> <paper-dialog-scrollable> <iron-pages selected="{{_selectedPageIndex}}"> <iron-page> <paper-listbox selected-item="{{_selectedDeviceElement}}" selected="{{_selectedDeviceIndex}}"> <template is="dom-repeat" items="[[_devices]]" as="device" sort="_sortDevices" filter="_filterDevices"> <paper-item device="[[device]]">[[device.name]]</paper-item> </template> </paper-listbox> </iron-page> <iron-page> <paper-listbox selected-item="{{_selectedServiceElement}}" selected="{{_selectedServiceIndex}}"> <template is="dom-repeat" items="[[_services]]" as="service" sort="_sortServices"> <template is="dom-if" if="[[_shouldShowService(service, tags)]]"> <paper-item service="[[service]]">[[service.application]]</paper-item> </template> </template> </paper-listbox> </iron-page> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button on-tap="_onNextButtonClick" disabled="[[_isNextButtonDisabled(_selectedDeviceElement, _selectedServiceElement, _selectedPageIndex)]]"> [[_getNextButtonText(_selectedDeviceElement, _selectedPageIndex)]]</paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "geofilter-device-selector",
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties: {
+        tags: {
+          type: Array,
+          value: ["pc", "gaming"]
+        },
+
+        header: {
+          type: String,
+          value: "<%= i18n.header %>"
+        }
+      },
+
+      ready: function () {
+        this._refreshDevices();
+        this._refreshServices();
+      },
+
+      _refreshDevices: function () {
+
+        get_devices().done(function (devices) {
+
+          var processedDevices = [];
+          for (var id in devices) {
+            if (devices.hasOwnProperty(id)) {
+              processedDevices.push(devices[id]);
+            }
+          }
+
+          this._devices = processedDevices;
+        }.bind(this));
+      },
+
+
+      _refreshServices: function () {
+        this._servicesPromise = Q($.getJSON(
+          "/json/_services_.json?cache=0",
+          function (services) {
+            this._services = services;
+          }.bind(this)
+        ));
+      },
+
+      _shouldShowService: function (service, tags) {
+
+        for (var i = 0; i < tags.length; i++) {
+          if (service.tags.indexOf(tags[i]) === -1) {
+            return false;
+          }
+        }
+
+        return true;
+      },
+      
+      _sortServices: function (service1, service2) {
+        if (service1.application < service2.application) {
+          return -1;
+        }
+
+        if (service1.application > service2.application) {
+          return 1;
+        };
+        
+        return 0;
+      },
+
+      _filterDevices: function (device) {
+        return device.id > 0;
+      },
+
+      _isDeviceConsole: function (deviceType) {
+        return deviceType === "PlayStation" ||
+               deviceType === "Xbox" ||
+               deviceType === "Wii" ||
+               deviceType === "NintendoSwitch";
+      },
+      
+      _sortDevices: function (device1, device2) {
+
+        if (
+          this._isDeviceConsole(device1.type) ===
+          this._isDeviceConsole(device2.type)
+        ) {
+        
+          return device1.name.localeCompare(device2.name);
+
+        } else {
+        
+          return this._isDeviceConsole(device1.type) ? -1 : 1;
+        }
+
+      },
+
+      _getNextButtonText: function (
+        selectedDeviceElement,
+        selectedPageIndex
+      ) {
+
+        if (selectedPageIndex === 0) {
+          if (!selectedDeviceElement) {
+            return "<%= i18n.next %>";
+          }
+          
+          var device = selectedDeviceElement.device;
+
+          if (!this._isDeviceConsole(device.type)) {
+            return "<%= i18n.next %>";
+          }
+        }
+
+        return "<%= i18n.done %>";
+      },
+
+      _isNextButtonDisabled: function (
+        selectedDeviceElement,
+        selectedServiceElement,
+        selectedPageIndex
+      ) {
+
+       return !(selectedPageIndex === 0 && selectedDeviceElement) &&
+              !(selectedPageIndex === 1 && selectedServiceElement);
+      },
+
+      _consoleDeviceSelected: function (device) {
+        this.close();
+
+        this._callback(device, {
+          name: "<%= i18n.console %>",
+          tags: ["geofilter", "console", "gaming"],
+          services: [{
+            sport: [1024, 0xffff],
+            dport: [1024, 0xffff],
+            proto: 17
+          }]
+        });
+      },
+
+      _otherDeviceSelected: function () {
+        this._selectedPageIndex = 1;
+      },
+
+      _serviceSelected: function (device, service) {
+        this.close();
+
+        this._callback(device, service);
+      },
+
+      _onNextButtonClick: function () {
+        
+        var device;
+        if (this._selectedDeviceElement) {
+          device = this._selectedDeviceElement.device;
+        }
+
+        if (this._selectedPageIndex === 0) {
+          if (this._isDeviceConsole(device.type)) {
+            this._consoleDeviceSelected(device);
+          } else {
+            this._otherDeviceSelected();
+          }
+
+        } else {
+          var service = this._selectedServiceElement.service;
+          
+          this._serviceSelected(device, service)
+        }
+      },
+
+      open: function (callback) {
+        this._callback = callback;
+
+        this._selectedPageIndex = 0;
+        this._selectedDeviceIndex = -1;
+        this._selectedServiceIndex = -1;
+        this._selectedDeviceElement = null;
+        this._selectedServiceElement = null;
+
+        this._refreshDevices();
+
+        this.$$("paper-dialog").open();
+      },
+
+      close: function () {
+        this.$$("paper-dialog").close();
+      }
+    }); </script> </dom-module> 

@@ -1,0 +1,28 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tabs.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tab.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-list-page.html"> <dom-module id="adblock-list"> <template> <style include="duma-theme iron-flex"> :host {
+        display: block;
+        width: 100%;
+      } </style> <paper-tabs selected="{{selected}}"> <paper-tab>BLACKLISTS</paper-tab> <paper-tab>WHITELISTS</paper-tab> </paper-tabs> <iron-pages id="pages" selected="{{selected}}"> <div> <adblock-list-page type-name="Blacklist" lists="[[blacklists]]"></adblock-list-page> </div> <div> <adblock-list-page type-name="Whitelist" lists="[[whitelists]]" is-whitelist></adblock-list-page> </div> </iron-pages> </template> <script> Polymer(
+    {
+      is: 'adblock-list',
+      properties:
+      {
+        selected:
+        {
+          type: Number,
+          value: 0,
+        },
+      },
+      ready: function()
+      {
+        this.pagesLoaded = 0;
+        this.$.pages.addEventListener("lists-loaded", function()
+        {
+          // Set panel to loaded after both lists have recieved a response from the server
+          this.pagesLoaded++;
+          if (this.pagesLoaded == 2)
+            $(this).closest("duma-panel").prop("loaded", true);
+          else if (this.pagesLoaded > 2)
+            $("adblock-chart-wrapper").each((index, panel) => panel.ReloadLists());
+        }.bind(this));
+      },
+    }); </script> </dom-module> 

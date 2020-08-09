@@ -1,0 +1,220 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <script src="/custom-elements/drag-table/dragula.js"></script> <dom-module id="drag-table"> <template> <style include="duma-theme"> /*
+      credit to: https://embed.plnkr.co/2b1tjQ/ for basic code
+      */
+
+      :host .gu-mirror {
+        position: fixed !important;
+        margin: 0 !important;
+        z-index: 9999 !important;
+        opacity: 0.8;
+        -ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=80)";
+        filter: alpha(opacity=80);
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        background-color: var(--transparent-background-color);
+      }
+
+      :host .gu-hide {
+        display: none !important;
+      }
+
+      .gu-unselectable {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+      }
+
+      .gu-transit {
+        opacity: 0.2;
+        -ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=20)";
+        filter: alpha(opacity=20);
+      }
+
+      #drag_table {
+        width: 100%;
+      }
+
+      ul.drag-table {
+        list-style-type: none;
+        padding: 0px;
+        margin: 0px;
+      }
+
+
+      td.drag-table > div:not(.non-overflow) {
+        padding: 0px;
+        margin: 0px;
+        overflow-y: auto;
+        height: inherit;
+      }
+
+      .dropdown-small {
+        width: 5em;
+      }
+
+      td.drag-table > div.row-layout {
+        display: flex;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+      td.drag-table > div.row-layout.center {
+        justify-content: center;
+        align-items: center;
+        align-self: center;
+      }
+      td.drag-table > div.row-layout.top {
+        margin-top: -1.5em;
+      }
+
+      div.overflow {
+        overflow-y: auto;
+        max-height: 6em;
+      } </style> <table id="drag_table"> <thead> <tr> <template is="dom-repeat" items="[[headers]]" as="header"> <th>[[header]]</th> </template> </tr> </thead> <tbody style="border-style: dotted;" id="drag_container"> </tbody> </table> </template> <script> Polymer({
+      is: 'drag-table',
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties: {
+
+        /**
+         * indicates the options to use for dragula
+         */
+        _dragulaOptions: Object,
+
+        _drake: {
+          type: Object
+        },
+
+        rows: {
+          type: Array,
+          value: []
+        },
+        headers: {
+          type: Array,
+        },
+        /*
+        set to true if you are going to refresh rows array after switching two
+        enabling this will reset rows back to the original position after switching
+        */
+        switchReset: {
+          type: Boolean,
+          value: false
+        }
+
+      },
+
+      attached: function () {
+        this._resetDrake();
+      },
+
+      _drakeExists: function () {
+        return this._drake !== undefined && this._drake !== null;
+      },
+
+      _killDrakeTimeout: function (time = 10) {
+        setTimeout(this._killDrake.bind(this), time);
+      },
+
+      _killDrake: function () {
+        if (this._drakeExists()) {
+          var tempDrake = this._drake;
+          this._drake = undefined;
+          tempDrake.destroy();
+          tempDrake = undefined;
+        }
+      },
+
+      // Element Behavior
+
+      _resetDrake: function () {
+        this._killDrake();
+        this._drake = dragula(this._getContainers(), {
+          direction: 'vertical',
+          ignoreInputTextSelection: true,
+          mirrorContainer: this.$$("#drag_table tbody"),
+        });
+        this._appendLocalDom();
+        //console.log(this._drake);
+      },
+
+      _appendLocalDom: function () {
+        if (this._drake !== undefined) {
+          this._drake.on('drop', function (el, target, source, sibling) {
+            //console.log(el,sibling,target,source)
+            el = $(el)
+            target = $(target)
+            if (sibling !== null) {
+              el.insertBefore(sibling)
+            } else {
+              target.append(el);
+            }
+            row_id = parseInt(el.attr("row_id"));
+            p2 = 1;
+            childs = target.find("tr");
+            for (var i = 0; i < childs.length; i++) {
+              if (childs[i] == el[0]) {
+                //new index
+                p2 = i + 1;
+              }
+            }
+            //console.log({id: row_id, pos: p2})
+            this._callback(row_id, p2);
+            this._killDrakeTimeout();
+          }.bind(this));
+        }
+      },
+
+      _getContainers: function () {
+        return [this.$$("#drag_container")];
+      },
+
+      setSwitchCallback: function (callback) {
+        this._callback = callback;
+        return this;
+      },
+
+      _clear: function () {
+        container = $("#drag_container");
+        container.empty();
+      },
+
+      _refresh: function () {
+        this._clear();
+        container = this.$$("#drag_container");
+        for (var i = 0; i < this.rows.length; ++i) {
+          Polymer.dom(container).appendChild(this._form_row(this.rows[i]));
+        }
+        if (!this._drakeExists()) {
+          setTimeout(this._resetDrake.bind(this), 100);
+        }
+      },
+      _form_row: function (row) {
+        row_el = $('<tr class="style-scope drag-table"></tr>');
+        row_el.attr('row_id', row.id)
+        for (var i = 0; i < row.data.length; ++i) {
+          Polymer.dom(row_el[0]).appendChild(this._form_data(row.data[i]));
+        }
+        return row_el[0];
+      },
+      _form_data: function (data) {
+        data_el = $('<td></td>');
+        data_el.html(data);
+        if (data instanceof jQuery && data.hasClass('center')) {
+          data_el.addClass('center');
+        }
+        return data_el[0];
+      },
+
+      setRows: function (newRows, callback) {
+        this.rows = newRows;
+        this._refresh();
+        callback();
+      }
+
+    }); </script> </dom-module> 

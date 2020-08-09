@@ -1,0 +1,226 @@
+<link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/libs/colours.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-top-blocked"> <template> <style include="duma-theme iron-flex"> :host {
+        display: block;
+        width: 100%;
+      }
+      ::content duma-chart,
+      ::content iron-pages > div,
+      ::content iron-pages {
+        height: 100%;
+      }
+      ::content .radioButtons {
+        margin: auto;
+      }
+
+      ::content #legend li span {
+        display: inline-block;
+        width: 16px;
+        height: 12px;
+        margin-right: 5px;
+        flex-shrink: 0;
+      }
+
+      ::content #legend {
+        overflow-y: auto;
+        max-width: 256px;
+        padding: 8px 16px;
+      }
+
+      ::content #legend ul {
+        padding: 0;
+        margin: 0;
+        list-style: none;
+      }
+
+      ::content #legend li {
+        cursor:pointer;
+        min-height: 28px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+        @apply(--paper-font-caption);
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+      }
+
+      ::content .strike { text-decoration: line-through !important; }
+
+      ::content #noDataWrapper {
+        padding-top: 10em;
+        text-align: center;
+      } </style> <iron-pages selected="[[dataPresent]]"> <div id="noDataWrapper"> <h2>No Data</h2> </div> <div class="layout horizontal"> <div id="legend" class="layout vertical"></div> <duma-chart id="graph" type="doughnut"></duma-chart> </div> </iron-pages></template>  <script> Polymer(
+    {
+      is: 'adblock-top-blocked',
+      properties:
+      {
+        disableButton:
+        {
+          type: Boolean,
+          value: false,
+        },
+        selectedType:
+        {
+          type: String,
+          value: "hits",
+          observer: "selectedTypeChanged",
+        },
+        data:
+        {
+          type: Object,
+          value: [],
+        },
+        dataPresent:
+        {
+          type: Number,
+          value: 0,
+        }
+      },
+      ready: function()
+      {
+        long_rpc_promise("com.netdumasoftware.adblocker", "burst_range", [true, {time: "86400.0", relative: true}, {time: "0.0", relative: true}]).done(this.BurstCallback.bind(this));
+      },
+      BurstCallback: function(data)
+      {
+        var bursts = JSON.parse(data).bursts;
+
+        rawDomains = [];
+
+        for (var i = 0; i < bursts.length; i++)
+        {
+          for (var ii = 0; ii < bursts[i].domains.length; ii++)
+          {
+            var name = bursts[i].domains[ii].name;
+            if (typeof rawDomains[name] == "undefined")
+              rawDomains[name] = 1;
+            else
+              rawDomains[name]++;
+          }
+        }
+
+        var keys = Object.keys(rawDomains);
+        var otherDomains = 0;
+
+        if (keys.length == 0)
+        {
+          // Tell panel finished loading
+          $(this).closest("duma-panel").prop("loaded", true);
+          return;
+        }
+
+        this.dataPresent = 1;
+
+        keys.sort((a, b) => rawDomains[b] - rawDomains[a]);
+
+        for(var i = 0; i < keys.length; i ++)
+        {
+          if (i < 10)
+          {
+            this.data.push(
+            {
+              domain: keys[i],
+              hits: rawDomains[keys[i]],
+            });
+          }
+          else
+            otherDomains += rawDomains[keys[i]];
+        }
+
+        if (otherDomains != 0)
+        {
+          this.data.unshift(
+          {
+            domain: "All Other Domains",
+            hits: otherDomains,
+          });
+        }
+
+        this.scopeSubtree(this.$.legend, true);
+
+        this.hits   = [];
+        var labels  = [];
+        var colours = [];
+        var cgen = getColourGenerator();
+
+        this.rawData = [];
+
+        for (var i = 0; i < this.data.length; i++)
+        {
+          colours.push(cgen());
+          labels.push(this.data[i].domain);
+          this.hits.push(this.data[i].hits);
+        }
+
+        for (var i = 0; i < this.hits.length; i++)
+          this.rawData.push(this.hits[i]);
+
+        var config =
+        {
+          data:
+          {
+            datasets:
+            [
+              {
+                data: this.rawData,
+                backgroundColor: colours,
+                borderColor: "#00000000",
+                label: 'Dataset 1',
+                hoverBorderWidth: 0,
+              },
+            ],
+            labels: labels,
+          },
+          options:
+          {
+            responsive: true,
+            legend:
+            {
+              display: false,
+            },
+            title:
+            {
+              display: false,
+            },
+            animation:
+            {
+              animateScale: true,
+              animateRotate: true
+            }
+          }
+        };
+
+        this.$.graph.options = config.options;
+        this.$.graph.data = config.data;
+
+        Polymer.RenderStatus.afterNextRender(this, this.setupLegend);
+      },
+
+      setupLegend()
+      {
+        $("#legend", this).html(this.$.graph.chart.generateLegend());
+
+        var meta_key = Object.keys(this.$.graph.chart.data.datasets[0]._meta)[0];
+        var metadata = this.$.graph.chart.data.datasets[0]._meta[meta_key].data;
+
+        $("#legend > ul > li", this).each(function(index,element)
+        {
+          if(metadata[index].hidden)
+            $(this).toggleClass("strike");
+        });
+
+        var graph = this.$.graph;
+
+        $("#legend > ul > li", this).on("click", function(e)
+        {
+          var index = $(this).index();
+          $(this).toggleClass("strike");
+
+          var ci = graph.chart;
+          var key = Object.keys(ci.data.datasets[0]._meta)[0];
+          var curr = ci.data.datasets[0]._meta[key].data[index];
+          curr.hidden = !curr.hidden
+          ci.update();
+        });
+
+        // Tell panel finished loading
+        $(this).closest("duma-panel").prop("loaded", true);
+      }
+    }); </script> </dom-module> 

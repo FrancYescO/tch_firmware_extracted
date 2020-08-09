@@ -1,0 +1,96 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-legend/duma-legend-item-horizontal.html"> <link rel="import" href="/custom-elements/duma-legend/duma-legend-item-vertical.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <!--
+  Creation:
+  Created a legend designed to be placed to the side of a graph.
+  To use you must provide an array (legendStats) following the examples structure where each element in the array corresponds to a statistic
+  You can set this array with a jquery prop: $(dumaLegendSelector).prop("legendStats", config);
+
+  Example data structure:
+  {
+    0:
+    {
+      label: "Download",
+      result: "-",
+      colour: "FFFFFF",
+      visible: true,
+      bgColour: "",
+    },
+    1:
+    {
+      label: "Upload",
+      result: "-",
+      colour: "FFFFFF",
+      visible: true,
+      bgColour: "",
+    },
+    2:
+    {
+      label: "Netflix Speed",
+      result: "-",
+      colour: "FFFFFF",
+      visible: false,
+      bgColour: "",
+    }
+  }
+
+  Structure explanation:
+  There are always 3 stats, you can hide the box icon by setting visible to false.
+  You can set the label, result, border colour and fill colour of each statistic.
+
+  Events:
+  On click, the item on the legend will be struck through and an event will be fired.
+  See duma-legend-item.html for more information about the event.
+
+  Updating:
+  If you want to update any part of the structure after initial config (for example when you get results to fill in)
+  you can update each element with the set method.
+
+  In this example index is an int representing which stat to update and the colour is the new value.
+  summaryInfo is a local dom property being bound to legendStats
+
+  setColour(index, colour)
+  {
+    var indexStr = index.toString();
+    this.set(`summaryInfo.${indexStr}.colour`, colour);
+    if (this.summaryInfo[indexStr].bgColour != "")
+      this.set(`summaryInfo.${indexStr}.bgColour`, colour);
+  }
+
+  Moitoring click events:
+  For monitoring click events you can listen to the "legendItemSelect" event. The details of the event contains a single int for the index of the toggled legend item
+  This serves the purpose of allowing the user to show/hide corresponding graph data.
+
+  An example for chartJS:
+
+  // Replace LEGEND_ID with the id for this legend
+  this.$.LEGEND_ID.addEventListener("legendItemSelect", function (value)
+  {
+    // Replace CHART_ID with the id for your graph
+    var chart = this.$.CHART_ID.chart;
+
+    // Toggle selected line, value.detail contains its line index
+    var meta = chart.getDatasetMeta(value.detail);
+    meta.hidden = meta.hidden === null ? !chart.data.datasets[value.detail].hidden : null;
+
+    // Tells chartjs to update, otherwise the line will only update after some other update event (e.g. resizing)
+    chart.update();
+  }.bind(this)); // Binding "this" for selecting the chart within the method.
+--> <dom-module id="duma-legend"> <template> <style is="custom-style" include="iron-flex"> :host:not([vertical]) {
+        @apply(--layout-horizontal);
+        padding: 0 16px 8px;
+      }
+      :host[vertical] {
+        @apply(--layout-vertical);
+        padding: 0 16px 8px;
+      } </style> <!-- Legend Start --> <template is="dom-if" if="[[!vertical]]"> <template is="dom-repeat" items="[[legendStats]]"> <duma-legend-item-horizontal index="[[index]]" id$="item-[[index]]" stat="[[item]]"></duma-legend-item-horizontal> </template> </template> <template is="dom-if" if="[[vertical]]"> <template is="dom-repeat" items="[[legendStats]]"> <duma-legend-item-vertical index="[[index]]" id$="item-[[index]]" stat="[[item]]"></duma-legend-item-vertical> </template> </template> </template> <script> Polymer(
+    {
+      is: 'duma-legend',
+      properties:
+      {
+        legendStats: Array,
+        vertical: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        }
+      }
+    }); </script> </dom-module> 

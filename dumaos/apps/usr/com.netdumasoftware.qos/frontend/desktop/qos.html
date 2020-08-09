@@ -1,0 +1,436 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/q.html"> <script> var qos = qos || (function () {
+    var packageId = "com.netdumasoftware.qos";
+
+    function addPanel(file, data, options) {
+      $("duma-panels")[0].add(
+        "/apps/" + packageId + "/desktop/" + file,
+        packageId,
+        data,
+        options
+      );
+    }
+
+    function getThrottle(callback) {
+      return Q.promise(function (resolve) {
+        long_rpc(packageId, "get_link_throttle", [], function (up, down) {
+          if (callback) {
+            callback(up, down);
+          }
+          resolve([up, down]);
+        });
+      });
+    }
+    
+    function getBandwidth(callback) {
+      return Q.promise(function (resolve) {
+        long_rpc(packageId, "get_bandwidth", [], function (up, down) {
+          if (callback) {
+            callback(up, down);
+          }
+          resolve([up, down]);
+        });
+      });
+    }
+    
+    function getBandwidthDistribution(callback) {
+      return Q.promise(function (resolve) {
+        long_rpc(packageId, "get_bandwidth_dist_tree", [], function (up, down) {
+          if (callback) {
+            callback(up, down);
+          }
+          resolve([up, down]);
+        });
+      });
+    
+    }
+
+    function saveDistribution(loaderDialog, upload, download) {
+      var promise = long_rpc_promise(
+        qos.getPackageId(),
+        "set_bandwidth_dist_tree",
+        [JSON.stringify(upload), JSON.stringify(download)] );
+
+      showLoaderDialog(loaderDialog, promise);
+      promise.done();
+
+      return promise;
+    }
+
+    function updatePanel(e, options) {
+      return $("duma-panels")[0].update(e, options);
+    }
+    
+    function removePanel(e) {
+      return $("duma-panels")[0].remove(e);
+    }
+      
+    function getGridstackOptions(panel){
+      var panels = $("duma-panels");
+      if(panels[0]){
+        var all_panels = panels[0].list();
+        for(var i = 0; i < all_panels.length; i ++){
+          var get_panel = $(all_panels[i].element).find("duma-panel");
+          if(get_panel[0]){
+            if (get_panel[0] === panel || get_panel[0]._file === panel){
+              return all_panels[i];
+            }
+          }
+        }
+      }
+      return {};
+    }
+
+    function reloadPanel(panel, newdata, defaultOptions){
+      var panels = $("duma-panels")[0];
+      var options = Object.assign({},getGridstackOptions(panel));
+      if(Object.keys(options).length > 0){
+        if(typeof panel === "string") panel = $(options.element).find("duma-panel")[0];
+        if(!newdata) newdata = panel.data;
+        delete options.element;
+        options._desktop = panel.hasOwnProperty("desktop") ? panel.desktop : false;
+        
+        panels.remove(panel);
+        panels.add(panel._file, panel._package, newdata, options);
+      }
+    }
+
+    function showLoaderDialog(loaderDialog, promise) {
+      promise.fin(function () {
+        $(loaderDialog)[0].close();
+        $(loaderDialog).find("paper-spinner-lite").prop("active", false);
+      });
+
+      $(loaderDialog)[0].open();
+      $(loaderDialog).find("paper-spinner-lite").prop("active", true);
+    }
+
+    function compare_nodes(lhs,rhs) {
+      return lhs.id - rhs.id;
+    }
+
+    function DomainTree(domain,domain_list,init,reset,get_node_name) {
+      this.domain = domain;
+      this.init = init;
+      this.reset = reset;
+      this.get_node_name = get_node_name;
+      this.domain_list = domain_list;
+      this.download_tree = null;
+      this.upload_tree = null;
+    }
+
+    function FlowerTree() {
+      this.current_domain = "";
+      this.domain_map = {};
+    }
+
+    FlowerTree.prototype = {
+      add_domain_tree: function(domain_tree) {
+        this.domain_map[domain_tree.domain] = domain_tree;
+      },
+
+      set_domain: function(domain) {
+        this.current_domain = domain;
+      },
+
+      get_domain: function() {
+        return this.current_domain;
+      },
+
+      get_download_tree: function() {
+        return this.domain_map[this.current_domain].download_tree;
+      },
+
+      get_upload_tree: function() {
+        return this.domain_map[this.current_domain].upload_tree;
+      },
+
+      get_domain_list: function() {
+        return this.domain_map[this.current_domain].domain_list;
+      },
+
+      get_download_node: function(id) {
+        var download_tree = this.domain_map[this.current_domain].download_tree;
+        var children = download_tree.children;
+
+        for (var i = 0; i < children.length; ++i) {
+          var node = children[i];
+
+          if (node.id === id) {
+            return node;
+          }
+        }
+
+        return null;
+      },
+
+      get_upload_node: function(id) {
+        var upload_tree = this.domain_map[this.current_domain].upload_tree;
+        var children = upload_tree.children;
+
+        for (var i = 0; i < children.length; ++i) {
+          var node = children[i];
+
+          if (node.id === id) {
+            return node;
+          }
+        }
+
+        return null;
+      },
+
+      get_node_name: function(id) {
+        return this.domain_map[this.current_domain].get_node_name(id);
+      },
+
+      init: function(download_tree,upload_tree) {
+        this.domain_map[this.current_domain].download_tree = download_tree;
+        this.domain_map[this.current_domain].upload_tree = upload_tree;
+
+        for (var domain in this.domain_map) {
+          if (domain !== this.current_domain) {
+            this.domain_map[domain].init();
+          }
+        }
+      },
+
+      save: function(loaderDialogue,do_reset) {
+        var current_domain = this.domain_map[this.current_domain];
+        var promise = saveDistribution(
+          loaderDialogue,
+          do_reset ? {} : current_domain.upload_tree,
+          do_reset ? {} : current_domain.download_tree
+        );
+
+        if (do_reset) {
+          this.reset();
+        } else {
+          for (var domain in this.domain_map) {
+            if (domain !== this.current_domain) {
+              this.domain_map[domain].reset();
+            }
+          }
+        }
+
+        return promise;
+      },
+
+      reset: function() {
+        for (var domain in this.domain_map) {
+          this.domain_map[domain].reset();
+        }
+      },
+
+      sort: function() {
+        for (var domain in this.domain_map) {
+          var domain_tree = this.domain_map[domain];
+
+          domain_tree.download_tree.children.sort(compare_nodes);
+          domain_tree.upload_tree.children.sort(compare_nodes);
+        }
+      }
+    }
+
+    function get_applications() {
+      return long_rpc_promise("com.netdumasoftware.qos","get_categories",[]);
+    }
+
+    var flower_tree = null;
+
+    function get_flower_tree() {
+      if (flower_tree) {
+        var promise =  Q.promise(
+          function(resolve) {
+            resolve(flower_tree);
+          }
+        );
+
+        promise.done();
+
+        return promise;
+      }
+
+      return Q.all([
+        get_devices(),
+        get_applications(),
+        getBandwidthDistribution()
+      ]).then(
+        function(data) {
+          var devices = data[0];
+          var applications = JSON.parse(data[1]);
+          var upload_tree = JSON.parse(data[2][0]);
+          var download_tree = JSON.parse(data[2][1]);
+              flower_tree = new FlowerTree();
+
+          flower_tree.add_domain_tree(
+            new DomainTree(
+              "devices",
+              devices,
+
+              // init
+              function() {
+                this.download_tree = {
+                  domain: this.domain,
+                  share_excess: true,
+                  children: []
+                };
+
+                this.upload_tree = {
+                  domain: this.domain,
+                  share_excess: true,
+                  children: []
+                };
+
+                var length = 0;
+
+                for (var id in this.domain_list) {
+                  if (parseInt(id)) {
+                    ++length;
+                  }
+                }
+
+                var average_distribution = 1.0 / length;
+
+                for (var id in this.domain_list) {
+                  if (parseInt(id)) {
+                    this.download_tree.children.push({
+                      id: id,
+                      normprop: average_distribution
+                    });
+
+                    this.upload_tree.children.push({
+                      id: id,
+                      normprop: average_distribution
+                    });
+                  }
+                }
+              },
+
+              // reset
+              function() {
+                var length = 0;
+
+                for (var id in this.domain_list) {
+                  if (parseInt(id)) {
+                    ++length;
+                  }
+                }
+
+                var average_distribution = 1.0 / length;
+
+                for (var i = 0; i < this.download_tree.children.length; ++i) {
+                  this.download_tree.children[i].normprop = average_distribution;
+                }
+
+                for (var i = 0; i < this.upload_tree.children.length; ++i) {
+                  this.upload_tree.children[i].normprop = average_distribution;
+                }
+              },
+
+              // get_node_name
+              function(id) {
+                var device = this.domain_list[id];
+
+                if (device) {
+                  return device.name;
+                } else {
+                  return "<%= i18n.unknown %>";
+                }
+              }
+            )
+          );
+
+          flower_tree.add_domain_tree(
+            new DomainTree(
+              "appcat",
+              applications,
+
+              // init
+              function() {
+                this.download_tree = {
+                  domain: this.domain,
+                  share_excess: true,
+                  children: []
+                };
+
+                this.upload_tree = {
+                  domain: this.domain,
+                  share_excess: true,
+                  children: []
+                };
+
+                var length = 0;
+
+                for (var category in this.domain_list) {
+                  ++length;
+                }
+
+                var average_distribution = 1.0 / length;
+		
+                for (var id in this.domain_list) {
+                  this.download_tree.children.push({
+                    id: id,
+                    normprop: average_distribution
+                  });
+
+                  this.upload_tree.children.push({
+                    id: id,
+                    normprop: average_distribution
+                  });
+                }
+              },
+
+              // reset
+              function() {
+                var length = 0;
+
+                for (var category in this.domain_list) {
+                  ++length;
+                }
+
+                var average_distribution = 1.0 / (length - 1);
+
+                for (var i = 0; i < this.download_tree.children.length; ++i) {
+                  this.download_tree.children[i].normprop = average_distribution;
+                }
+
+                for (var i = 0; i < this.upload_tree.children.length; ++i) {
+                  this.upload_tree.children[i].normprop = average_distribution;
+                }
+              },
+
+              // get_node_name
+              function(id) {
+                return this.domain_list[id] || "<%= i18n.unknown %>";
+              }
+            )
+          );
+
+          flower_tree.set_domain(download_tree.domain);
+          flower_tree.init(download_tree,upload_tree);
+          flower_tree.sort();
+
+          return flower_tree;
+        }
+      );
+    }
+
+    return {
+      addPanel: addPanel,
+      getThrottle: getThrottle,
+      getBandwidth: getBandwidth,
+      getBandwidthDistribution: getBandwidthDistribution,
+      updatePanel: updatePanel,
+      removePanel: removePanel,
+      reloadPanel: reloadPanel,
+      saveDistribution: saveDistribution,
+      showLoaderDialog: showLoaderDialog,
+      getPackageId: function () {
+        return packageId;
+      },
+
+      get_flower_tree: get_flower_tree
+    }
+  })(); </script> 

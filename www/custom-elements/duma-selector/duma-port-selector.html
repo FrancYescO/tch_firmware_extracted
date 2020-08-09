@@ -1,0 +1,118 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../paper-input/paper-input.html"> <link rel="import" href="../paper-listbox/paper-listbox.html"> <link rel="import" href="../paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="../paper-item/paper-item.html"> <dom-module id="duma-port-selector"> <template> <h3>Source Port</h3> <paper-input required type="number" min="1" max="65535" label="Start" on-change="_onSourcePortMinChange" error-message="Invalid port number" value="{{_sourcePortMinValue}}" invalid="{{_sourcePortMinInvalid}}" auto-validate></paper-input> <paper-input type="number" required min="[[_sourcePortMinValue]]" max="65535" label="End" error-message="Invalid port number" invalid="{{_sourcePortMaxInvalid}}" value="{{_sourcePortMaxValue}}" auto-validate></paper-input> <h3>Destination Port</h3> <paper-input required type="number" min="1" max="65535" label="Start" value="{{_destinationPortMinValue}}" error-message="Invalid port number" on-change="_onDestinationPortMinChange" invalid="{{_destinationPortMinInvalid}}" value="{{_destinationPortMinValue}}" auto-validate></paper-input> <paper-input required type="number" min="[[_destinationPortMinValue]]" max="65535" label="End" error-message="Invalid port number" invalid="{{_destinationPortMaxInvalid}}" value="{{_destinationPortMaxValue}}" auto-validate></paper-input> <paper-dropdown-menu label="Protocol" required error-message="Invalid protocol" invalid="{{_protocolInvalid}}"> <paper-listbox class="dropdown-content" selected="{{_protocolValue}}" attr-for-selected="name"> <paper-item name="tcp">TCP</paper-item> <paper-item name="udp">UDP</paper-item> <paper-item name="tcpudp">TCP &amp; UDP</paper-item> </paper-listbox> </paper-dropdown-menu> </template> <script> Polymer({
+      is: "duma-port-selector",
+
+      properties: {
+        valid: {
+          type: Boolean,
+          computed: "_isValid(_sourcePortMinInvalid, _sourcePortMaxInvalid, _destinationPortMinInvalid, _destinationPortMaxInvalid, _protocolInvalid, _sourcePortMinValue, _sourcePortMaxValue, _destinationPortMinValue, _destinationPortMaxValue, _protocolValue)"
+        },
+
+        value: {
+          computer: "_getValue(_protocolValue, _sourcePortMinValue, _sourcePortMaxValue, _destinationPortMinValue, _destinationPortMaxValue)"
+        }
+      },
+
+      _isValid: function (
+        sourcePortMinInvalid, sourcePortMaxInvalid, destinationPortMinInvalid,
+        destinationPortMaxInvalid, protocolInvalid, sourcePortMinValue,
+        sourcePortMaxValue, destinationPortMinValue, destinationPortMaxValue,
+        protocolValue
+      ) {
+        return !(
+          sourcePortMinInvalid || sourcePortMaxInvalid ||
+          destinationPortMinInvalid || destinationPortMaxInvalid ||
+          protocolInvalid || sourcePortMinValue === "" ||
+          sourcePortMaxValue === "" || destinationPortMinValue === "" ||
+          destinationPortMaxValue === "" || protocolValue > -1
+        );
+      },
+
+      _onSourcePortMinChange: function () {
+        this._sourcePortMaxValue = this._sourcePortMinValue;
+      },
+
+      _onDestinationPortMinChange: function () {
+        this._destinationPortMaxValue = this._destinationPortMinValue;
+      },
+
+      _getValue: function (
+        protocolValue, sourcePortMinValue,
+        sourcePortMaxValue, destinationPortMinValue,
+        destinationPortMaxValue
+      ) {
+        switch (protocolValue) {
+          case "tcp":
+          case "udp":
+            var service = this._generateService(
+              protocolValue, sourcePortMinValue,
+              sourcePortMaxValue, destinationPortMinValue,
+              destinationPortMaxValue
+            );
+
+            return {
+              custom: true,
+              services: [service]
+            };
+
+          case "tcpudp":
+            var tcpService = this._generateService(
+              "tcp", sourcePortMinValue,
+              sourcePortMaxValue, destinationPortMinValue,
+              destinationPortMaxValue
+            );
+            var udpService = this._generateService(
+              "udp", sourcePortMinValue,
+              sourcePortMaxValue, destinationPortMinValue,
+              destinationPortMaxValue
+            );
+
+            return {
+              custom: true,
+              services: [tcpService, udpService]
+            };
+        }
+
+      },
+
+      _getProtocolNumber: function (protocol) {
+        return {
+          "tcp": 6,
+          "udp": 17
+        }[protocol];
+      },
+
+      _generateService: function (
+        protocolValue, sourcePortMinValue,
+        sourcePortMaxValue, destinationPortMinValue,
+        destinationPortMaxValue
+      ) {
+        return {
+          sport: [
+            parseInt(sourcePortMinValue),
+            parseInt(sourcePortMaxValue)
+          ],
+          dport: [
+            parseInt(destinationPortMinValue),
+            parseInt(destinationPortMaxValue)
+          ],
+          proto: this._getProtocolNumber(protocolValue)
+        };
+      },
+      
+      reset: function () {
+        this._sourcePortMinValue = 1;
+        this._sourcePortMaxValue = 65535;
+        this._destinationPortMinValue = "";
+        this._destinationPortMaxValue = "";
+        this._protocolValue = -1;
+
+        this._sourcePortMinInvalid = false;
+        this._sourcePortMaxInvalid = false;
+        this._destinationPortMinInvalid = false;
+        this._destinationPortMaxInvalid = false;
+        this._protocolInvalid = false;
+      }
+    }); </script> </dom-module> 

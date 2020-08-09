@@ -1,0 +1,328 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_MultiAP_Controller_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_MultiAP.Controller.",
+    access = "readOnly",
+    description = "MultiAP controller parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "Enables or Disables the Multi-AP Controller and Agent functionality in the Gateway",
+      },
+      HardwareVersion = {
+        access = "readOnly",
+        type = "string",
+        description = "Hardware version of the multiap controller",
+      },
+      MultiAPAgentNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The number of Multi-AP Agent entries",
+      },
+      Boot = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "2",
+          },
+        },
+        description = "Boot the Multi-AP network or Gateway and Multi-AP network",
+      },
+      PowerOnTime = {
+        access = "readOnly",
+        type = "string",
+        description = "Power on time of the multiap controller",
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        description = "Software version of the multiap controller",
+      },
+      DeploySoftwareNow = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "Upgrade the firmware of the multiap controller",
+      },
+      DeploymentWindowOpen = {
+        access = "readWrite",
+        type = "string",
+        max = 32,
+        description = "Start time of the window, where the Gateway is allowed to install the software image on a Multi-AP Agent device. The time is specified in Local Time(hh:mm:ss)",
+      },
+      DeploymentWindowClose = {
+        access = "readWrite",
+        type = "string",
+        max = 32,
+        description = "End time of the window, where the Gateway is allowed to install the software image on a Multi-AP Agent device. The time is specified in Local Time(hh:mm:ss)",
+      },
+      DeploymentWindowTime = {
+        access = "readOnly",
+        type = "string",
+        max = 32,
+        description = "Randomly selected time between DeplymentWindowOpen and DeploymentWindowClose, when the Multi-AP Controller initiates its Software Deployment Procedures",
+      },
+      FactoryReset = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "2",
+          },
+        },
+        description = "Factory reset the multiAP-nodes according to the argument 1 or 2",
+      },
+      FactoryResetTime = {
+        access = "readOnly",
+        type = "string",
+        description = "Controller started time after partial or full factory reset procedure",
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local network = require("transformer.shared.common.network")
+local cronHandler = require('vendorextensions.cron_handler')
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local multiapBinding = { config = "multiap", sectionname = "controller" }
+local multiapAgentBinding = { config = "multiap", sectionname = "agent", option = "enabled" }
+local veBinding = { config = "vendorextensions" }
+local envBinding = { config = "env", sectionname = "var" }
+local wirelessBinding = { config = "wireless" }
+local transactions = {}
+
+local paramToOption = {
+  DeploymentWindowOpen = "deployment_window_start",
+  DeploymentWindowClose = "deployment_window_end",
+  DeploymentWindowTime = "deployment_window_random",
+}
+
+local function getUciParam(_, param)
+  veBinding.sectionname = "agent_software_deployment"
+  veBinding.option = paramToOption[param]
+  return uciHelper.get_from_uci(veBinding)
+end
+
+local function getNumberOfAgents()
+  local noOfAgents = 0
+  envBinding.option = "local_wifi_mac"
+  local internalAgentMac = getFromUci(envBinding)
+  for agentMac, agentData in pairs(conn:call("mapVendorExtensions.agent", "get", {}) or {}) do
+    if agentMac ~= internalAgentMac then
+      noOfAgents = noOfAgents + 1
+    end
+  end
+  return tostring(noOfAgents)
+end
+
+Device_Services_X_TELSTRA_MultiAP_Controller_.get = {
+  Enable = function(mapping, param)
+    multiapBinding.option = "enabled"
+    return getFromUci(multiapBinding) == "1" and getFromUci(multiapAgentBinding) == "1" and "1" or "0"
+  end,
+  HardwareVersion = function(mapping, param)
+    envBinding.option = "hardware_version"
+    return getFromUci(envBinding)
+  end,
+  MultiAPAgentNumberOfEntries = getNumberOfAgents,
+  Boot = "0",
+  PowerOnTime = function()
+    multiapBinding.option = "poweron_time"
+    return getFromUci(multiapBinding)
+  end,
+  SoftwareVersion = function()
+    local softwareVersion = conn:call("map_controller", "get_version", {}) or {}
+    return softwareVersion.version or ""
+  end,
+  DeploySoftwareNow = "0",
+  DeploymentWindowOpen = getUciParam,
+  DeploymentWindowClose = getUciParam,
+  DeploymentWindowTime = getUciParam,
+  FactoryReset = function()
+    multiapBinding.option = "factoryreset_type"
+    return getFromUci(multiapBinding)
+  end,
+  FactoryResetTime = function()
+    multiapBinding.option = "factoryreset_time"
+    return getFromUci(multiapBinding)
+  end,
+}
+
+local function setUciParam(_, param, value)
+  veBinding.sectionname = "agent_software_deployment"
+  veBinding.option = paramToOption[param]
+  setOnUci(veBinding, value, commitapply)
+  transactions[veBinding.config] = true
+end
+
+local function checkMulticastMessage()
+  local isUuidPresent = uciHelper.get_from_uci({ config = "vendorextensions", sectionname = "multicast_uuid"})
+  if isUuidPresent and isUuidPresent ~= "" then
+    return true
+  end
+  return
+end
+
+local function checkHourMinSecLimit(time)
+  local hour, min, sec = time:match("^(%d%d):(%d%d):(%d%d)$")
+  if not hour or (tonumber(hour) < 0 or tonumber(hour) > 23) or (tonumber(min) < 0 or tonumber(min) > 59) or (tonumber(sec) < 0 or tonumber(sec) > 59) then
+    return nil, "Invalid format"
+  end
+  return true
+end
+
+local function setDeploymentWindow(param, value)
+  local ok, err = checkHourMinSecLimit(value)
+  if not ok then
+    return nil, err
+  end
+  ok, err = cronHandler.checkTimeInterval(paramToOption[param], value)
+  if not ok then
+    return nil, err
+  end
+  setUciParam(nil, param, value)
+  local fileName = param == "DeploymentWindowOpen" and "/tmp/.setDeploymentWindowOpen" or "/tmp/.setDeploymentWindowClose"
+  local outFile = io.open(fileName, "w")
+  if outFile then
+    outFile:write(value,"\n")
+    outFile:close()
+  else
+    return nil, "Internal Error"
+  end
+end
+
+local bandsteeringMap = {
+  ["1"] = "off",
+  ["0"] = "bs0",
+}
+
+local function getAPAndSSIDFor2gAnd5g()
+  wirelessBinding.sectionname = "wifi-iface"
+  local ap2g, ap5g, ssid2g, ssid5g, iface2g, iface5g
+  uciHelper.foreach_on_uci(wirelessBinding, function(s)
+    if s.device == "radio_2G" and s.network == "lan" and s.fronthaul == "1" then
+      iface2g = s[".name"]
+      ssid2g = s.ssid
+    elseif s.device == "radio_5G" and s.network == "lan" and s.fronthaul == "1" then
+      iface5g = s[".name"]
+      ssid5g = s.ssid
+    end
+    if iface2g and iface5g then
+      -- Both 2.4GHz and 5GHz SSID and Wifi-iface has been found. So stop iterating.
+      return false
+    end
+  end)
+  if not iface2g or not iface5g then
+    -- Some internal error cannot find 2g or 5g iface. So return nil and cannot set BS to appropriate value.
+    return nil
+  end
+  ap2g = network.getAPForIface(iface2g)
+  ap5g = network.getAPForIface(iface5g)
+  return ap2g, ap5g, ssid2g, ssid5g
+end
+
+local function enableOrDisableBandsteering(ap2g, ap5g, value)
+  wirelessBinding.sectionname = ap2g
+  wirelessBinding.option = 'bandsteer_id'
+  setOnUci(wirelessBinding, value, commitapply)
+  wirelessBinding.sectionname = ap5g
+  setOnUci(wirelessBinding, value, commitapply)
+end
+
+Device_Services_X_TELSTRA_MultiAP_Controller_.set = {
+  Enable = function(mapping, param, value)
+    multiapBinding.option = "enabled"
+    setOnUci(multiapBinding, value, commitapply)
+    setOnUci(multiapAgentBinding, value, commitapply)
+    local ap2g, ap5g, ssid2g, ssid5g = getAPAndSSIDFor2gAnd5g()
+    if value == "0" and ssid2g ~= ssid5g then
+      -- Even though Controller is disabled, if user has 2 different SSID's, platform BS should remain off.
+      value = "1"
+    end
+    if not ap2g or ap2g == "" or ap5g == "" then
+      -- Some internal error cannot find 2g or 5g iface. So return nil and cannot set BS to appropriate value.
+      return nil, "Internal error Bandsteering cannot be enabled / disabled"
+    end
+    enableOrDisableBandsteering(ap2g, ap5g, bandsteeringMap[value])
+    transactions[multiapBinding.config] = true
+    transactions[wirelessBinding.config] = true
+  end,
+  Boot = function(mapping, param, value)
+    if checkMulticastMessage() then
+      return nil, "Already a Reset / Reboot is in progress. Please try after it is completed"
+    end
+    local fd = io.open("/tmp/.reboottype","w")
+    if fd then
+      fd:write(value, "\n")
+      fd:close()
+      commitapply:newset("multiap_reboot")
+    else
+      return nil, "internal write error"
+    end
+  end,
+  DeploySoftwareNow = function(mapping, param, value)
+    if value == "1" then
+      commitapply:newset("multiap_deploy_software_now")
+    end
+  end,
+  DeploymentWindowOpen = function(mapping, param, value)
+    return setDeploymentWindow(param, value)
+  end,
+  FactoryReset = function(mapping, param, value)
+    if checkMulticastMessage() then
+      return nil, "Already a Reset / Reboot is in progress. Please try after it is completed"
+    end
+    local fd = io.open("/tmp/.resettype","a")
+    if fd then
+      fd:write(value, "\n")
+      fd:close()
+      commitapply:newset("multiap_factoryreset")
+    else
+      return nil, "internal write error"
+    end
+  end,
+  DeploymentWindowClose = function(mapping, param, value)
+    return setDeploymentWindow(param, value)
+  end,
+}
+
+local function endTransaction(action)
+  for config,_ in pairs(transactions) do
+    action({config = config})
+  end
+  transactions = {}
+end
+
+Device_Services_X_TELSTRA_MultiAP_Controller_.commit = function()
+  endTransaction(uciHelper.commit)
+end
+
+Device_Services_X_TELSTRA_MultiAP_Controller_.revert = function()
+  endTransaction(uciHelper.revert)
+end
+
+local function ubusEventTriggered(mapping, action, data)
+  if data.Action == "powerOnTimeUpdated" then
+    return { { key = "", paramname = "PowerOnTime" } }
+  elseif data.Action == "FactoryResetTime" then
+    return { { key = "", paramname = "FactoryResetTime" } }
+  end
+end
+
+Device_Services_X_TELSTRA_MultiAP_Controller_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, ubusEventTriggered, "mapVendorExtensions.controller")
+end
+
+register(Device_Services_X_TELSTRA_MultiAP_Controller_)

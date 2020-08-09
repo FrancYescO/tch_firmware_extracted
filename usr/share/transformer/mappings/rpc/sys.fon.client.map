@@ -1,0 +1,95 @@
+local require = require
+local register = register
+local pairs, error = pairs, error
+local uciHelper = mapper("ucihelper")
+
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+local sys_fon_ = {
+    objectType = {
+      name = "sys.fon.",
+      access = "readOnly",
+      minEntries = 1,
+      maxEntries = 1,
+      parameters = {},
+    }
+}
+
+register(sys_fon_)
+
+-- sys.fon.client.{i}
+local Sys_Fon_Client_i_ = {
+  objectType = {
+    name = "sys.fon.client.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      L2Interface = {
+        access = "readOnly",
+        type = "string",
+      },
+      State = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local hosts
+local l3iface
+local clients = {}
+Sys_Fon_Client_i_.entries = function(mapping)
+  local entries = {}
+  clients = conn:call("hotspotd.clients", "list", {})
+  if clients == nil then
+    return entries
+  end
+  hosts = conn:call("hostmanager.device", "get", {}) or {}
+  l3iface = uciHelper.get_from_uci({ config = "hotspotd", sectionname = "main", option = "iface" })
+  for k in pairs(clients) do
+       entries[#entries+1] = k
+  end
+  return entries
+end
+
+Sys_Fon_Client_i_.get = {
+  Status = function(mapping, param, key)
+    return clients[key].status
+  end,
+  MACAddress = function(mapping, param, key)
+    return key
+  end,
+  L2Interface = function(mapping, param, key)
+    local l2iface = ""
+    for _,v in pairs(hosts) do
+      if v["mac-address"] == key and v["l3interface"] == l3iface then
+        l2iface = v["l2interface"]
+        break
+      end
+    end
+    return l2iface
+  end,
+  State = function(mapping, param, key)
+    local state = "0"
+    for _,v in pairs(hosts) do
+      if v["mac-address"] == key and v["l3interface"] == l3iface and v["state"] == "connected" then
+        state = "1"
+        break
+      end
+    end
+    return state
+  end,
+}
+
+register(Sys_Fon_Client_i_)

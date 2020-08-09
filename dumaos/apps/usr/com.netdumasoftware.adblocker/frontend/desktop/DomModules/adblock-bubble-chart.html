@@ -1,0 +1,512 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/libs/d3v5.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-domain-burst-dialog.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-bubble-chart"> <template> <style include="duma-theme iron-flex"> :host
+      {
+        overflow: visible;
+      }
+
+      .bubbles
+      {
+        stroke-width: 0px;
+      }
+
+      .bubbles:hover
+      {
+        stroke: black;
+        opacity: 1;
+      }
+
+      .maxSize
+      {
+        width: 100%;
+        height: 100%;
+        margin: 0px;
+        padding: 0px;
+      }
+
+      .breakLine
+      {
+        stroke-width: 2px;
+        stroke: white;
+        opacity: 0.5;
+      }
+
+      .rowLine
+      {
+        stroke-width: 1px;
+        stroke: var(--divider-color);
+        shape-rendering: crispEdges;
+      }
+
+      #bubbleGraph
+      {
+        overflow: hidden;
+      }
+
+      .tooltip
+      {
+        z-index: 1000;
+        position: absolute;
+        text-align: center;
+        padding: 5px;
+        border: 0px;
+        background: black;
+        pointer-events: all;
+        border-radius: 2px;
+        white-space: nowrap;
+      }
+
+      .tooltip::after
+      {
+        content: " ";
+        position: absolute;
+        left: 50%;
+        margin-left: -5px;
+        border-width: 5px;
+        border-style: solid;
+      }
+
+      .tooltipArrowBelow::after
+      {
+        bottom: 100%; /* At the bottom of the tooltip */
+        border-color: transparent transparent black transparent;
+      }
+
+      .tooltipArrowAbove::after
+      {
+        top: 100%; /* At the top of the tooltip */
+        border-color: black transparent transparent transparent;
+      }
+
+      #tooltipWrap
+      {
+        position: relative;
+        overflow: visible;
+      } </style> <!-- Adblock bubble chart dom start --> <div id="tooltipWrap" class="maxSize"> <div id="bubbleGraph" class="maxSize"> <svg id="svgChart" class="maxSize"> <g id="svgContent" class="maxSize"> </g> </svg> </div> </div> <adblock-domain-burst-dialog id="dialog" devices="[[devices]]"></adblock-domain-burst-dialog> </template> <script> var breaks = []
+
+    Polymer(
+    {
+      is: 'adblock-bubble-chart',
+      properties:
+      {
+        LineHeight:
+        {
+          type: Number,
+          value: 64,
+        },
+        devices: Object,
+        deviceCount:
+        {
+          type: Number,
+          value: 4,
+        },
+        listColours: Object,
+        listCount:
+        {
+          type: Number,
+          value: 1,
+        },
+        circleOpacity:
+        {
+          type: Number,
+          value: 0.85,
+        },
+        totalTimeRange:
+        {
+          type: Number,
+          value: 1800,
+        },
+        timeRangeStart:
+        {
+          type: Number,
+          value: 0,
+        },
+        timeRangeEnd:
+        {
+          type: Number,
+          value: 1800,
+        },
+        oldestTime:
+        {
+          type: Number,
+          value: -1,
+        },
+        currentTooltipItem:
+        {
+          type: Object,
+          value: null,
+        },
+      },
+      attached: function ()
+      {
+        if (typeof this.initialized != 'undefined')
+          return;
+
+        this.initialized = true;
+        this.runningProcessingLoop = false;
+
+        window.addEventListener("resize", function (e)
+        {
+          this.ResizeEvent();
+        }.bind(this));
+
+        this.height = this.LineHeight * this.deviceCount;
+        this.width  = this.$.bubbleGraph.clientWidth;
+
+        $(this.$.bubbleGraph).height(this.height);
+
+        this.data = [];
+        this.InitGraph(this.data);
+      },
+      Begin()
+      {
+        this.GetBurstTimespan(this.totalTimeRange, 0);
+      },
+      ResizeEvent()
+      {
+        this.width = this.$.bubbleGraph.clientWidth;
+
+        var line;
+        while ((line = this.$$(".rowLine")) != null)
+          $(line).remove();
+
+        this.CreateLines();
+      },
+      GetBurstTimespan(start, end, cont = false)
+      {
+        if (this.oldestTime == -1) { }
+        else if (start > this.oldestTime)
+          end = this.oldestTime;
+        else
+          return;
+
+        this.oldestTime = start;
+        long_rpc_promise("com.netdumasoftware.adblocker", "burst_range", [false, {time: (start + 5).toFixed(1), relative: true}, {time: (end + 5).toFixed(1), relative: true}]).done(this.ProcessData.bind(this, cont));
+      },
+      ProcessData(cont, result)
+      {
+        var data = JSON.parse(result);
+        var currentTime = (parseFloat(data.current_time) - 5).toString();
+
+        this.latestTime = parseFloat(currentTime);
+        this.UpdateAxis();
+
+        for (var i = 0; i < data.bursts.length; i++)
+        {
+          var burst = data.bursts[i];
+          var devIndex = 0;
+
+          for (var ii = 0; ii < this.devices.length; ii++)
+            if (this.devices[ii].DeviceID == burst.device_id)
+            {
+              devIndex = ii;
+              break;
+            }
+
+          this.AddData(
+          {
+            time: burst.timestamp,
+            hits: burst.domains_length,
+            list: burst.top_domain_list_id,
+            device: devIndex,
+            deviceID: burst.device_id,
+            inTimeSpan: false,
+          });
+        }
+
+        if (cont || !this.runningProcessingLoop)
+        {
+          this.runningProcessingLoop = true;
+          setTimeout(function () { long_rpc_promise("com.netdumasoftware.adblocker", "burst_range", [false, {time: currentTime, relative: false}, {time: "5.0", relative: true}]).done(this.ProcessData.bind(this, true)) }.bind(this), 1000);
+        }
+      },
+      InitGraph()
+      {
+        // Polymer is very dumb and requires this for no known reason
+        this.scopeSubtree(this.$.bubbleGraph, true);
+
+        // append the svg object to the body of the page
+        this.svg = d3.select(this.$.svgChart);
+
+        // ---------------------------//
+        //       AXIS  AND SCALE      //
+        // ---------------------------//
+
+        // Add X axis
+        this.x = d3.scaleLinear()
+                   .domain([60, 0])
+                   .range([0, this.width]);
+
+        this.xCalc = function(value)
+        {
+          var inTimeSpan = ((value.time >= this.startTime) && (value.time <= this.endTime))
+          if (value.inTimeSpan != inTimeSpan)
+          {
+            value.inTimeSpan = inTimeSpan;
+            this.dispatchEvent(new CustomEvent('deviceTotalChanged', { detail: { deviceID: value.device, change: ((inTimeSpan) ? value.hits : -value.hits) }}));
+          }
+          return this.x(value.time);
+        }.bind(this);
+
+        this.x_axis = d3.axisBottom()
+          .scale(this.x);
+
+        // Add Y axis
+        this.y = d3.scaleLinear()
+          .domain([-(this.LineHeight / 2), this.height - (this.LineHeight / 2)])
+          .range([0, this.height]);
+
+        // Add a scale for bubble size
+        this.z = d3.scaleSqrt()
+          .domain([0, 100])
+          .range([0, 30]);
+
+        // Add a scale for bubble color
+        this.myColor = function (index)
+        {
+          return this.listColours[index % this.listColours.length];
+        };
+
+
+        // ---------------------------//
+        //      TOOLTIP               //
+        // ---------------------------//
+
+        // -1- Create a tooltip div that is hidden by default:
+        this.tooltip = d3.select(this.$.bubbleGraph)
+          .append("div")
+            .style("opacity", 0)
+            .classed("tooltip", true);
+
+
+        // ---------------------------//
+        //       HIGHLIGHT GROUP      //
+        // ---------------------------//
+
+        // What to do when one group is hovered
+        var highlight = function(d)
+        {
+          // reduce opacity of all groups
+          d3.selectAll(".bubbles").style("opacity", this.circleOpacity)
+          // expect the one that is hovered
+          d3.selectAll("." + d).style("opacity", 1)
+        }
+
+        // And when it is not hovered anymore
+        var noHighlight = function(d)
+        {
+          d3.selectAll(".bubbles").style("opacity", this.circleOpacity)
+        }
+
+
+        // ---------------------------//
+        //       CIRCLES              //
+        // ---------------------------//
+
+        // Add dots
+        this.host = d3.select(this.$.svgContent);
+
+        // ---------------------------//
+        //       Row lines            //
+        // ---------------------------//
+        this.rowLinesWrapper = this.host.append("g");
+        this.CreateLines();
+      },
+      CreateLines()
+      {
+        $(this.rowLinesWrapper).empty();
+        for (var i = 0; i < this.deviceCount - 1; i++)
+          this.AddRowLine(this.rowLinesWrapper, i);
+      },
+      AddData(data, addToRaw=true)
+      {
+        if (addToRaw)
+          this.data.push(data);
+
+        var opacity = 0;
+        var pointerEvents = "none"
+        if (this.lists[this.GetListIndex(data.list)].visible)
+        {
+          opacity = this.circleOpacity;
+          pointerEvents = null;
+        }
+
+        this.host.append("circle")
+          .classed("bubbles", true)
+          .classed("list" + data.list, true)
+          .attr("cx",    () => this.xCalc(data))
+          .attr("cy",    () => this.y(data.device * this.LineHeight))
+          .attr("r",     () => this.z(Math.min(data.hits, this.LineHeight - 2)))
+          .style("fill", () => this.myColor(this.GetListIndex(data.list)))
+          .style("opacity", opacity)
+          .style("pointer-events", pointerEvents)
+          // -3- Trigger the functions for hover
+          .on("mouseover", function() { this.ShowTooltip(data); }.bind(this))
+          .on("mousemove", function() { this.MoveTooltip(data); }.bind(this))
+          .on("mouseout",  function() { this.HideTooltip(data); }.bind(this))
+          .on("tap",       function(timestamp) { this.$.dialog.ShowTimestamp(timestamp, data.deviceID);}.bind(this, data.time));
+      },
+      AddBreak(data, addToRaw=true)
+      {
+        if (addToRaw)
+          breaks.push(data);
+
+        var wrap = this.host.append("g");
+
+        var yRaw = data.device * this.LineHeight;
+        var yPos = this.y(yRaw);
+        var yTop = this.y(yRaw + this.LineHeight / 2);
+        var yBot = this.y(yRaw - this.LineHeight / 2);
+
+        var x1 = this.x(data.startTime);
+        var x2 = this.x(data.endTime);
+
+        data.mainLine = wrap.append("line")
+          .attr("x1",    () => x1)
+          .attr("x2",    () => x2)
+          .attr("y1",     () => yPos)
+          .attr("y2",     () => yPos)
+          .style("stroke-dasharray", () => 3)
+          .classed("breakLine", true);
+
+        data.leftLine = wrap.append("line")
+          .attr("x1",    () => x1)
+          .attr("x2",    () => x1)
+          .attr("y1",     () => yTop)
+          .attr("y2",     () => yBot)
+          .classed("breakLine", true);
+
+        data.rightLine = wrap.append("line")
+          .attr("x1",    () => x2)
+          .attr("x2",    () => x2)
+          .attr("y1",     () => yTop)
+          .attr("y2",     () => yBot)
+          .classed("breakLine", true);
+      },
+      AddRowLine(wrap, index)
+      {
+        var yPos = (index + 1) * (this.LineHeight) + 1;
+
+        var x1 = 0;
+        var x2 = this.width;
+
+        wrap.append("line")
+          .attr("x1", () => x1)
+          .attr("x2", () => x2)
+          .attr("y1", () => yPos)
+          .attr("y2", () => yPos)
+          .classed("rowLine", true);
+      },
+      SetTimeRange(start, end)
+      {
+        this.timeRangeStart = start;
+        this.timeRangeEnd = end;
+        this.UpdateAxis();
+      },
+      SetTotalTimeRange(time)
+      {
+        this.totalTimeRange = time;
+        if (typeof this.initialized != 'undefined')
+          this.GetBurstTimespan(this.totalTimeRange, 0);
+        this.UpdateAxis();
+      },
+      UpdateAxis()
+      {
+        if (this.width != this.$.bubbleGraph.clientWidth)
+          this.ResizeEvent();
+
+        this.UpdateTooltipText();
+
+        this.startTime = this.latestTime - this.totalTimeRange + this.timeRangeStart;
+        this.endTime = this.latestTime - this.totalTimeRange + this.timeRangeEnd;
+
+        this.x.domain([this.startTime, this.endTime]).range([0, this.width]);
+
+        this.svg.select(".x")
+          .transition()
+          .call(this.x_axis);
+
+        // Update chart
+        this.svg.selectAll("circle")
+          .data(this.data)
+          .attr("cx", (d) => this.xCalc(d));
+
+        // Update breaks
+        for (var i = 0; i < breaks.length; i++)
+        {
+          var x1 = this.x(breaks[i].startTime);
+          var x2 = this.x(breaks[i].endTime);
+          breaks[i].mainLine
+            .attr("x1", () => x1)
+            .attr("x2", () => x2);
+
+          breaks[i].leftLine
+            .attr("x1", () => x1)
+            .attr("x2", () => x1);
+
+          breaks[i].rightLine
+            .attr("x1", () => x2)
+            .attr("x2", () => x2);
+        }
+      },
+      ShowTooltip(d)
+      {
+        // Chose which way tooltip arrow is going
+        var isAbove = (d.device == (this.deviceCount - 1));
+        this.tooltip.classed("tooltipArrowAbove", isAbove);
+        this.tooltip.classed("tooltipArrowBelow", !isAbove);
+
+        this.tooltip.transition()
+          .duration(200)
+          .style("opacity", 1.0)
+
+        this.currentTooltipItem = d;
+        this.UpdateTooltipText();
+        this.MoveTooltip(d);
+      },
+      MoveTooltip(d)
+      {
+        var tooltopSize = this.tooltip.node().getBoundingClientRect();
+        var yOffset = (d.device == (this.deviceCount - 1)) ? -15 - tooltopSize.height : 15;
+        $(this.tooltip.node())
+          .css("left", (d3.mouse(this)[0] - (tooltopSize.width / 2)) + "px")
+          .css("top", (d3.mouse(this)[1] + yOffset) + "px");
+      },
+      UpdateTooltipText()
+      {
+        if (this.currentTooltipItem != null)
+          this.tooltip.html(FormatTimeAgo(this.latestTime - parseFloat(this.currentTooltipItem.time), true) + "<br/>" + this.currentTooltipItem.hits + " Domains Blocked");
+      },
+      HideTooltip(d)
+      {
+        this.tooltip.transition()
+          .duration(500)
+          .style("opacity", 0);
+      },
+      SetLists(lists)
+      {
+        this.$.dialog.SetLists(lists);
+        this.lists = lists;
+
+        // Update chart
+        this.svg.selectAll("circle")
+          .data(this.data)
+          .style("fill", (d) => this.myColor(this.GetListIndex(d.list)));
+      },
+      ToggleVisibility(listIndex)
+      {
+        var visible = this.lists[listIndex].visible ? 0 : this.circleOpacity;
+        var pointerType = this.lists[listIndex].visible ? "none" : null;
+        this.lists[listIndex].visible = !this.lists[listIndex].visible;
+
+        d3.selectAll(".list" + this.lists[listIndex].id).style("opacity", visible).style("pointer-events", pointerType);
+
+        return this.lists[listIndex].visible;
+      },
+      GetListIndex(id)
+      {
+        for (var i = 0; i < this.lists.length; i++)
+          if (this.lists[i].id == id)
+            return i;
+
+        return -1;
+      }
+    }); </script> </dom-module> 

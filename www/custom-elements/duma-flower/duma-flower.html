@@ -1,0 +1,559 @@
+<!--
+  (C) 2016 NETDUMA Software Ltd  
+  Iain Fraser
+
+  Flower polymer widget for allcoated shared distribution.
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/d3.html"> <link rel="import" href="/libs/util.html"> <link rel="import" href="/libs/math.html"> <link rel="import" href="/libs/sprintf.html"> <dom-module id="duma-flower"> <template> <style include="duma-theme"> :host {
+        display: block;
+        position: absolute;			
+        height: 100%;
+        width: calc(100% - 16px);
+        left: 16px;
+        top: 0;
+      }
+      .petal1{ 
+        fill: var(--primary-color);
+      }
+      .petal2{ 
+        fill: #f07e18;
+      }
+      .petal3{ 
+        fill: #f0cf18;
+      }
+      .petal4{ 
+        fill: #8cb912;
+      }
+      .petal5{ 
+        fill: #008d25;
+      }
+      .petalhole{ 
+        fill: #008d25;
+      }
+      line.grid{ 
+        stroke: var(--primary-background-color);
+        stroke-width: 0.05;
+      }
+      .outskirt{ 
+        fill: var(--background-color);
+        -webkit-transition: all 0.25s;
+        transition: all 0.25s;	
+      }
+
+      g.labels text	{	
+        font-size: 1em;
+        fill: var(--secondary-text-color);
+      }
+
+      g.slider	{
+        cursor: move;
+      }
+      .slider_text {
+        fill: var(--primary-background-color);
+      }
+      .slider_circle {
+        fill: var(--primary-text-color);
+      }
+
+      .slider:hover > .slider_circle	{
+        stroke-width: 2px;
+        stroke: var(--primary-text-color);
+      }
+
+      .svg_ratio_widget:hover	.outskirt	{
+        fill: var(--diabled-color);
+      } </style> <div class="svg-container"> <svg id="container"> </svg> </div> </template> <script> // constants
+    var R = 12;         // size of petals
+    var epsilon = 0.01;
+    var pi2 = Math.PI * 2;  
+    var omega = 0; //Math.PI / 4;    // rotation offset
+    var lspace = 10;             // space between figure and labels
+    var m_c;
+
+
+    function dot_product2( u, v ){
+            return u[0] * v[0] + u[1] * v[1];
+    }
+
+    function magnitude2( u ){
+      return Math.sqrt( u[0] * u[0] + u[1] * u[1] );
+    }
+
+    function rad_to_deg( rad ){
+      return rad * ( 180 / Math.PI );
+    }
+
+    function deg_to_rad( deg ){
+      return deg * ( Math.PI / 180 );
+    }
+
+    function box_reverse_polar_intersect( theta, b ){
+      var angle = theta + Math.PI;
+      var rw = b.width / ( 2 * Math.cos(angle) );
+      var rh = b.height / ( 2 * Math.sin(angle) );
+      var r = Math.min( Math.abs( rw ), Math.abs( rh ) );
+      return r;
+    }
+
+
+    /*
+      Z = tU + dV
+      W = ( a, b )
+
+      Goal is to find d such that
+      Z.W = -c
+    */
+    function calculate_d( U, V, L, t ){
+      var num = L.a * t * U.x + L.b * t * U.y + L.c
+      var den = ( -L.a * V.x  ) + ( -L.b * V.y )
+      var d = num / den
+      return d
+    }
+
+    // polygon is a set of lines
+    function find_min_d( theta, polygon, t ){
+      var V = { x :  Math.cos( theta ), y : Math.sin( theta ) }
+      var U = vec2_cross( V );
+
+      var lines = polygon_to_lines( polygon )
+      var minr, direction;
+
+      for( var i = 0; i < lines.length; i++ ){
+        var L = lines[i];
+        var D = [
+                calculate_d( U, V, L, t ),		// left
+                calculate_d( U, V, L, -t )		// right
+        ]
+
+        for( var j = 0; j < D.length; j++ ){
+          var d = D[j];
+          if( d >= 0 ){
+            if( is_undefined( minr ) || d < minr ){
+              minr = d;
+              direction = j;
+            }
+          }
+        }
+      }
+
+
+      // debug info
+      var origin = vec2_mul( V, minr );
+      var offset = vec2_mul( U, direction == 1 ? t : -t );
+      var intersect = vec2_add( origin, offset )
+            
+      return minr
+    }
+
+    function clip_string( x ){
+      var max_length = 10;
+      if( x.length > max_length )
+        return x.substring( 0, max_length );
+      else
+        return x;
+    }
+
+    function calculate_constants( width, height, data, g ){
+      var dtheta = pi2 / data.length;       
+      var k = {};
+
+      // create lables so we can get bound boxes first
+      k.labels = g.selectAll("text").data( data );
+      k.labels.enter().append("text");
+      k.labels.text( function( d, i ){ return clip_string( d.name ); } );
+
+
+      /*
+      * Now calculate the maximum radius that will fit in all
+      * the labels. 
+      * TODO: reorder the labels for maximum real-estate use
+      */
+
+      var w = width / 2;
+      var h = height / 2;
+      var minr, mintheta;
+      var opt_theta = 0;
+      var square = [
+          vec2(w,h), vec2(w,-h), vec2(-w,-h), vec2(-w,h)
+      ];
+
+      var a = 0;      
+      k.labels.each( function( d, i ){
+        var subtheta = i * dtheta
+        var theta = subtheta + a;
+        var b = this.getBBox();
+
+        var d = find_min_d( theta, square, b.height / 2 );
+        var r = d - ( b.width + lspace );      
+        if( r < 0 ) r = 0;
+
+        if( is_undefined( minr ) || r < minr ){
+          minr = r;
+          mintheta = a;
+        }
+      });
+        
+      var maxr = minr;
+      omega += mintheta;
+      var diameter = maxr * 2;  
+      
+      /*
+      * The closest circles can get is if there at the base polygon. The base regular polygon
+      * has sides of length S. Circles will only overlap if their combined radii is greater than
+      * S, i.e. 2R > S. So the goal is to pick a radius for the base shape such that S=2R.
+      * 
+      * The length of the sides of a regular polygon R are dependent on the shapes radius r as
+      * follows: S = 2r sin( PI / n ), where n is the number of verticies. So rearrange to 
+      * calcualte r given S we have: r = S / 2sin( PI/n). Substitute S=2R and you have:
+      *   r = R / sin( PI / n )
+      */
+      var inner_radius = R / Math.sin( Math.PI / data.length );
+      var outer_radius;
+      var fixed_petals = true;
+      if( fixed_petals ){
+        outer_radius = inner_radius + 100;
+        k.world_scale =  ( diameter / 2 ) / outer_radius;
+      } else {
+        outer_radius = diameter / 2;
+        k.world_scale = 1;
+      }
+      k.rscale = d3.scale.linear().domain( [0,100] ).range([ inner_radius, outer_radius] );
+      k.labelscale = d3.scale.linear().domain( [0,100] ).range([ inner_radius, diameter / 2] );
+      return k;
+    }
+
+
+    function calc_point( theta, mag, rscale ){
+      return [
+        Math.cos( theta + omega ) * rscale( mag ),
+        -Math.sin( theta + omega ) * rscale( mag )
+      ];
+    }
+
+
+    /* update ratio positions */
+    function update_ratio_pos( ratio_dom, data ){
+      var gs = d3.select( ratio_dom ).select("slider").selectAll("g")
+
+      gs.data( data ).attr("transform", function( d, i){
+        var p = calc_point( dtheta * i, d.mag, rscale )
+        return svg_translate( p[0], p[1] );
+      });
+
+      gs.select("text").text( function(d,i){ return Math.round( d.mag ); } );
+
+      var outline = d3.svg.line()
+         .x( function( d, i ){ return calc_point( dtheta * i, d.mag, rscale )[0]; } )
+         .y( function( d, i ){ return calc_point( dtheta * i, d.mag, rscale )[1]; } );
+      d3.select( d3.select(this).node().parentNode ).select("path")
+         .attr("d", function(){ return outline( data ) + "Z"; } );
+    }
+
+
+    function render_petal( g, path, angles, rref, r, classed ){
+      rref[0] = r;
+      g.append("path")
+      .attr("d", function(){ return path(angles) + "Z"; } )
+      .classed( classed, true );
+  //    .style("fill", fill );
+    }
+
+    function create_background( g, data, c ){
+      var n = data.length;
+      var angles = d3.range( 0, pi2 - epsilon, pi2 / n );
+      var r = [0];
+      var path = d3.svg.line()
+      .x( function(d,i){ return calc_point( d, r[0], c.rscale )[0];})
+      .y( function(d,i){ return calc_point( d, r[0], c.rscale )[1];});
+
+      // background petals 
+      render_petal( g, path, angles, r, 100, "petal1" );
+      render_petal( g, path, angles, r, 80, "petal2" );
+      render_petal( g, path, angles, r, 60, "petal3" );
+      render_petal( g, path, angles, r, 40, "petal4" );
+      render_petal( g, path, angles, r, 20, "petal5" );
+      render_petal( g, path, angles, r, 0, "petalhole" );   // gap
+
+      // render lines over petals
+      var lines = g.selectAll("line").data( angles ).enter();
+      lines.append("line")
+           .attr("x1", 0 )
+           .attr("y1", 0 )
+           .attr("x2", function( d ){ return calc_point( d, 100, c.rscale )[0]; } )
+           .attr("y2", function( d ){ return calc_point( d, 100, c.rscale )[1]; } )
+           .classed("grid",true);
+   //        .style("stroke","black");
+    }
+
+    function update_sliders( data, gs ){
+      if( is_undefined( gs ) )
+        gs = d3.select( d3.select(this).node().parentNode ).selectAll("g");
+      var dtheta = pi2 / data.length;    
+      var rscale = m_c.rscale;
+
+      gs.data( data ).attr("transform", function( d, i){
+        var p = calc_point( dtheta * i, d.mag, rscale )
+        return svg_translate( p[0], p[1] );
+      }); 
+    
+      gs.select("text").text( function(d,i){ return Math.round( d.mag ); } );
+
+      var outline = d3.svg.line()
+         .x( function( d, i ){ return calc_point( dtheta * i, d.mag, rscale )[0]; } )
+         .y( function( d, i ){ return calc_point( dtheta * i, d.mag, rscale )[1]; } );
+      d3.select( d3.select(this).node().parentNode ).select(".outskirt")
+         .attr("d", function(){ return outline( data ) + "Z"; } );  
+    }
+
+    function on_drag( d, i, rscale, dtheta ){
+      var u = calc_point( dtheta * i, d.mag, rscale );  // treat as vector
+      var v = [ d3.event.dx, d3.event.dy ];
+      var dir = dot_product2( u, v ) >= 0 ? 1 : -1;  
+      var old = d.mag;
+      var r  = rscale.range()[1] - rscale.range()[0];
+      $( this ).trigger("nodechange", [ d ] );
+
+      // update magnitude 
+      d.mag += magnitude2( v ) / r * dir * 100;	// -d3.event.dy / r;
+  //    d.mag = Math.min( Math.max( d.mag, 0 ), 1 );
+      d.mag = Math.min( Math.max( d.mag, 0 ), 100 );
+
+      // get the difference
+      var delta = d.mag - old;
+      
+      // calculate how much to move others
+      var borrow = -delta;
+      
+      // TODO: make it integer based???
+      // update all nodes
+      var gs = d3.select( d3.select(this).node().parentNode ).selectAll("g");
+      var data = gs.data();
+      var n = data.length;
+      var hungry = n > 0 ? n - 1 : 1;
+      while( Math.abs( borrow ) > 0.00001 && hungry > 0 ) { // TODO: episilon
+        var share =  borrow / hungry;     
+        hungry = 0; 
+        data = data.map( function( d, ii ){
+          if( ii == i ) return d;
+           
+          var used = 0;
+          if( d.mag + share < 0 ){
+            used = -d.mag;
+            d.mag = 0;
+          } else {
+            d.mag += share;
+            used = share;
+            hungry++;
+          } 
+
+          borrow -= used;
+              return d;
+        });    
+      }
+
+      update_sliders.call( this, data );
+
+    }
+
+    function create_sliders( g, data, c ){
+      var dtheta = pi2 / data.length;    
+      var drag = d3.behavior.drag().on("drag", 
+          function(d,i){ return on_drag.call( this, d, i, c.rscale, dtheta ); } );
+
+      // draw connected lines
+      var outline = d3.svg.line()
+         .x( function( d, i ){ return calc_point( dtheta * i, d.mag, c.rscale )[0]; } )
+         .y( function( d, i ){ return calc_point( dtheta * i, d.mag, c.rscale )[1]; } );
+
+      g.append("path")
+        .attr("d", function(){ return outline ( data ) + "Z"; } )
+        .classed("outskirt", true );
+
+    
+      var sliders = g.selectAll("g").data( data );
+      sliders.enter().append("g");
+      sliders.call( drag );
+
+      // translate group to position
+      sliders.attr("transform", function( d, i ){
+        var p = calc_point( dtheta * i, d.mag, c.rscale )
+        return svg_translate( p[0], p[1] );
+      } )
+      .classed("slider", true );  
+
+      // create actual slider
+      sliders.append("circle").attr("r", R )
+        .classed("slider_circle", true );
+      sliders.append("text")
+        .attr("y", ".35em" )	
+        .attr("text-anchor", "middle")
+        .classed("slider_text", true )
+        .text( function( d ){ return Math.round( d.mag ); } );
+    }
+
+    function create_labels( labels, data, c ){
+      var dtheta = pi2 / data.length;  
+      labels.attr("transform", function( d, i ){
+              var l = lspace;  // amount of space before text box
+              var theta = dtheta * i;
+              var b = this.getBBox();
+              
+              // get radius mag out in our units
+              var mag = c.labelscale.invert( c.labelscale(100) + l )
+
+              // calculate middle of textbox
+              var p = calc_point( dtheta * i, mag, c.labelscale )
+
+              // convert from center to bottom left
+              p[1] += b.height / 2;
+
+              if( theta > ( Math.PI / 2 )  && theta < (3*Math.PI)/2 )
+                return sprintf("%s rotate( %f %f,%f ) scale( -1, -1 ) translate(%d,%d)", 
+                    svg_translate( p[0], p[1] ), 
+                    -rad_to_deg( theta + omega ), 0, -b.height/2,
+                    -b.width, b.height );
+              else
+                return sprintf("%s rotate( %f %f,%f )", 
+                    svg_translate( p[0], p[1] ), 
+                    -rad_to_deg( theta + omega ), 0, -b.height/2 );
+        } )
+        .attr("text-anchor", function( d, i ){
+          var p = calc_point( dtheta * i, 100, c.labelscale )
+          return p[0] > 0 ? "start" : "start"; 
+        } )
+        .attr("dy", "-0.3em" )
+        .text( function( d, i ){ return d.name; } )
+     
+    }
+
+    function create_origin(){
+      var svg = this.$$("#container")
+      $(svg).empty();
+      this.scopeSubtree( svg, true);
+
+      var g = d3.select( svg ).selectAll("g").data( [ this.data ] );
+      g.enter().append("g");
+      g.attr("transform", svg_translate( this.width/2, this.height/2 ) );
+      return g;
+    }
+
+    function render(){
+      if( !this.dimensions_ready ) return;
+      if( is_undefined( this.data ) ) return;
+
+      var g = create_origin.call( this )
+      var c = calculate_constants( this.width, this.height, this.data, 
+                            g.append("g").classed("labels", true ) ) 
+      m_c = c;
+      var bg = g.append("g").classed("background", true);
+      bg.attr("transform", svg_scale( c.world_scale, c.world_scale ) );
+      create_background.call( this, bg, this.data, c );
+   
+      var sliders =  g.append("g").classed("sliders",true);
+      sliders.attr("transform", svg_scale( c.world_scale, c.world_scale ) );
+      create_sliders.call( this, sliders, this.data, c );
+      create_labels.call( this, c.labels, this.data, c );
+    }
+
+
+
+    function do_dimensions(){
+      var obj = this.$$("#container");
+      if( is_undefined( this.width ) ) 
+          this.width = $( this ).width();
+
+      if( this.width == 0 ) 
+        return;
+
+      this.width = Math.max( this.width, this.min_width );
+
+      var width = this.width;
+      var height = $( this ).height();
+      var dims = calculate_aspect_dimensions( width, height, this.aspect_ratio );
+      this.width = dims.width;
+      this.height = dims.height;
+
+      if( !this.dimensions_ready ){
+        var svg = d3.select( this.$$("#container") )
+          svg.attr("width",  this.width )
+            .attr("height", this.height )
+            .attr("viewBox", [0,0,this.width,this.height].join(" ") )
+            .attr("preserveAspectRatio", "xMidYMid" );
+      }
+
+      this.dimensions_ready = true;
+    }
+
+    function do_more_update_node(i, mag, data) {
+      var old = data[i].mag;
+      data[i].mag = mag;
+      var delta = mag - old;
+      
+      // calculate how much to move others
+      var borrow = -delta;
+      
+      // update all nodes
+      var data = data;
+      var n = data.length;
+      var hungry = n > 0 ? n - 1 : 1;
+      while( Math.abs( borrow ) > 0.00001 && hungry > 0 ) { // TODO: episilon
+        var share =  borrow / hungry;     
+        hungry = 0; 
+        data = data.map( function( d, ii ){
+          if( ii == i ) return d;
+           
+          var used = 0;
+          if( d.mag + share < 0 ){
+            used = -d.mag;
+            d.mag = 0;
+          } else {
+            d.mag += share;
+            used = share;
+            hungry++;
+          } 
+
+          borrow -= used;
+              return d;
+        });    
+      }
+    }
+  
+    function do_update_node( i, mag ){
+      do_more_update_node(i, mag, this.data);
+      var sliders = d3.select( this.$$("#container") ).selectAll(".slider");
+      update_sliders.call( this, this.data, sliders );
+    }
+
+    Polymer({
+      is: "duma-flower",
+      behaviors: [ Polymer.IronResizableBehavior ],
+      listeners: { "iron-resize": "onWidthChange" },
+      onWidthChange: function() {
+//        do_dimensions.call( this );
+      },
+      ready: function(){
+        var that = this;
+        setTimeout( function(){
+          do_dimensions.call( that );
+          render.call( that );
+        }, 0 );
+      },
+      properties : {
+        width: { type: Number },
+        height: { type: Number },
+        data: { type: Array, observer: '_datachange' },
+        aspect_ratio : { type: Number, value: 1.1 },
+        min_width : { type: Number, value: 720 },
+        dimensions_ready : { type: Boolean, value: false }
+      },
+      _datachange : function( newValue, oldValue ){
+        render.call( this );
+      },
+      update_node : function( index, mag ){
+        do_update_node.call( this, index, mag );
+        $( this ).trigger("nodechange", [ this.data[index] ] );
+      },
+
+      changeNodeMagnitude: function (i, mag, data) {
+        do_more_update_node(i, mag, data);
+      }
+    }); </script> </dom-module> 

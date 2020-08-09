@@ -1,0 +1,77 @@
+local ltedoctor = require("transformer.shared.ltedoctor")
+
+local ltedoctor_signal_quality = {
+	objectType = {
+		name = 'rpc.ltedoctor.signal_quality.@.',
+		access = 'readOnly',
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			name = {
+				access = "readOnly",
+				type = "string"
+			},
+			period_seconds = {
+				access = "readOnly",
+				type = "unsignedInt"
+			},
+			since_uptime = {
+				access = "readWrite",
+				type = "unsignedInt"
+			},
+			current_uptime = {
+				access = "readOnly",
+				type = "unsignedInt"
+			}
+		}
+	}
+}
+
+local entries = {
+	last_five_minutes = {
+		period_seconds = "300"
+	},
+	last_twenty_minutes = {
+		period_seconds = "1200"
+	},
+	last_hour = {
+		period_seconds = "3600"
+	},
+	diff = {},
+	all = {}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+function ltedoctor_signal_quality.getall(_, key)
+	local data = {
+		name = key,
+		current_uptime = tostring(ltedoctor.getUptime(conn) or ""),
+		period_seconds = entries[key].period_seconds or "",
+		since_uptime = tostring(ltedoctor.getSignalQualityDiffSinceUptime() or "")
+	}
+	return data
+end
+
+function ltedoctor_signal_quality.get(mapping, paramName, key)
+	return ltedoctor_signal_quality.getall(mapping, key)[paramName]
+end
+
+function ltedoctor_signal_quality.set(_, paramName, paramValue, key)
+	if key == "diff" and paramName == "since_uptime" then
+		ltedoctor.setSignalQualityDiffSinceUptime(tonumber(paramValue))
+	end
+end
+
+function ltedoctor_signal_quality.entries()
+	local keys = {}
+	for k in pairs(entries) do
+		table.insert(keys, k)
+	end
+	return keys
+end
+
+register(ltedoctor_signal_quality)

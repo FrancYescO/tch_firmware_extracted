@@ -1,0 +1,67 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/nd-css/duma-styles.html"> <link rel="import" href="/libs/rpc.html"> <dom-module id="time-selector"> <template> <style is="custom-style" include="duma-theme"> </style> <paper-dialog id="dialog" with-backdrop> <h4><%= i18n.routerTime %> - [[timedata.date]]</h4> <h4><%= i18n.timeZone %></h4> <paper-dialog-scrollable> <div class="inner"> <paper-listbox attr-for-selected="name" selected="{{selectedZone}}"> <template is="dom-repeat" items="[[zones]]" as="zone"> <paper-item name="[[zone.id]]">[[zone.display]]</paper-item> </template> </paper-listbox> </div> </paper-dialog-scrollable> <div> <paper-checkbox checked="{{dst}}"><%= i18n.autoDST %></paper-checkbox> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button on-click="save"><%= i18n.save %></paper-button> </div> </paper-dialog> </template> <script> var tzPackage = "com.netdumasoftware.config";
+
+    Polymer({
+      is: "time-selector",
+
+      properties: {
+        zones: {
+          type: Array,
+          value: []
+        },
+        selectedZone: {
+          type: Number,
+          value: 18
+        },
+        timedata: {
+          type: Object,
+          value: {
+            zone: "Unknown",
+            date: "Unknown"
+          }
+        },
+        dst: {
+          type: Boolean,
+          value: true
+        }
+      },
+
+      ready: function(){
+        long_rpc_promise(tzPackage,"get_time_zones",[]).done(function(result){
+          this.zones = result[0] || [];
+        }.bind(this));
+      },
+
+      loop: function(){
+        long_rpc_promise(tzPackage, "get_time_data", []).done(function(timedata){
+          if(timedata[0]){
+            timedata = timedata[0];
+            this.set('timedata.date', timedata.date);
+          }
+          if(this.$.dialog.opened){
+            setTimeout(this.loop.bind(this),950);
+          }
+        }.bind(this));
+      },
+
+      open: function(){
+        long_rpc_promise(tzPackage,"get_time_zone",[]).done(function(result){
+          if(result && result.length){
+            this.selectedZone = result[0] || 18;
+            this.dst = !!result[1];
+          }else{
+            this.selectedZone = 18;
+            this.dst = true;
+          }
+          this.$.dialog.open();
+          this.loop();
+        }.bind(this));
+      },
+      save: function(){
+        long_rpc_promise(tzPackage,"set_time_zone",[this.selectedZone,this.dst]).done(function(){
+          this.$.dialog.close();
+        }.bind(this));
+      }
+    }); </script> </dom-module> 

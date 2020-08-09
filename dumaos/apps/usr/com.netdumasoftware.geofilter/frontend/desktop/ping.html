@@ -1,0 +1,50 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <%
+require "libos"
+require "libtable"
+local platform_information = os.platform_information()
+%> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-input/paper-input.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/iron-collapse/iron-collapse.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/colours.html"> <link rel="import" href="/libs/sampler.html"> <link rel="import" href="/libs/util.html"> <link rel="import" href="/apps/com.netdumasoftware.geofilter/desktop/geo-filter.html"> <style is="custom-style" include="iron-flex iron-positioning iron-flex-factors duma-theme"> #ping-graph {
+    height: 100%;
+  }
+  
+  #allow-deny {
+    --paper-input-container: {
+      padding-top: 0;
+    };
+  }
+  .buttons {
+    padding: 0;
+  }
+  @media only screen and (min-width: 1600px) {
+    div#allow-deny {
+      @apply(--layout-horizontal);
+    }
+    div#allow-deny .buttons {
+      padding-left: 16px;
+    }
+  }
+  label {
+    color: var(--secondary-text-color);
+    padding-right: 8px;
+  }
+
+  .chart-container {
+    @apply(--layout);
+  }
+
+  table.auto {
+    width: auto;
+  }
+
+  span#domain {
+    word-break: break-all;
+  }
+  .toggle-info {
+    transform: rotate(0);
+    transition: transform ease-in-out 150ms;
+  }
+  .toggle-info.expanded {
+    transform: rotate(180);
+  } </style> <duma-panel id="ping-panel" show-close show-pin show-help show-help-tip> <div help-content> <p> <%= i18n.helpContent %> </p> </div> <div help-tip> <%= i18n.helpTip %> </div> <div main class="vertical"> <div class="layout vertical flex" id="ping-information"> <div class="flex-none layout horizontal"> <div class="flex"> <table id="host-statistics"> <tr class="ping"> <td> <label><%= i18n.ping %></label> </td> <td><span class="value"></span> <%= i18n.msUnit %></td> </tr> <% if not table.find({"XR300", "R7000"}, platform_information.model) then %> <tr class="server-tick-rate"> <td> <label><%= i18n.hostTickRate %></label> </td> <td class="value"></td> </tr> <tr class="client-tick-rate"> <td> <label><%= i18n.clientTickRate %></label> </td> <td class="value"></td> </tr> <% end %> <tr class="send-rate"> <td> <label><%= i18n.sendRate %></label> </td> <td><span class="value"></span> <%= i18n.kbpsUnit %></td> </tr> <tr class="receive-rate"> <td> <label><%= i18n.receiveRate %></label> </td> <td><span class="value"></span> <%= i18n.kbpsUnit %></td> </tr> <tr class="host-type"> <td> <label><%= i18n.hostType %></label> </td> <td> <span class="value"></span> </td> </tr> <tr class="id"> <td> <label><%= i18n.id %></label> </td> <td> <span class="value"></span> </td> </tr> <% if platform_information.model ~= "LH1000" then %> <tr class="domain"> <td> <label><%= i18n.domainName %></label> </td> <td> <span class="value"></span> </td> </tr> <% elseif platform_information.model ~= "DJA0231" then %> <tr class="domain"> <td> <label><%= i18n.domainName %></label> </td> <td> <span class="value"></span> </td> </tr> <% end %> </table> </div> <div class="flex"> <table id="overflow-table"> <tr class="host-type"> <td> <label><%= i18n.hostType %></label> </td> <td> <span class="value"></span> </td> </tr> <tr class="id"> <td> <label><%= i18n.id %></label> </td> <td> <span class="value"></span> </td> </tr> <% if platform_information.model ~= "LH1000" then %> <tr class="domain"> <td> <label><%= i18n.domainName %></label> </td> <td> <span class="value"></span> </td> </tr> <% elseif platform_information.model ~= "DJA0231" then %> <tr class="domain"> <td> <label><%= i18n.domainName %></label> </td> <td> <span class="value"></span> </td> </tr> <% end %> </table> <div id="allow-deny" class="content layout"> <paper-input class="flex-auto" id="host-name" auto-validate maxlength="20" char-counter always-float-label label="<%= i18n.hostNameLabel %>" error-message="<%= i18n.hostNameError %>"></paper-input> <div class="buttons layout horizontal"> <paper-button background id="allow"><%= i18n.allow %></paper-button> <paper-button id="deny"><%= i18n.deny %></paper-button> </div> </div> </div> </div> <div class="layout vertical chart-container flex"> <duma-chart type="line" id="ping-graph"></duma-chart> </div> </div> <div class="flex layout vertical center center-justified" id="no-host"> <%= i18n.autoPingNoHost %> </div> </div> </duma-panel> <paper-dialog id="ping-loader-dialog" modal> <h2><%= i18n.applyingSettings %></h2> <div class="layout horizontal center-justified"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="ping-duma-alert"></duma-alert> <script src="/apps/com.netdumasoftware.geofilter/desktop/ping.js"></script> 

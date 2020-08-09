@@ -1,0 +1,185 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <script> var Duma = Duma || {};
+  Duma.InputInputsBehavior = {
+    properties: {
+      value: {
+        type: String,
+        notify: true,
+        observer: "_setValue"
+      },
+
+      parts: {
+        type: Array,
+        value: []
+      },
+
+      disabled: Array
+    },
+
+    listeners: {
+      "keydown": "_onKeyPress",
+      "paste": "_onPaste"
+    },
+
+    observers: [
+      "_computeValue(parts.*)",
+      "_onDisableChange(disabled, disabled.*)"
+    ],
+
+    ready: function () {
+      var inputs = this.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) {
+        this.listen(inputs[i], "input", "_onInputChange");
+      }
+    },
+
+    _onDisableChange: function () {
+      var inputs = this.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) {
+        if (typeof(this.disabled) === "boolean") {
+          inputs[i].disabled = this.disabled;
+        } else {
+          inputs[i].disabled = this.disabled[i] ? this.disabled[i] : false;
+        }
+      }
+    },
+
+    _onInputChange: function (e) {
+      var inputs = this.querySelectorAll("input");
+
+      for (var i = 0; i < inputs.length; i++) {
+        if (inputs[i] === e.target && inputs[i] != e.target.value) {
+          this.set(["parts", i], e.target.value);
+          this._computeValue();
+        }
+      }
+    },
+    
+    _getFocusedSiblings: function (focused) {
+      var inputs = this.querySelectorAll("input");
+
+      for (var i = 0; i < inputs.length; i++) {
+        if (inputs[i] == focused) {
+          var output = {
+            previous: null,
+            next: null,
+            focused: focused
+          };
+          
+          for (var j = i - 1; j >= 0; j--) {
+            if (!inputs[j].disabled) {
+              output.previous = inputs[j];
+              break;
+            }
+          }
+          
+          for (var j = i + 1; j < inputs.length; j++) {
+            if (!inputs[j].disabled) {
+              output.next = inputs[j];
+              break;
+            }
+          }
+
+          return output;
+        }
+      }
+
+      return {};
+    },
+
+    _onPaste: function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      var siblings = this._getFocusedSiblings(document.activeElement);
+
+      if (siblings.focused) {
+        this.value = e.clipboardData.getData("Text");
+      }
+
+      while (siblings.next) {
+        siblings = this._getFocusedSiblings(siblings.next);
+      }
+
+      siblings.focused.focus();
+    },
+
+    _onKeyPress: function (e) {
+      var siblings = this._getFocusedSiblings(document.activeElement);
+
+      if (
+        e.keyCode === 9 || // 9 is tab key.
+        (
+          typeof(window.getSelection) != "undefined" &&
+          window.getSelection().toString()
+        ) ||
+        (
+          typeof(document.selection) != "undefined" &&
+          document.selection.type == "Text" &&
+          document.selection.createRange().text
+        )
+      ) { 
+        return;
+      }
+
+      if(e.keyCode == 8) { // 8 is backspace key.
+        if (
+          siblings.focused &&
+          siblings.focused.value.length === 0 &&
+          siblings.previous
+        ) {
+          siblings.previous.focus();
+        }
+
+      } else if (e.key === this._delimiter && siblings.next) {
+        siblings.next.focus();
+      } else if (
+        siblings.focused &&
+        (
+          siblings.focused.value.length ===
+          parseInt(siblings.focused.getAttribute("maxlength"))
+        ) &&
+        siblings.next
+      ) {
+        siblings.next.focus();
+        siblings.next.select();
+      }
+    },
+    
+    _computeValue: function() {
+      if (!this._delimiter) {
+        return false;
+      }
+
+      var value = this.parts.join(this._delimiter);
+      if (this.value != value) {
+        this.value = value;
+      }
+    },
+    
+    _setValue: function (value) {
+      if (!this._delimiter) {
+        return false;
+      }
+      
+      value = value.replace(/ /g, "");
+
+      var inputs = this.querySelectorAll("input");
+      var value = value.split(this._delimiter);
+
+      this.parts = value;
+      for (var i = 0; i < inputs.length; i++) {
+        if (value[i]) {
+          inputs[i].value = value[i];
+        } else {
+          inputs[i].value = "";
+        }
+      }
+
+      this.validate();
+
+      return true;
+    }
+  }; </script> 

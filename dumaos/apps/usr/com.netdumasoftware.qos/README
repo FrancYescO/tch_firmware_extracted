@@ -1,0 +1,57 @@
+NETGEAR NSS BUG
+----------------
+
+tc qdisc add fails sometimes and the error message you get is if you enable
+verbose logging in the qca-nss-drv module:
+
+nss_core_log_msg_failures[962]:bf2a3890: msg failure - interface: 108, type: 0, response: 4, error: 2
+nss_dynamic_interface_alloc_node[262]:bf2a3890 Received NACK from NSS
+nss_virt_if_create_sync[575]:bf2a3890: failure allocating virt if
+
+If you follow the code the error is a TX queueing error from Hardware abstraction 
+layer (HAL) NSS firmware to the high-level OS(HLOS) driver i.e. qca-nss-drv. Basically
+the descriptors run out in the hardware/firmware I suspect because the heavy traffic
+in the background uses it. Meaning the virtual interface cannot be created.
+
+
+Distribution Data Representation
+--------------------------------
+
+node = {
+  domain = string,                    -- nil if leaf
+  share_excess = boolean,             -- nil if leaf 
+  normprop = float, -- normalized proportion, nil if no parent (i.e. root)  
+  children = { array of child nodes },
+  id = anything, usually int
+}
+
+Normalized proportions of all children should add up to 1.0
+
+share_excess decides whether children can borrow from others if not using 
+bandwidth.
+
+Available domains:
+  "devices" - the node represents all devices in the system
+  "appcat" - application categories e.g. video, gaming, web, etc
+  "app" - application only
+ 
+
+id to identify the node, id only makes sense in context of parents domain.
+
+Simple e.g.
+{
+  domain = "devices",   
+  share_excess = true
+  children = {
+    { id = 1, normprop = 0.25 },
+    { 
+      id = 2, domain = "services", normprop = 0.5, share_excess=true,
+      children = {
+        { id=79, normprop = 0.3 },
+        { id = 21, normprop = 0.9 } 
+      }
+    }
+  } 
+}
+
+An empty table sent via RPC means normal distribution.

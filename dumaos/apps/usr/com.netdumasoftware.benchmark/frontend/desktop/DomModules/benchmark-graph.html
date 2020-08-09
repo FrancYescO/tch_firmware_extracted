@@ -1,0 +1,115 @@
+<link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/custom-elements/duma-legend/duma-legend.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <dom-module id="benchmark-graph"> <template> <style is="custom-style" include="duma-theme iron-flex"> :host {
+        @apply(--layout-vertical);
+        @apply(--layout-flex-auto);
+        flex-basis: 33.3333%;
+        position: relative;
+        background-color: rgba(var(--primary-background-rgb), 0.25);
+        min-height: 0;
+        height: 100%;
+      }
+      ::content .graphViewLayout {
+        @apply(--layout-vertical);
+        @apply(--layout-flex-auto);
+        min-height: 0;
+      }
+      ::content .graphViewLayout > duma-legend {
+        padding-left: 16px;
+      }
+      ::content .summaryLayout {
+        flex-shrink: 0;
+      }
+      ::content #loadingSpinnerWrapper {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 100%;
+        height: 100%;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-center-justified);
+        background-color: rgba(var(--primary-background-rgb), 0.5);
+      }
+      ::content .graph-wrap {
+        min-height: 0;
+        height: 100%;
+      }
+      ::content .graph-wrap duma-chart {
+        min-height: 0;
+        height: 100%;
+      }
+      ::content .graph-titlebar {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        height: 56px;
+        padding: 0 16px 0 8px;
+      }
+      ::content .graph-title {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-flex-auto);
+      }
+      ::content .graph-titletext {
+        @apply(--paper-font-subhead);
+      } </style> <!-- Module Body --> <!-- Header --> <div class="graph-titlebar"> <!-- Score and title --> <div class="graph-title"> <div id="ratingPlaceholder"></div> <div class="graph-titletext">[[graphTitle]]</div> </div> <!-- QoS --> <div class="graph-titleqos"> <!-- QoS [[qosString]] --> </div> </div> <!-- Body --> <div class="graphViewLayout"> <!-- Summary --> <duma-legend id="[[graphId]]-summary" legend-stats="[[summaryInfo]]"></duma-legend> <!-- Graph --> <div class="graph-wrap"> <duma-chart type="bar" id="[[graphId]]-graph"></duma-chart> </div> </div> <template is="dom-if" if="[[loading]]"> <div id="loadingSpinnerWrapper"> <paper-spinner-lite active></paper-spinner-lite> </div> </template> </template> <script> Polymer({
+      is: 'benchmark-graph',
+      properties: {
+        graphId: String,
+        graphTitle: String,
+        summaryInfo: Array,
+        ratingType: String,
+        loading:
+        {
+          type: Boolean,
+          value: false,
+        },
+        qosEnabled:
+        {
+          type:Boolean,
+          value: false,
+        },
+        qosString:
+        {
+          value: String,
+          computed: `getQoSString(qosEnabled)`,
+        }
+      },
+      ready: function()
+      {
+        var rating = document.createElement("duma-" + this.graphId + "-rating");
+        rating.id = this.graphId + "-rating";
+        rating.animated = true;
+
+        Polymer.dom(this.$.ratingPlaceholder).appendChild(rating);
+
+        this.$$("#" + this.graphId + "-summary").addEventListener("legendItemSelect", function (value)
+        {
+          var chart = this.$$("#" + this.graphId + "-graph").chart;
+          var meta = chart.getDatasetMeta(value.detail);
+          meta.hidden = meta.hidden === null ? !chart.data.datasets[value.detail].hidden : null;
+          chart.update();
+        }.bind(this));
+      },
+      setColour: function(index, colour)
+      {
+        var indexStr = index.toString();
+        this.set(`summaryInfo.${indexStr}.colour`, colour);
+        if (this.summaryInfo[indexStr].bgColour != "")
+          this.set(`summaryInfo.${indexStr}.bgColour`, colour);
+      },
+      setResult: function(index, result)
+      {
+        this.set(`summaryInfo.${index.toString()}.result`, result);
+      },
+      setLoading: function(value)
+      {
+        this.set(`loading`, value);
+      },
+      setQoS: function(value)
+      {
+        this.set(`qosEnabled`, !value);
+      },
+      getQoSString: function(value)
+      {
+        return (value) ? "ON" : "OFF";
+      }
+    }); </script> </dom-module> 

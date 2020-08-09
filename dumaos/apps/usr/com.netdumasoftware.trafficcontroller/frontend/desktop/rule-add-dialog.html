@@ -1,0 +1,768 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-input/paper-input.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html"> <link rel="import" href="/custom-elements/duma-timewheel/duma-timewheel.html"> <link rel="import" href="/libs/devices.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/cron.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="rule-add-dialog"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host paper-item:not(:disabled):focus {
+        background-color: var(--transparent-primary-color);
+      }
+      .buttons {
+        display: flex;
+        justify-content: space-between;
+      }
+      .all-devices {
+        display: flex;
+        justify-content: space-between;
+        font-size: 1.6em;
+        border-bottom:thin solid var(--divider-color);
+        align-items: center;
+      }
+      #target-select-container {
+        border-bottom:thin solid var(--divider-color);
+      } </style> <paper-dialog modal on-iron-overlay-closed="_on_close_reset"> <h2>[[ header ]]</h2> <paper-dialog-scrollable> <iron-pages selected="{{_selectedPageIndex}}"> <iron-page> <div class="inner"> <paper-input id="rule_add_name" label="Rule Name" auto-validate value="{{_name}}" pattern="{{_name_pattern}}" required></paper-input> <paper-checkbox checked="{{_notifications}}">Event Capture</paper-checkbox> </div> </iron-page> <iron-page> <div class="inner all-devices"> <label>All Devices</label><paper-checkbox checked="{{_allDevices}}"></paper-checkbox> </div> <paper-listbox id="rule_device_select" selected-items="{{_selectedDeviceElement}}" multi disabled="[[_allDevices]]"> <template is="dom-repeat" items="[[_devices]]" as="device" sort="_sortDevices" filter="_filterDevices"> <paper-item device="[[device]]" disabled="[[_allDevices]]">[[device.name]]</paper-item> </template> </paper-listbox> </iron-page> <iron-page> <!--seperate to create bar across hole thing--> <div id="target-select-container" class="inner"> <paper-dropdown-menu label="Select Target"> <paper-listbox class="dropdown-content" selected="{{selectedTargetIndex}}"> <template is="dom-repeat" items="[[targets]]" as="target"> <paper-item target="[[target]]">[[target]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="inner"> <!--Tried to use Iron Pages here, they did not work. Using a drop down so we can add more target types (such as category or URL) in the future--> <template is="dom-if" if="[[_matchRestamp(selectedTargetIndex,0)]]" restamp> <h4>All Traffic will be affected</h4> </template> <template is="dom-if" if="[[_matchRestamp(selectedTargetIndex,1)]]" restamp> <br> <label>Source Port</label> <!--Making the min = to Start means that you cannot properly type a number in the end box--> <paper-input label="Start" value="{{_port_sourceStart}}" type="number" min="1" max="65535" invalid="{{!_validPortRange(_port_sourceStart,_port_sourceEnd)}}" on-change="_onSourceStartChange"> </paper-input> <paper-input label="End" value="{{_port_sourceEnd}}" type="number" min="1" max="65535" invalid="{{!_validPortRange(_port_sourceStart,_port_sourceEnd)}}" error-message="{{_getPortErrorText(_port_sourceStart,_port_sourceEnd)}}"></paper-input> <br> <label>Destination Port</label> <paper-input label="Start" value="{{_port_destStart}}" type="number" min="1" max="65535" invalid="{{!_validPortRange(_port_destStart,_port_destEnd)}}" on-change="_onDestStartChange"> </paper-input> <paper-input label="End" value="{{_port_destEnd}}" type="number" min="1" max="65535" invalid="{{!_validPortRange(_port_destStart,_port_destEnd)}}" error-message="{{_getPortErrorText(_port_destStart,_port_destEnd)}}"></paper-input> <paper-dropdown-menu label="Select Protocol"> <paper-listbox class="dropdown-content" selected="{{_port_protocolIndex}}"> <template is="dom-repeat" items="[[protocols]]" as="prot"> <paper-item protocol="[[prot]]">[[prot]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </template> </div> <template is="dom-if" if="[[_matchRestamp(selectedTargetIndex,2)]]" restamp> <div class="inner"> <label>Select applications</label> </div> <paper-listbox id="rule_app_select" selected-items="{{_selectedServiceElement}}" multi> <template is="dom-repeat" items="[[_services]]" as="service" sort="_sortServices"> <template is="dom-if" if="[[_shouldShowService(service, tags)]]"> <paper-item service="[[service]]">[[service.application]]</paper-item> </template> </template> </paper-listbox> </template> <template is="dom-if" if="[[_matchRestamp(selectedTargetIndex,3)]]" restamp> <div class="inner"> <label>Select categories</label> </div> <paper-listbox id="rule_cat_select" selected-items="{{_selectedServiceElement}}" multi> <template is="dom-repeat" items="[[_categories]]" as="cat"> <paper-item cat="[[cat]]">[[cat.name]]</paper-item> </template> </paper-listbox> </template> </iron-page> <iron-page> <div class="inner"> <div class="horizontal layout"> <div class="flex-auto"> <duma-timewheel selected="{{schedule_am}}"></duma-timewheel> <duma-timewheel selected="{{schedule_pm}}" pm></duma-timewheel> </div> <div class="flex"> <paper-checkbox checked="{{Monday}}">Monday</paper-checkbox><br> <paper-checkbox checked="{{Tuesday}}">Tuesday</paper-checkbox><br> <paper-checkbox checked="{{Wednesday}}">Wednesday</paper-checkbox><br> <paper-checkbox checked="{{Thursday}}">Thursday</paper-checkbox><br> <paper-checkbox checked="{{Friday}}">Friday</paper-checkbox><br> <paper-checkbox checked="{{Saturday}}">Saturday</paper-checkbox><br> <paper-checkbox checked="{{Sunday}}">Sunday</paper-checkbox><br> <br><br> <paper-dropdown-menu label="Allow or block traffic"> <paper-listbox class="dropdown-content" selected="{{_blockAllow}}"> <template is="dom-repeat" items="[[_allowTypes('',_allDevices,_selectedPageIndex,selectedTargetIndex,_port_protocolIndex)]]" as="allow"> <paper-item allow="[[allow]]">[[allow]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div> </div> </iron-page> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss>Cancel</paper-button> <div> <template is="dom-if" if="[[_showBack(_selectedPageIndex)]]"> <paper-button on-tap="_onBackButtonClick"> Back </paper-button> </template> <paper-button on-tap="_onNextButtonClick" disabled="[[_isNextButtonDisabled(_name, _selectedPageIndex,_selectedDeviceElement,selectedTargetIndex,_selectedServiceElement,_blockAllow,_allDevices,
+            _port_sourceStart,_port_sourceEnd,_port_destStart,_port_destEnd,schedule_am,schedule_pm,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday)]]"> [[_getNextButtonText(_selectedPageIndex)]] </paper-button> </div> </div> </paper-dialog> </template> <script> Polymer({
+      is: "rule-add-dialog",
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties: {
+        protocols: {
+          type: Array,
+          value: ["TCP and UDP", "TCP", "UDP"]
+        },
+        targets: {
+          type: Array,
+          value: ["All Traffic", "Port Range", "Application", "Category"]
+        },
+        days: {
+          type: Array,
+          value: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        },
+        tags: {
+          type: Array,
+          value: ["pc", "gaming"]
+        },
+        selectedTargetIndex: {
+          type: Number,
+          value: 0,
+          notify: true,
+          observer: "_onTargetChange"
+        },
+        _port_protocolIndex: {
+          type: Number,
+          value: 0,
+          observer: "_onProtocolChange"
+        },
+        header: {
+          type: String,
+          value: "Add Rule"
+        },
+        schedule_am: {
+          type: Array,
+          value: [true, true, true, true, true, true, true, true, true, true, true, true]
+        },
+        schedule_pm: {
+          type: Array,
+          value: [true, true, true, true, true, true, true, true, true, true, true, true]
+        },
+        Monday: {
+          type: Boolean,
+          value: true
+        },
+        Tuesday: {
+          type: Boolean,
+          value: true
+        },
+        Wednesday: {
+          type: Boolean,
+          value: true
+        },
+        Thursday: {
+          type: Boolean,
+          value: true
+        },
+        Friday: {
+          type: Boolean,
+          value: true
+        },
+        Saturday: {
+          type: Boolean,
+          value: true
+        },
+        Sunday: {
+          type: Boolean,
+          value: true
+        },
+        _allDevices: {
+          type: Boolean,
+          value: false,
+          observer: "_allDevicesChange"
+        }
+      },
+
+      ready: function () {
+        this._refreshDevices();
+        this._refreshServices();
+        this._refreshCategories();
+        //setInterval(function () { this.debugInfo() }.bind(this),1000)
+      },
+
+      _firstAllDevicesChange: true,
+      _allDevicesChange: function(newValue, oldValue){
+      },
+
+      _refreshDevices: function () {
+        //function(devices){}.bind(this)
+        return get_devices().then(function (devices) {
+
+          var processedDevices = [];
+          for (var id in devices) {
+            if (devices.hasOwnProperty(id)) {
+              processedDevices.push(devices[id]);
+            }
+          }
+          /*
+          processedDevices.unshift({
+            id: Number.MAX_SAFE_INTEGER,
+            name: "All Devices",
+            type: "__ALL__",
+            blocked: false,
+            interfaces: [{
+              ips: [],
+              mac: "0:0:0:0:0:0",
+              name: "__ALL_DEVICES_FILL_IN__",
+              pinned: false,
+              type: "__ALL__",
+              wifi: false
+            }]
+          });
+          */
+          this._devices = processedDevices;
+          return this._devices;
+        }.bind(this));
+      },
+
+      _refreshServices: function () {
+        return Q($.getJSON(
+          "/json/_services_.json?cache=0",
+          function (services) {
+            this._services = services;
+            return services;
+          }.bind(this)
+        ));
+      },
+
+      _refreshCategories: function () {
+        return Q($.getJSON(
+          "/json/categories.json?cache=0",
+          function (categories) {
+            var cats = [];
+            var keys = Object.keys(categories);
+            for(var i = 0; i < keys.length; i++){
+              var key = keys[i];
+              cats.push({
+                name: key,
+                id: categories[key]
+              });
+            }
+            this._categories = cats;
+            return categories;
+          }.bind(this)
+        ));
+      },
+
+      _shouldShowService: function (service, tags) {
+        for (var i = 0; i < tags.length; i++) {
+          if (service.tags.indexOf(tags[i]) === -1) {
+            return false;
+          }
+        }
+        return true;
+      },
+
+      _sortServices: function (service1, service2) {
+        if (service1.application < service2.application) {
+          return -1;
+        }
+        if (service1.application > service2.application) {
+          return 1;
+        };
+        return 0;
+      },
+
+      _needsHR: function (device) {
+        return device.type == "__ALL__";
+      },
+
+      _consoleLog: function (output) {
+        return console.log(output);
+      },
+
+      _filterDevices: function (device) {
+        return device.id > 0;
+      },
+
+      _isDeviceConsole: function (deviceType) {
+        return deviceType === "PlayStation" ||
+          deviceType === "Xbox" ||
+          deviceType === "Wii" ||
+          deviceType === "NintendoSwitch";
+      },
+
+      _sortDevices: function (device1, device2) {
+        if (device1.type == "__ALL__") { return -1; }
+        else if (device2.type == "__ALL__") { return 1; }
+
+        if (
+          this._isDeviceConsole(device1.type) ===
+          this._isDeviceConsole(device2.type)
+        ) {
+          return device1.name.localeCompare(device2.name);
+        } else {
+          return this._isDeviceConsole(device1.type) ? -1 : 1;
+        }
+      },
+
+      _getNextButtonText: function (selectedPageIndex) {
+        if (this._finalPageIndex == selectedPageIndex) {
+          return "Done";
+        } else {
+          return "Next";
+        }
+      },
+
+      _isNextButtonDisabled: function (name, PageIndex, DeviceElements, TargetIndex, ServiceElements, blockAllow) {
+        return !(
+          (PageIndex === 0 && this.$.rule_add_name.validate()) ||
+          (PageIndex === 1 && this._validDeviceElements(DeviceElements)) ||
+          (PageIndex === 2 && (
+            (TargetIndex === 0) ||
+            (TargetIndex === 1 && this._validatePortRanges()) ||
+            ((TargetIndex === 2 || TargetIndex === 3 ) && ServiceElements.length > 0)
+          )) ||
+          (
+            PageIndex === 3 &&
+            this._validSchedule() &&
+            blockAllow !== undefined &&
+            blockAllow !== null
+          )
+        );
+      },
+
+      _showBack: function(page){
+        return page > 0;
+      },
+
+      _b(val, min = 0, max = 65535) {
+        return min <= val && val <= max;
+      },
+
+      _validPortRange: function (start, end) {
+        return this._b(start) && this._b(end, start);
+      },
+
+      _validDeviceElements: function (elements) {
+        if (this._allDevices) {
+          return true;
+        } else {
+          for (var i = 0; i < elements.length; i++) {
+            if (!elements[i].hasOwnProperty('device')) {
+              return false;
+            }
+          }
+          return elements.length > 0
+        }
+      },
+
+      _getPortErrorText: function (start, end) {
+        if (!(this._b(start) && this._b(end))) { return "Ports must be bewteen 0 to 65535."; }
+        else if (end < start) { return "End cannot be less than start"; }
+        return "";
+      },
+
+      _validatePortRanges: function () {
+        this._port_sourceStart = parseInt(this._port_sourceStart);
+        this._port_sourceEnd = parseInt(this._port_sourceEnd);
+        this._port_destStart = parseInt(this._port_destStart);
+        this._port_destEnd = parseInt(this._port_destEnd);
+
+        return this._validPortRange(this._port_sourceStart, this._port_sourceEnd) && this._validPortRange(this._port_destStart, this._port_destEnd);
+      },
+
+      _validSchedule: function () {
+        return (this._getHours().includes(true)) && (this._getDays().includes(true));
+      },
+
+      _getHours: function () {
+        return this.schedule_am.concat(this.schedule_pm);
+      },
+
+      _getDays: function () {
+        return [this.Sunday, this.Monday, this.Tuesday, this.Wednesday, this.Thursday, this.Friday, this.Saturday];
+      },
+
+      _setDays: function (bools) {
+        this.Sunday = bools[0];
+        this.Monday = bools[1];
+        this.Tuesday = bools[2];
+        this.Wednesday = bools[3];
+        this.Thursday = bools[4];
+        this.Friday = bools[5];
+        this.Saturday = bools[6];
+      },
+
+      _isAllDevices: function(device){
+        return device.id == Number.MAX_SAFE_INTEGER
+      },
+
+      _getDevicesIds: function () {
+        var ret = [];
+        for (var i = 0; i < this._selectedDeviceElement.length; ++i) {
+          var devEl = this._selectedDeviceElement[i];
+          if (this._allDevices) {
+            return [];
+          }
+          ret.push(devEl.device.id);
+        }
+        return ret;
+      },
+
+      _getPortsUsingProtocol: function (protocol) {
+        return [
+          {
+            sport: [
+              parseInt(this._port_sourceStart),
+              parseInt(this._port_sourceEnd)
+            ],
+            proto: parseInt(protocol)
+          },
+          {
+            dport: [
+              parseInt(this._port_destStart),
+              parseInt(this._port_destEnd)
+            ],
+            proto: parseInt(protocol)
+          }];
+
+      },
+      _getPorts: function () {
+        var ret = [];
+        //2 ifs for both
+        if (this._port_protocolIndex === 0 || this._port_protocolIndex === 1) {
+          ret = ret.concat(this._getPortsUsingProtocol(6));
+        }
+        if (this._port_protocolIndex === 0 || this._port_protocolIndex === 2) {
+          ret = ret.concat(this._getPortsUsingProtocol(17));
+        }
+        return ret;
+      },
+      _onSourceStartChange: function () {
+        this._port_sourceEnd = this._port_sourceStart;
+      },
+      _onDestStartChange: function () {
+        this._port_destEnd = this._port_destStart;
+      },
+
+      _getApplicationServices: function () {
+        var ret = [];
+        for (var i = 0; i < this._selectedServiceElement.length; ++i) {
+          var serEl = this._selectedServiceElement[i];
+          ret = ret.concat(serEl.service.services);
+        }
+        return ret;
+      },
+
+      _getCategories: function () {
+        var ret = [];
+        for (var i = 0; i < this._selectedServiceElement.length; ++i) {
+          ret.push(this._selectedServiceElement[i].cat.id);
+        }
+        return ret;
+      },
+
+      _createNewRule: function () {
+        //Adding the new rule
+        var newRule = {};
+        newRule.enabled = this._enabled;
+        newRule.name = this._name;
+        newRule.device = this._getDevicesIds();
+        newRule.services = [];
+        newRule.categories = [];
+        if (this.selectedTargetIndex == 1) {
+          newRule.services = this._getPorts();
+        } else if (this.selectedTargetIndex == 2) {
+          newRule.services = this._getApplicationServices();
+        } else if (this.selectedTargetIndex == 3) {
+          newRule.categories = this._getCategories();
+        } else {
+          newRule.services = [{}];
+        }
+        var cron = new Cron();
+        cron.setHours(this._getHours());
+        cron.setWeekdays(this._getDays());
+        newRule.schedule = cron.toString();
+        newRule.allow = this._allowTypes()[this._blockAllow].toLowerCase();
+        newRule.notifications = this._notifications;
+        if (this._ruleId !== null) {
+          newRule.id = this._ruleId;
+        }
+
+        return newRule;
+      },
+
+      _onNextButtonClick: function () {
+
+        var device;
+        if (this._selectedDeviceElement) {
+          device = this._selectedDeviceElement.device;
+        }
+
+        if (this._selectedPageIndex === this._finalPageIndex) {
+          var newRule = this._createNewRule();
+
+          this.close();
+          this._callback(newRule);
+
+        } else {
+          this._selectedPageIndex += 1;
+        }
+      },
+      _onBackButtonClick: function () {
+        this._selectedPageIndex -= 1;
+      },
+
+      _matchRestamp: function (from, match) {
+        return from == match;
+      },
+
+      _onTargetChange: function (newValue, oldValue) {
+        this._port_sourceStart = 1;
+        this._port_sourceEnd = 65535;
+        this._port_destStart = 1;
+        this._port_destEnd = 65535;
+        this._port_protocolIndex = 0;
+        this._selectedServiceElement = [];
+      },
+
+      _on_close_reset: function (e) {
+        //Bug where the dropdown for services causes the dialog to close and re-open
+        if (e === '__ON_CLOSE__' || $(e.target).prop('tagName') === 'PAPER-DIALOG') {
+          this.selectedTargetIndex = 0;
+          this._onTargetChange();
+          return this._selectDevices([-1]);
+        }
+      },
+
+      open: function (callback,delay=false) {
+        this._callback = callback;
+        this._selectedPageIndex = 0;
+        this._finalPageIndex = 3;
+
+        this._ruleId = null;
+        this._enabled = true;
+        this._name = "";
+        this._name_pattern = "^[A-Za-z0-9\\s!?*\\.,_-]+$";
+        this._notifications = true;
+
+        this._selectedDeviceElement = [];
+        this._startSelectedDevices = []
+        this._selectedTargetElement = null;
+
+        this._selectedServiceElement = [];
+
+        this._port_protocolIndex = 0;
+        this._port_sourceStart = 0;
+        this._port_sourceEnd = 65535;
+        this._port_destStart = 0;
+        this._port_destEnd = 65535;
+
+        this._blockAllow = 1;
+
+        this.schedule_am = new Array(12).fill(true);
+        this.schedule_pm = new Array(12).fill(true);
+
+        this._setDays(new Array(7).fill(true));
+
+        this._refreshDevices();
+
+        if(!delay) this.$$("paper-dialog").open();
+        return this._on_close_reset('__ON_CLOSE__');
+      },
+
+      close: function () {
+        this._on_close_reset('__ON_CLOSE__');
+        this.$$("paper-dialog").close();
+      },
+
+      _selectDevices: function (ids = []) {
+        return this._refreshDevices().then(function (devices) {
+          if(ids.length === 0){
+            this._allDevices = true;
+            return true;
+          }
+          var devices = $("#rule_device_select").find('paper-item');
+          for (var i = 0; i < devices.length; i++) {
+            var dev = devices[i].device;
+            this._toggleDevice(i, ids.includes(dev.id)); // || (this._allDevices && ids.length === 0));
+          }
+          return true
+        }.bind(this));
+      },
+      _toggleDevice: function (index, override = undefined) {
+        if (override === undefined) {
+          if(this.$.rule_device_select){
+            this.$.rule_device_select.select(index);
+          }else{
+            let rds = $("#rule_device_select");
+            if(rds[0]){
+              rds[0].select(index);
+            }else{
+              console.error("#rule_device_select not found. This should not happen.")
+            }
+          }
+        } else {
+          var devices = $("#rule_device_select").find('paper-item');
+          var dev = devices[index];
+          //true
+          if (dev.hasAttribute('aria-selected') != override) {
+            this._toggleDevice(index);
+          }
+        }
+      },
+
+      _allowTypes: function(all=false){
+        var ret = ["Allow","Block"];
+        if(all === true || (this.selectedTargetIndex === 1 && this._port_protocolIndex !== 2)){
+          ret.push("Reject");
+        }
+        return ret;
+      },
+      _onProtocolChange: function(newValue,oldValue){
+        if(oldValue === 2 || newValue === 2){
+          if(!this._allowTypes().includes("Reject")){
+            this._blockAllow = 1;
+          }
+        }
+      },
+
+      _selectServices: function (services) {
+        if ((services.length === 1 && Object.keys(services[0]).length === 0) || services.length === 0) {
+          //Must be All Traffic or categories, so don't change selectedTargetIndex
+          return
+        }
+        this.selectedTargetIndex = 2;
+        return this._refreshServices().then(function (_apps) {
+          if (!this._selectAsPort(services)) {
+            var that = this;
+            function waiting(services) {
+              if (!that._selectApplications(services)) {
+                setTimeout(function () { waiting(services); }, 100);
+              }
+            }
+            setTimeout(function () { waiting(services); }, 100);
+          }
+        }.bind(this));
+      },
+
+      _selectCategories: function (categories) {
+        if (categories.length === 0) {
+          //Must be All Traffic, so don't change selectedTargetIndex
+          return
+        }
+        this.selectedTargetIndex = 3;
+        return this._refreshCategories().then(function (_cats) {
+            var that = this;
+            function waiting(categories) {
+              if (!that._selectCats(categories)) {
+                setTimeout(function () { waiting(categories); }, 100);
+              }
+            }
+            setTimeout(function () { waiting(categories); }, 100);
+        }.bind(this));
+      },
+
+      _isAppInList(app, list) {
+        var app_services = app.services;
+        for (var i = 0; i < list.length; i++) {
+          var l_service = JSON.stringify(list[i]);
+          for (var a = 0; a < app_services.length; a++) {
+            var ap_service = JSON.stringify(app_services[a]);
+            if (ap_service == l_service) {
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+      _selectApplications: function (serviceList) {
+        var appsList = $("#rule_app_select").find('paper-item');
+        if (appsList.length === 0) { return false; }
+        for (var i = 0; i < appsList.length; i++) {
+          var app = appsList[i].service;
+          var shouldEnable = this._isAppInList(app, serviceList);
+          this._toggleApplication(i, shouldEnable);
+        }
+        return true;
+      },
+      _toggleApplication: function (index, override = undefined) {
+        if (override === undefined) {
+          this.$$("#rule_app_select").select(index);
+        } else {
+          var appsList = $("#rule_app_select").find('paper-item');
+          var app = appsList[index];
+          var current = app.hasAttribute('aria-selected');
+          if (current !== override) {
+            this._toggleApplication(index);
+          }
+        }
+      },
+
+      _isCatInList(cat, list) {
+        var keys = Object.keys(list);
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          if (cat.id === list[key]) {
+            return true;
+          }
+        }
+        return false;
+      },
+      _selectCats: function (categoryList) {
+        var catsList = $("#rule_cat_select").find('paper-item');
+        if (catsList.length === 0) { return false; }
+        for (var i = 0; i < catsList.length; i++) {
+          var cat = catsList[i].cat;
+          var shouldEnable = this._isCatInList(cat, categoryList);
+          this._toggleCategory(i, shouldEnable);
+        }
+        return true;
+      },
+      _toggleCategory: function (index, override = undefined) {
+        if (override === undefined) {
+          this.$$("#rule_cat_select").select(index);
+        } else {
+          var catsList = $("#rule_cat_select").find('paper-item');
+          var cat = catsList[index];
+          var current = cat.hasAttribute('aria-selected');
+          if (current !== override) {
+            this._toggleCategory(index);
+          }
+        }
+      },
+
+      _selectAsPort: function (services) {
+        if (this._isServicesPorts(services)) {
+          this.selectedTargetIndex = 1;
+          var proto = [0, 0];
+          for (var i = 0; i < services.length; i++) {
+            var serv = services[i];
+            if (serv.hasOwnProperty('sport') && !this._match(serv.sport, [0, 0])) {
+              this._port_sourceStart = serv.sport[0];
+              this._port_sourceEnd = serv.sport[1];
+            } else if (serv.hasOwnProperty('dport')) {
+              this._port_destStart = serv.dport[0];
+              this._port_destEnd = serv.dport[1];
+            }
+            if (serv.proto === 6) { proto[0] = 2; }
+            else { proto[1] = 1; }
+          }
+          //3 - (1+2) || 3 - (2+0) || 3 - (0+1) => 0,1,2
+          this._port_protocolIndex = 3 - (proto[0] + proto[1]);
+          return true;
+        } else {
+          return false;
+        }
+      },
+      _isServicesPorts: function (services) {
+        if (services.length !== 2 && services.length !== 4) { return false; }
+        // s-TCP, d-TCP, s-UDP, d-UDP
+        var exists = [
+          {
+            sport: [0, 0],
+            dport: [0, 0]
+          },
+          {
+            sport: [0, 0],
+            dport: [0, 0]
+          }
+        ]
+        for (var i = 0; i < services.length; i++) {
+          var serv = services[i];
+          if (serv.hasOwnProperty('appid') || !serv.hasOwnProperty('proto') || ![6, 17].includes(serv.proto)) { return false; }
+          else {
+            var PI = serv.proto === 6 ? 0 : 1;
+            if (serv.hasOwnProperty('sport')) {
+              if (this._match(exists[PI].sport, [0, 0]) || this._match(exists[PI].sport, serv.sport)) { exists[PI].sport = serv.sport; }
+              else { return false; }
+            } else if (serv.hasOwnProperty('dport')) {
+              if (this._match(exists[PI].dport, [0, 0]) || this._match(exists[PI].dport, serv.sport)) { exists[PI].dport = serv.dport; }
+              else { return false; }
+            } else {
+              return false;
+            }
+          }
+        }
+        return this._evalPorts(exists);
+      },
+      _evalPorts: function (test) {
+        var empty = JSON.stringify({ sport: [0, 0], dport: [0, 0] });
+        var uses_TCP = JSON.stringify(test[0]) !== empty;
+        var uses_UDP = JSON.stringify(test[1]) !== empty;
+        if (uses_TCP && uses_UDP) {
+          if (!this._match(test[0].sport, test[1].sport) || !this._match(test[0].dport, test[1].dport)) { return false; }
+          else {
+            return true;
+          }
+        } else {
+          return uses_TCP || uses_UDP;
+        }
+      },
+      _match: function (arr1, arr2) {
+        if (arr1.length !== arr2.length) { return false; }
+        for (var i = 0; i < arr1.length; i++) {
+          if (arr1[i] !== arr2[i]) { return false; }
+        }
+        return true;
+      },
+
+      _setAllowFromLowercase: function(allow){
+        var upperAllow = allow.toUpperCase();
+        var allow_types = this._allowTypes(true);
+        for(var i = 0; i < allow_types.length; i++){
+          if(upperAllow === allow_types[i].toUpperCase()){
+            this._blockAllow = i;
+            return;
+          }
+        }
+        this._blockAllow = 0;
+      },
+
+      openEdit: function (callback, rule) {
+        this.open(callback).then(function(t) {
+          this._ruleId = rule.id;
+          this._enabled = rule.enabled;
+          this._name = rule.name;
+          this._notifications = rule.notifications;
+          this._setAllowFromLowercase(rule.allow);
+          var cron = new Cron(rule.schedule);
+          this.schedule_am = cron.am();
+          this.schedule_pm = cron.pm();
+          this._setDays(cron.weekdays);
+          var canOpen = [false,false];
+          this._selectDevices(rule.device).done(function(){canOpen[0] = true;});
+          var serv = this._selectServices(rule.services) || this._selectCategories(rule.categories);
+          if(serv) serv.done(function(){canOpen[1] = true;});
+          else canOpen[1] = true;
+          var test = function(func){
+            if(canOpen[0] && canOpen[1]){
+              this.$$("paper-dialog").open();
+            }else{
+              setTimeout(func.bind(this,func),10);
+            }
+          }
+          test.call(this,test);
+        }.bind(this)).catch(function(e) {
+          console.log(e)
+        });
+      }
+    }); </script> </dom-module> 
