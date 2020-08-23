@@ -1,0 +1,130 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap4.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap4.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap4.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap4_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+
+uci set wireless.ap5.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap5.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap5.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap5_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+
+uci set wireless.wl0_2.ssid=GUEST-`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap6.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap6.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap6.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap6_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+
+uci set wireless.ap7.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap7.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap7.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap7_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+
+  uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+  uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+  uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+  uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  uci set wireless.ap1_auth0.secret=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap3.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  uci set wireless.ap3_auth0.secret=`uci get env.var.default_key_r1_s0`
+
+fi
+
+if [ "$DEV" == "dev" ] ; then
+  uci set wireless.radio_5G.channel=36
+fi
+
+uci commit wireless
+
+#to update the default security mode in env
+uci set env.var.default_security_mode_r0_s0=`uci get wireless.ap0.security_mode`
+uci set env.var.default_security_mode_r1_s0=`uci get wireless.ap1.security_mode`
+
+uci commit env
+
+#add for fixed index
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+
+uci set dmordering.WiFiAP=ordering
+uci add_list dmordering.WiFiAP.order=ap0
+uci add_list dmordering.WiFiAP.order=ap1
+uci add_list dmordering.WiFiAP.order=ap2
+uci add_list dmordering.WiFiAP.order=ap3
+uci add_list dmordering.WiFiAP.order=ap4
+uci add_list dmordering.WiFiAP.order=ap5
+uci add_list dmordering.WiFiAP.order=ap6
+uci add_list dmordering.WiFiAP.order=ap7
+
+uci set dmordering.WiFiSSID=ordering
+uci add_list dmordering.WiFiSSID.order=wl1
+uci add_list dmordering.WiFiSSID.order=wl1_1
+uci add_list dmordering.WiFiSSID.order=wl1_2
+uci add_list dmordering.WiFiSSID.order=wl1_3
+uci add_list dmordering.WiFiSSID.order=wl0
+uci add_list dmordering.WiFiSSID.order=wl0_1
+uci add_list dmordering.WiFiSSID.order=wl0_2
+uci add_list dmordering.WiFiSSID.order=wl0_3
+
+uci set dmordering.WifiRadio=ordering
+uci add_list dmordering.WifiRadio.order=radio_5G
+uci add_list dmordering.WifiRadio.order=radio_2G
+uci commit dmordering
+

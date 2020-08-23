@@ -1,0 +1,662 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="DNS" version="2.0">
+     <object name="DNS." access="readOnly" minEntries="1" maxEntries="1" set="DNSGlobal.sh">
+        <parameter name="SupportedRecordTypes" access="readOnly">
+            <syntax>
+                <list/>
+                <string>
+                    <enumeration value="A"/>
+                    <enumeration value="AAAA"/>
+                    <enumeration value="SRV"/>
+                    <enumeration value="PTR"/>
+                </string>
+                <default value="A,AAAA,PTR"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_IPVersionRestricted" access="readWrite">
+            <description>
+            When {{true}}, the CPE forwards A-type queries to ipv4 dns servers only and the AAAA-type queries to ipv6 dns servers only.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ReqIPVersionOnRedirect" access="readWrite">
+            <description>
+            When {{true}}, in case of the CPE receives an A-type query from an IPv6 client or an AAAA-type query from an IPv4 client,
+            the reply value is related to the requested IP version (instead of the IP version used to generate the query by the client)
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TCPRestricted" access="readWrite">
+            <description>
+            When {{true}}, dns server will be listening for TCP queries on interfaces listed in {{param|X_ADB_TCPAllowedIfaces}} only.
+            Otherwise dns server will listen on all available interfaces.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TCPAllowedIfaces" access="readWrite">
+            <description>
+            Comma separated list of interface objects.
+            If {{param|X_ADB_TCPRestricted}} is {{true}}, dns server will listen for TCP queries on these interfaces only.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_NoFallbackRCODEs" access="readWrite">
+            <description>
+            Comma separated list of Response Code (RCODE) values as specified in RFC1035 for which fallback will be disabled.
+            </description>
+            <syntax>
+                <list maxItems="5"/>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="5" step="1"/>
+                </unsignedInt>
+                <default value=""/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Client." access="readOnly" minEntries="1" maxEntries="1">
+        <parameter name="Enable" access="readWrite" set="DNS.sh">
+            <syntax>
+                <boolean/>
+                <default value="true"/>
+            </syntax>
+        </parameter>
+        <parameter name="ServerNumberOfEntries" access="readOnly" store="no">
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DynamicServerRuleNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_CacheEnable" access="readWrite" set="DNS.sh">
+            <description>Enable DNS cache Management</description>
+            <syntax>
+                <boolean/>
+                <default value="true"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Client.Server.{i}." access="readWrite" minEntries="0" maxEntries="unbounded" numEntriesParameter="ServerNumberOfEntries" enableParameter="Enable" set="DNS.sh" add="DNS.sh" del="DNS.sh">
+        <parameter name="Alias" access="readWrite">
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServer" access="readWrite" key="yes">
+            <syntax>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="Enable" access="readWrite">
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+        <parameter name="Type" access="readOnly">
+            <syntax>
+                <string>
+                    <enumeration value="DHCPv4"/>
+                    <enumeration value="DHCPv6"/>
+                    <enumeration value="IPCP"/>
+                    <enumeration value="Static"/>
+                </string>
+                <default value="Static"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFiltering" access="readWrite">
+            <description>Hostnames belonging to this domain are resolved by this DNS server.
+            Hostnames which don't match will be handled by different {{object}} objects.
+            If {{empty}}, resolution is allowed for any domain.
+            </description>
+            <syntax>
+                <string/>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFilteringRestricted" access="readWrite">
+            <description>
+            If {{true}}, fallback on failure for queries matching this entry will be performed only if the domain filter of the next chosen entry is the same as the original matching filter.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainInterface" access="readWrite">
+            <description>
+                This interface is used for outbound queries only for {{param|#.Server.{i}.X_ADB_DomainFiltering}} domains.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Timeout" access="readWrite">
+            <description>Timeout in {{units}} to wait for a server response.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="100" step="1"/>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="3000"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioBase" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDomain" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a specific Domain (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Permissions" access="readWrite">
+            <description>User access permissions to this {{object}}.</description>
+            <syntax>
+                <dataType ref="UserPermission"/>
+                <default value="333" />
+            </syntax>
+        </parameter>
+  </object>
+    <object name="DNS.Client.X_ADB_DynamicServerRule.{i}." access="readWrite" minEntries="0" maxEntries="unbounded" numEntriesParameter="X_ADB_DynamicServerRuleNumberOfEntries" enableParameter="Enable" set="DNSBlackHole.sh" del="DNSBlackHole.sh">
+        <description>Rules for dynamically-acquired DNS serving entries.
+        These define a template for {{object|.DNS.Client.Server}} objects which are dynamically created.
+        </description>
+        <parameter name="Alias" access="readWrite">
+            <description>A non-volatile handle used to reference this instance.
+            {{param}} provides a mechanism for an ACS to label this instance for future reference.
+            </description>
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="Enable" access="readWrite" set="DNSRuleEnable.sh">
+            <description>Enables or disables this entry.</description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <description>Specifies the IP interface over which the DNS query is sent.
+            If an empty string is specified, the CPE MUST use its routing policy (IP Forwarding table entries), if necessary, to determine the appropriate interface.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <description>The status of this entry.</description>
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+        <parameter name="Type" access="readWrite">
+            <description>Method used to assign the {{param|#.Server.{i}.DNSServer}} address.</description>
+            <syntax>
+                <string>
+                    <enumeration value="DHCPv4"/>
+                    <enumeration value="DHCPv6"/>
+                    <enumeration value="IPCP"/>
+                    <enumeration value="Any"/>
+                </string>
+                <default value="Any"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFiltering" access="readWrite">
+            <description>Hostnames belonging to this domain are resolved by this DNS server.
+            Hostnames which don't match will be handled by different {{object}} objects.
+            If {{empty}}, resolution is allowed for any domain.
+            </description>
+            <syntax>
+                <list maxItems="8"/>
+                <string/>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFilteringRestricted" access="readWrite">
+            <description>
+            If {{true}}, fallback on failure for queries matching this entry will be performed only if the domain filter of the next chosen entry is the same as the original matching filter.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Timeout" access="readWrite">
+            <description>Timeout in {{units}} to wait for a server response.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="100" step="1"/>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="3000"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ForceDrop" access="readWrite">
+            <description>
+                It forces the creation of rules to drop matching DNS queries. This behavior is useful to drop DNS queries preventing that these queries are routed on the wrong interface during transitorial phases.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DontCreate" access="readWrite">
+            <description>
+                On dynamic DNS rules learning (e.g. via DHCP), the client rule will be not created. This behavior is useful when the configuration requires to deny locally generated DNS traffic to a specific interface.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioBase" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDomain" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a specific Domain (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDrop" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a Drop Rule (useful only when X_ADB_ForceDrop is enabled).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Permissions" access="readWrite">
+            <description>User access permissions to this {{object}}.</description>
+            <syntax>
+                <dataType ref="UserPermission"/>
+                <default value="333" />
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Relay." access="readOnly" minEntries="1" maxEntries="1">
+        <parameter name="Enable" access="readWrite" set="DNS.sh">
+            <syntax>
+                <boolean/>
+                <default value="true"/>
+            </syntax>
+        </parameter>
+        <parameter name="ForwardNumberOfEntries" access="readOnly" store="no">
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DynamicForwardingRuleNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Relay.Forwarding.{i}." access="readWrite" minEntries="0" maxEntries="unbounded" numEntriesParameter="ForwardNumberOfEntries" enableParameter="Enable" set="DNS.sh" add="DNS.sh" del="DNS.sh">
+        <parameter name="Alias" access="readWrite">
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServer" access="readWrite" key="yes">
+            <syntax>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="Enable" access="readWrite">
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+        <parameter name="Type" access="readOnly">
+            <syntax>
+                <string>
+                    <enumeration value="DHCPv4"/>
+                    <enumeration value="DHCPv6"/>
+                    <enumeration value="IPCP"/>
+                    <enumeration value="Static"/>
+                </string>
+                <default value="Static"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_InboundInterface" access="readWrite">
+            <description>If not empty, specifies a IP interface this DNS relay is bound to for incoming requests.</description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFiltering" access="readWrite">
+            <description>Hostnames belonging to this domain are resolved by this DNS relay.
+            Hostnames which don't match will be handled by different {{object}} objects.
+            If empty, resolution is allowed for any domain.
+            </description>
+            <syntax>
+                <list maxItems="8"/>
+                <string>
+                    <size minLength="0" maxLength="64"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFilteringRestricted" access="readWrite">
+            <description>
+            If {{true}}, fallback on failure for queries matching this entry will be performed only if the domain filter of the next chosen entry is the same as the original matching filter.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainInterface" access="readWrite">
+            <description>
+                This interface is used for outbound queries only for {{param|#.Forwarding.{i}.X_ADB_DomainFiltering}} domains.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Timeout" access="readWrite">
+            <description>Timeout in {{units}} to wait for a server response.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="100" step="1"/>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="3000"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioBase" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDomain" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a specific Domain (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Permissions" access="readWrite">
+            <description>User access permissions to this {{object}}.</description>
+            <syntax>
+                <dataType ref="UserPermission"/>
+                <default value="333" />
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Relay.X_ADB_DynamicForwardingRule.{i}." access="readWrite" minEntries="0" maxEntries="unbounded" numEntriesParameter="X_ADB_DynamicForwardingRuleNumberOfEntries" enableParameter="Enable" set="DNSBlackHole.sh" del="DNSBlackHole.sh">
+        <description>Rules for dynamically-acquired DNS Relay forwarding entries.
+        These define a template for {{object|.DNS.Relay.Forwarding}} objects which are dynamically created.
+        </description>
+        <parameter name="Alias" access="readWrite">
+            <description>A non-volatile handle used to reference this instance.
+            {{param}} provides a mechanism for an ACS to label this instance for future reference.
+            </description>
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="Enable" access="readWrite" set="DNSRuleEnable.sh">
+            <description>Enables or disables this entry.</description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <description>Specifies the IP interface over which the DNS query is sent.
+            If an empty string is specified, the CPE MUST use its routing policy (IP Forwarding table entries), if necessary, to determine the appropriate interface.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="Status" access="readOnly" store="no">
+            <description>The status of this entry.</description>
+            <syntax>
+                <string>
+                    <enumeration value="Disabled"/>
+                    <enumeration value="Enabled"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="Disabled"/>
+            </syntax>
+        </parameter>
+        <parameter name="Type" access="readWrite">
+            <description>Method used to assign the {{param|#.Forwarding.{i}.DNSServer}} address.</description>
+            <syntax>
+                <string>
+                    <enumeration value="DHCPv4"/>
+                    <enumeration value="DHCPv6"/>
+                    <enumeration value="IPCP"/>
+                    <enumeration value="Any"/>
+                </string>
+                <default value="Any"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_InboundInterface" access="readWrite">
+            <description>If not empty, specifies a IP interface this DNS relay is bound to for incoming requests.</description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFiltering" access="readWrite">
+            <description>Hostnames belonging to this domain are resolved by this DNS relay.
+            Hostnames which don't match will be handled by different {{object}} objects.
+            If empty, resolution is allowed for any domain.
+            </description>
+            <syntax>
+                <list maxItems="8"/>
+                <string/>
+                <default value=""/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DomainFilteringRestricted" access="readWrite">
+            <description>
+            If {{true}}, fallback on failure for queries matching this entry will be performed only if the domain filter of the next chosen entry is the same as the original matching filter.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Timeout" access="readWrite">
+            <description>Timeout in {{units}} to wait for a server response.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="100" step="1"/>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="3000"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ForceDrop" access="readWrite">
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DontCreate" access="readWrite">
+            <description>
+                On dynamic DNS rules learning (e.g. via DHCP), the forwarding relay rule will be not created. This behavior is useful when the configuration requires to deny locally generated DNS traffic to a specific interface.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioBase" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDomain" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a specific Domain (useful only for the fallback functionality).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_PrioDrop" access="readWrite">
+            <description>Allows to set a specific priority to the DNS server for a Drop Rule (useful only when X_ADB_ForceDrop is enabled).</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="999" step="1"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Permissions" access="readWrite">
+            <description>User access permissions to this {{object}}.</description>
+            <syntax>
+                <dataType ref="UserPermission"/>
+                <default value="333" />
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

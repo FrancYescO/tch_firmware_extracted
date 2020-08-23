@@ -1,0 +1,208 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_BulkData_Profile_i_HTTP_ = {
+  objectType = {
+    name = "#ROOT.BulkData.Profile.{i}.HTTP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "1024",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Password = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        max = "256",
+      },
+      CompressionsSupported = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "GZIP",
+          "Compress",
+          "Deflate",
+        },
+      },
+      Compression = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "GZIP",
+          --"Compress", --Not supported
+          --"Deflate",  --Not supported
+          "None",
+        },
+        default = "None",
+      },
+      MethodsSupported = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "POST",
+          --"PUT", --Not supported
+        },
+      },
+      Method = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "POST",
+          --"PUT", --Not supported
+        },
+        default = "POST",
+      },
+      UseDateHeader = {
+        access = "readWrite",
+        type = "boolean",
+        default = "true",
+      },
+      RetryEnable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      RetryMinimumWaitInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "65535",
+          },
+        },
+        default = "5",
+      },
+      RetryIntervalMultiplier = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1000",
+            max = "65535",
+          },
+        },
+        default = "2000",
+      },
+      -- RequestURIParameterNumberOfEntries
+      -- automatically created when #ROOT.BulkData.Profile.{i}.HTTP.RequestURIParameter.{i}. is loaded
+    }
+  }
+}
+
+local bulk_helper = require "transformer.shared.bulkhelper"
+local register = register
+local commitapply = commitapply
+local concat = table.concat
+local uci_helper = require('transformer.mapper.ucihelper')
+local url_helper = require("socket.url")
+local firewall_binding = {config = "firewall", sectionname = "MARK_BULKDATA_SRCIP"}
+
+-- iterate over all uci interfaces calling a function for each
+-- @param f [function] the function to call
+local uci_profiles = {config="bulkdata", sectionname="profile"}
+local function foreach_profile(f)
+  return uci_helper.foreach_on_uci(uci_profiles, f)
+end
+
+local get_map = {
+  URL = "http_url",
+  Username = "http_username",
+  Password = function(object)
+    return ""
+  end,
+  CompressionsSupported = "http_compressions_supported",
+  Compression = "http_compression",
+  MethodsSupported = "http_methods_supported",
+  Method = "http_method",
+  UseDateHeader = function(object)
+    return bulk_helper.convert_boolean(object.http_usedate_header) or "true"
+  end,
+  RetryEnable = function(object)
+    return bulk_helper.convert_boolean(object.retry_enable) or "false"
+  end,
+  RetryMinimumWaitInterval = "retry_min_interval",
+  RetryIntervalMultiplier = "retry_interval_multiplier",
+}
+
+local function getPort(http_url)
+  -- the normal format: http://1.2.3.4:24224
+  local data = url_helper.parse(http_url)
+  if data then
+    if data.scheme ~= "http" and data.scheme ~= "https" then
+      -- format: 1.2.3.4:24224
+      data = url_helper.parse("http://" .. http_url)
+    end
+    if not data.port then
+      if data.scheme == "https" then
+        -- format: https://1.2.3.4
+        data.port = "443"
+      else
+        -- format: http://1.2.3.4
+        data.port = "80"
+      end
+    end
+  end
+  return data and data.port
+end
+
+local function getAllUrlPorts()
+  local ports, rports, port = {}, {}
+
+  foreach_profile(function(s)
+    port = getPort(s['http_url'])
+    if port and tonumber(port) then
+      ports[port] = true
+    end
+  end)
+  for port, _ in pairs(ports) do
+    rports[#rports + 1] = port
+  end
+  return concat(rports, " ")
+end
+
+local set_map = {
+  URL = function(binding, value)
+    binding.option = "http_url"
+    uci_helper.set_on_uci(binding, value, commitapply)
+
+    local ports = getAllUrlPorts()
+    if ports ~= "" then
+      firewall_binding.option = "dest_port"
+      uci_helper.set_on_uci(firewall_binding, ports, commitapply)
+      Multi_BulkData_Profile_i_HTTP_._profile.transactions[firewall_binding.config] = true
+    end
+    return true
+  end,
+  Username = "http_username",
+  Password = "http_password",
+  Compression = "http_compression",
+  Method = "http_method",
+  UseDateHeader = "http_usedate_header",
+  RetryEnable = "retry_enable",
+  RetryMinimumWaitInterval = "retry_min_interval",
+  RetryIntervalMultiplier = "retry_interval_multiplier",
+}
+
+bulk_helper.SetProfileMap(Multi_BulkData_Profile_i_HTTP_, {get = get_map, set = set_map}, commitapply)
+
+Multi_BulkData_Profile_i_HTTP_.getall = bulk_helper.getall
+
+Multi_BulkData_Profile_i_HTTP_.get = bulk_helper.get
+
+Multi_BulkData_Profile_i_HTTP_.set = bulk_helper.set
+
+Multi_BulkData_Profile_i_HTTP_.commit = bulk_helper.commit
+Multi_BulkData_Profile_i_HTTP_.revert = bulk_helper.revert
+
+bulk_helper.register(Multi_BulkData_Profile_i_HTTP_, register)
