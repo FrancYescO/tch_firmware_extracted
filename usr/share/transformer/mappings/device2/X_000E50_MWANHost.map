@@ -1,0 +1,113 @@
+-- Manually generated
+
+local Device_X_000E50_MWANHost_i_ = {
+  objectType = {
+    name = "Device.X_000E50_MWANHost.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "List all MWAN hosts and configure MWAN policy of hosts",
+    parameters = {
+      Policy = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.X_000E50_MWANPolicy.{i}.",
+        description = "MWAN policy, refer to one of the names in the policy section.",
+      },
+      Path = {
+        access = "readOnly",
+        type = "string",
+        description = "Applications that are affected by the policy."
+      },
+      Arg = {
+        access = "readOnly",
+        type = "string",
+        description = "Matches the part of the application's command line."
+      }
+    }
+  }
+}
+
+local commitapply, mapper, register, resolve = commitapply, mapper, register, resolve
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local mwanBinding = { config = "mwan" }
+local configChanged
+
+local function getUciValue(key, option, default)
+  mwanBinding.sectionname = key
+  mwanBinding.option = option
+  mwanBinding.default = default
+  return getFromUci(mwanBinding)
+end
+
+local function setUciValue(key, option, value)
+  mwanBinding.sectionname = key
+  mwanBinding.option = option
+  setOnUci(mwanBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_X_000E50_MWANHost_i_.entries = function()
+  local entries = {}
+  mwanBinding.sectionname = "host"
+  forEachOnUci(mwanBinding, function(s)
+    entries[#entries + 1]  = s[".name"]
+  end)
+  return entries
+end
+
+Device_X_000E50_MWANHost_i_.get = {
+  Policy = function(mapping, param, key)
+    local policy = getUciValue(key, "policy")
+    return policy and resolve("Device.X_000E50_MWANPolicy.{i}.", policy) or ""
+  end,
+  Path = function(mapping, param, key)
+    local path = getUciValue(key, "path")
+    return type(path) == "table" and table.concat(path, ",") or path
+  end,
+  Arg = function(mapping, param, key)
+    return getUciValue(key, "arg")
+  end
+}
+
+Device_X_000E50_MWANHost_i_.getall = function(mapping, key)
+  mwanBinding.sectionname = key
+  local allValues = uciHelper.getall_from_uci(mwanBinding)
+  return {
+    Policy = allValues.policy and resolve("Device.X_000E50_MWANPolicy.{i}.", allValues.policy) or "",
+    Path = allValues.path and type(allValues.path) == "table" and table.concat(allValues.path, ",") or allValues.path or "",
+    Arg = allValues.arg or ""
+  }
+end
+
+Device_X_000E50_MWANHost_i_.set = {
+  Policy = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.X_000E50_MWANPolicy.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    setUciValue(key, "policy", value)
+  end
+}
+
+Device_X_000E50_MWANHost_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(mwanBinding)
+    configChanged = false
+  end
+end
+
+Device_X_000E50_MWANHost_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(mwanBinding)
+    configChanged = false
+  end
+end
+
+register(Device_X_000E50_MWANHost_i_)

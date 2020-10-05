@@ -1,0 +1,44 @@
+#!/bin/sh
+
+. /usr/lib/gpon/gpon_cli.sh
+
+if [ -z "$1" ] ||  [ "$1" = "help" ] || [ "$1" = "-h" ]; then
+	help
+	exit 1
+fi
+
+if [ "$1" != "-c" ]; then
+	echo "Option -c must be specified"
+	help
+	exit 1
+fi
+
+while getopts "c:a:" arg
+do
+	case $arg in
+		c)
+			opts="$OPTARG"
+			if [ "$opts" = "-a" ]; then
+				echo "No arg for -c option"
+				help
+				exit 1
+			fi
+			func=${opts// /_}
+		;;
+		a)
+			args="$OPTARG"
+		;;
+		?)
+			help
+			exit 1
+		;;
+	esac
+done
+
+# Call command handler
+$func $args
+if [ $? != 0 ]; then
+	help
+	exit 1
+fi
+
