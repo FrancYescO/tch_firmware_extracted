@@ -1,0 +1,205 @@
+<div class="row">
+    <div class="col-md-4 toc-container hidden-sm">
+        <nav class="toc">
+            <ul>
+              <li du-scrollspy="widget_line_status" class="hidden-xs"><a href="#widget_line_status" translate du-smooth-scroll>PAGES.LINE.LINE_STATUS.TITLE</a></li>
+              <li du-scrollspy="widget_wifi_channel_container" class="hidden-xs"><a href="#widget_wifi_channel_container" translate du-smooth-scroll>PAGES.LINE.WIFI_CHANNEL.TITLE</a></li>
+              
+                <!-- TABS -->
+                <li ng-class="{'visible-xs': true, active: !tabSelected}" ng-click="tabSelected = switchTab(false);">
+                    <a href="" translate>PAGES.LINE.LINE_STATUS.TITLE</a>
+                </li>
+                <li ng-class="{'visible-xs': true, active: tabSelected}" ng-click="tabSelected = switchTab(true);">
+                    <a href="" translate>PAGES.LINE.WIFI_CHANNEL.TITLE</a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    <div class="col-md-8 main-container">
+    <div ng-class="{'mobile-super-wrapper': true, active: !tabSelected}">  
+    <div id="widget_line_status">
+      <div ng-include="'views/partials/widget_line_status.html'"></div>
+      <div class="panel panel-body">
+        <form class="form-horizontal">
+            <fieldset>
+                <div class="row form-group">
+                  <!--label class="col-sm-3 control-label col-xs-8 text-left-xs" translate="PAGES.LINE.LINE_STATUS.EDIT.{{auto_checks.enabled? 'VERIFY' : 'VERIFY_MAN'}}"></label-->
+                  <!-- June modify -->
+                  <label class="col-sm-3 control-label col-xs-8 text-left-xs" translate="PAGES.LINE.LINE_STATUS.EDIT.VERIFY"></label>
+                  <div class="col-sm-7 col-xs-4 text-right-xs">
+                    <button type="button" class="btn btn-toggle" ng-model="auto_checks.enabled" uib-btn-checkbox></button>
+                  </div>
+                </div>
+                <div class="form-group" ng-disabled="!auto_checks.enabled">
+
+                  <fieldset ng-disabled="!auto_checks.enabled">
+                    <label class="col-sm-3  col-xs-5 control-label text-left-xs" translate="PAGES.LINE.LINE_STATUS.EDIT.FREQ"></label>
+                    <div class="col-sm-4 col-xs-7">
+                        <div class="btn-group" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                            <span translate="PAGES.LINE.LINE_STATUS.EDIT.{{auto_checks.selected_freq.name}}" ></span> <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <li ng-repeat="when in auto_checks.freq">
+                              <!--a ng-click="auto_checks.selected_freq = when" href="" translate="PAGES.LINE.LINE_STATUS.EDIT.{{when.name}}"></a-->
+                              <!-- June modify -->
+                              <a ng-click="auto_checks.selected_freq = when; auto_checks.selected_time='0000'" href="" translate="PAGES.LINE.LINE_STATUS.EDIT.{{when.name}}"></a>
+                            </li>
+                          </ul>
+                        </div>
+                    </div>
+                    <div class="col-sm-4 col-xs-6 no-animate" ng-if="auto_checks.selected_freq.code == 1">
+                        <div class="btn-group" uib-dropdown>
+                          <button type="button" class="btn" uib-dropdown-toggle>
+                              <span translate>FORMS.ON_TIME</span> {{auto_checks.selected_time | fwTime}} <span class="caret"></span>
+                          </button>
+                          <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                            <li ng-repeat="hour in hours">
+                              <a ng-click="auto_checks.selected_time = hour" href="">{{hour | fwTime}}</a>
+                            </li>
+                          </ul>
+                        </div>
+                    </div>
+
+                    <div class="col-sm-9 col-sm-offset-3 clear-xs">
+                      <p><small translate="PAGES.LINE.LINE_STATUS.EDIT.FREQ_INFO"></small></p>
+                    </div>
+                  </fieldset>
+                </div>
+                
+                <div class="hidden-xs form-group no-animate" ng-init = "dev.isExpanded = true" ng-init="filterHistoryTable ='all'" >
+                  <label class="col-sm-3 control-label" translate="PAGES.LINE.LINE_STATUS.EDIT.TABLE.TITLE"></label>
+                  <div class="col-sm-9" fw-loader="line_status.history">
+                    <ul class="nav nav-tabs">
+                      <li ng-class="filterHistoryTable == 'all' ? 'active' : ''"><a ng-click="filterHistoryTable = 'all'"><span translate>PAGES.LINE.LINE_STATUS.EDIT.TABLE.ALL</span></a></a></li>                      
+                      <li ng-class="filterHistoryTable == 'max' ? 'active' : ''"><a ng-click="filterHistoryTable = 'max'""><span translate>PAGES.LINE.LINE_STATUS.EDIT.TABLE.MAX</span><span class="badge" ng-if="badge.max > 0">{{badge.max}}</span></a></li>
+                      <li ng-class="filterHistoryTable == 'min' ? 'active' : ''"><a ng-click="filterHistoryTable = 'min'""><span translate>PAGES.LINE.LINE_STATUS.EDIT.TABLE.MIN</span><span class="badge" ng-if="badge.min > 0">{{badge.min}}</span></a></a></li>
+                      <li><a  ng-click="dev.isExpanded=!dev.isExpanded" ng-class="{'dropup':dev.isExpanded}">
+                        <span class="caret"></span></a>
+                      </li>
+                    </ul>                  
+
+                    <div class="row" ng-class="{'collapse':!dev.isExpanded}" ng-repeat-end >
+                      <div class="col-md-12">
+                        <div class="fixed-height">
+                          <table class="table table-condensed">
+                          <thead>
+                            <tr>
+                              <th translate>PAGES.LINE.LINE_STATUS.EDIT.TABLE.DATE</th>
+                              <th translate>Download</th>
+                              <th translate>Upload</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr ng-repeat="history in line_status.history" ng-if="applyFilter(history, filterHistoryTable)" >
+                              <td>{{history.date_info | fwDate}}</td>
+                              <td>{{byteToMBString(history.linerate_ds)}} </td>
+                              <td>{{byteToMBString(history.linerate_us)}} </td>
+                            </tr>
+                          </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+            </fieldset>
+        </form>        
+      </div>
+      <div class="button-container text-right">
+        <button type="button" ng-disabled="saving_auto_checks" ng-click="save_speedLog_schedule()" class="btn btn-default" translate>FORMS.SAVE_CHANGES</button>
+        <button type="button" class="btn btn-default" ng-click="revert_speedLog_schedule()" translate>FORMS.CANCEL</button>
+      </div><br /><br />
+    </div>  
+        
+    <!-- TABS -->
+    </div>
+    <div ng-class="{'mobile-super-wrapper': true, active: tabSelected}">
+    <!-- /TABS -->
+
+    <div id="widget_wifi_channel_container"> 
+      <div ng-include="'views/partials/widget_wifi_channel.html'"></div>
+      <!--div class="panel panel-body"-->
+      <!-- June modify -->
+      <div ng-class="{'panel panel-body':true, 'loading-data':!wifi.channelReady}">
+        <form class="form-horizontal">
+          <div class="form-group">
+            <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.LINE.WIFI_CHANNEL.SEARCH_CHANNEL</label>
+            <div class="col-sm-7 col-xs-4 text-right-xs">
+              <button type="button" class="btn btn-toggle" ng-model="search_channel[commons.filter]" uib-btn-checkbox></button>
+            </div>
+            <p ng-if="commons.filter=='freq2_4'" ng-disabled="!search_channel[commons.filter]" class="col-sm-9  col-sm-offset-3 col-xs-12 description"><small translate>PAGES.LINE.WIFI_CHANNEL.SEARCH_CHANNEL_DESC_2G</small></p>
+            <p ng-if="commons.filter=='freq5'" ng-disabled="!search_channel[commons.filter]" class="col-sm-9  col-sm-offset-3 col-xs-12 description"><small translate>PAGES.LINE.WIFI_CHANNEL.SEARCH_CHANNEL_DESC_5G</small></p>
+          </div>
+          <fieldset ng-disabled="search_channel[commons.filter]" >
+            <div class="form-group" >
+              <label class="col-sm-3 col-xs-8 control-label text-left-xs" translate>PAGES.LINE.WIFI_CHANNEL.CHANNEL</label>
+              <div class="col-sm-2 col-xs-4">
+                <div class="btn-group" uib-dropdown>
+                  <button type="button" class="btn" uib-dropdown-toggle>
+                    <span >{{wifi_channel_list[commons.filter + '_channel_to_use']}}</span> <span class="caret"></span>
+                  </button>
+                  <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                    <li ng-repeat="ch in wifi_channel_list.channel_band_list[commons.filter]">
+                      <a ng-click="wifi_channel_list[commons.filter + '_channel_to_use'] = ch" href="">{{ch}}</a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+              <p class="col-sm-9 col-sm-offset-3 col-xs-12"><small translate>PAGES.LINE.WIFI_CHANNEL.CHANNEL_DESC</small></p>
+            </div>
+          </fieldset>
+          <div class="form-group">
+            <label class="col-sm-3 col-xs-6 control-label text-left-xs" translate>PAGES.LINE.WIFI_CHANNEL.HZ_CHANNEL</label>
+            <div class="col-sm-3 col-xs-6">
+              <div class="btn-group" uib-dropdown>
+                <button type="button" class="btn" uib-dropdown-toggle>
+                  <span>{{search_channel[commons.filter+'_band'].name}}</span> <span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                  <!--li ng-repeat="band in bandwidth_list"-->
+                  <!-- June modify -->
+                  <li ng-repeat="band in bandwidth_list[commons.filter]">
+                    <a ng-click="changeChannelBand(commons.filter, band)" href="">{{band.name}}</a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </form>
+        <div class="row hidden-xs" ng-init = "wifi_channel.isExpanded = true"  >
+            <label class="col-sm-3 control-label text-right" translate="PAGES.LINE.WIFI_CHANNEL.EDIT.TABLE.TITLE"></label>
+            <div class="col-sm-9" fw-loader="wifi_channel_list[commons.filter]">
+              <table class="table table-condensed" >
+                <thead>
+                  <tr>
+                    <th translate="PAGES.LINE.WIFI_CHANNEL.EDIT.TABLE.CHANNEL"></th>
+                    <th translate="PAGES.LINE.WIFI_CHANNEL.EDIT.TABLE.NAME"></th>
+                    <th  class="no-wrap" translate="PAGES.LINE.WIFI_CHANNEL.EDIT.TABLE.MAC"></th>
+                    <th translate="PAGES.LINE.WIFI_CHANNEL.EDIT.TABLE.RSSI"></th>
+                    <th><span style="cursor:pointer" class="form-control-static" ng-class="{'dropup':wifi_channel.isExpanded}" ng-click="wifi_channel.isExpanded=!wifi_channel.isExpanded">
+                        <span class="caret"></span></span></th>
+                  </tr>
+                </thead>
+                <tbody ng-repeat="(key, channel) in wifi_channel_list[commons.filter]">
+                  <tr ng-repeat="wch in channel" ng-class="{'collapse':!wifi_channel.isExpanded, 'striped' : key % 2 == 0 }">
+                    <td>{{wch.channel}}</td>
+                    <td class="break-all">{{wch.ssid}}</td>
+                    <td class="no-wrap">{{wch.bssid}}</td>
+                    <td>{{wch.rssi}}</td>
+                    <td></td>
+                  </tr>                  
+                </tbody>
+              </table>
+              
+            </div>
+        </div>
+      </div>
+      <div class="button-container text-right">
+        <button type="submit" class="btn btn-default" ng-click="applyWifiChanges()" translate>FORMS.SAVE_CHANGES</button>
+        <button type="submit" class="btn btn-default" ng-click="revert_search_channel_schedule()" translate>FORMS.CANCEL</button>
+      </div><br /><br />
+    </div>  
+    </div> <!-- FINE TABS --> 
+    </div>
+</div>
