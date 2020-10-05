@@ -1,0 +1,535 @@
+local Device_Hosts_Host_i_ = {
+  objectType = {
+    name = "Device.Hosts.Host.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "HostNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        status = "deprecated",
+        type = "string",
+        max = "64",
+      },
+      PhysAddress = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      IPAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      DHCPClient = {
+        access = "readOnly",
+        list = true,
+        maxItems = "2",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.DHCPv4.Server.Pool.{i}.Client.{i}. Device.DHCPv6.Server.Pool.{i}.Client.{i}.",
+      },
+      LeaseTimeRemaining = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AssociatedDevice = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      Layer1Interface = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+      },
+      Layer3Interface = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+      },
+      HostName = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      X_FASTWEB_GroupName = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Family",
+          "Other",
+        },
+      },
+      X_FASTWEB_Icon = {
+        access = "readWrite",
+        type = "string",
+        max = "30",
+      },
+      X_FASTWEB_ParentalControlEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_RestrictedAccessEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_RoutineEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_FASTWEB_Modified = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      ActiveLastChange = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      -- IPv4AddressNumberOfEntries
+      -- automatically created when Device.Hosts.Host.{i}.IPv4Address.{i}. is loaded
+      -- IPv6AddressNumberOfEntries
+      -- automatically created when Device.Hosts.Host.{i}.IPv6Address.{i}. is loaded
+    }
+  }
+}
+
+local format, gsub, match = string.format, string.gsub, string.match
+local mapper, os, pairs, resolve, next = mapper, os, pairs, resolve, next
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local network = require("transformer.shared.common.network")
+local foreachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(nil, commitapply)
+
+local mt = { __index = function() return "" end }
+
+local devs = {}
+
+local function getDevKey()
+  local all = {}
+  local id
+  for k,v in pairs(devs) do
+    id = tonumber(k:match("^dev(%d+)"))
+    if id then
+      all[id] = id
+    end
+  end
+  return format("dev%d",#all+1)
+end
+
+Device_Hosts_Host_i_.entries = function(mapping)
+  local entries = network.getHostInfo( nil, function(info) return info["mac-address"] end)
+  local dev_macs = {}
+  for k,v in ipairs(entries) do
+    dev_macs[v] = k
+  end
+
+  --Get deivce list from config user_friendly_name
+  local binding = {config = "user_friendly_name", sectionname = "name"}
+  devs = {}
+  foreachOnUci(binding, function(s)
+    if not s.mac or not dev_macs[s.mac] then
+      devs[s[".name"]] = true
+      entries[#entries+1] = s[".name"]
+    else
+      local sname = format("lan_dev%d", dev_macs[s.mac])
+      tele:RenameUfnDevice(s[".name"], sname)
+    end
+  end)
+  uciHelper.commit(binding)
+
+  return entries
+end
+
+local wlanPort = network.wlanRemotePort()
+
+local Icons = {
+  "Console",
+  "Printer",
+  "Computer",
+  "Laptop",
+  "Smartphone",
+  "Tablet",
+  "TV",
+  "Other",
+  "Hard disk",
+}
+
+local IconsMap = {
+  ["Console"] = "0",
+  ["Printer"] = "1",
+  ["Computer"] = "2",
+  ["Laptop"] = "3",
+  ["Smartphone"] = "4",
+  ["Tablet"] = "5",
+  ["TV"] = "6",
+  ["Other"] = "7",
+  ["Hard disk"] = "8",
+}
+
+local initial_config = {
+  ["group_name"] = "Other",
+  ["icon"] = "Other",
+  ["parental_control"] = "0",
+  ["restricted_access"] = "0",
+}
+
+local function getHostData(key)
+  local data, dev = network.getHostDataByMAC(key)
+  if dev == "" then
+    local device = tele:GetUfnDeviceAll(key)
+    data["mac-address"] = device["mac"]
+    data["user-friendly-name"] = device["name"]
+    data["device-type"] = device["type"]
+    data["connected_time"] = 0
+    data["ipv4"] = {}
+    data["ipv6"] = {}
+    dev = key
+    setmetatable(data, mt)
+  end
+  return data, dev
+end
+
+local function getLeaseTime(addr,hostData)
+  local leaseTime = 0
+  if addr.configuration == "dynamic" then
+    local f = io.open("/tmp/dhcp.leases","r")
+    if f then
+      for line in f:lines() do
+        local remaining, mac = match(line, "^(%d+)%s+([%x:]+)")
+        if mac == hostData["mac-address"] then
+          if remaining and remaining ~= 0 then
+            local connected = hostData.connected_time or 0
+	    local nRenew = math.ceil((os.time() - connected)/remaining) + 1
+	    leaseTime = (connected + nRenew * remaining) - os.time()
+          elseif remaining == 0 then
+            leaseTime = -1
+          end
+          break
+        end
+      end
+      f:close()
+    end
+  end
+  return tostring(leaseTime)
+end
+
+local function getPrimaryAddress(hostData)
+  local primaryAddress = {}
+  if next(hostData.ipv4) ~= nil then
+    for _,n in pairs(hostData.ipv4) do
+      if n.state == "connected" or n.state == "stale" then
+        primaryAddress = n
+      end
+    end
+  elseif next(hostData.ipv6) ~= nil then
+    for _,n in pairs(hostData.ipv6) do
+      if n.state == "connected" or n.state == "stale" then
+        primaryAddress  = n
+      end
+    end
+  end
+  return primaryAddress  or {}
+end
+
+local wirelessBinding = { config = "wireless" }
+local function getLayer1Interface(ifName)
+  if not ifName or ifName == "" then
+    return ""
+  end
+  local ethInterface = resolve("Device.Ethernet.Interface.{i}.", match(ifName,"([a-zA-Z]+%d)"))
+  if ethInterface then
+    return ethInterface
+  end
+  local externalRadio
+  if wlanPort and wlanPort == ifName then
+    wirelessBinding.sectionname = "wifi-device"
+    foreachOnUci(wirelessBinding, function(s)
+      if s.type == "quantenna" then
+        externalRadio = s[".name"]
+        return false
+      end
+    end)
+    if externalRadio then
+      wirelessBinding.sectionname = "wifi-iface"
+      foreachOnUci(wirelessBinding, function(s)
+        if s.device == externalRadio then
+          ifName = s[".name"]
+        end
+      end)
+    else
+      return ""
+    end
+  end
+  wirelessBinding.sectionname = ifName
+  wirelessBinding.option = "device"
+  local wirelessDevice = getFromUci(wirelessBinding)
+  return resolve("Device.WiFi.Radio.{i}.", wirelessDevice) or ""
+end
+
+-- Function Description: To find the AP associated to a specific macaddr.
+-- Input  : macaddr <MAC Address of the connected device>
+-- Output : return AP or "" <AP to which the device is currently Associated>
+
+local function getAP(macaddr)
+  if macaddr then
+    local data = conn:call("wireless.accesspoint.station", "get", { }) or {}
+    for ap, mactable in pairs(data) do
+      mactable = mactable or {}
+      for mac,sta in pairs(mactable) do
+        if mac == macaddr and sta.state and sta.state:match("Associated") then
+          return ap
+        end
+      end
+    end
+  end
+  return ""
+end
+
+local function getGroupName(mac)
+  local group_name = tele.mgr:GetFWDevice(mac, "group_name")
+  return (group_name and group_name:find("Family")) and "Family" or "Other"
+end
+
+local function getIcon(mac)
+  local icon = tele.mgr:GetFWDevice(mac, "icon_id")
+  return (icon and icon ~="") and Icons[icon+1] or Icons[8]
+end
+
+local function getParentalControlEnable(mac)
+  return (tele.mgr:GetFWDevice(mac, "parental_ctl") == "1") and "1" or "0"
+end
+
+local function getRestrictedAccessEnable(mac)
+  return tele.mgr:GetDeviceBlackListStatus(mac)
+end
+
+local function getRoutineEnable(mac)
+  local routine_enable = "0"
+  local fwd = tele.mgr:GetFWDeviceAll(mac)
+  if fwd and fwd.group_name and fwd.group_name:find("Family") and fwd.routine == "1" then
+    routine_enable = "1"
+  end
+  return routine_enable
+end
+
+local function getModified(mac)
+  if getGroupName(mac) ~= initial_config["group_name"] then return "1" end
+  if getIcon(mac) ~= initial_config["icon"] then return "1" end
+  if getParentalControlEnable(mac) ~= initial_config["parental_control"] then return "1" end
+  if getRestrictedAccessEnable(mac) ~= initial_config["restricted_access"] then return "1" end
+
+  return "0"
+end
+
+Device_Hosts_Host_i_.get = {
+  Active = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return (hostData.state == "connected") and "1" or "0"
+  end,
+
+  PhysAddress = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return hostData["mac-address"]
+  end,
+
+  IPAddress = function(mapping,param,key)
+    local hostData = getHostData(key)
+    local addr = getPrimaryAddress(hostData)
+    return addr.address or ""
+  end,
+
+  AssociatedDevice = function(mapping,param,key)
+    local ap = getAP(key)
+    return (resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' , ap .. "|" .. key) or "")
+  end,
+
+  HostName = function(mapping,param,key)
+    local hostData = getHostData(key)
+    local macAddress = key or ""
+    return hostData["user-friendly-name"] or hostData.hostname or "unknown-" .. macAddress
+  end,
+
+  X_FASTWEB_GroupName = function(mapping,param,key)
+    return getGroupName(key)
+  end,
+
+  X_FASTWEB_Icon = function(mapping,param,key)
+    return getIcon(key)
+  end,
+
+  X_FASTWEB_ParentalControlEnable = function(mapping,param,key)
+    return getParentalControlEnable(key)
+  end,
+
+  X_FASTWEB_RestrictedAccessEnable = function(mapping,param,key)
+    return getRestrictedAccessEnable(key)
+  end,
+
+  X_FASTWEB_RoutineEnable = function(mapping,param,key)
+    return getRoutineEnable(key)
+  end,
+
+  X_FASTWEB_Modified = function(mapping, param, key)
+    return getModified(key)
+  end,
+
+  DHCPClient = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return (resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData.interface.. "|" ..key) or "")
+  end,
+
+  LeaseTimeRemaining = function(mapping,param,key)
+    local hostData = getHostData(key)
+    local addr = getPrimaryAddress(hostData)
+    return getLeaseTime(addr,hostData)
+  end,
+
+  Layer1Interface = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return getLayer1Interface(hostData.l2interface)
+  end,
+
+  Layer3Interface = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return resolve("Device.IP.Interface.{i}.",hostData.interface) or ""
+  end,
+
+  ActiveLastChange = function(mapping,param,key)
+    local hostData = getHostData(key)
+    return os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or ""
+  end,
+}
+
+Device_Hosts_Host_i_.getall = function(mapping,key)
+  local hostData, dev = getHostData(key)
+  local macAddress = hostData["mac-address"]
+  local ap = getAP(macAddress)
+  local addr = getPrimaryAddress(hostData)
+  return {
+    Active = hostData.state == "connected" and "1" or "0",
+    PhysAddress = macAddress,
+    IPAddress = addr.address or "",
+    AssociatedDevice = resolve('Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}.' ,ap .. "|" .. macAddress) or "",
+    HostName = hostData["user-friendly-name"] or hostData.hostname or "unknown-" .. macAddress,
+    X_FASTWEB_GroupName = getGroupName(macAddress),
+    X_FASTWEB_Icon = getIcon(macAddress),
+    X_FASTWEB_ParentalControlEnable = getParentalControlEnable(macAddress),
+    X_FASTWEB_RestrictedAccessEnable = getRestrictedAccessEnable(macAddress),
+    X_FASTWEB_RoutineEnable = getRoutineEnable(macAddress),
+    X_FASTWEB_Modified = getModified(macAddress),
+    DHCPClient = resolve('Device.DHCPv4.Server.Pool.{i}.Client.{i}.' , hostData["interface"].. "|" ..dev) or "",
+    LeaseTimeRemaining = getLeaseTime(addr,hostData),
+    Layer1Interface =  getLayer1Interface(hostData.l2interface),
+    Layer3Interface = resolve("Device.IP.Interface.{i}.",hostData.interface) or "",
+    ActiveLastChange = os.date("%Y-%m-%dT%H:%M:%SZ", hostData["connected_time"]) or "",
+  }
+end
+
+local setMap = setmetatable({
+  HostName = function(mapping, param, value, key)
+    if devs[key] then
+      tele:SetUfnDevice(key, "name", value)
+    else
+      conn:call("hostmanager.device", "set", { ["mac-address"] = key, ["user-friendly-name"] = value })
+    end
+  end,
+  PhysAddress = function(mapping, param, value, key)
+    if not value:match("%x%x:%x%x:%x%x:%x%x:%x%x:%x%x") then
+      return nil, "The format of physical address is wrong."
+    end
+    if devs[key] then
+      tele:SetUfnDevice(key, "mac", value)
+      tele.mgr:SetFWDevice(value, "mac", value)
+    end
+  end,
+  X_FASTWEB_GroupName = function(mapping, param, value, key)
+    tele.mgr:SetFWDevice(key, "group_name", value)
+    if value == "Other" then
+      tele.mgr:DisableDeviceRoutine(key)
+    end
+  end,
+  X_FASTWEB_Icon = function(mapping, param, value, key)
+    local id = IconsMap[value]
+    if id then
+      tele.mgr:SetFWDevice(key, "icon_id", id)
+    end
+  end,
+  X_FASTWEB_ParentalControlEnable = function(mapping, param, value, key)
+    tele.mgr:SetDeviceParentalCtl(key, value)
+  end,
+  X_FASTWEB_RestrictedAccessEnable = function(mapping, param, value, key)
+    if (getRestrictedAccessEnable(key) ~= value) then
+      tele.mgr:SetBlackListDevice(key, value)
+    end
+  end,
+  X_FASTWEB_RoutineEnable = function(mapping, param, value, key)
+    local bfamily = getGroupName(key):find("Family")
+
+    if value == "1" and not bfamily then
+      return nil, "The setting is invalid because the device is not In-family."
+    end
+
+    if value == "0" and bfamily then
+      tele.mgr:DisableDeviceRoutine(key)
+    else
+      tele.mgr:SetFWDevice(key, "routine", value)
+    end
+  end,
+}, {__index = function() return function() return true end end})
+
+Device_Hosts_Host_i_.set = function(mapping, param, value, key)
+  local hostData = getHostData(key)
+  local mac = key
+  if param:find("X_FASTWEB_") then
+    if hostData["mac-address"] == "" then
+      return nil, "Please firstly set device's PhysAddress."
+    else
+      mac = hostData["mac-address"]
+    end
+  end
+  return setMap[param](mapping, param, value, mac)
+end
+
+Device_Hosts_Host_i_.add = function(mapping)
+  Device_Hosts_Host_i_.entries()
+  local key = getDevKey()
+  tele:SetUfnDevice(key, nil, "name")
+  return key
+end
+
+Device_Hosts_Host_i_.delete = function(mapping, key)
+  if devs[key] then
+    tele:DelUfnDevice(key)
+    devs[key] = nil
+  end
+  return true
+end
+
+Device_Hosts_Host_i_.commit = function()
+  tele:commit()
+end
+
+Device_Hosts_Host_i_.revert = function()
+  tele:revert()
+end
+
+register(Device_Hosts_Host_i_)
