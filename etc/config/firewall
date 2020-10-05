@@ -1,0 +1,1069 @@
+config defaults
+    option syn_flood   1
+    option input     DROP
+    option output    ACCEPT
+    option forward   DROP
+# Uncomment this line to disable ipv6 rules
+#   option disable_ipv6 1
+    option drop_invalid '1'
+
+config zone 'lan'
+    option name    lan
+    list   network     'lan'
+    option input     ACCEPT
+    option output    ACCEPT
+    option forward     ACCEPT
+    #this zone is a lan zone (for IGD/Device:2)
+    option mtu_fix     '1'
+    option wan     0
+
+config zone 'mgmt'
+    option name    mgmt
+    list   network     'mgmt'
+    #option extra '-m mark ! --mark 0x10000000/0xf0000000'
+    option input     DROP
+    option output    ACCEPT
+    option forward     DROP
+    option masq    1
+    option mtu_fix     1
+    #this zone is a mgmt zone (for IGD/Device:2)
+    option wan     1
+
+config zone 'wan'
+    option name    wan
+    list   network   'wan'
+    list   network     '6rd'
+    #option extra '-m mark --mark 0x10000000/0xf0000000'
+    option input     DROP
+    option output    ACCEPT
+    option forward     DROP
+    option masq    1
+    list masq_src    'lan'
+    list masq_src    'Guest'
+    option mtu_fix     1
+    #this zone is a wan zone (for IGD/Device:2)
+    option wan     1
+
+config zone 'wwan'
+    option name    wwan
+    list   network   'wwan'
+    option input     DROP
+    option output    ACCEPT
+    option forward     DROP
+    option masq    1
+    option mtu_fix     1
+    #this zone is a wan zone (for IGD/Device:2)
+    option wan     1
+
+config zone 'Guest'
+    option name 'Guest'
+    list network 'Guest'
+    option input 'DROP'
+    option output 'ACCEPT'
+    option forward 'ACCEPT'
+    option mtu_fix '1'
+    option wan '0'
+
+config zone 'hotspot'
+    option name 'hotspot'
+    list network 'hotspot'
+    option input 'DROP'
+    option output 'ACCEPT'
+    option forward 'ACCEPT'
+    option mtu_fix '1'
+    option wan '0'
+
+config forwarding 'lan_wan'
+    option src  lan
+    option dest wan
+
+config forwarding 'lan_wwan'
+    option src  lan
+    option dest wwan
+
+config forwarding 'Guest_wan'
+    option src 'Guest'
+    option dest 'wan'
+
+config forwarding 'Guest_wwan'
+    option src 'Guest'
+    option dest 'wwan'
+
+# We need to accept udp packets on port 68,
+# see https://dev.openwrt.org/ticket/4108
+config rule 'Allow_DHCP_Renew_mgmt'
+    option name    Allow-DHCP-Renew-mgmt
+    option src     mgmt
+    option proto     udp
+    option dest_port   68
+    option target    ACCEPT
+    option family    ipv4
+
+config rule 'Allow_DHCP_Renew_wan'
+    option name    Allow-DHCP-Renew-wan
+    option src     wan
+    option proto     udp
+    option dest_port   68
+    option target    ACCEPT
+    option family    ipv4
+
+# Allow IPv4 ping
+config rule 'Allow_Ping_mgmt'
+    option name    Allow-Ping-mgmt
+    option src     mgmt
+    option proto     icmp
+    list   icmp_type   echo-request
+    option family    ipv4
+    option target    ACCEPT
+
+config rule 'Allow_Ping_wan'
+    option name    Allow-Ping-wan
+    option src     wan
+    option proto     icmp
+    list   icmp_type   echo-request
+    option family    ipv4
+    option target    ACCEPT
+
+
+# Allow DHCPv6 replies
+# see https://dev.openwrt.org/ticket/10381
+config rule 'Allow_DHCPv6'
+    option name    Allow-DHCPv6
+    option src     wan
+    option proto     udp
+    option src_ip    fc00::/6
+    option dest_ip     fc00::/6
+    option dest_port   546
+    option family    ipv6
+    option target    ACCEPT
+
+# Allow the 6rd packets, otherwise all dropped at wan interface
+config rule 'Allow_Encapsulated_IPv6'
+    option name 'Allow-Encapsulated-IPv6'
+    option src 'wan'
+    option proto '41'
+    option target 'ACCEPT'
+
+# Allow essential incoming IPv6 ICMP traffic
+config rule 'Allow_ICMPv6_Input'
+    option name    Allow-ICMPv6-Input
+    option src     wan
+    option proto     icmp
+    list   icmp_type   echo-request
+    list   icmp_type   echo-reply
+    list   icmp_type   destination-unreachable
+    list   icmp_type   packet-too-big
+    list   icmp_type   time-exceeded
+    list   icmp_type   bad-header
+    list   icmp_type   unknown-header-type
+    list   icmp_type   router-solicitation
+    list   icmp_type   neighbour-solicitation
+    list   icmp_type   router-advertisement
+    list   icmp_type   neighbour-advertisement
+    option limit     1000/sec
+    option family    ipv6
+    option target    ACCEPT
+
+# Allow essential forwarded IPv6 ICMP traffic
+config rule 'Allow_ICMPv6_Forward'
+    option name    Allow-ICMPv6-Forward
+    option src     wan
+    option dest    *
+    option proto     icmp
+    list   icmp_type   echo-request
+    list   icmp_type   echo-reply
+    list   icmp_type   destination-unreachable
+    list   icmp_type   packet-too-big
+    list   icmp_type   time-exceeded
+    list   icmp_type   bad-header
+    list   icmp_type   unknown-header-type
+    option limit     1000/sec
+    option family    ipv6
+    option target    ACCEPT
+
+config rule 'Deny_HTTPS_lan'
+    option name 'Deny-HTTPS-lan'
+    option src 'lan'
+    option proto 'tcp'
+    option dest_port '443'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_HTTP_lan'
+    option name 'Deny-HTTP-lan'
+    option dest 'lan'
+    option proto 'tcp'
+    option dest_port '8080'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_HTTPS_lan_v6'
+    option name 'Deny-HTTPS-lan-v6'
+    option src 'lan'
+    option proto 'tcp'
+    option dest_port '443'
+    option family 'ipv6'
+    option target 'DROP'
+
+config rule 'access_2_LAN_IP'
+    option name 'Only-allow-access-to-LAN-IP'
+    option src 'lan'
+    option proto 'tcp'
+    option family 'ipv4'
+    option extra '-m multiport --dports 80,22,8080,443,8443,9443 -m addrtype --limit-iface-in ! --dst-type LOCAL'
+    option target 'REJECT'
+
+config rule 'access_2_GUEST_IP'
+    option name 'Only-allow-access-to-GUEST-IP'
+    option src 'Guest'
+    option proto 'tcp'
+    option family 'ipv4'
+    option extra '-m multiport --dports 80,22,8080,443,8443,9443 -m addrtype --limit-iface-in ! --dst-type LOCAL'
+    option target 'REJECT'
+
+config rule 'Deny_Guest_lan_gateway'
+    option name 'Deny-Guest-lan-gateway'
+    option src 'Guest'
+    option proto 'all'
+    option dest_ip '192.168.1.254'
+    option family 'any'
+    option target 'DROP'
+
+config rule 'Deny_lan_2_Guest'
+    option name 'Deny-lan-2-Guest'
+    option src 'lan'
+    option dest 'Guest'
+    option proto 'all'
+    option target 'DROP'
+
+config rule 'Deny_Guest_2_lan'
+    option name 'Deny-Guest-2-lan'
+    option src 'Guest'
+    option dest 'lan'
+    option proto 'all'
+    option target 'DROP'
+
+config rule 'Access_Guest_ICMP'
+    option name              'Allow-Guest-ICMP'
+    option src               'Guest'
+    option proto             'icmp'
+    option target            'ACCEPT'
+    option family            'ipv4'
+    option dest_ip           '192.168.78.1'
+
+
+
+# Reject LAN access to TCP services on CPE WAN address(es)
+config rule 'Restrict_TCP_LAN_Input'
+	option name		 'Restrict-TCP-LAN-Input'
+	option src		 'lan'
+	option dest_ip		 '!lan'
+	option proto		 'tcp'
+	option family		 'ipv4'
+	option extra		 '-m mark --mark 0/0x9000000' # exclude intercepted traffic
+	option target		 'REJECT'
+
+# include a file with users custom iptables rules
+config include
+    option path    /etc/firewall.user
+    option reload '1'
+
+config include 'tchext_restart'
+    option type    'script'
+    option path    '/lib/functions/firewall-restart-ext-tch.sh'
+
+config include 'tchext'
+    option type    'script'
+    option path    '/lib/functions/firewall-ext-tch.sh'
+    option reload    '1'
+
+config cone 'PSandXBoxLive1'
+    option name    'PS and XBox Live 1'
+    option src     'wan'
+#   option src_dip   '_SET_BY_CWMP_SCRIPT_'
+    option dest_port   '88'
+
+config cone 'PSandXBoxLive2'
+    option name    'PS and XBox Live 2'
+    option src     'wan'
+#   option src_dip   '_SET_BY_CWMP_SCRIPT_'
+    option dest_port   '3074:3658'
+
+config cone 'PSandXBoxLive3'
+    option name    'PS and XBox Live 3'
+    option src     'wan'
+#   option src_dip   '_SET_BY_CWMP_SCRIPT_'
+    option dest_port   '10070'
+
+config include 'tod'
+    option type    'script'
+    option path    '/lib/functions/tod.sh'
+    option reload    '1'
+
+config include 'intercept'
+    option type    'script'
+    option path    '/usr/lib/intercept/firewall.sh'
+
+config fwconfig 'fwconfig'
+    option defaultoutgoing_lax 'ACCEPT'
+    option defaultoutgoing_normal 'ACCEPT'
+    option defaultoutgoing_high 'DROP'
+    option defaultoutgoing_user 'DROP'
+    option defaultincoming_lax 'REJECT'
+    option defaultincoming_normal 'DROP'
+    option defaultincoming_high 'DROP'
+    option defaultincoming_user 'DROP'
+    option level 'normal'
+
+config rulesgroup 'pinholerules'
+    option enabled     '1'
+    option name    'FW rules for opening pinholes'
+    option type    'pinholerule'
+
+config redirectsgroup 'userredirects'
+    option enabled     '1'
+    option name    'FW redirects defined by the user'
+    option type    'userredirect'
+
+config redirectsgroup 'dmzredirects'
+    option enabled     '0'
+    option name    'FW redirects for the DMZ functionality'
+    option type    'dmzredirect'
+
+config dmzredirect 'dmzredirect'
+    option name    'DMZ rule'
+    option src     'wan'
+    option dest    'lan'
+    option family  'ipv4'
+    option target  'DNAT'
+    option proto   '!icmp'
+
+config rule 'SpeedTest_Allow_8888'
+    option name 'SpeedTest_Allow_8888'
+    option src 'wan'
+    option dest_port '8888'
+    option target 'ACCEPT'
+
+config rule 'SpeedTest_Allow_7548'
+    option name 'SpeedTest_Allow_7548'
+    option src 'wan'
+    option dest_port '7548'
+    option target 'ACCEPT'
+
+config dmzredirect 'dmzredirect_Guest'
+    option name 'DMZ rule Guest'
+    option src 'wan'
+    option dest 'Guest'
+    option family 'ipv4'
+    option target 'DNAT'
+    option proto '!icmp'
+
+config rule 'Deny_SIP_LAN_1'
+    option name 'Deny-Lan-SIP-1'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.48.64/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_2'
+    option name 'Deny-Lan-SIP-2'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.5.192/28'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_3'
+    option name 'Deny-Lan-SIP-3'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.49.64/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_4'
+    option name 'Deny-Lan-SIP-4'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.1.128/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_5'
+    option name 'Deny-Lan-SIP-5'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.30.160/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_6'
+    option name 'Deny-Lan-SIP-6'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.0.96/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_7'
+    option name 'Deny-Lan-SIP-7'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.30.48/28'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_8'
+    option name 'Deny-Lan-SIP-8'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.252.48.83'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_LAN_9'
+    option name 'Deny-Lan-SIP-9'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.252.47.68'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_1'
+    option name 'Deny-Guest-SIP-1'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.48.64/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_2'
+    option name 'Deny-Guest-SIP-2'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.5.192/28'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_3'
+    option name 'Deny-Guest-SIP-3'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.49.64/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_4'
+    option name 'Deny-Guest-SIP-4'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.1.128/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_5'
+    option name 'Deny-Guest-SIP-5'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.30.160/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_6'
+    option name 'Deny-Guest-SIP-6'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.0.96/27'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_7'
+    option name 'Deny-Guest-SIP-7'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.247.30.48/28'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_8'
+    option name 'Deny-Guest-SIP-8'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.252.48.83'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'Deny_SIP_Guest_9'
+    option name 'Deny-Guest-SIP-9'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option dest_ip '10.252.47.68'
+    option family 'ipv4'
+    option target 'DROP'
+
+config rule 'redirectdmz'
+    option name    'rule DMZ'
+    option src     'lan'
+    option dest    'wan'
+    option target  'ACCEPT'
+    option enabled '1'
+
+config ipset wanapi_ipset
+    option external wanapi_ipset
+    option family ipv4
+    option match src_ip
+    option storage hash
+    option enabled '0'
+
+config redirect wanapi
+    option src wan
+    option src_dport 8443
+    option proto tcp
+    option dest_port 443
+    option ipset wanapi_ipset
+
+config redirect 'SNAT_wan_zone'
+    option enabled '0'
+    option name 'SNAT_wan_zone'
+    option src 'lan'
+    option src_dip '_SET_BY_CWMP_SCRIPT_'
+    option dest 'wan'
+    option proto 'all'
+    option target 'SNAT'
+
+config redirect 'SNAT_RADIUS'
+    option name 'SNAT_RADIUS'
+    option proto 'udp'
+    option dest 'mgmt'
+    option dest_port '1812-1813'
+    option src_dip '_SET_BY_CWMP_SCRIPT_'
+    option enabled '0'
+    option target 'SNAT'
+
+config redirect 'SNAT_wan_zone_guest'
+    option name 'SNAT_wan_zone_guest'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option target 'SNAT'
+    option enabled '0'
+    option src_dip '_SET_BY_CWMP_SCRIPT_'
+
+config rule 'MARK_CPE_DNSQUERY_SRCIP'
+    option enabled '0'
+    option name 'MARK_CPE_DNSQUERY_SRCIP'
+    option dest_port '53'
+    option set_mark '0x10000000/0xf0000000'
+    option target 'MARK'
+
+config rule 'MARK_SPEEDTEST_DATA_SRCIP'
+    option enabled '0'
+    option name 'MARK_SPEEDTEST_DATA_SRCIP'
+    option proto 'all'
+    option extra '-m mark --mark 0x7000/0x7800'
+    option set_mark '0x10000000/0xf0000000'
+    option target 'MARK'
+
+config rule 'MARK_DATA_SRCIP'
+    option enabled '0'
+    option name 'MARK_DATA_SRCIP'
+    option proto 'all'
+    option extra '-m mark --mark 0xf800/0xf800'
+    option set_mark '0x10000000/0xf0000000'
+    option target 'MARK'
+
+config rule 'MARK_BULKDATA_SRCIP'
+    option enabled '0'
+    option name 'MARK_BULKDATA_SRCIP'
+    option dest_port '24224'
+    option set_mark '0x10000000/0xf0000000'
+    option target 'MARK'
+
+config rule 'MARK_LAN_TO_WAN'
+    option enabled  '0'
+    option name     'MARK_LAN_TO_WAN'
+    option src      'lan'
+    option proto    'all'
+    option set_mark '0x10000000/0xf0000000'
+    option device   'br-lan'
+    option target   'MARK'
+
+config rule 'MARK_WAN_TO_LAN'
+    option enabled  '0'
+    option name     'MARK_WAN_TO_LAN'
+    option src      'wan'
+    option dest_ip  '_SET_BY_CWMP_SCRIPT_'
+    option proto    'all'
+    option set_mark '0x10000000/0xf0000000'
+    option target   'MARK'
+
+config rule 'MARK_GUEST_TO_WAN'
+    option enabled '0'
+    option name 'MARK_GUEST_TO_WAN'
+    option src 'Guest'
+    option proto 'all'
+    option set_mark '0x10000000/0xf0000000'
+    option device 'wl0_2'
+    option target 'MARK'
+
+config rule 'MARK_WWAN_TO_LAN'
+    option enabled  '0'
+    option name     'MARK_WWAN_TO_LAN'
+    option src      'wan'
+    option proto    'all'
+    option set_mark '0x10000000/0xf0000000'
+    option target   'MARK'
+    option device   'wwan0'
+
+config rulesgroup 'normalrules'
+    option enabled     '1'
+    option name    'FW rules for normal level'
+    option type    'normalrule'
+
+config rulesgroup 'laxrules'
+    option enabled     '0'
+    option name    'FW rules for lax level'
+    option type    'laxrule'
+
+config rulesgroup 'highrules'
+    option enabled     '0'
+    option name    'FW rules for high level'
+    option type    'highrule'
+
+config rulesgroup 'userrules'
+    option enabled     '0'
+    option name    'FW rules for user level'
+    option type    'userrule'
+
+config rulesgroup 'defaultrules'
+    option enabled     '1'
+    option name    'FW rules for default behavior'
+    option type    'defaultrule'
+
+config normalrule 'Normal_Allow_Incoming_IPv6'
+    option src 'wan'
+    option dest 'lan'
+    option family 'ipv6'
+    option name 'Allow incoming IPv6 when firewall off'
+    option target 'ACCEPT'
+
+config userrule 'High_HTTP'
+    option name    HTTP
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   80
+    option target    ACCEPT
+
+config userrule 'High_HTTPS'
+    option name    HTTPS
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   443
+    option target    ACCEPT
+
+config userrule 'High_SMTP'
+    option name    SMTP
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   25
+    option target    ACCEPT
+
+config userrule 'High_POP3'
+    option name    POP3
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   110
+    option target    ACCEPT
+
+config userrule 'High_IMAP'
+    option name    IMAP
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   445
+    option target    ACCEPT
+
+config userrule 'High_IMAP4'
+    option name    IMAP4
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   143
+    option target    ACCEPT
+
+config userrule 'High_IMAP4_SSL'
+    option name    IMAP4_SSL
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   993
+    option target    ACCEPT
+
+config userrule 'High_POP3_SSL'
+    option name    POP3_SSL
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   995
+    option target    ACCEPT
+
+config userrule 'High_SMTP_SSL'
+    option name    SMTP_SSL
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   465
+    option target    ACCEPT
+
+config userrule 'High_DNS_TCP'
+    option name    DNS_TCP
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   53
+    option target    ACCEPT
+
+config userrule 'High_DNS_UDP'
+    option name    DNS_UDP
+    option src     lan
+    option dest    wan
+    option proto     udp
+    option dest_port   53
+    option target    ACCEPT
+
+config userrule 'High_SMTP_587'
+    option name    SMTP_587
+    option src     lan
+    option dest    wan
+    option proto     tcp
+    option dest_port   587
+    option target    ACCEPT
+
+config userrule 'High_PING'
+    option name    PING
+    option src     lan
+    option dest     wan
+    option proto     icmp
+    list   icmp_type   echo-request
+    option family    ipv4
+    option target    ACCEPT
+
+config userrule 'Guest_HTTP'
+    option name 'HTTP'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '80'
+    option target 'ACCEPT'
+
+config userrule 'Guest_HTTPS'
+    option name 'HTTPS'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '443'
+    option target 'ACCEPT'
+
+config userrule 'Guest_SMTP'
+    option name 'SMTP'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '25'
+    option target 'ACCEPT'
+
+config userrule 'Guest_POP3'
+    option name 'POP3'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '110'
+    option target 'ACCEPT'
+
+config userrule 'Guest_IMAP'
+    option name 'IMAP'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '445'
+    option target 'ACCEPT'
+
+config defaultrule 'defaultoutgoing'
+    option name 'Default action for outgoing NAT'
+    option src 'lan'
+    option dest 'wan'
+    option proto 'all'
+    option target 'ACCEPT'
+
+config defaultrule 'defaultoutgoing_Guest'
+    option name 'Default action for outgoing NAT for Guest'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'all'
+    option target 'ACCEPT'
+
+config helper 'help_ftp'
+    option helper    ftp
+    option dest_port   21
+    option proto     tcp
+
+config helper 'help_tftp'
+    option helper    tftp
+    option dest_port   69
+    option proto     udp
+
+config helper 'help_snmp'
+    option helper    snmp
+    option family    ipv4
+    option dest_port   161
+    option proto     udp
+
+config helper 'help_pptp'
+    option helper    pptp
+    option family    ipv4
+    option dest_port   1723
+    option proto     tcp
+
+config helper 'help_sip'
+    option helper    sip
+    option dest_port   5060
+    option proto     tcpudp
+    option enable   1
+
+config helper 'help_amanda'
+    option helper    amanda
+    option dest_port   10080
+    option proto     udp
+
+config helper 'help_rtsp'
+    option helper    rtsp
+    option dest_port   554
+    option family    ipv4
+    option proto     tcp
+
+config rule 'Allow_ACS_1'
+    option name 'Allow-ACS-1'
+    option src 'wan'
+    option src_ip '30.253.131.0/24'
+    option proto 'tcp'
+    option dest_port '51050'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_ACS_2'
+    option name 'Allow-ACS-2'
+    option src 'wan'
+    option src_ip '59.0.121.0/24'
+    option proto 'tcp'
+    option dest_port '51050'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_1'
+    option name 'Allow-restricted-sip-from-wan-again-1'
+    option src 'wan'
+    option src_ip '30.253.253.68/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_2'
+    option name 'Allow-restricted-sip-from-wan-again-2'
+    option src 'wan'
+    option src_ip '10.252.47.36/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_3'
+    option name 'Allow-restricted-sip-from-wan-again-3'
+    option src 'wan'
+    option src_ip '10.247.5.196/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_4'
+    option name 'Allow-restricted-sip-from-wan-again-4'
+    option src 'wan'
+    option src_ip '10.247.1.132/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_5'
+    option name 'Allow-restricted-sip-from-wan-again-5'
+    option src 'wan'
+    option src_ip '10.247.0.100/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_6'
+    option name 'Allow-restricted-sip-from-wan-again-6'
+    option src 'wan'
+    option src_ip '10.247.30.52/24'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_7'
+    option name 'Allow-restricted-sip-from-wan-again-7'
+    option src 'wan'
+    option src_ip '10.247.0.0/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_8'
+    option name 'Allow-restricted-sip-from-wan-again-8'
+    option src 'wan'
+    option src_ip '10.247.1.0/27'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_9'
+    option name 'Allow-restricted-sip-from-wan-again-9'
+    option src 'wan'
+    option src_ip '10.247.48.0/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_10'
+    option name 'Allow-restricted-sip-from-wan-again-10'
+    option src 'wan'
+    option src_ip '10.247.48.64/27'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_11'
+    option name 'Allow-restricted-sip-from-wan-again-11'
+    option src 'wan'
+    option src_ip '10.247.30.96/27'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_12'
+    option name 'Allow-restricted-sip-from-wan-again-12'
+    option src 'wan'
+    option src_ip '10.247.30.128/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_13'
+    option name 'Allow-restricted-sip-from-wan-again-13'
+    option src 'wan'
+    option src_ip '10.247.49.0/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_14'
+    option name 'Allow-restricted-sip-from-wan-again-14'
+    option src 'wan'
+    option src_ip '10.247.49.64/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_15'
+    option name 'Allow-restricted-sip-from-wan-again-15'
+    option src 'wan'
+    option src_ip '10.247.30.96/27'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_16'
+    option name 'Allow-restricted-sip-from-wan-again-16'
+    option src 'wan'
+    option src_ip '10.247.30.128/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_17'
+    option name 'Allow-restricted-sip-from-wan-again-17'
+    option src 'wan'
+    option src_ip '10.247.49.0/26'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Allow_restricted_sip_18'
+    option name 'Allow-restricted-sip-from-wan-again-18'
+    option src 'wan'
+    option src_ip '10.247.49.64/27'
+    option target 'ACCEPT'
+    option family 'ipv4'
+
+config rule 'Access_Guest_DHCP'
+    option name              'Allow-Guest-DHCP'
+    option src               'Guest'
+    option proto             'udp'
+    option dest_port         '67'
+    option target            'ACCEPT'
+    option family            'ipv4'
+
+config rule 'Access_Guest_DNS'
+    option name              'Allow-Guest-DNS'
+    option src               'Guest'
+    option dest              'wan'
+    option proto             'udp'
+    option dest_port         '53'
+    option target            'ACCEPT'
+    option family            'ipv4'
+
+config rule 'Access_Guest_DNS_input'
+    option name              'Allow-Guest-DNS'
+    option src               'Guest'
+    option proto             'udp'
+    option dest_port         '53'
+    option target            'ACCEPT'
+    option family            'ipv4'
+
+config rule 'Access_Guest_ICMPv6'
+    option name              'Allow-Guest-ICMPv6'
+    option src               'Guest'
+    option proto             'icmp'
+    list   icmp_type         'echo-request'
+    list   icmp_type         'echo-reply'
+    list   icmp_type         'destination-unreachable'
+    list   icmp_type         'packet-too-big'
+    list   icmp_type         'time-exceeded'
+    list   icmp_type         'bad-header'
+    list   icmp_type         'unknown-header-type'
+    list   icmp_type         'router-solicitation'
+    list   icmp_type         'neighbour-solicitation'
+    list   icmp_type         'router-advertisement'
+    list   icmp_type         'neighbour-advertisement'
+    option limit             '1000/sec'
+    option family            'ipv6'
+    option target            'ACCEPT'
+
+config rule 'Access_Guest_Browser'
+    option name 'Access-Guest-Browser'
+    option src 'Guest'
+    option dest 'wan'
+    option proto 'tcp'
+    option dest_port '443 80'
+    option target 'ACCEPT'
+
+config redirect 'SNAT_PING'
+    option name 'SNAT_PING'
+    option dest 'mgmt'
+    option proto 'icmp'
+    option target 'SNAT'
+    option enabled '1'
+    option src_dip ' _SET_BY_CWMP_SCRIPT_ '

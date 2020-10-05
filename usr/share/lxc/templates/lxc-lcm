@@ -1,0 +1,372 @@
+#!/usr/bin/env lua
+local lfs = require("lfs")
+
+--A whitelist of the packages we want in our container
+local package_list = {
+"base-files",
+"busybox", -- Added on top of minimal
+"flock", -- Added on top of minimal
+--"fstools", -- New dependency from base-files
+--"fwtool", -- New dependency from base-files
+"jshn",
+"jsonfilter",
+"libblobmsg-json",
+"libc",
+"libgcc",
+"libjson-c",
+"libjson-script",
+"liblua",
+"libnl-tiny",
+"libpthread",
+"librt",
+"libssp",
+"libstdcpp",
+"libubox",
+"libubus",
+"libuci",
+"lua",
+"netifd",
+"procd",
+"opkg",
+"ubox",
+"ubus",
+"ubusd",
+--"uclient-fetch", -- New dependency from opkg
+}
+
+local blacklist = {
+  "/etc/boards", -- No custo requirements
+  "/etc/board%.d", -- No need to detect the board inside the container
+  "/etc/uci%-defaults", -- No firstboot needed
+  "/etc/rc%.button", -- A container has no buttons
+  "/init", -- Will be in the container config
+  "/var", -- Will be in the container config
+  "/etc/init%.d", -- Container will install its own init.d scripts
+  "/rom", -- Container doesn't have to be aware of /rom
+  "/etc/wlan", -- Container doesn't have to worry about wlan
+  "/etc/fstab", -- This information should be in the container config
+  "/etc/localtime",
+  "/etc/TZ", -- Not used by glibc
+  "/lib/preinit", -- No preinit needed inside the container
+  "/etc/opkg/keys", -- No opkg keys needed inside the container
+  "/lib/upgrade", -- Containers will not be able to upgrade dynamically,
+  "/sbin/init", -- We provide our own init
+  "/etc/group", -- We don't want to share this sensitive information with the container
+  "/etc/passwd", -- We don't want to share this sensitive information with the container
+  "/etc/openwrt_version", -- Incorrect information (contains wrong version info)
+  "/etc/openwrt_release", -- Incorrect information (contains wrong release info)
+  "/usr/lib/os%-release", -- Incorrect information (contains wrong release info)
+  "/etc/os%-release", -- Incorrect information (contains wrong release info)
+  "/lib/brcm63xx_tch%.sh", -- Technicolor specific
+  "/etc/rdpa_init%.sh", -- Technicolor specific
+  "/etc/opkg/distfeeds%.conf", -- No opkg feeds used in our container
+  "/etc/opkg/customfeeds%.conf", -- No opkg feeds used in our container
+  "/bin/passwd", -- Currently we don't allow to change user passwords inside the container
+}
+
+local opkg_info_dir = "/usr/lib/opkg/info/"
+local opkg_status_dir = "/usr/lib/opkg/"
+
+local function file_allowed(file_path)
+  for _, pattern in ipairs(blacklist) do
+    if file_path:match("^"..pattern) then
+      return false
+    end
+  end
+  return true
+end
+
+local filelist
+
+local function generate_filelist()
+  if filelist then
+    return filelist
+  end
+  filelist = {}
+  -- Translate the package list to a file list
+  for _, package in ipairs(package_list) do
+    -- First verify the package is installed
+    local f = io.open(opkg_info_dir..package..".list", "r")
+    if not f then
+      error("Package "..package.." is not installed!")
+    end
+    for line in f:lines() do
+      if file_allowed(line) then
+        filelist[#filelist + 1] = line
+      end
+    end
+    f:close()
+  end
+  return filelist
+end
+
+local function add_to_dirlist(dirlist, entry)
+  local _, occur = entry:gsub("/", "")
+  if occur > 1 then
+    -- Add parent directories first
+    add_to_dirlist(dirlist, entry:match("^(.+)/[^/]+$"))
+  end
+  if not dirlist[entry] then
+    dirlist[#dirlist + 1] = entry
+    dirlist[entry] = true
+  end
+end
+
+local function create_fstree(rootfs, name)
+  local filelist = generate_filelist()
+  local dirlist = {}
+  -- Prepopulate dirlist with some standard requirements
+  add_to_dirlist(dirlist, opkg_info_dir:match("(.*)/$"))
+  add_to_dirlist(dirlist, "/dev") -- TODO check if these can be auto-created by the LXC config
+  add_to_dirlist(dirlist, "/etc/init.d") -- Explicitely re-add this directory as we will want to install our own init scripts
+  add_to_dirlist(dirlist, "/etc/rc.d") -- Explicitely re-add this directory as we will want to install our own init scripts
+  add_to_dirlist(dirlist, "/proc") -- TODO check if these can be auto-created by the LXC config
+  add_to_dirlist(dirlist, "/sys") -- TODO check if these can be auto-created by the LXC config
+  add_to_dirlist(dirlist, "/tmp") -- TODO check if these can be auto-created by the LXC config
+  add_to_dirlist(dirlist, "/var/lock") -- Needed by opkg to perform an install
+  add_to_dirlist(dirlist, "/tmp/lcm_"..name) -- Needed by LCM to download new packages to 
+  for _, file in ipairs(filelist) do
+    if lfs.attributes(file, "mode") ~= "file" then
+      error(file.." is not a file")
+    end
+    file = file:match("^(.+)/[^/]+$")
+    add_to_dirlist(dirlist, file)
+  end
+  for _, dir in ipairs(dirlist) do
+    local ok, errmsg = lfs.mkdir(rootfs..dir)
+    if not ok then
+      error(errmsg)
+    end
+  end
+end
+
+local function copy_list_file(rootfs, package)
+  local orig_info = io.open(opkg_info_dir..package..".list", "r")
+  if not orig_info then
+    error("Unable to read opkg list info for " .. package)
+  end
+  local lxc_info = io.open(rootfs..opkg_info_dir..package..".list", "w")
+  if not lxc_info then
+    orig_info:close()
+    error("Unable to write opkg list info for " .. package)
+  end
+  for file in orig_info:lines() do
+    if file_allowed(file) then
+      lxc_info:write(file.."\n")
+    end
+  end
+  lxc_info:close()
+  orig_info:close()
+end
+
+local function copy_control_file(rootfs, package)
+  local orig_info = io.open(opkg_info_dir..package..".control", "r")
+  if not orig_info then
+    error("Unable to read opkg config info for " .. package)
+  end
+  local lxc_info = io.open(rootfs..opkg_info_dir..package..".control", "w")
+  if not lxc_info then
+    orig_info:close()
+    error("Unable to write opkg config info for " .. package)
+  end
+  local essential_found = false
+  for line in orig_info:lines() do
+    if line:match("^Essential: yes$") then
+      essential_found = true
+    end
+    lxc_info:write(line.."\n")
+  end
+  if not essential_found then
+    lxc_info:write("Essential: yes\n")
+  end
+  lxc_info:close()
+  orig_info:close()
+end
+
+local function populate_status_file(rootfs, package)
+  local orig_info = io.open(opkg_status_dir.."status", "r")
+  if not orig_info then
+    error("Unable to read status file")
+  end
+  local lxc_info = io.open(rootfs..opkg_status_dir.."status", "a+")
+  if not lxc_info then
+    orig_info:close()
+    error("Unable to write opkg status file")
+  end
+  local package_started = false
+  local essential_found = false
+  for line in orig_info:lines() do
+    if package_started then
+      if line:match("^Essential: yes$") then
+        essential_found = true
+      end
+      if line:match("^%s*$") then
+        if not essential_found then
+          lxc_info:write("Essential: yes\n")
+          essential_found = false
+        end
+        package_started = false
+      end
+      lxc_info:write(line.."\n")
+    else
+      if line == "Package: "..package then
+        package_started = true
+        lxc_info:write(line.."\n")
+      end
+    end
+  end
+  lxc_info:close()
+  orig_info:close()
+end
+
+local function populate_opkg_info(rootfs)
+  for _, package in ipairs(package_list) do
+    copy_list_file(rootfs, package)
+    copy_control_file(rootfs, package)
+    populate_status_file(rootfs, package)
+  end
+end
+
+local function chmod(perm, file)
+  os.execute("chmod " .. perm .. " " .. file)
+end
+
+local function install_lcmbase(rootfs, name)
+  create_fstree(rootfs, name)
+  chmod("755", rootfs)
+  populate_opkg_info(rootfs)
+
+  -- Define a root user
+  local f = io.open(rootfs.."/etc/passwd", "w")
+  if not f then
+    error("Could not create /etc/passwd")
+  end
+  f:write("root:x:0:0:root:/root:/bin/sh\n")
+  f:close()
+
+  -- Define a root group
+  f = io.open(rootfs.."/etc/group", "w")
+  if not f then
+    error("Could not create /etc/group")
+  end
+  f:write("root:x:0:root\n")
+  f:close()
+
+  -- Create a startup script
+  f = io.open(rootfs.."/etc/init.d/rcS", "w")
+  if not f then
+    error("Could not create /etc/init.d/rcS")
+  end
+  f:write([[
+#!/bin/sh
+
+run_scripts() {
+        for i in /etc/rc.d/$1*; do
+                [ -x $i ] && $i $2 2>&1
+        done
+}
+
+run_scripts "$1" "$2" &
+]])
+  f:close()
+  chmod("744", rootfs.."/etc/init.d/rcS")
+
+  f = io.open(rootfs.."/sbin/init", "w")
+  if not f then
+    error("Could not create /sbin/init")
+  end
+  f:write([[
+#!/bin/sh
+
+/etc/init.d/rcS S boot
+
+trap "{ run_scripts K shutdown }" SIGPWR
+
+while true; do
+  # Doing nothing
+  sleep 10
+done
+]])
+  f:close()
+  chmod("755", rootfs.."/sbin/init")
+  return true
+end
+
+local lxc_template_config="/usr/share/lxc/config/lcm.config"
+
+local function export_shared_config(rootfs)
+  local f = io.open(lxc_template_config, "w")
+  local filelist = generate_filelist()
+  table.sort(filelist)
+  for _, file in ipairs(filelist) do
+    f:write("lxc.mount.entry = "..file.." "..file:match("^/(.*)").." none ro,bind,create=file 0 0\n")
+  end
+  f:close()
+  return true
+end
+
+local function create_configuration(path, rootfs, name)
+  local f = io.open(path.."/config", "w")
+  if not f then
+    error("Unable to create config file for "..path)
+  end
+  f:write("lxc.rootfs.path = \""..rootfs.."\"\n")
+  f:write("lxc.include = \""..lxc_template_config.."\"\n")
+  f:write("lxc.mount.entry = /tmp/lcm_" .. name .. " tmp/lcm_" .. name .. " none ro,bind,create=dir 0 0\n")
+  f:write("lxc.signal.halt = SIGPWR\n")
+  f:write("lxc.signal.reboot = SIGTERM\n")
+  f:write("lxc.uts.name = \""..name.."\"\n")
+  f:write("lxc.cap.drop = sys_module mac_admin mac_override sys_time\n")
+  f:write("lxc.mount.auto = cgroup:mixed proc:mixed sys:mixed\n")
+  f:close()
+  return true
+end
+
+local function print_usage()
+  print([[
+LXC LCM openwrt image builder
+
+Special arguments:
+[ -h | --help ]: Print this help message and exit.
+
+LXC internal arguments (do not pass manually!):
+[ -n | --name <name> ]: The container name
+[ -p | --path <path> ]: The path to the container
+[ --rootfs <rootfs> ]: The path to the container's rootfs
+]])
+end
+
+local function run(args)
+  local path, rootfs, name
+  for k,v in ipairs(args) do
+    if v:match("%-h") or v:match("%-%-help") then
+      print_usage()
+      return
+    elseif v:match("%-p=") then
+      path=v:match("%-p=(.+)")
+    elseif v:match("%-%-path=") then
+      path=v:match("%-%-path=(.+)")
+    elseif v:match("%-n=") then
+      name=v:match("%-n=(.+)")
+    elseif v:match("%-%-name=") then
+      name=v:match("%-%-name=(.+)")
+    elseif v:match("%-%-rootfs=") then
+      rootfs=v:match("%-%-rootfs=(.+)")
+    end
+  end
+  -- Check that we have all variables we need
+  if not name or not path or not rootfs then
+    error("Please pass the name, path, and rootfs for the container")
+  end
+  if not install_lcmbase(rootfs, name) then
+    error("Failed to install rootfs")
+  end
+  if not export_shared_config(rootfs) then
+    error("Unable to export shared config")
+  end
+  if not create_configuration(path, rootfs, name) then
+    error("Failed to write config file")
+  end
+end
+
+run({...})

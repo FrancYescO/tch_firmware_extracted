@@ -1,0 +1,153 @@
+-- Manually generated
+local Multi_X_000E50_ALG_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Object to customize the ALG",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        description = "Name of the Service"
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables or disables the corresponding ALG"
+      },
+      DestPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        default = "0",
+        description = "Destination port of the ALG"
+      },
+      Protocol = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP"
+        },
+        description = "Protocol of the ALG",
+      },
+      Interface = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Interface for the Service"
+      },
+    },
+  }
+}
+
+local upper = string.upper
+local uciHelper = mapper("ucihelper")
+local firewallBinding =  { config = "firewall" }
+local configChanged
+local network = require("transformer.shared.common.network")
+local getMappingType = network.getMappingType
+
+local paramMap = {
+  Name = "helper",
+  Enable = "enable",
+  DestPort = "dest_port",
+  Protocol = "proto",
+  Interface = "intf",
+}
+
+local paramDefaults = {
+  Enable = "1",
+  DestPort = "0",
+}
+
+local function getFromUci(param, key)
+  firewallBinding.sectionname = key
+  firewallBinding.option = paramMap[param]
+  firewallBinding.default = paramDefaults[param]
+  return uciHelper.get_from_uci(firewallBinding)
+end
+
+local function setOnUci(_, param, value, key)
+  firewallBinding.sectionname = key
+  firewallBinding.option = paramMap[param]
+  uciHelper.set_on_uci(firewallBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getInterface(mapping, key, interface)
+  local path
+  mapping._section = getMappingType(mapping)
+  if interface ~= "" then
+    if mapping._section == "device2" then
+      path = resolve("Device.IP.Interface.{i}.", interface)
+    else
+      local lanInterfaces = network.getLanInterfaces()
+      if lanInterfaces[interface] then
+        path = resolve('InternetGatewayDevice.LANDevice.{i}.', interface)
+      else
+        path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", interface)
+      end
+    end
+  end
+  return path or ""
+end
+
+Multi_X_000E50_ALG_i_.entries = function()
+  local entries = {}
+  firewallBinding.sectionname = "helper"
+  uciHelper.foreach_on_uci(firewallBinding, function(s)
+    entries[#entries + 1] = s[".name"]
+  end)
+  return entries
+end
+
+Multi_X_000E50_ALG_i_.get = function(mapping, param, key)
+  if param == "Name" or param == "Protocol" then
+    return upper(getFromUci(param, key))
+  elseif param == "Interface" then
+    return getInterface(mapping, key, getFromUci(param , key))
+  end
+  return getFromUci(param, key)
+end
+
+Multi_X_000E50_ALG_i_.getall = function(mapping, key)
+  firewallBinding.sectionname = key
+  local allValues = uciHelper.getall_from_uci(firewallBinding)
+  return {
+    Name = upper(allValues.helper or ""),
+    Enable = allValues.enable or "1",
+    DestPort = allValues.dest_port or "0",
+    Protocol = upper(allValues.proto or ""),
+    Interface = getInterface(mapping, key, allValues.intf),
+  }
+end
+
+Multi_X_000E50_ALG_i_.set = setOnUci
+
+Multi_X_000E50_ALG_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(firewallBinding)
+  end
+  configChanged = false
+end
+
+Multi_X_000E50_ALG_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(firewallBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_ALG_i_, "#ROOT", {"Device.Services.X_BELGACOM_ALG", "Device.Services.X_000E50_ALG", "InternetGatewayDevice.X_000E50_ALG" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

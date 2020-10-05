@@ -1,0 +1,251 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_IP_Interface_i_IPv6Prefix_i_ = {
+  objectType = {
+    name = "Device.IP.Interface.{i}.IPv6Prefix.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "IPv6PrefixNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error",
+        },
+        default = "Disabled",
+      },
+--[[ TODO
+      PrefixStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Preferred",
+          "Deprecated",
+          "Invalid",
+          "Inaccessible",
+          "Unknown",
+        },
+        default = "Invalid",
+      },
+--]]
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Prefix = {
+        access = "readOnly", --Setting of Prefix will disable lan, so cannot implement set functionality
+        type = "string",
+        default = "",
+      },
+--[[ TODO
+      Origin = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "AutoConfigured",
+          "PrefixDelegation",
+          "RouterAdvertisement",
+          "WellKnown",
+          "Static",
+          "Child",
+        },
+        default = "Static",
+      },
+      StaticType = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Static",
+          "Inapplicable",
+          "PrefixDelegation",
+          "Child",
+        },
+        default = "Static",
+      },
+      ParentPrefix = {
+        access = "readWrite",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.IPv6Prefix.{i}.",
+        default = "",
+      },
+      ChildPrefixBits = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      OnLink = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Autonomous = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+--]]
+      PreferredLifetime = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "dateTime",
+        default = "9999-12-31T23:59:59Z",
+      },
+      ValidLifetime = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "dateTime",
+        default = "9999-12-31T23:59:59Z",
+      },
+      X_000E50_Prefix = {
+        access = "readWrite",
+        type = "string",
+        description = "Allows to configure Prefix for the Interface",
+        default = "",
+      },
+    }
+  }
+}
+
+local next, os, ipairs = next, os, ipairs
+
+local dmordering = require 'transformer.shared.models.dmordering'
+local ipaddr = require 'transformer.shared.models.device2.ipaddr'
+local network = require 'transformer.shared.common.network'
+local uci_helper = mapper("ucihelper")
+local set_on_uci = uci_helper.set_on_uci
+local networkBinding = { config = "network" }
+local configChanged
+
+local function makeLifetimeAbsolute(now, lifetime)
+  lifetime = tonumber(lifetime)
+  if lifetime then
+    return now + lifetime
+  end
+end
+
+local prefixCache = {}
+
+local function getCachedPrefix(key, parent)
+	local prefixes = prefixCache[parent]
+	return prefixes and prefixes[key] or {}
+end
+
+Device_IP_Interface_i_IPv6Prefix_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  local prefixes = {}
+  local ubus_data = ipaddr.UbusInterfaceData()
+  local now = os.time()
+  for _, ifname in ipairs(dmordering.linksTo("network.interface", parentKey)) do
+    local prefixData = {}
+    local ubusStatus = ubus_data:get(ifname) or {}
+
+    if ubusStatus then
+      if ubusStatus["ipv6-prefix"] and next(ubusStatus["ipv6-prefix"]) then
+        prefixData =  ubusStatus["ipv6-prefix"]
+      elseif ubusStatus['ipv6-prefix-assignment'] and next(ubusStatus['ipv6-prefix-assignment']) then
+        prefixData =  ubusStatus["ipv6-prefix-assignment"]
+      end
+    end
+
+    for index, values in ipairs(prefixData) do
+      local key = index==1 and ifname or (ifname..'|'..index)
+      prefixes[key] = {
+        address = values.address,
+        preferred = makeLifetimeAbsolute(now, values.preferred),
+        valid = makeLifetimeAbsolute(now, values.valid),
+        mask=values.mask,
+        enable = true,
+      }
+      entries[#entries+1] = key
+    end
+  end
+  prefixCache[parentKey] = prefixes
+  return entries
+end
+
+local function getPrefix(prefix)
+  if prefix.address and prefix.mask then
+    return prefix.address .. "/" .. prefix.mask
+  end
+  return ""
+end
+
+local function setUciParam(section, paramName, value)
+  networkBinding.sectionname = section
+  networkBinding.option = paramName
+  set_on_uci(networkBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_IP_Interface_i_IPv6Prefix_i_.get = {
+  Enable = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.enable and "1" or "0"
+  end,
+  Status = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.enable and "Enabled" or "Disabled"
+  end,
+  Prefix = function(_, _, key, parent)
+    return getPrefix(getCachedPrefix(key, parent))
+  end,
+  PreferredLifetime = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return network.convertEpochToISO(prefix.preferred)
+  end,
+  ValidLifetime = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return network.convertEpochToISO(prefix.valid)
+  end,
+  X_000E50_Prefix = function(_, _, key, parent)
+    local prefix = getCachedPrefix(key, parent)
+    return prefix.mask and tostring(prefix.mask) or ""
+  end,
+}
+
+Device_IP_Interface_i_IPv6Prefix_i_.getall = function(_, key, parent)
+  local prefix = getCachedPrefix(key, parent)
+  return {
+    Enable = prefix.enable and "1" or "0",
+    Status = prefix.enable and "Enabled" or "Disabled",
+    Prefix = getPrefix(prefix),
+    PreferredLifetime = network.convertEpochToISO(prefix.preferred),
+    ValidLifetime = network.convertEpochToISO(prefix.valid),
+    X_000E50_Prefix = prefix.mask and tostring(prefix.mask) or "",
+  }
+end
+
+Device_IP_Interface_i_IPv6Prefix_i_.set = {
+  X_000E50_Prefix = function(mapping, param, value, key, parent)
+    setUciParam(parent, "ip6assign", value)
+    configChanged = true
+  end,
+}
+
+Device_IP_Interface_i_IPv6Prefix_i_.commit = function()
+  if configChanged then
+    uci_helper.commit(networkBinding)
+    configChanged = false
+  end
+end
+
+Device_IP_Interface_i_IPv6Prefix_i_.revert = function()
+  if configChanged then
+    uci_helper.revert(networkBinding)
+    configChanged = false
+  end
+end
+
+register(Device_IP_Interface_i_IPv6Prefix_i_)
