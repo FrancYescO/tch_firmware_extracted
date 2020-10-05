@@ -1,0 +1,88 @@
+#!/bin/sh
+
+rootfs_pivot() {
+    {
+	echo "switching to jffs2"
+	mount -o move /tmp/overlay /overlay 2>&-
+
+	# Check if any configuration need to be removed
+	rm -rf /overlay/*.remove_due_to_upgrade
+	parameter_conversion=1
+
+	# Check for RTFD
+	if [[ -L /overlay/remove_due_to_rtfd ]]; then
+		reset_bank=$(readlink /overlay/remove_due_to_rtfd)
+		echo "Applying reset to factory default to $reset_bank"
+		rm -rf $reset_bank
+		rm -f /overlay/remove_due_to_rtfd
+		parameter_conversion=0
+	fi
+
+	# Insert bank manager kernel module to get the booted bank
+	if [[ -f /lib/modules/$(uname -r)/bankmgr.ko ]]; then
+		if ! ( lsmod | grep bankmgr >/dev/null ); then
+			insmod bankmgr
+		fi
+
+		booted_bank=/overlay/$(cat /proc/banktable/booted)
+		passive_bank=/overlay/$(cat /proc/banktable/notbooted)
+
+		# Check if Homeware configuration is available on the active bank
+		if [[ -d $booted_bank ]]; then
+			echo "HOMEWARE_CONFIG_ON_ACTIVE_BANK"
+
+		# Check if Homeware configuration is available on the passive bank
+		elif [[ -d $passive_bank ]]; then
+			echo "HOMEWARE_CONFIG_ON_PASSIVE_BANK"
+			mkdir $booted_bank
+
+			# Check if configuration could be cleaned up (in case of config on root or legacy)
+			if [[ -d /overlay/etc/config ]]; then
+				rm -rf $(find /overlay -maxdepth 1 -path "/overlay/bank_*" -prune -o -path /overlay -o -print)
+			elif [[ -L /overlay/config-bank-lastboot ]]; then
+				# No legacy SW anymore, the legacy config can be erased
+				rm -rf $(readlink /overlay/config-bank-lastboot) /overlay/config-bank-lastboot
+			fi
+
+			if [[ $parameter_conversion == 1 ]]; then
+				# Indicate the source configuration for parameter conversion
+				ln -sfn $passive_bank /overlay/homeware_conversion
+			fi
+
+		# Check if Homeware configuration is available on root jffs2 partition
+		elif [[ -d /overlay/etc/config ]]; then
+			echo "HOMEWARE_CONFIG_ON_ROOT"
+			mkdir $booted_bank
+			if [[ $parameter_conversion == 1 ]]; then
+				ln -sfn /overlay /overlay/homeware_conversion
+			fi
+
+		# Check for legacy configuration
+		elif [[ -L /overlay/config-bank-lastboot ]]; then
+			if [[ -d /overlay/$(basename $(readlink /overlay/config-bank-lastboot)) ]]; then
+				echo "LEGACY_CONFIG"
+			fi
+
+		# no config found out, possibly running for the 1st time a BLI with an empty userfs
+		else
+			echo "NO_CONFIG_FOUND"
+		fi
+
+		if [[ ! -d $booted_bank ]]; then
+			mkdir $booted_bank
+		fi
+
+		echo "Dual bank, overlay on $booted_bank"
+		# Set up the overlay to use the correct user settings based on booted bank
+		fopivot $booted_bank /rom && pi_mount_skip_next=true
+
+	else
+		echo "Single bank, overlay on /"
+		# For single bank platform, we use the complete overlay
+		fopivot /overlay /rom && pi_mount_skip_next=true
+	fi
+	}
+}
+
+boot_hook_add preinit_mount_root rootfs_pivot
+
