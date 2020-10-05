@@ -1,0 +1,240 @@
+#!/usr/bin/env lua
+--[[
+/********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+** Copyright (c) 2017 -          Technicolor Delivery Technologies, SAS **
+** - All Rights Reserved                                                **
+** Technicolor hereby informs you that certain portions                 **
+** of this software module and/or Work are owned by Technicolor         **
+** and/or its software providers.                                       **
+** Distribution copying and modification of all such work are reserved  **
+** to Technicolor and/or its affiliates, and are not permitted without  **
+** express written authorization from Technicolor.                      **
+** Technicolor is registered trademark and trade name of Technicolor,   **
+** and shall not be used in any manner without express written          **
+** authorization from Technicolor                                       **
+*************************************************************************/
+--]]
+
+local lapp = require("pl.lapp")
+
+local ubus = require("ubus")
+local conn = ubus.connect()
+local pairs, ipairs, print = pairs, ipairs, print
+
+lapp.add_type("property",
+  function(s)
+    local k, v = s:match("([^=]+)=(.*)")
+    lapp.assert(k, "not a valid property definition")
+    return { name = k, value = v }
+  end
+)
+
+local function printf(fmt, ...)
+  io.write(fmt:format(...))
+end
+
+local function print_table(t, indent)
+  indent = indent or ""
+  if t.ID then
+    printf("%sID: %s\n", indent, t.ID)
+    t.ID = nil
+    indent = indent .. "  "
+  end
+  local sorted = {}
+  for k in pairs(t) do
+    sorted[#sorted + 1] = k
+  end
+  table.sort(sorted)
+  for _, k in ipairs(sorted) do
+    printf("%s%s: %s\n", indent, k, t[k])
+  end
+  printf("\n")
+end
+
+local function ubus_method_with_properties(method, args)
+  local properties = {}
+  local ubus_args = { properties = properties }
+  for _, property in ipairs(args.properties) do
+    properties[property.name] = property.value
+  end
+  local result = conn:call("lcm", method, ubus_args)
+  if result then
+    local indent = ""
+    if result.operationID then
+      printf("operationID: %s\n", result.operationID)
+      indent = "  "
+    end
+    if result.packages then
+      for _, pkg in ipairs(result.packages) do
+        print_table(pkg, indent)
+      end
+    else
+      print_table(result)
+    end
+  else
+    print("Failed to contact lcmd")
+  end
+end
+
+-------------------------------------------------------------------------------
+local list_ee_help = [[
+list_execenvs - List available execution environments.
+  -n,--name  (optional string) Name of the execution environment.
+]]
+
+local function list_execenvs(args)
+  local ubus_args = { name = args.name }
+  local result = conn:call("lcm", "list_execenvs", ubus_args)
+  if result then
+    if #result.execenvs> 0 then
+      for _, execenv in ipairs(result.execenvs) do
+        print_table(execenv)
+      end
+    else
+      print("No execution environments configured")
+    end
+  else
+    print("Failed to contact lcmd.")
+  end
+end
+
+-------------------------------------------------------------------------------
+local list_pkgs_help = [[
+list - List available packages.
+  <properties...> (optional property) A list of properties the packages should have.
+      A property is specified as <name>=<value>.
+]]
+
+local function list_packages(args)
+  ubus_method_with_properties("list_packages", args)
+end
+
+-------------------------------------------------------------------------------
+local modify_help = [[
+modify - Modify a package's (writable) properties.
+  -i,--ID  (string) ID of the package whose properties to modify.
+  <properties...> (property) A list of properties to update.
+      A property is specified as <name>=<value>.
+]]
+
+local function modify(args)
+  local properties = {}
+  local ubus_args = { ID = args.ID, properties = properties }
+  for _, property in ipairs(args.properties) do
+    properties[property.name] = property.value
+  end
+  local result = conn:call("lcm", "modify_package", ubus_args)
+  if result then
+    print_table(result)
+  else
+    print("Failed to contact lcmd")
+  end
+end
+
+-------------------------------------------------------------------------------
+local install_help = [[
+install - Install a new package.
+  -e,--execenv  (string) Name of the execution environment in which to install the new package.
+  -u,--url      (string) URL where to download the package from.
+  -n,--username (optional string) A username to authenticate the download with.
+  -p,--password (optional string) A password to authenticate the download with.
+]]
+local function install(args)
+  local ubus_args = {
+    execenv = args.execenv,
+    URL = args.url,
+    username = args.username,
+    password = args.password
+  }
+  local result = conn:call("lcm", "install", ubus_args)
+  if result then
+    print_table(result)
+  else
+    print("Failed to contact lcmd")
+  end
+end
+
+-------------------------------------------------------------------------------
+local start_help = [[
+start - Start the packages matching the given properties.
+  <properties...> (property) A list of properties the packages should have.
+      A property is specified as <name>=<value>.
+]]
+
+local function start(args)
+  ubus_method_with_properties("start", args)
+end
+
+-------------------------------------------------------------------------------
+local stop_help = [[
+stop - Stop the packages matching the given properties.
+  <properties...> (property) A list of properties the packages should have.
+      A property is specified as <name>=<value>.
+]]
+
+local function stop(args)
+  ubus_method_with_properties("stop", args)
+end
+
+-------------------------------------------------------------------------------
+local uninstall_help = [[
+uninstall - Uninstall the packages matching the given properties.
+  <properties...> (property) A list of properties the packages should have.
+      A property is specified as <name>=<value>.
+]]
+
+local function uninstall(args)
+  ubus_method_with_properties("uninstall", args)
+end
+
+-------------------------------------------------------------------------------
+local delete_help = [[
+delete - Delete the packages matching the given properties.
+  <properties...> (property) A list of properties the packages should have.
+      A property is specified as <name>=<value>.
+]]
+
+local function delete(args)
+  ubus_method_with_properties("delete", args)
+end
+
+-------------------------------------------------------------------------------
+local commands = {
+  list_execenvs = { f = list_execenvs, help = list_ee_help   },
+  list          = { f = list_packages, help = list_pkgs_help },
+  modify        = { f = modify,        help = modify_help    },
+  install       = { f = install,       help = install_help   },
+  start         = { f = start,         help = start_help     },
+  stop          = { f = stop,          help = stop_help      },
+  uninstall     = { f = uninstall,     help = uninstall_help },
+  delete        = { f = delete,        help = delete_help    },
+}
+local commandlist = {}
+for cmd in pairs(commands) do
+  commandlist[#commandlist + 1] = cmd
+end
+table.sort(commandlist)
+
+-------------------------------------------------------------------------------
+local global_help = [[
+Usage: lcm <command> <command options>
+
+Supported commands with their options are:
+]]
+local args = { ... }
+local command = table.remove(args, 1)
+local handler = commands[command]
+if not handler then
+  print(global_help)
+  for _, cmd in ipairs(commandlist) do
+    print(commands[cmd].help)
+  end
+  os.exit()
+end
+local rc
+rc, args = pcall(lapp, handler.help, args)
+if not rc then
+  print(handler.help)
+else
+  handler.f(args)
+end

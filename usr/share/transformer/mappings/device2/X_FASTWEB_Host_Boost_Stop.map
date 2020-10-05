@@ -1,0 +1,160 @@
+local Device_Hosts_Host_i_BS_ = {
+  objectType = {
+    name = "Device.Hosts.Host.{i}.#TYPE.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ScheduledEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Lease = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "0h 00'",
+          "0h 30'",
+          "1h 00'",
+          "1h 30'",
+          "2h 00'",
+          "4h 00'",
+          "",
+        },
+      },
+      Frequency = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Weekends",
+          "Working days",
+          "Daily",
+          "",
+        },
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local Duration = {
+  ["0h 30'"] = "1800",
+  ["1h 00'"] = "3600",
+  ["1h 30'"] = "5400",
+  ["2h 00'"] = "7200",
+  ["4h 00'"] = "14400"
+}
+
+local map = {
+  Enable = "enabled",
+  ScheduledEnable = "enabled",
+  Lease = "lease",
+  Start = "start",
+  Frequency = "frequency",
+}
+
+local match, find = string.match, string.find
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(Device_Hosts_Host_i_BS_, commitapply)
+
+local function get_info(mapping, key)
+  local mac = key
+  local mode = "online"
+  local activity = (mapping.objectType.name):find("X_FASTWEB_Boost") and "boost" or "stop"
+
+  if key:find("dev") then
+    mac = tele:GetUfnDevice(key, "mac")
+  end
+  if mac ~= "" then
+    local fwd = tele.mgr:GetFWDeviceAll(mac)
+    mode = (fwd and fwd.group_name and fwd.group_name:find("Family") and fwd.routine == "1") and "routine" or "online"
+  end
+
+  return mac, mode, activity
+end
+
+Device_Hosts_Host_i_BS_.get = function(mapping, param, key)
+  local mac, mode, activity = get_info(mapping, key)
+
+  if mode == "online" and param == "Start" then
+    return ""
+  end
+
+  if param == "Enable" then
+    return (activity == "boost") and tele.mgr:GetBoostStatus(mac) or tele.mgr:GetStopStatus(mac)
+  elseif param == "ScheduledEnable" then
+    return (tele.mgr:GetFWTimer(mac, {"routine", activity}, "enabled") == "1") and "1" or "0"
+  end
+
+  if map[param] then
+    local value = tele.mgr:GetFWTimer(mac, {mode, activity}, map[param])
+    if param == "Lease" and value == "" then
+      return "0h 00'"
+    else
+      return value
+    end
+  end
+end
+
+Device_Hosts_Host_i_BS_.set = function(mapping, param, value, key)
+  local mac, mode, activity = get_info(mapping, key)
+  if mac == "" then
+    return nil, "Please firstly set device's PhysAddress."
+  end
+
+  if ((param == "Lease" and (value == "" or value == "0h 00'")) or (param == "Frequency" and value == "") or (param == "Start" and value == "")) then
+    return true
+  end
+
+  if mode == "online" then
+    if (param == "ScheduledEnable" and value == "1") then
+      return nil, "Not supported on routine disabled"
+    elseif (param == "Start" or param == "Frequency" or (param == "ScheduledEnable" and value == "0" )) then
+      return true
+    end
+  else
+    if param == "Start" then
+      if tele:CheckTimeFormat(value) == false then
+         return nil, "The time format is wrong."
+      end
+    elseif param == "Enable" and value == "1" then
+      return nil, "The Enable value is invalid. The Enable only can be set as '0' when RoutineEnable is '1'."
+    end
+  end
+
+  local prefixs = {mode, activity}
+  if map[param] == "enabled" then
+    mode = (param == "ScheduledEnable") and "routine" or "online"
+    tele.mgr:SetBSAction(mac, mode, activity, value)
+
+    if param == "Enable" and value == "1" then
+      local lease = tele.mgr:GetFWTimer(mac, prefixs, "lease")
+      local duration = Duration[lease]
+      tele.mgr:SetBSTimer(mac, mode, activity, duration)
+    end
+  elseif map[param] then
+    tele.mgr:SetFWTimer(mac, prefixs, map[param], value)
+    local timer = tele.mgr:GetFWTimerAll(mac, prefixs)
+    timer.duration = Duration[timer.lease]
+    tele.mgr:SetBSTimer(mac, mode, activity, timer.duration, timer.start, timer.frequency)
+  end
+
+  return true
+end
+
+Device_Hosts_Host_i_BS_.commit = function()
+  tele:commit()
+end
+
+Device_Hosts_Host_i_BS_.revert = function()
+  tele:revert()
+end
+
+teleHelper.register(Device_Hosts_Host_i_BS_, register, "#TYPE", {"X_FASTWEB_Boost", "X_FASTWEB_Stop"})

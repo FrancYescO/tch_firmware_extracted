@@ -1,0 +1,18 @@
+#!/bin/sh
+
+if [ ! -f "/rom/etc/sysctl.conf" ] || cmp -s "/rom/etc/sysctl.conf" "/etc/sysctl.conf"; then
+        echo "kernel.printk=1 4 1 7" >> /etc/sysctl-tch.conf
+	exit 0
+fi
+
+fingerprint="$(md5sum /etc/sysctl.conf)"
+fingerprint="${fingerprint%% *}"
+
+if [ "$fingerprint" = "1b05ebb41f72cb84e5510573cd4aca26" ] || \
+   [ "$fingerprint" = "62deb895be1a7f496040187b7c930e4e" ]; then
+	logger -t migrate-sysctl "Updating sysctl.conf to use current defaults"
+	cp "/rom/etc/sysctl.conf" "/etc/sysctl.conf"
+fi
+
+echo "kernel.printk=1 4 1 7" >> /etc/sysctl-tch.conf 
+exit 0

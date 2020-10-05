@@ -1,0 +1,376 @@
+<div class="row">
+    <div class="col-md-4 toc-container hidden-sm">
+        <nav class="toc">
+            <ul>
+              <li du-scrollspy="led_panel" class="hidden-xs"><a href="#led_panel" translate du-smooth-scroll>PAGES.MODEM.LED.TITLE</a></li>
+              <li du-scrollspy="line_panel" class="hidden-xs">
+                  <a href="#line_panel" class="hidden-xs" translate du-smooth-scroll>PAGES.MODEM.LINE.TITLE</a>
+              </li>
+              <li class="hidden-xs" du-scrollspy="wifi_panel"><a href="#wifi_panel" translate du-smooth-scroll>PAGES.MODEM.WIFI.TITLE</a></li>
+              <li class="hidden-xs" du-scrollspy="ports_panel"><a href="#ports_panel" translate du-smooth-scroll>PAGES.MODEM.PORTS.TITLE</a></li>
+              
+              <!-- TABS -->
+              <li ng-class="{'visible-xs': true, active: !tabSelected}" ng-click="tabSelected = switchTab(false);">
+                  <a href="" translate>PAGES.MODEM.LED.TITLE</a>
+              </li>
+              <li ng-class="{'visible-xs': true, active: tabSelected}" ng-click="tabSelected = switchTab(true);">
+                  <a href="" translate>PAGES.MODEM.LINE.TITLE_M</a>
+              </li>
+            </ul>
+        </nav>
+    </div>
+    <div class="col-md-8 main-container">
+      <div ng-class="{'mobile-super-wrapper': true, active: !tabSelected}">
+      <div id="led_panel">
+        <div ng-include="'views/partials/widget_led_status.html'"></div>
+        <div ng-class="{'panel-body':true, 'panel': true, 'loading-data':!isDataReadyP1}">
+            
+          <!-- STATUS LEDs-->
+          <div class="form-horizontal">
+            <div class="row form-group">
+              <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.LED.STATUS.TITLE"></label>
+              <div class="col-sm-9">
+                <table class="table table-condensed">
+                  <thead>
+                    <tr>
+                      <th translate>FORMS.NAME</th>
+                      <th translate>PAGES.MODEM.LED.STATUS.RESULT</th>
+                      <th class="hidden-xs" translate>PAGES.MODEM.LED.STATUS.LAST_VERIFICATION</th>
+                      <th>&nbsp;</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <!-- Line status -->
+                    <tr>
+                      <td>
+                          <p class="form-control-static">
+                              <span class="icon icon-line-status"></span><span translate>PAGES.MODEM.LED.STATUS.LINE.NAME</span>
+                          </p>
+                      </td>
+                      <td>
+                          <p class="form-control-static">
+                              <span ng-class="{'icon-bullet': true, inactive: status.line.status != 'ON'}"></span>
+                              <span translate="PAGES.MODEM.LED.STATUS.LINE.RESULT.{{status.line.status || 'NAN'}}"></span>
+                          </p>
+                      </td>
+                      <td class="hidden-xs"><p class="form-control-static">{{status.line.last_verification}}</p></td>
+                      <td style="cursor:pointer" ng-class="{'dropup':status.line.isExpanded}" ng-click="status.line.isExpanded=!status.line.isExpanded">
+                        <span class="caret"></span>
+                      </td>
+                    </tr>
+                    <tr ng-if="status.line.isExpanded">
+                        <td colspan="4">
+                            <p translate>PAGES.MODEM.LED.STATUS.LINE.DESCRIPTION</p>
+                        </td>
+                    </tr>
+
+                    <!-- WiFi status -->
+                    <tr>
+                      <td>
+                          <p class="form-control-static">
+                              <span class="icon icon-wifi-status"></span><span translate>PAGES.MODEM.LED.STATUS.WIFI.NAME</span>
+                          </p>
+                      </td>
+                      <td>
+                          <p class="form-control-static">
+                              <span ng-class="{'icon-bullet': true, inactive: status.wifi.status != 'ON'}"></span>
+                              <span translate="PAGES.MODEM.LED.STATUS.WIFI.RESULT.{{status.wifi.status || 'NAN'}}"></span>
+                          </p>
+                      </td>
+                      <td class="hidden-xs"><p class="form-control-static">{{status.wifi.last_verification}}</p></td>
+                      <td style="cursor:pointer" ng-class="{'dropup':status.wifi.isExpanded}" ng-click="status.wifi.isExpanded=!status.wifi.isExpanded">
+                        <span class="caret"></span>
+                      </td>
+                    </tr>
+                    <tr ng-if="status.wifi.isExpanded">
+                        <td colspan="4">
+                            <p translate>PAGES.MODEM.LED.STATUS.WIFI.DESCRIPTION</p>
+                        </td>
+                    </tr>
+
+                    <!-- WPS status -->
+                    <tr>
+                      <td>
+                          <p class="form-control-static">
+                              <span class="icon icon-wps-status"></span><span translate>PAGES.MODEM.LED.STATUS.WPS.NAME</span>
+                          </p>
+                      </td>
+                      <td>
+                          <p class="form-control-static">
+                              <span ng-class="{'icon-bullet': true, inactive: status.wps.status != 'ON'}"></span>
+                              <span translate="PAGES.MODEM.LED.STATUS.WPS.RESULT.{{status.wps.status || 'NAN'}}"></span>
+                          </p>
+                      </td>
+                      <td class="hidden-xs"><p class="form-control-static">{{status.wps.last_verification}}</p></td>
+                      <td style="cursor:pointer" ng-class="{'dropup':status.wps.isExpanded}" ng-click="status.wps.isExpanded=!status.wps.isExpanded">
+                        <span class="caret"></span>
+                      </td>
+                    </tr>
+                    <tr ng-if="status.wps.isExpanded">
+                        <td colspan="4">
+                            <p translate>PAGES.MODEM.LED.STATUS.WPS.DESCRIPTION</p>
+                        </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="row form-group">
+              <label class="col-sm-3 col-xs-8 control-label text-right text-left-xs" translate="PAGES.MODEM.LED.PRESENCE"></label>
+              <div class="col-sm-7 col-xs-4 text-right-xs">
+                <button type="button" class="btn btn-toggle" ng-model="status.presence" uib-btn-checkbox></button>
+              </div>
+            </div>
+
+            <fieldset ng-disabled="!status.presence"><!-- June modify -->
+              <div class="row form-group">
+                <label class="col-sm-3 col-xs-8 control-label text-right text-left-xs" translate="PAGES.MODEM.LED.AUTO_OFF.TITLE"></label>
+                <div class="col-sm-9 col-xs-4 text-right-xs">
+                  <button type="button" class="btn btn-toggle" ng-model="status.auto_off.active" uib-btn-checkbox></button>
+                </div>
+              </div>
+
+              <div ng-class="{row: true, 'form-group': true, 'disabled': !status.auto_off.active}">                    
+                <div class="col-sm-3 col-xs-6 col-sm-offset-3">
+                    <div class="btn-group" uib-dropdown>
+                      <button type="button" class="btn" uib-dropdown-toggle>
+                        <span><span translate>FORMS.FROM_TIME</span> {{status.auto_off.from}}</span> <span class="caret"></span>
+                      </button>
+                      <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                        <!--li ng-repeat="hh in hh_ranges" role="menuitem"><a ng-click="status.auto_off.from = hh" href="">{{hh}}</a></li-->
+                        <!-- June modify -->
+                        <li ng-repeat="hh in hh_ranges" role="menuitem"><a ng-click="status.auto_off.from = hh; checkLedEndTime();" href="">{{hh}}</a></li>
+                      </ul>
+                    </div>
+                </div>
+                <div class="col-sm-3 col-xs-6">
+                    <div class="btn-group" uib-dropdown>
+                      <button type="button" class="btn" uib-dropdown-toggle>
+                          <span><span translate>FORMS.TO_TIME</span> {{status.auto_off.to}}</span> <span class="caret"></span>
+                      </button>
+                      <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                        <!--li ng-repeat="hh in hh_ranges" role="menuitem"><a ng-click="status.auto_off.to = hh" href="">{{hh}}</a></li-->
+                        <!-- June modify -->
+                        <li ng-repeat="hh in hh_ranges" role="menuitem" ng-if="!(hh==status.auto_off.from)"><a ng-click="status.auto_off.to = hh" href="">{{hh}}</a></li>
+                      </ul>
+                    </div>
+                </div>
+              </div>
+
+              <div class="row form-group">
+                <div class="col-sm-9 col-sm-offset-3 hidden-xs">
+                  <p><small translate="PAGES.MODEM.LED.AUTO_OFF.DESCRIPTION"></small></p>
+                </div>
+              </div>
+            </fieldset><!-- June modify -->
+          </div>
+          
+        </div>
+      </div>
+      <div class="button-container text-right">
+        <button type="submit" class="btn btn-default" ng-click="save_data()" translate>FORMS.SAVE_CHANGES</button>
+        <button type="submit" class="btn btn-default" ng-click="reset()" translate>FORMS.CANCEL</button>
+      </div><br /><br />
+      
+      <!-- TABS -->
+      </div>
+      <div ng-class="{'mobile-super-wrapper': true, active: tabSelected}">
+      <!-- /TABS -->
+      
+      <div id="line_panel" class="panel panel-default">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.MODEM.LINE.TITLE</h3>
+        </div>
+
+        <div class="panel-body">
+          <div fw-loader="isDataReadyP2" ng-class="{'form-horizontal':true, 'text-center':!isDataReadyP2}">
+            <div class="row form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.LINE.LABELS.STATUS"></label>
+                <div class="col-sm-9">
+                    <span ng-class="{'icon-bullet': true, active: line.status}"></span>
+                    <span translate="PAGES.MODEM.LINE.MESSAGES.STATUS.{{line.status? 'OK' : 'NOK'}}.SHORT"></span>
+                </div>
+                <div class="col-sm-9 col-sm-offset-3">
+                  <p>
+                      <small translate="PAGES.MODEM.LINE.MESSAGES.STATUS.{{line.status? 'OK' : 'NOK'}}.DESC"></small>
+                      <small translate="PAGES.MODEM.LINE.MESSAGES.LINE.{{line.details.line}}.DESC"></small>
+                      <small translate="PAGES.MODEM.LINE.MESSAGES.IPV4.{{line.details.ipv4? 'OK' : 'NOK'}}.DESC"></small>
+                      <small translate>PAGES.MODEM.LINE.DESC_END</small>
+                  </p>
+                </div>
+            </div>
+            <div class="row form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.LINE.LABELS.DETAILS"></label>
+                <div class="col-sm-9">
+                    
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th translate>PAGES.MODEM.LINE.LABELS.VERIFY</th>
+                          <th translate>PAGES.MODEM.LINE.LABELS.RESULT</th>
+                          <th>&nbsp;</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.LINE.LABELS.LINE"></span></td>
+                           <td><span translate="PAGES.MODEM.LINE.MESSAGES.LINE.{{line.details.line}}.SHORT"></span></td>
+                           <th>&nbsp;</th>
+                        </tr>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.LINE.LABELS.IPV4"></span></td>
+                           <td>
+                               <span ng-if="line.details.ipv4"><span translate="PAGES.MODEM.LINE.MESSAGES.IPV4.OK.SHORT"></span><span>{{line.details.ipv4}}</span></span>
+                               <span ng-if="!line.details.ipv4"><span translate="PAGES.MODEM.LINE.MESSAGES.IPV4.NOK.SHORT"></span></span>
+                           </td>
+                           <th>&nbsp;</th>
+                        </tr>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.LINE.LABELS.HOP_PING"></span></td>
+                           <td><span translate="PAGES.MODEM.LINE.MESSAGES.HOP.{{line.details.hop_ping}}.SHORT"></span></td>
+                           <th>&nbsp;</th>
+                        </tr>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.LINE.LABELS.DNS_PING"></span></td>
+                           <td><span translate="PAGES.MODEM.LINE.MESSAGES.DNS.{{line.details.dns_ping}}.SHORT"></span></td>
+                           <th>&nbsp;</th>
+                        </tr>
+                      </tbody>
+                    </table>
+                    
+                    
+                    <div class="btn-group">
+                      <button type="button" class="btn btn-default" ng-click="refresh_line_status()">
+                        <span translate>PAGES.MODEM.REFRESH</span>
+                      </button>
+                    </div>
+                </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="wifi_panel" class="panel panel-default">
+        <div class="panel-heading">
+          <h3 class="panel-title" translate>PAGES.MODEM.WIFI.TITLE</h3>
+        </div>
+        <div ng-class="{'panel-body':true, 'loading-data':!isDataReadyP3}">
+            <div class="form-horizontal">
+            <div class="row form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.WIFI.LABELS.STATUS"></label>
+                <div class="col-sm-9">
+                    <span ng-class="{'icon-bullet': true, active: wifi.status}"></span>
+                    <span translate="PAGES.MODEM.WIFI.MESSAGES.STATUS.{{wifi.status? 'OK' : 'NOK'}}"></span>
+                </div>
+            </div>
+            
+            <div class="row form-group">
+                <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.LINE.LABELS.DETAILS"></label>
+                <div class="col-sm-9">
+                    
+                    <table class="table table-condensed">
+                      <thead>
+                        <tr>
+                          <th translate>PAGES.MODEM.WIFI.LABELS.WIFI</th>
+                          <th translate>PAGES.MODEM.WIFI.LABELS.STATUS2</th>
+                          <th translate>PAGES.MODEM.WIFI.LABELS.SECURITY</th>
+                          <th>&nbsp;</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.WIFI.LABELS.F5GHZ"></span></td>
+                           <td><span translate="PAGES.MODEM.WIFI.MESSAGES.{{wifi.f5ghz.status? 'ACTIVE' : 'INACTIVE'}}"></span></td>
+                           <td>{{wifi.f5ghz.security}}</td>
+                           <th>&nbsp;</th>
+                        </tr>
+                        <tr>
+                           <td><span translate="PAGES.MODEM.WIFI.LABELS.F24GHZ"></span></td>
+                           <td><span translate="PAGES.MODEM.WIFI.MESSAGES.{{wifi.f24ghz.status? 'ACTIVE' : 'INACTIVE'}}"></span></td>
+                           <td>{{wifi.f24ghz.security}}</td>
+                           <th>&nbsp;</th>
+                        </tr>
+                      </tbody>
+                    </table>
+                    
+                    
+                    <div class="btn-group">
+                      <button type="button" class="btn btn-default" ng-click="refresh_wifi_status()">
+                        <span translate>PAGES.MODEM.REFRESH</span>
+                      </button>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+      </div>
+
+      <div class="nav_helper">
+        <div id="ports_panel" class="panel panel-default">
+          <div class="panel-heading">
+            <h3 class="panel-title" translate>PAGES.MODEM.PORTS.TITLE</h3>
+          </div>
+          <div ng-class="{'panel-body':true, 'loading-data':!isDataReadyP4}">
+              <div class="form-horizontal">
+              <div class="row form-group">
+                  <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.PORTS.LABELS.ETH"></label>
+                  <div class="col-sm-9">
+                      
+                      
+                      <table class="table table-condensed">
+                        <thead>
+                          <tr>
+                            <th translate>PAGES.MODEM.PORTS.LABELS.PORT</th>
+                            <th translate>PAGES.MODEM.PORTS.LABELS.STATUS</th>
+                            <th>&nbsp;</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr ng-repeat="dev in ports.eth">
+                             <td><span>{{dev.name}}</span></td>
+                             <td><span translate="PAGES.MODEM.PORTS.LABELS.{{dev.status? 'OK' : 'NOK'}}"></span><span ng-if="dev.status && dev.speed">, {{dev.speed}} Mbps</span></td>
+                             <th>&nbsp;</th>
+                          </tr>
+                        </tbody>
+                      </table>
+                  </div>
+              </div>
+              <div class="row form-group">
+                  <label class="col-sm-3 control-label text-right" translate="PAGES.MODEM.PORTS.LABELS.USB"></label>
+                  <div class="col-sm-9">
+                      
+                      
+                      <table class="table table-condensed">
+                        <thead>
+                          <tr>
+                            <th translate>PAGES.MODEM.PORTS.LABELS.PORT</th>
+                            <th translate>PAGES.MODEM.PORTS.LABELS.STATUS</th>
+                            <th>&nbsp;</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr ng-repeat="dev in ports.usb">
+                             <td><span>{{dev.name}}</span></td>
+                             <td><span translate="PAGES.MODEM.PORTS.LABELS.{{dev.status? 'OK' : 'NOK'}}"></span><span ng-if="dev.status && dev.speed">, {{dev.speed}} Mbps</span></td>
+                             <th>&nbsp;</th>
+                          </tr>
+                        </tbody>
+                      </table>
+                      
+                      <div class="btn-group">
+                        <button type="button" class="btn btn-default" ng-click="refresh_ports_status()">
+                          <span translate>PAGES.MODEM.REFRESH</span>
+                        </button>
+                      </div>
+                  </div>
+              </div>
+              </div>
+          </div>
+        </div>
+      </div>
+      
+      </div><!-- FINE TABS -->
+
+    </div>
+</div>

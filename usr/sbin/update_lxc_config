@@ -1,0 +1,83 @@
+#!/usr/bin/env lua
+local require, pairs, type = require, pairs, type
+local uci = require("uci")
+local cursor = uci.cursor()
+
+local lxc_path = "/srv/lxc/"
+
+local known_options = {
+  ["lxc_cgroup_cpuset_cpus"] = false,
+  ["lxc_cgroup_cpu_cfs_quota_us"] = 3,
+  ["lxc_cgroup_memory_limit_in_bytes"] = 3,
+  ["lxc_net_%d+_type"]= false,
+  ["lxc_net_%d+_flags"] = false,
+  ["lxc_net_%d+_link"] = false,
+  ["lxc_net_%d+_ipv4_address"] = false,
+  ["lxc_net_%d+_ipv4_gateway"] = false,
+  ["lxc_net_%d+_ipv6_address"] = false,
+  ["lxc_net_%d+_ipv6_gateway"] = false,
+  ["lxc_net_%d+_hwaddr"] = false,
+  ["lxc_net_%d+_name"] = false,
+}
+
+local function is_option_known(option)
+  for opt_pattern, limit_gsub in pairs(known_options) do
+    if option:match(opt_pattern) then
+      if type(limit_gsub) == "number" then
+        return true, limit_gsub
+      end
+      return true
+    end
+  end
+  return false
+end
+
+local function update_config(lxc_name, config_options)
+  local fd = io.open(lxc_path .. lxc_name .. "/config", "r")
+  if not fd then
+    return
+  end
+  local tmp_path = io.open("/tmp/"..lxc_name, "w")
+  if not tmp_path then
+    fd:close()
+    return
+  end
+  for line in fd:lines() do
+    for option_to_change, value in pairs(config_options) do
+      if line:match(option_to_change) then
+        line = line:gsub("=.*", "= "..value)
+        config_options[option_to_change] = nil
+      end
+    end
+    tmp_path:write(line.."\n")
+  end
+  -- Append remaining options
+  for option_to_change, value in pairs(config_options) do
+    option_to_change = option_to_change:gsub("%^", "", 1)
+    tmp_path:write(option_to_change.." = "..value.."\n")
+  end
+  tmp_path:close()
+  fd:close()
+  os.remove(lxc_path .. lxc_name .. "/config")
+  os.execute("mv /tmp/" .. lxc_name .. " " .. lxc_path .. lxc_name .. "/config")
+end
+
+local function configure_lxc_instance(section)
+  if section["enabled"] ~= "1" then
+    return
+  end
+  local config_to_be_written = {}
+  local name = section[".name"]
+  -- Iterate over all options in the section. Handle only the ones we know and allow.
+  -- Underscores in option names are replaced by dots in the lxc config.
+  for option_name, option_value in pairs(section) do
+    local is_known, limit_gsub = is_option_known(option_name)
+    if is_known then
+      option_name = "^" .. option_name:gsub("_", "%.", limit_gsub)
+      config_to_be_written[option_name] = option_value
+    end
+  end
+  update_config(name, config_to_be_written)
+end
+
+cursor:foreach("lxc", "lxc_instance", configure_lxc_instance)

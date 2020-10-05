@@ -1,0 +1,278 @@
+#!/usr/bin/env lua
+--[[
+/********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+** Copyright (c) 2017 -          Technicolor Delivery Technologies, SAS **
+** - All Rights Reserved                                                **
+** Technicolor hereby informs you that certain portions                 **
+** of this software module and/or Work are owned by Technicolor         **
+** and/or its software providers.                                       **
+** Distribution copying and modification of all such work are reserved  **
+** to Technicolor and/or its affiliates, and are not permitted without  **
+** express written authorization from Technicolor.                      **
+** Technicolor is registered trademark and trade name of Technicolor,   **
+** and shall not be used in any manner without express written          **
+** authorization from Technicolor                                       **
+*************************************************************************/
+--]]
+
+local require = require
+local tonumber = tonumber
+local pairs = pairs
+
+local posix = require("tch.posix")
+local logger = require("tch.logger")
+local uloop = require("uloop")
+uloop.init()
+local ubus = require("lcm.ubus")
+local lcm = require("lcm.core")
+local s_errorcodes = require("lcm.errorcodes")
+local xpcall = require ("tch.xpcall")
+local traceback = debug.traceback
+
+-- enclose option parsing code in separate block so the
+-- code can be GC'd after execution
+do
+  local option_converter = {
+    log_level = function(v)
+      return tonumber(v)
+    end,
+    log_stderr = function(v)
+      return tonumber(v)==1
+    end
+  }
+  local function no_conversion_needed(v)
+    return v
+  end
+  -- read in the uci config and add it to defconfig
+  local function do_config(defconfig)
+    local config = defconfig or {}
+
+    local uci = require("uci")
+    -- The global UCI_CONFIG can be set when running tests. If set we want to
+    -- use it. Otherwise it's nil and the context is created with the default conf_dir.
+    local cursor = uci.cursor(UCI_CONFIG)
+    local uci_config = cursor:get_all("lcmd")
+    if uci_config and uci_config.daemon_config then
+      for option, value in pairs(uci_config.daemon_config) do
+        local convert = option_converter[option] or no_conversion_needed
+        config[option] = convert(value)
+      end
+    end
+    if config.execution_environments then
+      for _, execenv_name in ipairs(config.execution_environments) do
+        if uci_config[execenv_name] then
+          config[execenv_name] = uci_config[execenv_name]
+        end
+      end
+    end
+    return config
+  end
+
+  local config = do_config{
+    log_level = 3,
+    log_stderr = false,
+    execution_environments = nil,
+    db_type = "file",
+    db_location = "/etc/lcmd/db",
+  }
+  logger.init("lcmd", config.log_level, posix.LOG_PID + (config.log_stderr and posix.LOG_PERROR or 0))
+  lcm.init(config)
+  lcm.init = nil
+end
+
+local exec_timer
+local function execution_state_check()
+  lcm.update_execution_states()
+  exec_timer:set(1000)
+end
+
+local empty = {}
+
+local function list_execenvs(req, msg)
+  local ok, execenvs = xpcall(lcm.list_execenvs, traceback, msg or empty)
+  if ok then
+    ubus.reply(req, { execenvs = execenvs })
+  else
+    ubus.reply(req, { errorcode = s_errorcodes.INTERNAL_ERROR, errormsg = execenvs })
+  end
+end
+
+local function list_packages(req, msg)
+  local ok, packages = xpcall(lcm.list_packages, traceback, msg or empty)
+  if ok then
+    ubus.reply(req, { packages = packages })
+  else
+    ubus.reply(req, { errorcode = s_errorcodes.INTERNAL_ERROR, errormsg = packages })
+  end
+end
+
+local function modify_package(req, msg)
+  local ok, result, errorcode, errormsg = xpcall(lcm.modify_package, traceback, msg or empty)
+  if not ok then
+    ubus.reply(req, { errorcode = s_errorcodes.INTERNAL_ERROR, errormsg = result })
+  elseif not result then
+    ubus.reply(req, { errorcode = errorcode, errormsg = errormsg })
+  else
+    ubus.reply(req, empty)
+  end
+end
+
+local function install(req, msg)
+  local ok, ID, errorcode_or_operationID, errormsg = xpcall(lcm.install, traceback, msg or empty)
+  if not ok then
+    ubus.reply(req, { errorcode = s_errorcodes.INTERNAL_ERROR, errormsg = ID })
+  elseif not ID then
+    ubus.reply(req, { errorcode = errorcode_or_operationID, errormsg = errormsg })
+  else
+    ubus.reply(req, { ID = ID, operationID = errorcode_or_operationID })
+  end
+end
+
+local function xpcall_method(method, req, msg)
+  local ok, packages, errorcode_or_operationID, errormsg = xpcall(method, traceback, msg or empty)
+  if not ok then
+    ubus.reply(req, { errorcode = s_errorcodes.INTERNAL_ERROR, errormsg = packages })
+  elseif not packages then
+    ubus.reply(req, { errorcode = errorcode_or_operationID, errormsg = errormsg })
+  else
+    ubus.reply(req, { packages = packages, operationID = errorcode_or_operationID })
+  end
+end
+
+local function start(req, msg)
+  xpcall_method(lcm.start, req, msg)
+end
+
+local function stop(req, msg)
+  xpcall_method(lcm.stop, req, msg)
+end
+
+local function uninstall(req, msg)
+  xpcall_method(lcm.uninstall, req, msg)
+end
+
+local function delete(req, msg)
+  xpcall_method(lcm.delete, req, msg)
+end
+
+local ubus_objects = {
+  lcm = {
+    -- List information on the available execution environments or the
+    -- information of a particular execution environment.
+    -- Returns a table with key "execenvs" and value an array of
+    -- tables that each contain the properties of an execution environment.
+    -- The array could be empty.
+    list_execenvs = {
+      list_execenvs,
+      { name = ubus.STRING }  -- optional; if not provided all execution environment info is returned
+    },
+    -- List the metadata of all packages or packages matching the given properties
+    -- Returns a table with key "packages" and value an array of
+    -- tables that each contain the properties of a package.
+    -- The array could be empty.
+    list_packages = {
+      list_packages,
+      { properties = ubus.TABLE }  -- optional; if not provided (or empty) all package info is returned
+    },
+    -- Update a package's (writable) metadata.
+    -- Returns an empty table if all went well. Otherwise a table is returned
+    -- with the key "errorcode" with the value an error code (integer),
+    -- and the key "errormsg" with the value an error message (string).
+    modify_package = {
+      modify_package,
+      { ID = ubus.STRING,       -- mandatory; identifier of the package whose metadata to modify
+        properties = ubus.TABLE -- mandatory; key-value pairs with the property to update
+                                -- and its new value; an empty string value unsets the property
+      }
+    },
+    -- Download a package from the given URL and install it in the given
+    -- execution environment.
+    -- If the install request is accepted for further processing
+    -- a table is returned with the key "ID" and the value an unique package
+    -- identifier (string) that can be used to follow up the
+    -- installation process via the list_packages() method. A second key "operationID" with
+    -- value an unique operation identifier (string) is also present. This can be used to
+    -- link events with the operation that triggered them.
+    -- If the install request is rejected a table is returned with
+    -- the key "errorcode" with the value an error code (integer),
+    -- and the key "errormsg" with the value an error message (string).
+    -- TODO: support providing an array of packages to install? Could be
+    -- useful to 'batch' installs; lcmd would notify when it has processed
+    -- a batch. This could help cwmpd to unambigiously know when all actions
+    -- of a particular ChangeDUState RPC have been processed.
+    install = {
+      install,
+      { URL = ubus.STRING,      -- mandatory; location where to fetch the package from
+        execenv = ubus.STRING,  -- mandatory; execution environment on which to install the package
+        username = ubus.STRING, -- optional
+        password = ubus.STRING, -- optional
+      }
+    },
+    -- Start the packages matching the given properties.
+    -- The actual starting is done asynchronously so it's possible the request does not
+    -- return an error but the starting still fails.
+    -- Returns a table with key "operationID" and value an unique operation identifier
+    -- (string), and key "packages" and value an array of tables. Each table
+    -- represents a matching package and contains at least the key "ID" and value the
+    -- package's unique identifier (string). If the start request for that package is
+    -- rejected the table will also contain a key "errorcode" with the value an error
+    -- code (integer) and a key "errormsg" with the value an error message (string).
+    -- The operationID can be used to link events with the operation that triggered them.
+    start = {
+      start,
+      { properties = ubus.TABLE }  -- optional; if not provided (or empty) all packages are started
+    },
+    -- Stop the packages matching the given properties.
+    -- The actual stopping is done asynchronously so it's possible the request does not
+    -- return an error but the stopping still fails.
+    -- Returns a table with key "operationID" and value an unique operation identifier
+    -- (string), and key "packages" and value an array of tables. Each table
+    -- represents a matching package and contains at least the key "ID" and value the
+    -- package's unique identifier (string). If the stop request for that package is
+    -- rejected the table will also contain a key "errorcode" with the value an error
+    -- code (integer) and a key "errormsg" with the value an error message (string).
+    -- The operationID can be used to link events with the operation that triggered them.
+    stop = {
+      stop,
+      { properties = ubus.TABLE }  -- optional; if not provided (or empty) all packages are stopped
+    },
+    -- Uninstall the packages matching the given properties.
+    -- Packages that are currently running will be stopped first.
+    -- Returns a table with key "operationID" and value an unique operation identifier
+    -- (string), and key "packages" and value an array of tables. Each table
+    -- represents a matching package and contains at least the key "ID" and value the
+    -- package's unique identifier (string). If the uninstall request for that package is
+    -- rejected the table will also contain a key "errorcode" with the value an error
+    -- code (integer) and a key "errormsg" with the value an error message (string).
+    -- The operationID can be used to link events with the operation that triggered them.
+    uninstall = {
+      uninstall,
+      { properties = ubus.TABLE }  -- optional; if not provided (or empty) all packages are uninstalled
+    },
+    -- Update the packages matching the given properties.
+    -- Packages that are currently running will be stopped first.
+    -- Returns a table with key "operationID" and value an unique operation identifier
+    -- (string), and key "packages" and value an array of tables. Each table
+    -- represents a matching package and contains at least the key "ID" and value the
+    -- package's unique identifier (string). If the uninstall request for that package is
+    -- rejected the table will also contain a key "errorcode" with the value an error
+    -- code (integer) and a key "errormsg" with the value an error message (string).
+    -- The operationID can be used to link events with the operation that triggered them.
+--    update = {
+--      update,
+--      { properties = ubus.TABLE,
+--        URL = ubus.STRING,
+--        username = ubus.STRING,
+--        password = ubus.STRING }
+--    }
+      -- Remove the packages matching the given properties from lcmd's database. 
+      delete = {
+        delete,
+        { properties = ubus.TABLE }  -- optional; if not provided (or empty) all packages are deleted. Use with caution.
+      },
+  }
+}
+
+ubus.add(ubus_objects)
+exec_timer = uloop.timer(execution_state_check, 1000)
+uloop.run()

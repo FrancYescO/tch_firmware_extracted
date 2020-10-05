@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+STOP=10
+
+SERVICE_SIG_RELOAD="URG"
+USE_PROCD=1
+CWMPD_PID_FILE=/var/run/cwmpd.pid
+CWMPEVENTS_PID_FILE=/var/run/cwmpevents.pid
+CWMPD_FW_FILE=/lib/functions/firewall-cwmpd.sh
+
+boot() {
+  logger -t cwmpd "Starting cwmpd on boot"
+
+  if [ -f /usr/bin/cwmpd-boot-delay ]; then
+    logger -t cwmpd "Calling cwmpd-boot-delay script."
+    /usr/bin/cwmpd-boot-delay && start &
+  else
+    start
+  fi
+}
+
+start_service() {
+  logger -t cwmpd "Starting cwmpd"
+
+  source ${CWMPD_FW_FILE}
+
+  procd_open_instance "cwmpd"
+  procd_set_param command /usr/bin/cwmpd
+  procd_set_param pidfile "${CWMPD_PID_FILE}"
+  procd_set_param env TCH_LD_CMDLINE="/usr/bin/cwmpd"
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+  add_cwmpd_fw_rule
+  procd_close_instance
+
+  procd_open_instance "cwmpevents"
+  procd_set_param command /usr/bin/cwmpevents
+  procd_set_param pidfile "${CWMPEVENTS_PID_FILE}"
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+  procd_close_instance
+}
+
+service_started() {
+  procd_set_config_changed firewall
+}
+
+reload_service() {
+  logger -t cwmpd "Reloading cwmpd"
+  procd_send_signal cwmpd cwmpd $(kill -l "${SERVICE_SIG_RELOAD}")
+  if [ $? -eq 0 ]; then
+    # We need to call the start function once again in order to overwrite
+    # firewall rules.
+    # Because the process is already there, procd will not actually restart
+    # cwmmpd.
+    start
+  else
+    echo "Reload of cwmpd failed. Cwmpd not yet running?"
+  fi
+  # make sure the last statement of the reload function is always true
+  # otherwise init.d will restart cwmpd on failure of the reload function
+  # and that can lead to an unwanted racecondition during boot time
+  true
+}
+
+stop_service() {
+  procd_set_config_changed firewall
+}

@@ -1,0 +1,256 @@
+local Device_X_000E50_SSH_i= {
+  objectType = {
+    name = "Device.Services.X_000E50_SSH.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Interface = {
+        access = "readOnly",
+        type = "string",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Loginfo = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local content_entries = {}       -- cached dropbear config sections
+local uci_helper = mapper("ucihelper")
+local logger = require("tch.logger")
+local log = logger.new("X_000E50_SSH", 3)
+local common = mapper("nwcommon")
+local findLanWanInterfaces = common.findLanWanInterfaces
+local fw_commit = false
+local db_commit = false
+local enabled_intf = ""
+local url = require("socket.url")
+local NF_CONNTRACK = "/proc/net/nf_conntrack"
+local sshinfopath = "/etc/"
+local get_ubus_interface_status = common.get_ubus_interface_status
+
+-- binding for uci_helper
+local dropbear_bnd = {config="dropbear", sectionname="dropbear", option=""}
+local firewall_bnd = {config="firewall", sectionname="rule", option="target"}
+
+local function get_acs_port()
+  local acs_url = uci_helper.get_from_uci({ config = "cwmpd", sectionname = "cwmpd_config", option = "acs_url", extended = true})
+  local parsed_url = url.parse(acs_url)
+  local scheme = parsed_url.scheme
+  local port = parsed_url.port
+
+  if port == nil then
+    if scheme == "https" then
+      port = "443"
+    elseif scheme == "http" then
+      port = "80"
+    end
+  end
+  return port
+end
+
+local function get_wan_ip()
+  local interface = uci_helper.get_from_uci({ config = "cwmpd", sectionname = "cwmpd_config", option = "interface", extended = true})
+  local v = get_ubus_interface_status(interface)
+
+  v = v and v['ipv4-address']
+  v = v and v[1]
+  return (v and v['address']) or ""
+end
+
+local function get_acs_ip()
+  local PARSE_COUNT = 10
+  local nf_conntrack_maps = {"c1", "c2", "proto3", "c4", "timeout5", "status6", "src7", "dst8", "sport9", "dport10"}
+  local nf_conntrack_columns = {}
+  local acs_ip = "unknown"
+  local timeout = 0
+  local new_timeout
+  local acs_port = get_acs_port()
+  local wan_ip = get_wan_ip()
+
+  local f = io.open(NF_CONNTRACK, "r")
+  for l in f:lines() do
+    -- parse columns
+    local count = 1
+    for w in string.gmatch(l, "%S+") do
+      if count >= 7 and count <= PARSE_COUNT then --src, dst, sport, dport
+        w = w:match("%d+.*")
+      elseif count > PARSE_COUNT  then
+        break
+      end
+      nf_conntrack_columns[nf_conntrack_maps[count]] = w
+      count = count + 1
+    end
+
+    -- check ACS ipaddress
+    new_timeout = tonumber(nf_conntrack_columns["timeout5"])
+    if nf_conntrack_columns["proto3"] == "tcp" and new_timeout > timeout then
+      if nf_conntrack_columns["sport9"] == acs_port and nf_conntrack_columns["dst8"] == wan_ip then
+        timeout = new_timeout
+        acs_ip = nf_conntrack_columns["src7"]
+      elseif nf_conntrack_columns["dport10"] == acs_port and nf_conntrack_columns["src7"] == wan_ip then
+        timeout = new_timeout
+        acs_ip = nf_conntrack_columns["dst8"]
+      end
+    end
+  end
+  f:close()
+  return acs_ip
+end
+
+local function write_loginfo(fileName, TR69_info)
+  local f = io.open(fileName, "w")
+  if f then
+    f:write(TR69_info)
+    f:close()
+  end
+end
+
+local function read_loginfo(fileName)
+  local result = ""
+  local fd = io.open(fileName)
+  if fd then
+    result = fd:read("*a") or ""
+    fd:close()
+  end
+  return result
+end
+
+Device_X_000E50_SSH_i.entries = function()
+  local need_commit = false
+  local sshEntries = {}
+  content_entries = {}
+  dropbear_bnd.sectionname = "dropbear"
+
+  uci_helper.foreach_on_uci(dropbear_bnd, function(section)
+    -- dropbear is an unnamed config entry, generate a unique key to identify it accross reboot if needed
+    if (not section._key) then
+        section._key = uci_helper.generate_key_on_uci({config = "dropbear", sectionname = section[".name"]})
+        need_commit = true
+    end
+
+    sshEntries[#sshEntries + 1] = section._key
+    content_entries[section._key] = section
+  end)
+  if need_commit == true then
+    uci_helper.commit_keys(dropbear_bnd)
+  end
+  return sshEntries
+end
+
+Device_X_000E50_SSH_i.get = {
+  Interface = function(mapping, param, key)
+    return content_entries[key].Interface
+  end,
+  Enable = function(mapping, param, key)
+    -- get the firewall setting for this entry if wan zone
+    local firewall_enable = "1"
+    local db_section = content_entries[key]
+
+    if common.interface2zone(db_section.Interface).wan == "1" then
+       local firewall_rule_name = "SSH-"..db_section.Interface
+       uci_helper.foreach_on_uci(firewall_bnd, function(fw_section)
+         if fw_section.name == firewall_rule_name then
+           if fw_section.target == "DROP" then
+             firewall_enable = "0"
+           end
+           return
+         end
+       end)
+    end
+
+    if content_entries[key].enable == "1" and firewall_enable == "1" then
+       return "1"
+    end
+    return "0"
+  end,
+  Loginfo = function(mapping, param, key)
+    local loginfo = read_loginfo(sshinfopath..content_entries[key].Interface)
+    if loginfo == nil then
+      loginfo = ""
+    end
+    return loginfo
+  end,
+}
+
+Device_X_000E50_SSH_i.set = {
+  Enable = function (mapping, param, value, key)
+    local db_section = content_entries[key]
+
+    -- set the new value
+    dropbear_bnd.sectionname = db_section['.name']
+    dropbear_bnd.option = "enable"
+    uci_helper.set_on_uci(dropbear_bnd, value, commitapply)
+    db_commit = true
+
+    -- log enabling method
+    if value == "1" then
+      enabled_intf = db_section.Interface
+    end
+
+    -- setup firewall (only wan zones)
+    if common.interface2zone(db_section.Interface).wan == "1" then
+      local firewall_rule_name = "SSH-"..db_section.Interface
+      local target = "DROP"
+      if value == "1" then
+        target = "ACCEPT"
+      end
+      uci_helper.foreach_on_uci(firewall_bnd, function(fw_section)
+        if fw_section.name == firewall_rule_name then
+          local binding = {config = "firewall", sectionname = "", option = "target"}
+          binding.sectionname = fw_section[".name"]
+          uci_helper.set_on_uci(binding, target, commitapply)
+          fw_commit = true
+          return
+        end
+      end)
+    end
+
+    -- requirement to log all SSH changes
+    log:warning("Remote Setting of SSH on "..db_section.Interface.." to "..value)
+  end,
+}
+
+Device_X_000E50_SSH_i.commit = function ()
+  if db_commit == true then
+    uci_helper.commit(dropbear_bnd)
+    db_commit = false
+
+    -- log enabling method: source(GUI,TR-069), IP, timestamp
+    if enabled_intf ~= "" then
+      local source = "TR-069"
+      local ip = get_acs_ip()
+      local timestamp = os.date("%d.%m.%Y %H:%M:%S")
+      local TR69_info = source .. "_" .. ip .. "_" .. timestamp
+      write_loginfo(sshinfopath..enabled_intf, TR69_info)
+      enabled_intf = ""
+    end
+  end
+  if fw_commit == true then
+    uci_helper.commit(firewall_bnd)
+    fw_commit = false
+  end
+end
+
+Device_X_000E50_SSH_i.revert = function ()
+  if db_commit == true then
+    uci_helper.revert(dropbear_bnd)
+    db_commit = false
+  end
+  if fw_commit == true then
+    uci_helper.revert(firewall_bnd)
+    fw_commit = false
+  end
+end
+
+register(Device_X_000E50_SSH_i)
+

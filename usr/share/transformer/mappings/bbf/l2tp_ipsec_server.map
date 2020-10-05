@@ -1,0 +1,212 @@
+-- Manually generated
+local popen = io.popen
+local match = string.match
+
+local uci_helper = require 'transformer.mapper.ucihelper'
+
+local function getServerIsEnabled()
+  return uci_helper.get_from_uci({config= "vpn", sectionname="l2tpipsecserver", option="enable"})
+end
+
+local function getRemoteIPStart()
+  return uci_helper.get_from_uci({config= "vpn", sectionname="l2tpipsecserver", option="remote_ip_start"})
+end
+
+local function getRemoteIPEnd()
+  return uci_helper.get_from_uci({config= "vpn", sectionname="l2tpipsecserver", option="remote_ip_end"})
+end
+
+local function getNumberOfConnectedClients()
+  local clients = 0
+  -- ipsec daemon may still be running while l2tp-ipsec-server is disabled:
+  -- only count clients if server is really enabled.
+  if "1" == getServerIsEnabled() then
+    local fd = popen("ipsec status")
+    if fd then
+      for line in fd:lines() do
+        if line:match("l2tp%-server.*ESTABLISHED") then
+          clients = clients + 1
+        end
+      end
+      fd:close()
+    end
+  end
+  return tostring(clients)
+end
+
+local generators = {
+  -- The generator functions known to /lib/functions/l2tp-ipsec-secrets.sh
+  generateChapSecret = "generate_chap_secret",
+  generateIPSecPSK = "generate_ipsec_PSK",
+}
+
+local function generateSecret(_, pname)
+  local secret = ""
+  local generator = generators[pname]
+  if generator then
+    local fd, msg = popen(". /lib/functions/l2tp-ipsec-secrets.sh; " .. generator)
+    if fd then
+      secret = fd:read("*l") or ""
+      fd:close()
+    end
+  else
+    return nil, "No secret generator found"
+  end
+  return secret
+end
+
+local Multi_X_000E50_L2TPIPSecServer_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = 'readOnly',
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      remote_ip_start = {
+        access = "readWrite",
+        type = "string",
+      },
+      remote_ip_end = {
+        access = "readWrite",
+        type = "string",
+      },
+      numberOfConnectedClients = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      generateChapSecret = {
+        access = "readOnly",
+        type = "string",
+      },
+      generateIPSecPSK = {
+        access = "readOnly",
+        type = "string",
+      }
+    }
+  },
+  get = {
+    enable = function()
+      return getServerIsEnabled()
+    end,
+    remote_ip_start = function()
+      return getRemoteIPStart()
+    end,
+    remote_ip_end = function()
+      return getRemoteIPEnd()
+    end,
+    numberOfConnectedClients = function()
+      return getNumberOfConnectedClients()
+    end,
+    generateChapSecret = generateSecret,
+    generateIPSecPSK = generateSecret,
+    },
+    set = {
+      enable = function(mapping, paramname, paramvalue)
+        uci_helper.set_on_uci({config= "vpn", sectionname = "l2tpipsecserver", option = "enable"}, paramvalue, commitapply)
+        uci_helper.commit({config = "vpn"})
+        uci_helper.set_on_uci({config= "ipsec", sectionname = "l2tp", option = "enabled"}, paramvalue, commitapply)
+        uci_helper.commit({config = "ipsec"})
+      end,
+      remote_ip_start = function(mapping, paramname, paramvalue)
+        local remote_ip_end = getRemoteIPEnd()
+        local remote_ip_range = "192.168.0.0/16"
+        uci_helper.set_on_uci({config= "vpn", sectionname = "l2tpipsecserver", option = "remote_ip_start"}, paramvalue, commitapply)
+        uci_helper.commit({config = "vpn"})
+        if paramvalue ~= '' and remote_ip_end ~= '' then
+          remote_ip_range = paramvalue .. "-" .. remote_ip_end
+        end
+        uci_helper.set_on_uci({config= "firewall", sectionname = "vpn", option = "subnet"}, remote_ip_range, commitapply)
+        uci_helper.commit({config = "firewall"})
+      end,
+      remote_ip_end = function(mapping, paramname, paramvalue)
+        local remote_ip_start = getRemoteIPStart()
+        local remote_ip_range = "192.168.0.0/16"
+        uci_helper.set_on_uci({config= "vpn", sectionname = "l2tpipsecserver", option = "remote_ip_end"}, paramvalue, commitapply)
+        uci_helper.commit({config = "vpn"})
+        if paramvalue ~= '' and remote_ip_start ~= '' then
+          remote_ip_range = remote_ip_start .. "-" .. paramvalue
+        end
+        uci_helper.set_on_uci({config= "firewall", sectionname = "vpn", option = "subnet"}, remote_ip_range, commitapply)
+        uci_helper.commit({config = "firewall"})
+      end,
+    }
+}
+
+local function getall()
+  local values = {}
+  for param, generator in pairs(generators) do
+    values[param] = generateSecret(_, generator)
+  end
+  values["numberOfConnectedClients"] = getNumberOfConnectedClients()
+  return values
+end
+
+Multi_X_000E50_L2TPIPSecServer_.getall = getall
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_L2TPIPSecServer_, "#ROOT", { "Device.X_000E50_L2TPIPSecServer", "InternetGatewayDevice.X_000E50_L2TPIPSecServer", "rpc.l2tpipsecserver" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_X_000E50_L2TPIPSecServer_ConnectedClients_i_ = {
+  objectType = {
+    name = "#ROOT.ConnectedClients.{i}.",
+    access = "readOnly",
+    description = "Object to display VPN connected clients IP address information.",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      IPAddress = {
+        access = "readOnly",
+	type = "string",
+        description = "IP address of the VPN client connected",
+      },
+      Time = {
+        access = "readOnly",
+        type = "string",
+        description = "System time when VPN client is connected",
+      },
+    }
+  }
+}
+
+local process = require("tch.process")
+
+local function getProcessStatus(key)
+  return key:match("ESTABLISHED+%s+(%S+%s+%S+).*%[(%S+)%]$")
+end
+
+Multi_X_000E50_L2TPIPSecServer_ConnectedClients_i_.entries = function()
+  local entries = {}
+  local fd = process.popen("ipsec", {"status"})
+  if fd then
+    for line in fd:lines() do
+      if line:match("l2tp%-server.*ESTABLISHED") then
+        entries[#entries + 1] = line
+      end
+    end
+  end
+  fd:close()
+  return entries
+end
+
+Multi_X_000E50_L2TPIPSecServer_ConnectedClients_i_.get = {
+  Time = function(mapping, _, key)
+    return getProcessStatus(key) or ""
+  end,
+  IPAddress = function(mapping, _, key)
+    local _, ip = getProcessStatus(key)
+    return ip or ""
+  end,
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_L2TPIPSecServer_ConnectedClients_i_, "#ROOT", { "Device.X_000E50_L2TPIPSecServer", "InternetGatewayDevice.X_000E50_L2TPIPSecServer", "rpc.l2tpipsecserver" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
