@@ -1,0 +1,112 @@
+local InternetGatewayDevice_X_000E50_SSH_i= {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_SSH.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Interface = {
+        access = "readOnly",
+        type = "string",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+local content_entries = {}
+local mt = { __index = function() return "" end }
+local function getSection(key)
+    return setmetatable(content_entries[key] or {}, mt)
+end
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local common = mapper('nwcommon')
+local get_lower_layers = common.get_lower_layers
+local findLanWanInterfaces = common.findLanWanInterfaces
+local wanconn = require("transformer.shared.wanconnection")
+-- binding for uci_helper
+local binding={config="dropbear", sectionname="", option=""}
+
+InternetGatewayDevice_X_000E50_SSH_i.entries = function()
+  local sshEntries = {}
+  content_entries = {}
+  binding.sectionname="dropbear"
+
+  local res = uci_helper.foreach_on_uci(binding, function(section)
+    -- dropbear is an unnamed config entry, generate a unique key to identify if
+    -- accross reboot if needed
+    if (not section._key) then
+        section._key = uci_helper.generate_key_on_uci({config="dropbear", sectionname=section[".name"]})
+    end
+    sshEntries[#sshEntries + 1] = section._key
+    content_entries[section._key] = section
+  end)
+  if res then
+    uci_helper.commit_keys(binding)
+  else
+    uci_helper.revert_keys(binding)
+  end
+  return sshEntries
+end
+
+InternetGatewayDevice_X_000E50_SSH_i.get = {
+  Interface = function(mapping, param, key)
+    local v = getSection(key)
+    local value = v.Interface
+    if value == "" then
+      return 'Any'
+    end
+    local lanInterfaces = findLanWanInterfaces(false)
+    local isLan = false
+    for _,j in pairs(lanInterfaces) do
+      if (value == j) then
+        isLan = true
+        break
+      end
+    end
+    if (isLan) then
+      return resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', value) or ""
+    else
+      local key, status = wanconn.get_connection_key(value)
+      if key and status then
+        if status.proto == "pppoe" or status.proto == "pppoa" then
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key) or ""
+        else
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key) or ""
+        end
+      end
+    end
+    return ""
+  end,
+  Enable = function(mapping, param, key)
+    local v = getSection(key)
+    return v.enable
+  end,
+}
+InternetGatewayDevice_X_000E50_SSH_i.set = {
+  Enable = function (mapping, param, value, key)
+    if value == "1" or value == 1 or value == true or value == "true" then
+       value = 1
+    elseif  value == "0" or value == 0 or value == false or value == "false" then
+       value = 0
+    end
+    local v = getSection(key)
+    binding.sectionname=v['.name']
+    binding.option="enable"
+    return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+}
+InternetGatewayDevice_X_000E50_SSH_i.commit = function ()
+    uci_helper.commit(binding)
+end
+
+InternetGatewayDevice_X_000E50_SSH_i.revert = function ()
+   uci_helper.revert(binding)
+end
+
+register(InternetGatewayDevice_X_000E50_SSH_i)

@@ -1,0 +1,32 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+
+boot() {
+	. $IPKG_INSTROOT/lib/config/uci.sh
+
+	local MODULE_DIR="/lib/modules/$(uname -r)"
+	local enable_usb3_support="$(uci_get system config enable_usb3_support 1)"
+	local enable_usb2_support="$(uci_get system config enable_usb2_support 1)"
+	local enable_usb1_support="$(uci_get system config enable_usb1_support 1)"
+	[ "$enable_usb3_support" -eq 0 -a "$enable_usb2_support" -eq 0 -a "$enable_usb1_support" -eq 0 ] && return 0
+	[ -f "$MODULE_DIR"/bcm_usb.ko ] && {
+		insmod "$MODULE_DIR"/bcm_usb.ko usb3_enable=$enable_usb3_support
+	}
+	[ -f "$MODULE_DIR"/xhci-hcd.ko -a "$enable_usb3_support" -ne 0 ] && {
+		insmod "$MODULE_DIR"/xhci-hcd.ko
+		[ -f "$MODULE_DIR"/xhci-plat-hcd.ko ] && insmod "$MODULE_DIR"/xhci-plat-hcd.ko
+	}
+	[ -f "$MODULE_DIR"/ehci-hcd.ko -a "$enable_usb2_support" -ne 0 ] && {
+		insmod "$MODULE_DIR"/ehci-hcd.ko
+		[ -f "$MODULE_DIR"/ehci-platform.ko ] && insmod "$MODULE_DIR"/ehci-platform.ko
+		[ -f "$MODULE_DIR"/ehci-pci.ko ] && insmod "$MODULE_DIR"/ehci-pci.ko;
+	}
+	[ -f "$MODULE_DIR"/ohci-hcd.ko -a "$enable_usb1_support" -ne 0 ] && {
+		insmod "$MODULE_DIR"/ohci-hcd.ko
+		[ -f "$MODULE_DIR"/ohci-platform.ko ] && insmod "$MODULE_DIR"/ohci-platform.ko
+		[ -f "$MODULE_DIR"/ohci-pci.ko ] && insmod "$MODULE_DIR"/ohci-pci.ko;
+	}
+
+	return 0
+}

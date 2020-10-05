@@ -1,0 +1,73 @@
+#!/bin/sh /etc/rc.common
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+
+START=90
+
+clean_tables() {
+    echo "Cleaning URLFILTER rules from iptables"
+    # deleting urlfilter from forwarding rule
+    iptables -D forwarding_rule -j urlfilter >/dev/null 2>&1
+
+    # deleting urlfilter chain
+    iptables -F urlfilter >/dev/null 2>&1
+    iptables -X urlfilter >/dev/null 2>&1
+
+    TARGET=`cat /proc/cpuinfo | grep "Comcerto" | cut -d':' -f 2 | cut -d' ' -f 2`
+    if [ "$TARGET" == "Comcerto" ] ; then
+        cmm -c set asym_fastforward disable
+    fi
+}
+
+insert_tables() {
+    echo "Inserting URLFILTER rules into iptables"
+
+    # creating urlfilter chain
+    iptables -N urlfilter
+
+    #Board specific config (SKIPLOG is BRCM specific)
+    TARGET=`cat /proc/cpuinfo | grep "Comcerto" | cut -d':' -f 2 | cut -d' ' -f 2`
+    if [ "$TARGET" != "Comcerto" ] ; then
+        iptables -A urlfilter -p tcp --dport 80 -j SKIPLOG
+    else
+        cmm -c set asym_fastforward enable
+    fi
+    iptables -A urlfilter -p tcp --dport 80 -j QUEUE
+
+    # insert the chain into the forwarding_rule
+    iptables -I forwarding_rule -j urlfilter
+}
+
+start() {
+
+    clean_tables
+
+    if [ "$(uci get parental.general.enable)" == '1' ]
+    then
+        if [ -f /www/docroot/parental-block.lp ]; then
+            IP="$(uci get network.lan.ipaddr)"
+            uci set parental.redirect.blocked_page_redirect="$IP/parental-block.lp"
+        fi
+        # start the daemon
+        echo "Starting the URLFILTER daemon"
+        if [ "$(uci get parental.general.exclude)" == '1' ]
+	then
+            service_start /bin/urlfilterd-tch Exclude
+        else
+            service_start /bin/urlfilterd-tch
+        fi
+
+        insert_tables
+    else
+        echo "NOT starting the URLFILTER daemon, parental.general.enable not set"
+    fi
+}
+
+stop() {
+
+    clean_tables
+
+    service_stop /bin/urlfilterd-tch
+
+}

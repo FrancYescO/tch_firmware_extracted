@@ -1,0 +1,132 @@
+local mapper, register = mapper, register
+local conn = mapper("ubus").connect()
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(Telemanagement_Led_Ambientlight_, commitapply)
+
+local Telemanagement_Led_Ambientlight_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_LED.AmbientLight.",
+    access = "readOnly",
+    description = "To get led ambientlight switchoff parameters Enable, Start, End.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+Telemanagement_Led_Ambientlight_.get = {
+  Enable = function(mapping, paramname, key)
+    return tele.mgr:GetLedActive()
+  end,
+}
+
+local function set_ambient_light(enabled)
+  local data = {}
+  local led = tele.mgr:GetFWTimerAll(nil, "led")
+  if led.enabled == "1" and led.start and led.stop then
+    if tele.mgr:CheckTimeSlot(led.start, led.stop) then
+      enabled = "0"
+    else
+      if not enabled then
+        enabled = "1"
+      end
+    end
+  end
+  local current_enable = tele.mgr:GetLedActive()
+  if enabled and enabled ~= current_enable then
+    data["state"] = enabled == "1" and "active" or "inactive"
+    conn:send("ambient.status", data)
+    tele.mgr:SetLedActive(enabled)
+  end
+end
+
+Telemanagement_Led_Ambientlight_.set = {
+  Enable = function(mapping, paramname, paramvalue)
+    set_ambient_light(paramvalue)
+    return true
+  end,
+}
+
+Telemanagement_Led_Ambientlight_.commit = function()
+  tele:commit()
+end
+
+Telemanagement_Led_Ambientlight_.revert = function()
+  tele:revert()
+end
+
+register(Telemanagement_Led_Ambientlight_)
+
+local Telemanagement_Led_Ambientlight_SwitchOff_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_LED.AmbientLight.SwitchOff.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+      End = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+Telemanagement_Led_Ambientlight_SwitchOff_.get = {
+  Enable = function(mapping, paramname, key)
+    local enable = tele.mgr:GetFWTimer(nil, "led","enabled")
+    return enable == "" and "0" or enable
+  end,
+  Start = function(mapping, paramname, key)
+    return  tele.mgr:GetFWTimer(nil, "led","start")
+  end,
+  End = function(mapping, paramname, key)
+    return  tele.mgr:GetFWTimer(nil, "led","stop")
+  end,
+}
+
+local function LedTodSetValue(mapping, paramname, paramvalue)
+  if not paramvalue then
+    return false
+  end
+  if paramname == "Enable" then
+    tele.mgr:SetLedAction(paramvalue)
+  elseif paramname == "Start" or paramname == "End" then
+    if tele:CheckTimeFormat(paramvalue) then
+      if paramname == "Start" then
+        tele.mgr:SetLedTimer(paramvalue,nil)
+      else
+        tele.mgr:SetLedTimer(nil,paramvalue)
+      end
+    else
+      return nil, "The time format should be hh:00 or hh:30."
+    end
+  end
+  set_ambient_light()
+  return true
+end
+
+Telemanagement_Led_Ambientlight_SwitchOff_.set = LedTodSetValue
+
+Telemanagement_Led_Ambientlight_SwitchOff_.commit = function()
+  tele:commit()
+end
+
+Telemanagement_Led_Ambientlight_SwitchOff_.revert = function()
+  tele:revert()
+end
+
+register(Telemanagement_Led_Ambientlight_SwitchOff_)

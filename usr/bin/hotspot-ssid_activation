@@ -1,0 +1,75 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions.sh
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+local hotbr
+local wifibr
+local action
+local checkintf=$2
+
+
+hotspot() {
+	local network_name="$1"
+	local protocol
+	config_get protocal "$network_name" proto
+	if [ "$protocal" == "gretap" ] || [ "$protocal" == "grev6tap" ]; then
+		echo "find gre tunnel"
+		config_get hotbr "$network_name" network
+		config_load "wireless"
+		config_foreach setwlintf wifi-iface
+	fi
+}
+
+
+setwlintf() {
+	local network_name="$1"
+	local protocol
+	config_get wifibr "$network_name" network
+	if [ "$wifibr" == "$hotbr" ]; then
+		echo "find hotbr wifi intf"
+		case $action in
+			0)
+				ifconfig $network_name down
+			;;
+			1)
+				ifconfig $network_name up
+			;;
+			2)
+				echo "only check intf"
+				if [ "$checkintf" == "$network_name" ]; then
+					echo "found hotspot intf= $network_name"
+					exit 2
+				fi
+			;;
+			*)
+				echo "invalid action"
+				exit 1
+			;;
+		esac
+	fi
+}
+
+
+case $1 in
+    start)
+	action=1
+	config_load "network"
+	config_foreach hotspot interface
+    ;;
+    stop)
+	action=0
+	config_load "network"
+	config_foreach hotspot interface
+    ;;
+    check)
+    	action=2
+	config_load "network"
+	config_foreach hotspot interface    #return 2 if intf is for hotspot
+    ;;
+    *)
+        echo "hotspot error: invalid action"
+        exit 1
+    ;;
+esac
+

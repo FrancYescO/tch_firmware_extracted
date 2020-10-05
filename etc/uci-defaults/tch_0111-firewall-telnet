@@ -1,0 +1,57 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+
+cat << EOF > /etc/init.d/telnet
+#!/bin/sh /etc/rc.common
+
+# Copyright (C) 2006-2011 OpenWrt.org
+
+START=50
+USE_PROCD=1
+PROG=/usr/sbin/telnetd
+
+start_service()
+{
+ procd_open_instance
+ procd_set_param command "\$PROG" -F -l /bin/login
+ procd_close_instance
+}
+EOF
+
+chmod +x /etc/init.d/telnet
+ln -s ../init.d/telnet /etc/rc.d/S50telnet
+
+# run telnetd for first boot
+/etc/init.d/telnet start
+
+#add firewall rule
+uci -q batch <<-EOT
+    delete firewall.telnetlan
+    set firewall.telnetlan=rule
+    set firewall.telnetlan.name='Refuse_TELNET_LAN'
+    set firewall.telnetlan.src='lan'
+    set firewall.telnetlan.proto='tcp'
+    set firewall.telnetlan.dest_port='23'
+    set firewall.telnetlan.target='REJECT'
+    set firewall.telnetlan.enabled='1'
+
+    delete firewall.telnetguest
+    set firewall.telnetguest=rule
+    set firewall.telnetguest.name='Refuse_TELNET_GUEST'
+    set firewall.telnetguest.src='Guest'
+    set firewall.telnetguest.proto='tcp'
+    set firewall.telnetguest.dest_port='23'
+    set firewall.telnetguest.target='REJECT'
+    set firewall.telnetguest.enabled='1'
+
+    delete firewall.telnet
+    set firewall.telnet=include
+    set firewall.telnet.type='script'
+    set firewall.telnet.path='/lib/functions/firewall-telnet.sh'
+    set firewall.telnet.reload='1'
+
+    commit firewall
+EOT
+
+exit 0
