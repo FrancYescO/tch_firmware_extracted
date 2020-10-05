@@ -1,0 +1,218 @@
+
+local RemoteAccess = {
+  objectType = {
+    name = "Device.X_FASTWEB_RemoteAccess.",
+    description = "This object contains parameter related to the wan side FASTWEB API",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Authorization = {
+        access = "readWrite",
+        type = "base64",
+        hidden = "true",
+        description = "Base64 encode username:password for FASTWEB API wan access"
+      },
+      ListenPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          min = "0",
+          max = "65535"
+        },
+        description = "Public port number for FASTEB API wan access"
+      },
+      AllowedSubnet = {
+        access = "readWrite",
+        type = "string",
+        description = "comma separated list of ip/subnets allowed to access the wan api"
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or Disable the RemoteAccess control"
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+	enumeration = {
+	  "Enabled",
+	  "Disabled",
+	  "NoCertificate",
+	},
+        description = "firewall and ipset status for the RemoteAccess control"
+      },
+    },
+  },
+}
+
+local uci = mapper "ucihelper"
+local inet = require 'tch.inet'
+local isValidIPv4 = inet.isValidIPv4
+
+local auth = { config="fastweb", sectionname="wan", option="auth"}
+local port = { config="firewall", sectionname="wanapi", option="src_dport"}
+local ipset = {config="ipset", sectionname="ipset_entry"}
+local ipset_entry = {config="ipset"}
+local firewallStatus = { config="firewall", sectionname="wanapi_ipset", option="enabled" }
+local ipsetStatus = { config="ipset", sectionname="wanapi_ipset", option="enabled" }
+local changedConfigs = {}
+
+local function config_updated(binding)
+	changedConfigs[binding.config] = binding
+end
+
+local function set_on_uci(binding, value)
+	uci.set_on_uci(binding, value, commitapply)
+	config_updated(binding)
+end
+
+local function default_ipset_extractor(set)
+	return set.ip
+end
+
+local function load_ipset(setname, extractor)
+	extractor = extractor or default_ipset_extractor
+	local ips = {}
+	uci.foreach_on_uci(ipset, function(section)
+		if section.ipset == setname then
+			ips[#ips+1] = extractor(section)
+		end
+	end)
+	return ips
+end
+
+local function delete_ipset_entries(setname)
+	local names = load_ipset(setname, function(set) return set['.name'] end)
+	for _, name in ipairs(names) do
+		ipset_entry.sectionname = name
+		ipset_entry.option = nil
+		uci.delete_on_uci(ipset_entry, commitapply)
+		config_updated(ipset_entry)
+	end
+end
+
+local function create_ipset_entries(setname, entries)
+	for _, ip in ipairs(entries) do
+		ipset_entry.sectionname = uci.add_on_uci(ipset, commitapply)
+		ipset_entry.option = "ipset"
+		set_on_uci(ipset_entry, setname)
+		ipset_entry.option = "ip"
+		set_on_uci(ipset_entry, ip)
+	end
+end
+
+local function get_ip_and_netmask(cidr)
+	local ip, netmask = cidr:match("^([^/]+)/(.*)$")
+	if not ip then
+		-- no netmask given, assume /32
+		ip = cidr
+		netmask = "32"
+	end
+	return ip, netmask
+end
+
+local function isValidNetmask(mask)
+	local n = tonumber(mask)
+	return  n and (0<=n) and (n<=32)
+end
+
+local function normalize_cidr(cidr)
+	local ip, mask = get_ip_and_netmask(cidr)
+	if not isValidIPv4(ip) or not isValidNetmask(mask) then
+		return 
+	end
+	return ip.."/"..mask
+end
+
+local function get_ip_list(value)
+	local ips = {}
+	for cidr in value:gmatch("[^,]+") do
+		cidr = normalize_cidr(cidr)
+		if not cidr then
+			return
+		end
+		ips[#ips+1] = cidr
+	end
+	return ips
+end
+
+-- return true if ipset is enabled, else false
+local function ipset_enabled()
+        return uci.get_from_uci(ipsetStatus) ~= "0"
+end
+
+-- return true if firewall ipset is enabled, else false
+local function firewall_enabled()
+        return uci.get_from_uci(firewallStatus) ~= "0"
+end
+
+local function get_remote_access_status()
+        if firewall_enabled() then
+          if ipset_enabled() then
+            return "Enabled"
+          else
+            return "Disabled"
+          end
+        else
+          return "NoCertificate"
+        end
+end
+
+RemoteAccess.get = {
+	Authorization = function()
+		return uci.get_from_uci(auth)
+	end,
+	ListenPort = function()
+		return uci.get_from_uci(port, "0")
+	end,
+	AllowedSubnet = function()
+		local ips = load_ipset("wanapi_ipset")
+		return table.concat(ips, ",")
+	end,
+	Enable = function()
+		return ipset_enabled() and "1" or "0"
+	end,
+	-- Status represents ipset status and firewall ipset status
+	-- Return success only when both is enabled
+	Status = function()
+		return get_remote_access_status()
+	end
+}
+
+RemoteAccess.set = {
+	Authorization = function(_, _, value)
+		set_on_uci(auth, value)
+	end,
+	ListenPort = function(_, _, value)
+		set_on_uci(port, value)
+	end,
+	AllowedSubnet = function(_, _, value)
+		local ips = get_ip_list(value)
+		if not ips then
+			return nil, "invalid value"
+		end
+		delete_ipset_entries("wanapi_ipset")
+		create_ipset_entries("wanapi_ipset", ips)
+	end,
+	Enable = function(_,_, value)
+		set_on_uci(ipsetStatus, value)
+	end
+}
+
+local function endTransaction(action)
+	for _, binding in pairs(changedConfigs) do
+		action(binding)
+	end
+	changedConfigs = {}
+end
+
+RemoteAccess.commit = function()
+	endTransaction(uci.commit)
+end
+
+RemoteAccess.revert = function()
+	endTransaction(uci.revert)
+end
+
+register(RemoteAccess)

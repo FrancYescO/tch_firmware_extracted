@@ -1,0 +1,36 @@
+local ambientLed_ = {
+  objectType = {
+    name = "rpc.ambientLed.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        enabled = {
+            access = "readWrite",
+            type = "string",
+        },
+    },
+  }
+}
+local uci_helper = mapper("ucihelper")
+local led_config = { config = 'ledfw', sectionname = 'ambient', option='active'}
+
+local function get(mapping, paramName)
+  return uci_helper.get_from_uci(led_config)
+end
+
+local function set(mapping, paramName, paramValue, key)
+  local conn = mapper("ubus").connect()
+  local packet = {}
+  packet["state"] = paramValue == "1" and "active" or "inactive"
+  conn:send("ambient.status", packet)
+  uci_helper.set_on_uci(led_config, paramValue)
+  uci_helper.commit(led_config)
+  return true
+end
+
+ambientLed_.get = get
+ambientLed_.set = set
+
+register(ambientLed_)
+

@@ -1,0 +1,453 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_QoS_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      MaxClassificationEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MaxAppEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      -- AppNumberOfEntries
+      -- automatically created when Device.QoS.App.{i}. is loaded
+      MaxFlowEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      -- FlowNumberOfEntries
+      -- automatically created when Device.QoS.Flow.{i}. is loaded
+      MaxPolicerEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      -- PolicerNumberOfEntries
+      -- automatically created when Device.QoS.Policer.{i}. is loaded
+      MaxQueueEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+--[[ TODO
+      -- QueueNumberOfEntries
+      -- automatically created when Device.QoS.Queue.{i}. is loaded
+      -- QueueStatsNumberOfEntries
+      -- automatically created when Device.QoS.QueueStats.{i}. is loaded
+      MaxShaperEntries = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      -- ShaperNumberOfEntries
+      -- automatically created when Device.QoS.Shaper.{i}. is loaded
+--]]
+      DefaultForwardingPolicy = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+      },
+      DefaultTrafficClass = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+      },
+      DefaultPolicer = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      DefaultQueue = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+      },
+      DefaultDSCPMark = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-2",
+          },
+        },
+      },
+      DefaultEthernetPriorityMark = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-2",
+          },
+        },
+      },
+      AvailableAppList = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "List of available applications",
+      },
+--[[ TODO
+      DefaultInnerEthernetPriorityMark = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-2",
+          },
+        },
+      },
+      AvailableAppList = {
+        access = "readOnly",
+        list = true,
+        max = "1024",
+        type = "string",
+      },
+--]]
+      -- ClassificationNumberOfEntries
+      -- automatically created when Device.QoS.Classification.{i}. is loaded
+
+---- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+      Enable = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "boolean",
+      },
+      MaxQueues = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local mapper, register, resolve = mapper, register, resolve
+local uciHelper = mapper("ucihelper")
+local list = require("transformer.shared.common.list")
+local qosBinding = { config = "qos" }
+local forEachOnUci = uciHelper.foreach_on_uci
+local pairs, string, tostring = pairs, string, tostring
+local ensureList = list.ensureList
+local ethBinding = {config = "ethernet"}
+local xdslBinding = {config = "xdsl"}
+local wanSensingBinding = { config = "wansensing" }
+local getFromUci = uciHelper.get_from_uci
+local fastwebBinding = { config = "fastweb" }
+local setOnUci = uciHelper.set_on_uci
+local transactions = {}
+local commitapply = commitapply
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+
+
+-- List of qos classification rules sections in UCI
+local classificationRules = {
+  classify = true,
+  reclassify = true,
+  l2classify = true,
+}
+
+local function getUciValue(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default =  default
+  return getFromUci(binding)
+end
+
+-- finds the section name which contains traffic id "1" and has high priority
+local function findHighPrioritySec()
+  local priority, sectionname
+  qosBinding.sectionname = "class"
+  forEachOnUci(qosBinding, function(s)
+    if s.trafficid and s.priority then
+      for _, v in pairs(s.trafficid) do
+        if v == "1" then
+          if s.priority == "0" then
+            sectionname = s['.name']
+            return false
+          end
+          priority = priority or s.priority
+          if s.priority < priority then
+            priority = s.priority
+            sectionname = s['.name']
+          end
+        end
+      end
+    end
+  end)
+  return sectionname or ""
+end
+
+local function getConnectionType()
+  return "gpon"
+end
+
+-- Get the maximum upstream  rate for "sfp" and "vdsl"
+local function getUpstreamRate(connectionType)
+  if connectionType == "p2p" or connectionType == "gpon" then
+    return getUciValue(ethBinding, "shapingconf", "max_bit_rate", "0")
+  elseif connectionType == "VDSL" then
+    return getUciValue(xdslBinding, "dsl0", "maxusdatarate", "0")
+  end
+  return "0"
+end
+
+-- Get the maximum downstream rate for "vdsl" only
+local function getDownstreamRate(connectionType)
+  if connectionType == "VDSL" then
+    return getUciValue(xdslBinding, "dsl0", "maxdsdatarate", "0")
+  elseif connectionType == "p2p" or connectionType == "gpon" then
+    return getUciValue(fastwebBinding, "port_shaping", "total_download_bw", "0")
+  end
+  return "0"
+end
+
+-- Get the maximum upstream or downstream rate for VDSL or sfp
+-- @return max rate or "0" if no VDSL or sfp
+local function getMaxRateValue(direction, connectionType)
+  if direction == "upstream" then
+    return getUpstreamRate(connectionType)
+  elseif direction == "downstream" then
+    return getDownstreamRate(connectionType)
+  end
+  return "0"
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+local function setBitRate(value)
+  local q4BitRate = ( (tonumber(value) * 10 ) / 100)
+  setUciValue(qosBinding, "W_Q4", "min_bit_rate", math.ceil(q4BitRate))
+  local q5BitRate = (tonumber(value) / 100)
+  setUciValue(qosBinding, "W_Q3", "min_bit_rate", math.ceil(q5BitRate))
+end
+
+local function setAggrDataRate(option, value)
+  local dataRate = getUciValue(xdslBinding, "dsl0", option)
+  dataRate = (dataRate ~= "") and dataRate or "4000"
+  local maxaggrdatarate = tonumber(value) + tonumber(dataRate)
+  setUciValue(xdslBinding, "dsl0", "maxaggrdatarate", tostring(maxaggrdatarate))
+end
+
+Multi_QoS_.get = {
+  Enable = "1", -- Hardcoded to '1' since there is no lower layer support
+  MaxQueues = function()
+    local maxQueues = 0
+    qosBinding.sectionname = "classgroup"
+    forEachOnUci(qosBinding, function(s)
+      if s.classes then
+        for value in string.gmatch(s.classes, "%S+") do
+          maxQueues = maxQueues + 1
+        end
+      end
+    end)
+    return tostring(maxQueues)
+  end,
+  MaxQueueEntries = function()
+    qosBinding.sectionname = "class"
+    local maxQueueEntry = 0
+    forEachOnUci(qosBinding, function(s)
+      maxQueueEntry = maxQueueEntry + 1
+    end)
+    return tostring(maxQueueEntry)
+  end,
+  MaxClassificationEntries = function()
+    local MaxClassificationEntry = 0
+    local qosParams, srcInterfaces, dstInterfaces, srcPorts, dstPorts, dscpValue
+    qosBinding.sectionname = nil
+    qosBinding.option = nil
+    qosParams = uciHelper.getall_from_uci(qosBinding)
+    for _,s in pairs(qosParams) do
+      if classificationRules[s[".type"]] then
+        srcInterfaces = ensureList(s.srcif)
+        dstInterfaces = ensureList(s.dstif)
+        dscpValue = ensureList(s.dscp)
+        srcPorts = ensureList(s.srcports)
+        dstPorts = ensureList(s.dstports)
+        MaxClassificationEntry = MaxClassificationEntry + (#srcInterfaces * #dstInterfaces * #dscpValue * #srcPorts * #dstPorts)
+      end
+    end
+    return tostring(MaxClassificationEntry)
+  end,
+  AvailableAppList = "0", -- Hardcoded to '0' since there is no lower layer support
+  DefaultDSCPMark = "-1", -- Hardcoded to '-1' since there is no lower layer support
+  DefaultEthernetPriorityMark = "-1", -- Hardcoded to '-1',since EthernetPriorityMark is set to -1
+  DefaultTrafficClass = '0', -- As per QoS V2 implementation, the default traffic class is always 0
+  MaxAppEntries = "0", -- Hardcoded to "0", since there is no lower layer support available
+  MaxFlowEntries = "0", -- Hardcoded to "0", since there is no lower layer support available
+  MaxPolicerEntries = "0", -- Hardcoded to "0", since there is no lower layer support available
+  DefaultForwardingPolicy = "0", -- Hardcoded to "0", since there is no lower layer support available
+  DefaultPolicer = function(mapping)
+    -- returns Instance number of the Policer table entry for IGD
+    if mapping.objectType.name:match('^InternetGatewayDevice.') then
+      return "-1" -- Since there is no policer support in homeware this will be set as -1
+    end
+    -- returns the path name of a row in the Policer table for Device
+    return "" -- Since there is no policer support in homeware this will be set as ""
+  end,
+  DefaultQueue = function(mapping)
+    -- returns Instance number of the Queue table entry for IGD
+    local path = resolve("InternetGatewayDevice.QueueManagement.Queue.{i}.", findHighPrioritySec()) or ""
+    if mapping.objectType.name:match('^InternetGatewayDevice.') then
+      return string.match(path, "%.(%d+)$") or ""
+    end
+    -- returns path name of a row in the Queue table for Device
+    return path
+  end,
+  TotalDownloadBW = function(mapping, param)
+    return getMaxRateValue("downstream", getConnectionType())
+  end,
+  TotalUPloadBW = function(mapping, param)
+    return getMaxRateValue("upstream", getConnectionType())
+  end,
+  DS_Disable = function(mapping, param)
+    return getUciValue(fastwebBinding, "port_shaping", "ds_disable", "1")
+  end,
+}
+
+Multi_QoS_.set = {
+  TotalUPloadBW = function(mapping, param, value)
+    if getConnectionType() == "p2p" or getConnectionType() == "gpon" then
+      setUciValue(ethBinding, "shapingconf", "max_bit_rate", value)  -- setting in ethernet
+      setUciValue(ethBinding, "shapingconf", "max_burst_size", math.ceil(value*0.1))  -- setting in ethernet
+      if value == "0" then
+        setUciValue(ethBinding, "shapingconf", "enable", value)
+      else
+        setUciValue(ethBinding, "shapingconf", "enable", "1")
+      end
+      setBitRate(value)
+    elseif getConnectionType() == "VDSL" then
+      --minimum possible value for maxds- and maxus = 4000
+      if tonumber(value) == 0 then
+        setUciValue(xdslBinding, "dsl0", "maxusdatarate", "")
+      else
+        value = (tonumber(value) >= 4000) and tonumber(value) or 4000
+        setUciValue(xdslBinding, "dsl0", "maxusdatarate", value)
+      end
+
+      -- set maxaggrdatarate
+      setAggrDataRate("maxdsdatarate", value)
+      setBitRate(value)
+    end
+  end,
+  TotalDownloadBW = function(mapping, param, value)
+    if getConnectionType() == "VDSL" then
+      --minimum possible value for maxds- and maxus = 4000
+      if getUciValue(fastwebBinding, "port_shaping", "ds_disable", "1") == "0" then
+        if tonumber(value) == 0 then
+          setUciValue(xdslBinding, "dsl0", "maxdsdatarate", "")
+        else
+          value = (tonumber(value) >= 4000) and tonumber(value) or 4000
+          setUciValue(xdslBinding, "dsl0", "maxdsdatarate", value)
+        end
+
+        setUciValue(fastwebBinding, "port_shaping", "total_download_bw", value)
+        -- set maxaggrdatarate
+        setAggrDataRate("maxusdatarate", value)
+      else
+        setUciValue(fastwebBinding, "port_shaping", "total_download_bw", value)
+      end
+    elseif getConnectionType() == "p2p" or getConnectionType() == "gpon" then
+      setUciValue(fastwebBinding, "port_shaping", "total_download_bw", value)
+      commitapply:newset("Device.X_FASTWEB_QOS.TotalDownloadBW")
+    end
+  end,
+  DS_Disable  = function(mapping, param, value)
+    setUciValue(fastwebBinding, "port_shaping", "ds_disable", value)
+    if getConnectionType() == "VDSL" then
+      if value == "0" then
+        local downloadBW = getUciValue(fastwebBinding, "port_shaping", "total_download_bw")
+        setUciValue(xdslBinding, "dsl0", "maxdsdatarate", downloadBW)
+        -- set maxaggrdatarate
+        setAggrDataRate("maxusdatarate", downloadBW)
+      else
+        setUciValue(xdslBinding, "dsl0", "maxdsdatarate", "")
+      end
+      transactions[xdslBinding.config] = true
+    elseif getConnectionType() == "p2p" or getConnectionType() == "gpon" then
+      commitapply:newset("Device.X_FASTWEB_QOS.DS_Disable")
+    end
+  end,
+}
+
+
+-- GetParamsFastweb for object "Device.X_FASTWEB_QOS"
+local function getParamsFastweb()
+  return {
+    TotalDownloadBW = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The current maximum attainable data rate downstream (expressed in Kbps)",
+    },
+    TotalUPloadBW = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The current maximum attainable data rate upstream (expressed in Kbps)",
+    },
+    DS_Disable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "To control whether CPE should use TotalDownloadBW for download shaping value",
+    },
+  }
+end
+
+local function getParamForDev(name)
+  return {
+    access = "readOnly", -- readWrite currently not supported
+    type = "string",
+    max = "256",
+    pathRef = true,
+    targetParent = "Device.QoS."..name..".{i}.",
+    range = nil,
+  }
+end
+
+Multi_QoS_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_QoS_.revert = function()
+  for config in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+-- A getall implementation is not done as it will not bring any improvement
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_QoS_, "#ROOT", {"InternetGatewayDevice.QueueManagement", "Device.QoS", "Device.X_FASTWEB_QOS"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match('^InternetGatewayDevice.') then
+    -- Remove device2-specific parameters from igd
+    dupli.objectType.parameters.DefaultInnerEthernetPriorityMark = nil
+  elseif dupli.objectType.name:match('^Device.X_FASTWEB_QOS.') then
+    dupli.objectType.parameters = getParamsFastweb()
+  else
+    -- Remove igd-specific parameters from device2
+    dupli.objectType.parameters.Enable = nil
+    dupli.objectType.parameters.MaxQueues = nil
+    dupli.objectType.parameters.DefaultPolicer = getParamForDev("Policer")
+    dupli.objectType.parameters.DefaultQueue = getParamForDev("Queue")
+  end
+  register(dupli)
+end
