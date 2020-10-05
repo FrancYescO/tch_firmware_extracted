@@ -1,0 +1,27 @@
+#!/bin/sh
+
+{
+    echo ''
+    echo 'stop() {'
+    echo '   echo `(echo "poni2c reboot")| consoled ` > /dev/null'
+    echo '}'
+}  >> /etc/init.d/pon_caldata
+
+ln -s /etc/init.d/pon_caldata /etc/rc.d/K19pon_caldata
+
+old_version="18.38.1136"
+current_ver=`hexdump -C -s 0xe3c15 -n 10 /dev/mtd0 |awk -F '|'  '{print $2}'`
+if [ "$current_ver" == $old_version ]; then
+    echo "OLD version detected, upgrading now"
+    echo " >>> Old bootloader ($current_ver) detected, Updating bootloader to 19.23.1186" > /dev/ttyS0
+    mtd write /etc/6856nand_19.23.1186-02dc2e7.bl /dev/mtd0
+    sync
+    echo " >>> Finishing bootloader finished & rebooting." > /dev/ttyS0
+    rm /etc/6856nand_19.23.1186-02dc2e7.bl
+    rm /etc/uci-defaults/tch_0002-update-bootloader
+    reboot
+else
+  echo "New bootloader($current_ver) detected, skip upgrading" > /dev/ttyS0
+fi
+
+

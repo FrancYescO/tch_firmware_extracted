@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="QoEDiagnostics" version="2.0">
+    <object name="X_ADB_QoE.LANDiagnostics." access="readOnly" minEntries="1" maxEntries="1" set="QoeDiagnostics.sh">
+        <description>
+        This object allows to configure and trigger multiple LAN tests.
+        The LAN tests are performed periodically according to the {{param|ExecutionInterval}} parameter.
+        For each test iteration, the CPE automatically creates an entry in {{object|.IP.Diagnostics.X_ADB_LANDiagnostics}} table, where the test results will be stored.
+        </description>
+        <parameter name="DiagnosticsState" access="readWrite" localNotify="forceEnabled">
+            <description>{{enum}}
+             If this parameter is set to {{enum|Requested}}, the CPE MUST initiate the corresponding diagnostic test.
+             To ensure the use of the proper test parameters (the writable parameters in this object), the test parameters MUST be set either prior to or at the same time as setting the {{param|DiagnosticsState}} to {{enum|Requested}}.
+
+             When all the scheduled tests are completed, the value of this parameter is set to {{enum|Completed}}.
+
+             When this diagnostic campaign is initiated by the ACS, the CPE MUST establish a new connection to the ACS to allow the ACS to view the results, indicating the Event code 8 DIAGNOSTICS COMPLETE in the Inform message.
+
+             The results for the individual test executions are maintained in newly created instances of {{object|.IP.Diagnostics.X_ADB_LANDiagnostics}} object.
+
+             Any single upload test execution is serialized with any other QoE diagnostics test that may happen concurrently, waiting for a maximum timeout and then terminating with {{enum|Error_Internal|.IP.Diagnostics.X_ADB_LANDiagnostics.{i}.DiagnosticsState}}.
+
+             After the diagnostic is complete, the value of all result parameters MUST be retained by the CPE until either this diagnostic is run again, or the CPE reboots.
+             A limited number of test results are saved in reboot-persistent storage, as configured by {{param|MaxStored}} parameter.
+             Periodic upload of the test results can be scheduled by configuring the {{object|Report}} object.
+
+             Modifying any of the writable parameters in this object except for this one MUST result in the value of this parameter being set to {{enum|None}}.
+
+             While the test campaign is in progress, modifying any of the writable parameters in this object except for this one MUST result in the test campaign being terminated and the value of this parameter being set to {{enum|None}}.
+
+             While the test campaign is in progress, setting this parameter to {{enum|Requested}} (and possibly modifying other writable parameters in this object) MUST result in the test campaign being terminated and then restarted using the current values of the test parameters.
+
+             The running test campaign can be stopped by setting this paramter to {{enum|None}}.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Requested"/>
+                    <enumeration value="Completed"/>
+                    <enumeration value="Error_OutOfMemory"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="TestCode" access="readWrite">
+            <description>
+            A test code string that will be copied in the uploaded report files.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="64"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="ExecutionNumber" access="readWrite">
+            <description>The number of test executions to be performed.
+            After this number is reached, the diagnostic is completed.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="2" maxInclusive="500"/>
+                </unsignedInt>
+                <default value="100"/>
+            </syntax>
+        </parameter>
+        <parameter name="ExecutionCount" access="readOnly">
+            <description>
+            The number of test executions performed during the current diagnostic.
+            </description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="ExecutionInterval" access="readWrite">
+            <description>Time interval in {{units}} between two consecutive test executions.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="5"/>
+                    <units value="minutes"/>
+                </unsignedInt>
+                <default value="60"/>
+            </syntax>
+        </parameter>
+        <parameter name="StartupDelayRange" access="readWrite">
+            <description>
+            The range in {{units}} of a random delay before starting the first test.
+            Set to 0 to start immediately with the first test.
+            Otherwise, a random delay is evaluated on diagnostics Requested and on boot time.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0"/>
+                    <units value="minutes"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="MinFreeMemory" access="readWrite">
+            <description>
+            The minimum amount of free memory, in {{units}}, required to run a new test execution.
+            Before starting each single test, the system is checked for this memory requirement, otherwise the test campaign is stopped with {{enum|Error_OutOfMemory|DiagnosticsState}}.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="15"/>
+                    <units value="MB"/>
+                </unsignedInt>
+                <default value="15"/>
+            </syntax>
+        </parameter>
+        <parameter name="MaxStored" access="readWrite">
+            <description>
+            The maximum number of test results saved in reboot-persistent storage.
+            After this maximum number is reached, test results are temporary saved in memory.
+            On successful report upload, room is freed to store new test results (see the {{object|Report}} object).
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="30"/>
+                </unsignedInt>
+                <default value="25"/>
+            </syntax>
+        </parameter>
+        <parameter name="Check" access="readWrite" excludeUser="CWMP" store="no">
+            <description>
+            This is a trigger to check for a new test execution.
+            </description>
+            <syntax hidden="true">
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="X_ADB_QoE.LANDiagnostics.Report." access="readOnly" minEntries="1" maxEntries="1" set="QoeDiagnosticsReport.sh">
+        <description>
+        This object allows to configure the periodic report of multiple LAN test, uploading the results to a remote server.
+        The uploaded content is in XML format, and contains device information read from {{object|.DeviceInfo}}.
+        The data upload is performed periodically according to the {{param|UploadInterval}} parameter.
+        When the upload is triggered, the CPE sends all test results collected in table {{object|.IP.Diagnostics.X_ADB_LANDiagnostics}} and, on successfull upload, deletes the related instances.
+        </description>
+        <parameter name="Enable" access="readWrite">
+            <description>Enable the report of test results.</description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="UploadURL" access="readWrite">
+            <description>The URL where to upload the test results.
+            The URL can contain some variables with curly braces {} notation, which will be replaced by the corresponding value before the data upload attempt:
+: {sn}: the serial number ({{param|.DeviceInfo.SerialNumber}})
+: {pc}: the product class ({{param|.DeviceInfo.ProductClass}})
+: {oui}: the manufacturer OUI ({{param|.DeviceInfo.ManufacturerOUI}})
+: {mac}: the base MAC address ({{param|.X_ADB_FactoryData.BaseMACAddress}})
+: {time}: the current local time ({{param|.Time.CurrentLocalTime}})
+            Example:
+: http://file.server.com/qoe/LAN/{oui}/{pc}/{sn}-{time}.xml
+            </description>
+            <syntax>
+                <string>
+                    <pattern value="https?://.+"/>
+                    <pattern value="ftp://.+"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="UploadInterval" access="readWrite">
+            <description>Time interval in {{units}} between two consecutive data upload.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1"/>
+                    <units value="hours"/>
+                </unsignedInt>
+                <default value="48"/>
+            </syntax>
+        </parameter>
+        <parameter name="Upload" access="readWrite">
+            <description>Trigger the data upload of the available test results.</description>
+            <syntax hidden="true">
+                <boolean/>
+            </syntax>
+        </parameter>
+        <parameter name="RetryNumber" access="readWrite">
+            <description>Maximum number of attempts to retry a failed upload.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="0" maxInclusive="5"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="RetryInterval" access="readWrite">
+            <description>Time interval in {{units}} between two consecutive upload attempts.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="300"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="60"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastUploadStatus" access="readOnly">
+            <description>The result status of the last data upload attempt.</description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Completed"/>
+                    <enumeration value="Error"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastUploadTime" access="readOnly">
+            <description>The time of the last successfull data upload.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastUploadErrorTime" access="readOnly">
+            <description>The time of the last failed data upload.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="Username" access="readWrite">
+            <description>Username to access the upload file server.</description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="64"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Password" access="readWrite">
+            <description>Password to access the upload file server.</description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="64"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="UserInfo" access="readWrite">
+            <description>User information to be added in uploaded report file.</description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="1024"/>
+                </string>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="SoftwareModules" version="2.0">
+    <object name="ManagementServer.X_ADB_CWMPState.">
+        <parameter name="DUStateChangeCompleteNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState.DUStateChangeComplete.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="DUStateChangeCompleteNumberOfEntries">
+        <description>
+        This table contains information about any operation on software modules for which the result must be notified to the ACS.
+        Two types of notification could be sent:
+        DU STATE CHANGE COMPLETE Inform, in case the ACS asked for the software module update with ChangeDUState RPC.
+        AUTONOMOUS DU STATE CHANGE COMPLETE Inform, in case the software module update was not specifically asked by the ACS.
+        </description>
+        <parameter name="Autonomous" access="readOnly">
+            <description>
+            This value is {{true}} in case this entry is related to autonomous software module update, {{false}} if related to the result of a ChangeDUState RPC by ACS.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="true"/>
+            </syntax>
+        </parameter>
+        <parameter name="CommandKey" access="readOnly">
+            <description>
+            The value of the CommandKey argument passed to the CPE in the corresponding ChangeDUState RPC.
+            This value is empty in case {{param|Autonomous}} is {{true}}.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="32"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="OperationNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState.DUStateChangeComplete.{i}.Operation.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="OperationNumberOfEntries">
+        <description>
+        Table of operations that are reported within the (Autonomous)DUStateChangeComplete message.
+        </description>
+        <parameter name="URL" access="readOnly">
+            <description>
+            The URL that specifies the location of the DU to be installed.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="1024"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="UUID" access="readOnly">
+            <description>
+            The UUID as defined in RFC 4122 of the DU that was affected.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="36"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Username" access="readOnly">
+            <description>
+            Username to be used by the CPE to authenticate with the file server, if
+authentication is required.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Password" access="readOnly">
+            <description>
+            Password to be used by the CPE to authenticate with the file server, if
+authentication is required.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="ExecutionEnvRef" access="readOnly">
+            <description>
+            A reference to the Execution Environment upon which the DU is to be installed.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                    <pathRef targetParent=".SoftwareModules.ExecEnv." refType="weak" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="DeploymentUnitRef" access="readOnly">
+            <description>
+            A reference to the DU affected.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                    <pathRef targetParent=".SoftwareModules.DeploymentUnit." refType="weak" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Version" access="readOnly">
+            <description>
+            The version of the DU affected.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="32"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="CurrentState" access="readOnly" localNotify="forceEnabled">
+            <description>
+            The state of the operation. {{enum|None}} means the operation has not been performed yet.
+            Otherwise, reports the state attained either by completing the requested operation or reflecting the state of the DU after a failed attempt to change its state.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Installed"/>
+                    <enumeration value="Uninstalled"/>
+                    <enumeration value="Failed"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="Resolved" access="readOnly">
+            <description>
+            Whether or not the DU operation resolved all of its dependencies.
+            In the case of an Uninstall, this value is meaningless and SHOULD be true.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="true"/>
+            </syntax>
+        </parameter>
+        <parameter name="ExecutionUnitRefList" access="readOnly">
+            <description>
+            List of the Execution Units related to the affected DU.
+            </description>
+            <syntax>
+                <list/>
+                <string>
+                    <pathRef targetParent=".SoftwareModules.ExecutionUnit." refType="weak" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="StartTime" access="readOnly">
+            <description>
+            The date and time the operation on the DU was started in UTC.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="CompleteTime" access="readOnly">
+            <description>
+            The date and time the operation on the DU was fully completed and applied in UTC.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="FaultCode" access="readOnly">
+            <description>
+            Numerical fault code in case of operation failure.
+            </description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="OperationPerformed" access="readOnly">
+            <description>
+            The operation that was performed against the DU.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="Install"/>
+                    <enumeration value="Update"/>
+                    <enumeration value="Uninstall"/>
+                </string>
+                <default value="Install"/>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

@@ -1,0 +1,132 @@
+local mapper, tonumber, pairs, ipairs, tostring = mapper, tonumber, pairs, ipairs, tostring
+local helper = require("mobiled.scripthelpers")
+
+local error_codes = {
+  [1001] = "1001 (user-defined) - Non-responsive LTE module",
+  [1003] = "1003 (user-defined) - Connection failure before the firmware download",
+  [1004] = "1004 (user-defined) - There is a voice calling over mobile, please try upgrading later",
+  [4]    = "1005 (user-defined) - Download failed",
+  [6]    = "1006 (user-defined) - Upgrade failed",
+  [1007] = "1007 (user-defined) - Connection failure during the firmware download"
+}
+
+local obj = {
+  objectType = {
+    name = "#ROOT.{i}.X_000E50_Upgrade.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Path = {
+        access = "readWrite",
+        type = "string",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      ErrorCode = {
+        access = "readOnly",
+        type = "string",
+      }
+    }
+  }
+}
+
+local upgrade = {}
+local statusCache = {}
+
+local conn = mapper("ubus").connect()
+if not conn then
+  return
+end
+
+local function getall(mapping, key)
+  local result = {}
+  result.Path = ""
+  local info = helper.getUbusData(conn, "mobiled.device", "get", { imei = key })
+  local dev_idx = tonumber(info.dev_idx)
+  if dev_idx then
+    info = helper.getUbusData(conn, "mobiled.device", "firmware_upgrade", { dev_idx = dev_idx })
+    result.Status = info.status
+    result.ErrorCode = info.error_code
+    if (result.Status == "" or result.Status == "not_running" or result.Status == "done" or result.Status == "failed" or result.Status == "timeout") and statusCache[dev_idx] and statusCache[dev_idx].status then
+      result.Status = statusCache[dev_idx].status
+      result.ErrorCode = statusCache[dev_idx].error_code
+    end
+    result.ErrorCode = error_codes[result.ErrorCode] or result.ErrorCode
+  else
+    result.Status = ""
+    result.ErrorCode = ""
+  end
+  return result
+end
+
+local function get(mapping, paramName, key)
+  return getall(mapping, key)[paramName]
+end
+
+obj.getall = getall
+obj.get = get
+
+obj.set = {
+  Path = function(mapping, paramname, paramvalue, key)
+    local info = helper.getUbusData(conn, "mobiled.device", "get", { imei = key })
+    local dev_idx = tonumber(info.dev_idx)
+    if dev_idx then
+      upgrade[dev_idx] = paramvalue
+    end
+    commitapply:newset("mobiled_upgrade")
+  end,
+}
+
+obj.commit = function()
+  if #upgrade > 0 then
+    local f = assert(io.open("/tmp/.mobiled.upgrade",'w'))
+    if f then
+      for dev_idx, path in pairs(upgrade) do
+        f:write(dev_idx .. " " .. path .. "\n")
+      end
+      f:close()
+    end
+  end
+  upgrade = {}
+end
+
+obj.revert = function()
+  upgrade = {}
+end
+
+local function mobiled_event(mapping, event, msg)
+  local events = {}
+  local status = msg["status"]
+  local dev_idx = msg["dev_idx"]
+  local error_code = msg["error_code"]
+  if status and dev_idx then
+    local info = helper.getUbusData(conn, "mobiled.device", "get", { dev_idx = dev_idx })
+    if status == "done" or status == "failed" or status == "timeout" then
+      statusCache[dev_idx].status = status
+      statusCache[dev_idx].error_code = error_code and tostring(error_code) or ""
+    end
+    events[#events + 1] = { key = info.imei, paramname = "Status" }
+    if error_code then
+      events[#events + 1] = { key = info.imei, paramname = "ErrorCode" }
+    end
+    return events
+  end
+  if msg["event"] and msg["event"] == "device_removed" and dev_idx then
+    statusCache[dev_idx] = {}
+  end
+end
+
+obj.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, mobiled_event, "mobiled.firmware_upgrade")
+  ubus_evsrc.watch_event(mapping, mobiled_event, "mobiled")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(obj, "#ROOT", {"InternetGatewayDevice.X_000E50_Cellular.Interface", "Device.Cellular.Interface"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

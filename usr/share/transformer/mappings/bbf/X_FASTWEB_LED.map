@@ -1,0 +1,115 @@
+-- Manually generated
+local Multi_LED_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the LED Status",
+    parameters = {
+    }
+  }
+}
+
+local mapper = mapper
+local duplicator = mapper("multiroot").duplicate
+
+local duplicates = duplicator(Multi_LED_, "#ROOT", { "InternetGatewayDevice.X_FASTWEB_LED.", "Device.X_FASTWEB_LED." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_FASTWEB_LED_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the LED Status",
+    parameters = {
+      Color = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the color of the LED",
+      },
+      State = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the LED",
+      },
+      LastCheckDate = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the last executed time of the button",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local match = string.match
+local buttonBinding = { config = "button" }
+local ledfwBinding = { config = "ledfw" }
+
+local connTypeMap = {
+  ["LineStatus"] = "broadband",
+  ["WPS"] = "wps",
+  ["WiFiStatus"] = "wireless"
+}
+
+local lastCheckDateMap = {
+  ["LineStatus"] = "line",
+  ["WPS"] = "wps",
+  ["WiFiStatus"] = "wifi"
+}
+
+local colorMap = {
+  ["red"] = "Red",
+  ["green"] = "Green",
+  ["orange"] = "Orange",
+  ["off"] = "OFF",
+}
+
+local stateMap = {
+  ["solid"] = "Solid",
+  ["blink"] = "Blinking",
+}
+
+local function getConnType(mapping, param)
+  local connType = match(mapping.objectType.name, "^.+%.(.+)%.")
+  if param == "LastCheckDate" then
+    return connType and lastCheckDateMap[connType]
+  end
+  return connType and connTypeMap[connType]
+end
+
+local function getLEDInfo(connectionType, option)
+  ledfwBinding.sectionname = connectionType
+  ledfwBinding.option = option
+  local ledInfo = uciHelper.get_from_uci(ledfwBinding)
+  if match(ledInfo, "%-") then
+    return match(ledInfo, "(%S+)%-(%S+)")
+  end
+  return ledInfo
+end
+
+Multi_FASTWEB_LED_.get = function(mapping, param)
+  local connectionType = getConnType(mapping, param)
+  if param == "Color" then
+    local color = getLEDInfo(connectionType, "color")
+    return color ~= "" and colorMap[color] or "Green"
+  elseif param == "State" then
+    local _, state = getLEDInfo(connectionType, "color")
+    return state and stateMap[state] or "Solid"
+  elseif param == "LastCheckDate" then
+    buttonBinding.sectionname = connectionType
+    buttonBinding.option = "lastdate"
+    buttonBinding.default = ""
+    return uciHelper.get_from_uci(buttonBinding)
+  end
+end
+
+duplicates = duplicator(Multi_FASTWEB_LED_, "#ROOT", { "InternetGatewayDevice.X_FASTWEB_LED.LineStatus.", "Device.X_FASTWEB_LED.LineStatus.", "InternetGatewayDevice.X_FASTWEB_LED.WiFiStatus.", "Device.X_FASTWEB_LED.WiFiStatus.", "InternetGatewayDevice.X_FASTWEB_LED.WPS.", "Device.X_FASTWEB_LED.WPS." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="QoEDiagnostics" version="2.0">
+    <object name="X_ADB_QoE." access="readOnly" minEntries="1" maxEntries="1">
+        <description>
+        Object to support Quality of Experience diagnostics.
+        </description>
+        <parameter name="SamplingNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="X_ADB_QoE.Sampling.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="SamplingNumberOfEntries" set="QoeSampling.sh">
+        <description>
+        This object allows to configure and trigger the sampling of a list of parameters (i.e. statistics counters).
+        At the end of the test, the values of sampled parameters are stored in the {{object|Parameter}} table.
+        </description>
+        <parameter name="Alias" access="readOnly" key="yes">
+            <description>Name of this object instance.</description>
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="DiagnosticsState" access="readWrite">
+            <description>{{enum}}
+             If the ACS sets the value of this parameter to {{enum|Requested}}, the CPE MUST initiate the corresponding diagnostic test.
+             To ensure the use of the proper test parameters (the writable parameters in this object), the test parameters MUST be set either prior to or at the same time as (in the same SetParameterValues) setting the {{param|DiagnosticsState}} to {{enum|Requested}}.
+
+             When requested, the CPE SHOULD wait until after completion of the communication session with the ACS before starting the diagnostic.
+
+             When the test is completed, the value of this parameter MUST be {{enum|Completed}} or {{enum|Error}}.
+
+             When the diagnostic initiated by the ACS is completed, the CPE MUST establish a new connection to the ACS to allow the ACS to view the results, indicating the Event code 8 DIAGNOSTICS COMPLETE in the Inform message.
+
+             After the diagnostic is complete, the value of all result parameters (all read-only parameters in this object) MUST be retained by the CPE until either this diagnostic is run again, or the CPE reboots.
+
+             Modifying any of the writable parameters in this object except for this one MUST result in the value of this parameter being set to {{enum|None}}.
+
+             While the test is in progress, modifying any of the writable parameters in this object except for this one MUST result in the test being terminated and the value of this parameter being set to {{enum|None}}.
+
+             While the test is in progress, setting this parameter to {{enum|Requested}} (and possibly modifying other writable parameters in this object) MUST result in the test being terminated and then restarted using the current values of the test parameters.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Requested"/>
+                    <enumeration value="Completed"/>
+                    <enumeration value="Error"/>
+                    <enumeration value="Error_Timeout"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="PathList" access="readWrite">
+            <description>
+            The list of parameters to be sampled.
+            Both full path to parameters and path to objects (dot-terminated) are allowed. {{pattern}}
+            Examples:
+: Device.IP.Interface.1.Stats.PacketsSent
+: Device.IP.Interface.1.Stats.PacketsReceived
+: Device.ATM.Link.2.Stats.
+            </description>
+            <syntax>
+                <list minItems="0" maxItems="50"/>
+                <string>
+                    <size maxLength="100"/>
+                    <pattern value="Device\..+"/>
+                    <pattern value="InternetGatewayDevice\..+"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="SamplesNumber">
+            <description>The number of samples to read for each parameter.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="5" step="1"/>
+                </unsignedInt>
+                <default value="1"/>
+            </syntax>
+        </parameter>
+        <parameter name="SamplesInterval">
+            <description>The interval in {{units}} between the samples read for each parameter.
+            This parameter is ignored if {{param|SamplesNumber}} is 1.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="5" maxInclusive="15" step="1"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="5"/>
+            </syntax>
+        </parameter>
+        <parameter name="ParameterNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="SampleTime" access="readOnly">
+            <description>
+            After the test is completed, this parameter contains the absolute start time of the sampling.
+            This is the time of the first sampled value when more than one is configured in {{param|SamplesNumber}}.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="X_ADB_QoE.Sampling.{i}.Parameter.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="ParameterNumberOfEntries">
+        <description>
+        After the test is completed, for each sampled parameter one entry is created in this table.
+        </description>
+        <parameter name="Path" access="readOnly">
+            <description>The full path name of the sampled parameter.</description>
+            <syntax>
+                <string/>
+            </syntax>
+        </parameter>
+        <parameter name="Value" access="readOnly">
+            <description>The sampled parameter values.
+            The number of items in this list is equal to {{param|#.SamplesNumber}}.
+            </description>
+            <syntax>
+                <list/>
+                <string/>
+            </syntax>
+        </parameter>
+        <parameter name="Timestamp" access="readOnly">
+            <description>The sampled values timestamps, in {{units}} since {{param|#.SampleTime}}.
+            The number of items in this list is equal to {{param|#.SamplesNumber}}.
+            </description>
+            <syntax>
+                <list/>
+                <unsignedInt>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="X_ADB_QoE.SamplingDiagnostics.">
+        <parameter name="PathList" access="readWrite">
+            <description>
+            The list of parameters to be sampled.
+            Both full path to parameters and path to objects (dot-terminated) are allowed. {{pattern}}
+            Examples:
+: Device.IP.Interface.1.Stats.PacketsSent
+: Device.IP.Interface.1.Stats.PacketsReceived
+: Device.ATM.Link.2.Stats.
+            </description>
+            <syntax>
+                <list minItems="0" maxItems="50"/>
+                <string>
+                    <size maxLength="100"/>
+                    <pattern value="Device\..+"/>
+                    <pattern value="InternetGatewayDevice\..+"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="SamplesNumber">
+            <description>The number of samples to read for each parameter.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="5" step="1"/>
+                </unsignedInt>
+                <default value="1"/>
+            </syntax>
+        </parameter>
+        <parameter name="SamplesInterval">
+            <description>The interval in {{units}} between the samples read for each parameter.
+            This parameter is ignored if {{param|SamplesNumber}} is 1.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="5" maxInclusive="15" step="1"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="5"/>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

@@ -1,0 +1,259 @@
+#!/bin/sh /etc/rc.common
+
+START=15
+
+KERNELVER=`uname -r`
+
+# TMOUT=0 means no busybox shell timeout.
+# if you want the busybox shell to timeout after some number of seconds of inactivity,
+# change the 0 to the number of seconds, e.g. 300.
+export TMOUT=0
+
+lilac_config() {
+	local cfg="$1"
+
+	config_get PUBLIC_IF "$cfg" outbound_interface
+	config_get PRIVATE_IFS "$cfg" inbound_interfaces
+	config_get IPTABLES_CHAIN "$cfg" iptables_chain
+}
+
+insmod_3_4() {
+	 test -e /lib/modules/$KERNELVER/bcm_log.ko && insmod /lib/modules/$KERNELVER/bcm_log.ko
+	# RDPA
+	test -e /lib/modules/$KERNELVER/bdmf.ko && insmod /lib/modules/$KERNELVER/bdmf.ko bdmf_chrdev_major=215 bdmf_global_trace_level=1
+	 test -e /lib/modules/$KERNELVER/gpon_stack.ko && insmod /lib/modules/$KERNELVER/gpon_stack.ko
+	 test -e /lib/modules/$KERNELVER/rdpa_gpl.ko && insmod /lib/modules/$KERNELVER/rdpa_gpl.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && insmod /lib/modules/$KERNELVER/rdpa.ko
+	 test -e /etc/rdpa_init.sh && /etc/rdpa_init.sh
+	 test -e /etc/rdpa_gpon_init.sh && /etc/rdpa_gpon_init.sh
+	 test -e /etc/rdpa_gbe_init.sh && /etc/rdpa_gbe_init.sh
+	 test -e /etc/rdpa_epon_init.sh && /etc/rdpa_epon_init.sh
+	 test -e /etc/rdpa_gbe_wan5_init.sh && /etc/rdpa_gbe_wan5_init.sh
+	 test -e /etc/rdpa_gpon_ext_sw_init.sh && /etc/rdpa_gpon_ext_sw_init.sh
+	 test -e /etc/rdpa_gbe_wan0_init.sh && /etc/rdpa_gbe_wan0_init.sh
+	 test -e /lib/modules/$KERNELVER/rdpa_mw.ko && insmod /lib/modules/$KERNELVER/rdpa_mw.ko
+	 test -e /lib/modules/$KERNELVER/bcmbrfp.ko && insmod /lib/modules/$KERNELVER/bcmbrfp.ko
+	# General
+	 test -e /lib/modules/$KERNELVER/chipinfo.ko && insmod /lib/modules/$KERNELVER/chipinfo.ko
+	 test -e /lib/modules/$KERNELVER/bcmxtmrtdrv.ko && insmod /lib/modules/$KERNELVER/bcmxtmrtdrv.ko
+	 test -e /lib/modules/$KERNELVER/bcm_ingqos.ko && insmod /lib/modules/$KERNELVER/bcm_ingqos.ko
+	 test -e /lib/modules/$KERNELVER/bcm_bpm.ko && insmod /lib/modules/$KERNELVER/bcm_bpm.ko
+	 test -e /lib/modules/$KERNELVER/pktflow.ko && insmod /lib/modules/$KERNELVER/pktflow.ko
+	 test -e /lib/modules/$KERNELVER/pktcmf.ko && insmod /lib/modules/$KERNELVER/pktcmf.ko
+	 test -e /lib/modules/$KERNELVER/bcmfap.ko && insmod /lib/modules/$KERNELVER/bcmfap.ko
+	 test -e /lib/modules/$KERNELVER/pktrunner.ko && insmod /lib/modules/$KERNELVER/pktrunner.ko
+	 test -e /lib/modules/$KERNELVER/flowbond.ko && insmod /lib/modules/$KERNELVER/flowbond.ko
+	 test -e /etc/cmf/cmfcfg && /etc/cmf/cmfcfg
+	 test -e /lib/modules/$KERNELVER/profdrvdd.ko && insmod /lib/modules/$KERNELVER/profdrvdd.ko
+	 test -e /lib/modules/$KERNELVER/bcmxtmcfg.ko && insmod /lib/modules/$KERNELVER/bcmxtmcfg.ko
+	 test -e /lib/modules/$KERNELVER/ext_bonding.ko && insmod /lib/modules/$KERNELVER/ext_bonding.ko
+	 test -e /lib/modules/$KERNELVER/atmapi.ko && insmod /lib/modules/$KERNELVER/atmapi.ko
+	 test -e /lib/modules/$KERNELVER/adsldd.ko && insmod /lib/modules/$KERNELVER/adsldd.ko
+	 test -e /lib/modules/$KERNELVER/blaa_dd.ko && insmod /lib/modules/$KERNELVER/blaa_dd.ko
+	 test -e /lib/modules/$KERNELVER/bcmprocfs.ko && insmod /lib/modules/$KERNELVER/bcmprocfs.ko
+	# test -e /lib/modules/$KERNELVER/kernel/net/ipv6/ipv6.ko && insmod /lib/modules/$KERNELVER/kernel/net/ipv6/ipv6.ko
+	 test -e /lib/modules/$KERNELVER/kernel/net/atm/br2684.ko && insmod /lib/modules/$KERNELVER/kernel/net/atm/br2684.ko
+	 test -e /lib/modules/$KERNELVER/linux-kernel-bde.ko && insmod /lib/modules/$KERNELVER/linux-kernel-bde.ko
+	 test -e /lib/modules/$KERNELVER/linux-user-bde.ko && insmod /lib/modules/$KERNELVER/linux-user-bde.ko
+	 # enet depends on moca depends on i2c
+	 test -e /lib/modules/$KERNELVER/i2c_bcm6xxx.ko && insmod /lib/modules/$KERNELVER/i2c_bcm6xxx.ko
+	 test -e /lib/modules/$KERNELVER/bcm3450.ko && insmod /lib/modules/$KERNELVER/bcm3450.ko
+	 test -e /lib/modules/$KERNELVER/gpon_i2c.ko && insmod /lib/modules/$KERNELVER/gpon_i2c.ko
+	 test -e /lib/modules/$KERNELVER/laser_i2c.ko && insmod /lib/modules/$KERNELVER/laser_i2c.ko
+	 test -e /lib/modules/$KERNELVER/sfp_i2c.ko && insmod /lib/modules/$KERNELVER/sfp_i2c.ko
+	 test -e /lib/modules/$KERNELVER/bcmmoca.ko && insmod /lib/modules/$KERNELVER/bcmmoca.ko
+	 test -e /lib/modules/$KERNELVER/bcm_enet.ko && insmod /lib/modules/$KERNELVER/bcm_enet.ko
+	 test -e /lib/modules/$KERNELVER/time_sync.ko && insmod /lib/modules/$KERNELVER/time_sync.ko
+	 test -e /lib/modules/$KERNELVER/nciTMSkmod.ko && insmod /lib/modules/$KERNELVER/nciTMSkmod.ko
+	 test -e /lib/modules/$KERNELVER/bcmsw.ko && insmod /lib/modules/$KERNELVER/bcmsw.ko && ifconfig bcmsw up
+	 test -e /lib/modules/$KERNELVER/bcm_usb.ko && insmod /lib/modules/$KERNELVER/bcm_usb.ko
+	 test -e /lib/modules/$KERNELVER/bcmarl.ko && insmod /lib/modules/$KERNELVER/bcmarl.ko
+
+	#load SATA/AHCI modules
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/ata/libata.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/ata/libata.ko
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/ata/libahci.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/ata/libahci.ko
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/ata/ahci.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/ata/ahci.ko
+	 test -e /lib/modules/$KERNELVER/kernel/arch/arm/plat-bcm63xx/bcm63xx_sata.ko && insmod /lib/modules/$KERNELVER/kernel/arch/arm/plat-bcm63xx/bcm63xx_sata.ko
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/ata/ahci_platform.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/ata/ahci_platform.ko
+
+	#load usb modules
+	 for f in drivers/usb/usb-common drivers/usb/core/usbcore \
+	  drivers/usb/host/ehci-hcd drivers/usb/host/ohci-hcd drivers/usb/host/xhci-hcd \
+	  arch/arm/plat-bcm63xx/bcm63xx_usb \
+	  drivers/usb/class/usblp drivers/usb/storage/usb-storage; do
+	  test -e /lib/modules/$KERNELVER/kernel/$f.ko && insmod /lib/modules/$KERNELVER/kernel/$f.ko
+	 done
+
+	 test -e /lib/modules/$KERNELVER/usb-storage.ko && insmod /lib/modules/$KERNELVER/usb-storage.ko
+
+	# WLAN accelerator Module
+	 test -e /lib/modules/$KERNELVER/wfd.ko && insmod /lib/modules/$KERNELVER/wfd.ko
+
+	# WLAN Module
+	 test -e /lib/modules/$KERNELVER/wlcsm.ko && insmod /lib/modules/$KERNELVER/wlcsm.ko
+	 test -e /lib/modules/$KERNELVER/wlemf.ko && insmod /lib/modules/$KERNELVER/wlemf.ko
+	 test -e /lib/modules/$KERNELVER/wl.ko && insmod /lib/modules/$KERNELVER/wl.ko
+	 test -e /lib/modules/$KERNELVER/dhd.ko && insmod /lib/modules/$KERNELVER/dhd.ko firmware_path=/etc/wlan_dhd  mfg_firmware_path=/etc/wlan_dhd/mfg
+	 test -e /etc/wlan/rtecdc.trx && mount -t usbfs none /proc/bus/usb && /bin/bcmdl /etc/wlan/rtecdc.trx && sleep 2 && insmod /lib/modules/$KERNELVER/wl-usb.ko
+
+	 test -e /lib/modules/$KERNELVER/dect.ko && insmod /lib/modules/$KERNELVER/dect.ko
+	 test -e /lib/modules/$KERNELVER/dspdd.ko && insmod /lib/modules/$KERNELVER/dspdd.ko
+	 test -e /lib/modules/$KERNELVER/endpointdd.ko && insmod /lib/modules/$KERNELVER/endpointdd.ko
+	 test -e /lib/modules/$KERNELVER/p8021ag.ko && insmod /lib/modules/$KERNELVER/p8021ag.ko
+
+	# other modules
+	 test -e /lib/modules/$KERNELVER/isdn.ko && insmod /lib/modules/$KERNELVER/isdn.ko
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/isdn/capi/capi.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/isdn/capi/capi.ko
+	 test -e /lib/modules/$KERNELVER/bcmgpon.ko && insmod /lib/modules/$KERNELVER/bcmgpon.ko
+	 test -e /lib/modules/$KERNELVER/bcmvlan.ko && insmod /lib/modules/$KERNELVER/bcmvlan.ko
+	 test -e /lib/modules/$KERNELVER/pwrmngtd.ko && insmod /lib/modules/$KERNELVER/pwrmngtd.ko
+	 test -e /lib/modules/$KERNELVER/kernel/drivers/char/hw_random/rng-core.ko && insmod /lib/modules/$KERNELVER/kernel/drivers/char/hw_random/rng-core.ko
+	 test -e /lib/modules/$KERNELVER/bcmtrng.ko && insmod /lib/modules/$KERNELVER/bcmtrng.ko
+
+	 test -e /lib/modules/$KERNELVER/laser_dev.ko && insmod /lib/modules/$KERNELVER/laser_dev.ko
+	 test -e /lib/modules/$KERNELVER/pmd.ko && insmod /lib/modules/$KERNELVER/pmd.ko
+	 test -e /lib/modules/$KERNELVER/sim_card.ko && insmod /lib/modules/$KERNELVER/sim_card.ko
+
+	# presecure fullsecure modules
+	 test -e /lib/modules/$KERNELVER/otp.ko && insmod /lib/modules/$KERNELVER/otp.ko
+
+	# EPON Module
+	 test -e /lib/modules/$KERNELVER/epon_stack.ko && insmod /lib/modules/$KERNELVER/epon_stack.ko epon_usr_init=1
+
+	# RDPA Command Drivers
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_tm.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_tm.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_iptv.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_iptv.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_ic.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_ic.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_sys.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_sys.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_br.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_br.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_port.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_port.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_llid.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_llid.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_spdsvc.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_spdsvc.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd_drv.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd_drv.ko
+
+	# Gre tunnel modules
+	 test -e /lib/modules/$KERNELVER/gre.ko && insmod /lib/modules/$KERNELVER/gre.ko && insmode /lib/modules/$KERNELVER/ip_gre.ko
+}
+
+insmod_4_1() {
+	 test -e /lib/modules/$KERNELVER/chipinfo.ko && insmod /lib/modules/$KERNELVER/chipinfo.ko
+	#
+	 test -e /lib/modules/$KERNELVER/bdmf.ko && insmod /lib/modules/$KERNELVER/bdmf.ko
+	# I2C
+	 test -e /lib/modules/$KERNELVER/i2c_bcm6xxx.ko && insmod /lib/modules/$KERNELVER/i2c_bcm6xxx.ko
+	 test -e /lib/modules/$KERNELVER/pon_i2c.ko && insmod /lib/modules/$KERNELVER/pon_i2c.ko
+	 test -e /lib/modules/$KERNELVER/i2cmux_i2c.ko && insmod /lib/modules/$KERNELVER/i2cmux_i2c.ko
+
+	 if test -e /lib/modules/$KERNELVER/pon_i2c.ko ; then
+    # work round for 10G SFP modules, thoese modules can't be detected for 1st time. 
+    # insert i2c_bcm6xxx.ko again, if it fails to detect SFP module
+	 test -e /proc/i2c_pon/ponPhy_eeprom0 || ( rmmod i2c_bcm6xxx && insmod /lib/modules/$KERNELVER/i2c_bcm6xxx.ko )
+	 test -e /proc/i2c_pon/ponPhy_eeprom0 || echo pon_i2c 0x50 > /sys/bus/i2c/devices/i2c-0/new_device
+	 test -e /proc/i2c_pon/ponPhy_eeprom1 || echo pon_i2c 0x51 > /sys/bus/i2c/devices/i2c-0/new_device
+	 else
+	 test -e /lib/modules/$KERNELVER/bcm_i2c.ko && insmod /lib/modules/$KERNELVER/bcm_i2c.ko
+	 test -e /lib/modules/$KERNELVER/bcmsfp_i2c.ko && insmod /lib/modules/$KERNELVER/bcmsfp_i2c.ko
+	 fi
+
+	# PON
+	 test -e /lib/modules/$KERNELVER/opticaldet.ko && insmod /lib/modules/$KERNELVER/opticaldet.ko
+	 test -e /lib/modules/$KERNELVER/bcm_pondrv.ko && insmod /lib/modules/$KERNELVER/bcm_pondrv.ko
+
+	# BPM
+	 test -e /lib/modules/$KERNELVER/bcm_bpm.ko && insmod /lib/modules/$KERNELVER/bcm_bpm.ko
+	# RDPA
+	 test -e /lib/modules/$KERNELVER/rdpa_gpl.ko && insmod /lib/modules/$KERNELVER/rdpa_gpl.ko
+	 test -e /lib/modules/$KERNELVER/rdpa_gpl_ext.ko && insmod /lib/modules/$KERNELVER/rdpa_gpl_ext.ko
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && insmod /lib/modules/$KERNELVER/rdpa.ko
+	 test -e /lib/modules/$KERNELVER/rdpa_usr.ko && insmod /lib/modules/$KERNELVER/rdpa_usr.ko
+	 test -e /lib/modules/$KERNELVER/rdpa_mw.ko && insmod /lib/modules/$KERNELVER/rdpa_mw.ko
+	 test -e /lib/modules/$KERNELVER/bcmbrfp.ko && insmod /lib/modules/$KERNELVER/bcmbrfp.ko
+
+	 test -e /lib/modules/$KERNELVER/bcm_spdsvc.ko && insmod /lib/modules/$KERNELVER/bcm_spdsvc.ko
+
+	# General
+	 test -e /lib/modules/$KERNELVER/pktflow.ko && insmod /lib/modules/$KERNELVER/pktflow.ko
+
+	# enet
+	 test -e /lib/modules/$KERNELVER/bcm_enet.ko && insmod /lib/modules/$KERNELVER/bcm_enet.ko
+
+	# moving
+	 test -e /lib/modules/$KERNELVER/pktrunner.ko && insmod /lib/modules/$KERNELVER/pktrunner.ko
+	 test -e /lib/modules/$KERNELVER/bcmmcast.ko && insmod /lib/modules/$KERNELVER/bcmmcast.ko
+
+	# load SATA/AHCI
+
+	# pcie
+
+	# WLAN
+	 test -e /lib/modules/$KERNELVER/wfd.ko && insmod /lib/modules/$KERNELVER/wfd.ko
+
+	# NetXL
+
+	# WLAN Module
+	 test -e /lib/modules/$KERNELVER/wlcsm.ko && insmod /lib/modules/$KERNELVER/wlcsm.ko
+	 test -e /lib/modules/$KERNELVER/wlemf.ko && insmod /lib/modules/$KERNELVER/wlemf.ko
+	 test -e /lib/modules/$KERNELVER/wl.ko && insmod /lib/modules/$KERNELVER/wl.ko
+	 test -e /lib/modules/$KERNELVER/dhd.ko && insmod /lib/modules/$KERNELVER/dhd.ko firmware_path=/etc/wlan_dhd  mfg_firmware_path=/etc/wlan_dhd/mfg dhd_dpc_prio=5  iface_name=wl  dhd_console_ms=0
+
+	# load usb
+	 test -e /lib/modules/$KERNELVER/usb-storage.ko && insmod /lib/modules/$KERNELVER/usb-storage.ko
+
+	# other
+	 test -e /lib/modules/$KERNELVER/bcmvlan.ko && insmod /lib/modules/$KERNELVER/bcmvlan.ko
+	 test -e /lib/modules/$KERNELVER/pwrmngtd.ko && insmod /lib/modules/$KERNELVER/pwrmngtd.ko
+	 test -e /lib/modules/$KERNELVER/laser_dev.ko && insmod /lib/modules/$KERNELVER/laser_dev.ko
+	 test -e /lib/modules/$KERNELVER/laser_i2c.ko && insmod /lib/modules/$KERNELVER/laser_i2c.ko
+	 test -e /lib/modules/$KERNELVER/sim_card.ko && insmod /lib/modules/$KERNELVER/sim_card.ko
+	 test -e /lib/modules/$KERNELVER/bcmmoca.ko && insmod /lib/modules/$KERNELVER/bcmmoca.ko
+
+	# presecure
+	 test -e /lib/modules/$KERNELVER/otp.ko && insmod /lib/modules/$KERNELVER/otp.ko
+	 test -e /lib/modules/$KERNELVER/pmd.ko && insmod /lib/modules/$KERNELVER/pmd.ko
+
+	# RDPA Command
+	 test -e /lib/modules/$KERNELVER/rdpa.ko && test -e /lib/modules/$KERNELVER/rdpa_cmd.ko && insmod /lib/modules/$KERNELVER/rdpa_cmd.ko
+
+	# Ingress
+	# Must
+	# LTE
+	 test -e /lib/modules/$KERNELVER/xt_SKIPLOG.ko && insmod /lib/modules/$KERNELVER/xt_SKIPLOG.ko
+
+	 test -e /etc/rdpa_init.sh && /etc/rdpa_init.sh
+     test -e /etc/rdpa_gpon_init.sh && /etc/rdpa_gpon_init.sh
+
+	# Enable the PKA driver.
+	 test -e /sys/devices/platform/bcm_pka/enable && echo 1 > /sys/devices/platform/bcm_pka/enable
+
+	# Gre tunnel modules
+	 test -e /lib/modules/$KERNELVER/gre.ko && insmod /lib/modules/$KERNELVER/gre.ko
+	 test -e /lib/modules/$KERNELVER/ip_gre.ko && insmod /lib/modules/$KERNELVER/ip_gre.ko
+
+	# voice
+	 test -e /lib/modules/$KERNELVER/dsphal.ko && insmod /lib/modules/$KERNELVER/dsphal.ko
+	 test -e /lib/modules/$KERNELVER/slicslac.ko && insmod /lib/modules/$KERNELVER/slicslac.ko
+}
+
+start() {
+
+#	echo "Mounting filesystems..."
+#	/bin/mount -a
+	mknod /var/fuse c 10 229
+	chmod a+rw /var/fuse
+	mkdir -p /var/log /var/run /var/state/dhcp /var/ppp /var/udhcpd /var/zebra /var/siproxd /var/cache /var/tmp /var/samba /var/samba/share /var/samba/homes /var/samba/private /var/samba/locks
+	cp  /etc/smb.conf /var/samba/ 2>/dev/null
+
+	echo "Configuring system..."
+	ifconfig lo 127.0.0.1 netmask 255.0.0.0 broadcast 127.255.255.255 up
+	echo > /var/udhcpd/udhcpd.leases
+
+	echo "Loading drivers and kernel modules... "
+	echo
+
+	# insmod modules for Linux kernel 3.4 or 4.1
+	insmod_$(uname -r | cut -d. -f1-2 | tr . _)
+}
+
+stop() {
+	echo "stop"
+}

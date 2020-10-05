@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+# Copyright © 2016 Technicolor
+
+# has to be before nginx, which is currently on S80
+START=79
+
+boot() {
+        # Check if date is set; we should at least be in 2016 or later
+        local CURRENTYEAR=$(date +"%Y")
+        [ $CURRENTYEAR -lt "2016" ] && {
+                logger -s -t sscert "Date appears to not be set!"
+                return
+        }
+
+        cert=$(find /etc/nginx/server.crt -type f -perm 400)
+        if [ -n "$cert" ]
+        then
+          logger -s -t sscert "The certificate was correctly generated"
+        else
+          logger -s -t sscert "Now generate this device's self signed certificate"
+          rm -f /etc/nginx/server.key /etc/nginx/server.crt
+          sscertgen -keyfile /etc/nginx/server.key -certfile /etc/nginx/server.crt
+          chmod 400 /etc/nginx/server.key /etc/nginx/server.crt
+        fi
+}
