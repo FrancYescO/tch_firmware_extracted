@@ -1,0 +1,141 @@
+local Device_X_FASTWEB_ParentalControl_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_ParentalControl.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      ApplyTo = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local pairs = pairs
+local setmetatable = setmetatable
+local uci = mapper("ucihelper")
+local commitapply = commitapply
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(Device_X_FASTWEB_ParentalControl_, commitapply)
+
+local mt = { __index = function() return "" end }
+
+local control_mode_map = setmetatable({
+  ["1"] = "Selected devices",
+  ["0"] = "Whole network",
+}, mt)
+
+local rev_control_mode_map = setmetatable({
+  ["Whole network"] = "0",
+  ["Selected devices"] = "1",
+},mt)
+
+Device_X_FASTWEB_ParentalControl_.get = {
+  Enabled = function(mapping, paramname, key)
+    return tele.mgr:GetParentalCtlStatus()
+  end,
+  ApplyTo = function(mapping, paramname, key)
+    local mode = tele.mgr:GetParentalCtlMode()
+    return control_mode_map[mode]
+  end,
+}
+
+Device_X_FASTWEB_ParentalControl_.set = {
+  Enabled =  function(mapping, paramname, value, key)
+    tele.mgr:SetParentalCtlStatus(value)
+    return true
+  end,
+  ApplyTo = function(mapping, paramname, value, key)
+    local mode = rev_control_mode_map[value]
+    if mode == "" then
+      return nil, "The value is invalid."
+    end
+    tele.mgr:SetParentalCtlMode(mode)
+    return true
+  end,
+}
+
+Device_X_FASTWEB_ParentalControl_.commit =  function()
+  tele:commit()
+end
+
+Device_X_FASTWEB_ParentalControl_.revert = function()
+  tele:revert()
+end
+
+register(Device_X_FASTWEB_ParentalControl_)
+
+local Device_X_FASTWEB_ParentalControl_URL_i_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_ParentalControl.URL.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "URLNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      BlocksEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      BlocksURL = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local map = {
+  BlocksEnable = "action",
+  BlocksURL = "site",
+}
+
+Device_X_FASTWEB_ParentalControl_URL_i_.entries = function(mapping, parent)
+  local keys = {}
+  local urls = tele.mgr:GetAllURLs()
+  for _, url in ipairs(urls) do
+    keys[#keys+1] = url.id
+  end
+  return keys
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.get = function(mapping, param, key)
+  if map[param] then
+    return tele.mgr:GetURL(key, map[param])
+  end
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.set = function(mapping, param, value, key)
+  if map[param] then
+    tele.mgr:SetURL(key, map[param], value)
+    return true
+  else
+    return nil, "Not support the parameter!"
+  end
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.add = function(mapping)
+  local key = tele.mgr:AddURL()
+  return key
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.delete = function(mapping, key)
+  tele.mgr:DelURL(key)
+  return true
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.commit =  function()
+  tele:commit()
+end
+
+Device_X_FASTWEB_ParentalControl_URL_i_.revert = function()
+  tele:revert()
+end
+
+register(Device_X_FASTWEB_ParentalControl_URL_i_)
