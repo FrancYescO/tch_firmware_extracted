@@ -1,0 +1,42 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions/vpn_common_inc.sh
+
+
+intf=$1
+tty_dev=$2
+speed=$3
+local_ip=$4
+remote_ip=$5
+ipparam=$6
+
+
+pppd="/usr/sbin/pppd"
+
+get_vpn_proto()
+{
+	local intf=$1
+	local pid=
+	local cmdline=
+
+	[ -f /var/run/${intf}.pid ] || return
+	pid=$(cat /var/run/${intf}.pid)
+
+	[ -d /proc/${pid} ] || return
+
+	cmdline=$(cat /proc/${pid}/cmdline)
+	[ "${cmdline:0:${#pppd}}" == "$pppd" ] || { echo ""; return; }
+
+	[ -n "$(echo $cmdline | grep options.pptpd)" ] && { echo $(find_proto pptp); return; }
+
+	[ -n "$(echo $cmdline | grep options.xl2tpd)" ] && { echo $(find_proto l2tp); return; }
+}
+
+proto=$(get_vpn_proto $intf)
+
+[ -z "$proto" ] && exit 0
+
+ip_up_cb $proto $intf $tty_dev $speed $local_ip $remote_ip $ipparam
+
+exit 0
+

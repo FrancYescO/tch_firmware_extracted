@@ -1,0 +1,26 @@
+#! /bin/sh
+
+cat <<EOF >> /sbin/firstusedate
+date +"%Y-%m-%d" | grep "1970-01-01" > /dev/null && exit 0
+cd /etc/easy-rsa/
+generate_openvpn_keys()
+{
+    easyrsa --batch init-pki
+    easyrsa --batch --req-cn=ca build-ca nopass
+    easyrsa --batch --req-cn=server gen-req server nopass
+    easyrsa --batch --req-cn=client gen-req client nopass
+    easyrsa --batch sign server server
+    easyrsa --batch sign client client
+    cp pki/ca.crt pki/issued/server.crt pki/private/server.key  pki/issued/client.crt pki/private/client.key /etc/openvpn/
+    /etc/init.d/openvpn restart
+}
+if [ -d "/etc/openvpn" ] && [ -d "/etc/easy-rsa/" ] && [ -f "/etc/openvpn/dh2048.pem" ]; then
+    if [ ! -f "pki/ca.crt" ] || [ ! -f "pki/issued/server.crt" ] || [ ! -f "pki/private/server.key" ] || [ ! -f "pki/issued/client.crt" ] || [ ! -f "pki/private/client.key" ]; then
+        generate_openvpn_keys
+    fi
+    if [ ! -s "pki/ca.crt" ] || [ ! -s "pki/issued/server.crt" ] || [ ! -s "pki/private/server.key" ] || [ ! -s "pki/issued/client.crt" ] || [ ! -s "pki/private/client.key" ]; then
+        generate_openvpn_keys
+    fi
+fi
+EOF
+

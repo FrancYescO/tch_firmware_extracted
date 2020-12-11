@@ -1,0 +1,149 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_Stats_ = {
+  objectType = {
+    name = "#ROOT.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      X_TCH_PacketsDropped = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      X_TCH_PacketsErrored = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      ErrorsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      UnicastPacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      UnicastPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      DiscardPacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      DiscardPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+--[[ TODO
+      MulticastPacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+--]]
+      MulticastPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+--[[ TODO
+      BroadcastPacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      BroadcastPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      UnknownProtoPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+--]]
+    }
+  }
+}
+
+local mapper = mapper
+local common = mapper("nwcommon")
+-- function aliases
+local getIntfInfo=common.getIntfInfo
+
+local ethernetStatsMap = {
+  BytesSent = "tx_bytes",
+  BytesReceived = "rx_bytes",
+  PacketsSent = "tx_packets",
+  PacketsReceived = "rx_packets",
+  ErrorsSent = "tx_errors",
+  ErrorsReceived = "rx_errors",
+  DiscardPacketsSent = "tx_dropped",
+  DiscardPacketsReceived = "rx_dropped",
+  MulticastPacketsReceived = "multicast",
+}
+
+Multi_Stats_.get = function(mapping, param, key)
+  if param == "X_TCH_PacketsDropped" then
+    local rx = getIntfInfo(key, "rx_dropped")
+    local tx = getIntfInfo(key, "tx_dropped")
+    return tostring(rx+tx)
+  end
+  if param == "X_TCH_PacketsErrored" then
+    local rx = getIntfInfo(key, "rx_errors")
+    local tx = getIntfInfo(key, "tx_errors")
+    return tostring(rx+tx)
+  end
+  if param == "UnicastPacketsSent" then
+    return getIntfInfo(key, "tx_packets", "0")
+  end
+  if param == "UnicastPacketsReceived" then
+    local packageReceived = getIntfInfo(key, "rx_packets")
+    local multicast = getIntfInfo(key, "multicast")
+    if tonumber(multicast) and tonumber(packageReceived) then
+      return tostring(tonumber(packageReceived) - tonumber(multicast))
+    end
+    return ""
+  end
+  return getIntfInfo(key,ethernetStatsMap[param],"0")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Stats_, "#ROOT", {"InternetGatewayDevice.LANDevice.{i}.LANEthernetInterfaceConfig.{i}", "InternetGatewayDevice.LANInterfaces.LANEthernetInterfaceConfig.{i}"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

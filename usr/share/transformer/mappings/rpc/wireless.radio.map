@@ -1,0 +1,236 @@
+local logger = require("transformer.logger")
+local log = logger.new("wireless.radio", 2)
+local register = register;
+local pairs = pairs
+
+local wireless_radio_ = {
+  objectType = {
+    name = "rpc.wireless.radio.@.",
+    access = "readOnly",
+    numEntriesParameter = "RadiosNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+		admin_state = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		oper_state = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		max_phy_rate = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		phy_rate = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_frequency_bands = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_standards = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		standard = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		band = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_countries = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		country = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		allowed_channels = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		used_channels = {
+	        access = "readOnly",
+	        type = "string",
+        },
+        requested_channel = {
+            access = "readWrite",
+            type = "string",
+        },
+		channel = {
+	        access = "readOnly",
+	        type = "string",
+        },
+        requested_channel_width = {
+            access = "readWrite",
+            type = "string",
+        },
+		channel_width = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		ext_channel_location = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		beacon_period = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		dtim_interval = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		rts_threshold = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection_mode = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection_trigger = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		short_slot = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		rateset = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		frame_bursting = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		sgi = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		cdd = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		stbc = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		ampdu = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		amsdu = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		interference_mode = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		interference_channel_list = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		ht_security_restriction = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		remotely_managed = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		integrated_ap = {
+	        access = "readOnly",
+	        type = "string",
+        },
+	        tx_power_overrule_reg = {
+                access = "readOnly",
+                type = "string",
+        },
+                tx_power_adjust = {
+                access = "readWrite",
+                type = "string",
+        },
+    },
+  }
+}
+
+local require, mapper, error = require, mapper, error
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function getDataForRadio(radio)
+    local result = conn:call("wireless.radio", "get", { name = radio })
+    if result == nil then
+        log:error("Cannot retrieve radio info for radio " .. radio)
+        return {}
+    end
+    return result[radio]
+end
+
+local function entriesWirelessRadio(mapping)
+    local entries = {}
+    local result = conn:call("wireless.radio", "get", { })
+    if result ~= nil then
+        for k,_ in pairs(result) do
+            entries[#entries+1] = k
+        end
+    end
+    return entries
+end
+
+local function getall(mapping, key)
+	local radioData = getDataForRadio(key)
+	local sanitizedData = {}
+	for k,v in pairs(radioData) do
+		sanitizedData[k] = nilToEmptyString(v)
+	end
+	return sanitizedData
+end
+
+local function get(mapping, paramName, key)
+	local radioData = getDataForRadio(key)
+	return nilToEmptyString(radioData[paramName]);
+end
+
+local namemap = {   admin_state="state",
+                    requested_channel = "channel",
+                    requested_channel_width = "channelwidth",
+                }
+local set = function(mapping, param, value, key)
+    uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = namemap[param] or param}, value, commitapply)
+end
+
+wireless_radio_.entries = entriesWirelessRadio
+wireless_radio_.getall = getall
+wireless_radio_.get = get
+wireless_radio_.set = set
+wireless_radio_.commit = function()
+    uci_helper.commit({config = "wireless"})
+end
+wireless_radio_.revert = function()
+    uci_helper.revert({config = "wireless"})
+end
+
+register(wireless_radio_)
+

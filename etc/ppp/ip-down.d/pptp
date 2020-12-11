@@ -1,0 +1,15 @@
+#!/bin/sh
+
+. /lib/functions/network.sh
+
+local iface="$1"
+local waniface="wan"
+
+if [ `expr match "$iface" "pptp-"` != 0 ] && [ "`ip -4 route |grep ^default`" = "" ]; then
+	if network_is_up $waniface; then
+                network_get_gateway gateway $waniface
+                network_get_device device $waniface
+                [ -n "$gateway" ] && [ -n "$device" ] && route add default gw $gateway dev $device
+        fi
+fi
+

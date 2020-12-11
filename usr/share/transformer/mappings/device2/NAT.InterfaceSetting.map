@@ -1,0 +1,137 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_NAT_InterfaceSetting_i_ = {
+  objectType = {
+    name = "Device.NAT.InterfaceSetting.{i}.",
+    access = "readOnly", -- readWrite currently not supported
+    numEntriesParameter = "InterfaceSettingNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Enabled_NATForcedDisabled",
+          "Enabled_PortMappingDisabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Interface = {
+        access = "readOnly", --readwrite currently not supported since lowerlayer support is not available
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        default = "",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local nwCommon = mapper("nwcommon")
+local uciHelper = mapper("ucihelper")
+local networkBinding = { config = "network", sectionname = "interface"}
+local firewallBinding = {config = "firewall" }
+local interfaceToZone = nwCommon.interface2zone
+local isConfigChanged = false
+
+local v6Proto = {
+  ["6rd"] = true,
+  ["grev6"] = true,
+  ["grev6tap"] = true,
+  ["dhcpv6"] = true,
+}
+
+local statusMap = {
+  ["0"] = "Disabled",
+  ["1"] = "Enabled",
+  [""] = "Error_Misconfigured"
+}
+
+Device_NAT_InterfaceSetting_i_.entries = function()
+  local interfaces = {}
+  uciHelper.foreach_on_uci(networkBinding, function(s)
+    if not v6Proto[s.proto] then
+      if interfaceToZone(s['.name']) then
+        interfaces[#interfaces + 1] = s['.name']
+      end
+    end
+  end)
+  return interfaces
+end
+
+local function getEnable(mapping, param, key)
+  local zoneInfo = interfaceToZone(key)
+  if zoneInfo and (zoneInfo.masq) == "1" then
+    return "1"
+  end
+  return "0"
+end
+
+local function getInterface(mapping, param, key)
+  return resolve("Device.IP.Interface.{i}.", key) or ""
+end
+
+local function getStatus(mapping, param, key)
+  local enable = getEnable(mapping, param, key)
+  return statusMap[enable] or "Disabled"
+end
+
+Device_NAT_InterfaceSetting_i_.get = {
+  Enable = getEnable,
+  Status = getStatus,
+  Interface = getInterface,
+}
+
+Device_NAT_InterfaceSetting_i_.getall = function(mapping, key)
+  local enable = getEnable(mapping, nil, key)
+  return {
+    Enable = enable or "0",
+    Status = statusMap[enable] or "Disabled",
+    Interface = resolve("Device.IP.Interface.{i}.", key) or "",
+  }
+end
+
+Device_NAT_InterfaceSetting_i_.set = {
+  Enable = function(mapping, param, value, key)
+    local zoneInfo = interfaceToZone(key)
+    firewallBinding.sectionname = zoneInfo['.name']
+    firewallBinding.option = "masq"
+    uciHelper.set_on_uci(firewallBinding,value,commitapply)
+    isConfigChanged = true
+  end
+}
+
+Device_NAT_InterfaceSetting_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_NAT_InterfaceSetting_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_NAT_InterfaceSetting_i_)

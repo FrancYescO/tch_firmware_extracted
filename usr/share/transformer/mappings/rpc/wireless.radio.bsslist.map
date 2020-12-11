@@ -1,0 +1,84 @@
+local logger = require("transformer.logger")
+local log = logger.new("wireless.radio.bsslist", 2)
+local register = register;
+
+local wireless_radio_bsslist_ = {
+  objectType = {
+    name = "rpc.wireless.radio.@.bsslist.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      ssid = {
+          access = "readOnly",
+          type = "string",
+      },
+      channel = {
+          access = "readOnly",
+          type = "string",
+      },
+      rssi = {
+          access = "readOnly",
+          type = "string",
+      },
+      sec = {
+          access = "readOnly",
+          type = "string",
+      },
+      cap = {
+          access = "readOnly",
+          type = "string",
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function getDataForBsslist(ap)
+    local result = conn:call("wireless.radio.bsslist", "get", { name = ap })
+    if result == nil then
+        log:error("Cannot retrieve bsslist info for ap " .. ap)
+        return {}
+    end
+    return result[ap] or {}
+end
+
+local function entries(mapping, parentkey)
+    local result = {}
+    local bsslist = getDataForBsslist(parentkey)
+    for k,_ in pairs(bsslist) do
+        result[#result+1] = k
+    end
+    return result
+end
+
+local function getall(mapping, key, parentkey)
+    local bsslist = getDataForBsslist(parentkey)
+    local data = bsslist[key] or {}
+    local sanitizedData = {}
+    for k,v in pairs(data) do
+        sanitizedData[k] = nilToEmptyString(v)
+    end
+    return sanitizedData
+end
+
+local function get(mapping, paramName, key, parentkey)
+    local bsslist = getDataForBsslist(parentkey)
+    local data = bsslist[key] or {}
+    return nilToEmptyString(data[paramName]);
+end
+
+
+wireless_radio_bsslist_.entries = entries
+wireless_radio_bsslist_.getall = getall
+wireless_radio_bsslist_.get = get
+register(wireless_radio_bsslist_)

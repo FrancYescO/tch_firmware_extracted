@@ -1,0 +1,307 @@
+local register, require = register, require
+local lfs = require("lfs")
+local match, tostring, open, format = string.match, tostring, io.open, string.format
+local popen, read = io.popen, io.read
+local posix = require("tch.posix")
+local uci_helper = mapper("ucihelper")
+
+local openvpn_server_user_ = {
+    objectType = {
+        name = "rpc.openvpn.server.user.@.",
+        access = "readWrite",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+          username = {
+                access = "readWrite",
+                type = "string",
+            },
+          password = {
+              access = "readWrite",
+              type = "password",
+          },
+        },
+    }
+}
+
+local psw_file = "/etc/openvpn/psw-file"
+
+local function getentries()
+  local entries = {}
+  local fd, msg = open(psw_file)
+  if not fd then
+    return entries
+  end
+  while true do
+    local line = fd:read("*line")
+    if line == nil then break end
+    if line:find("%s") then
+      entries[#entries +1] = "user"..tostring(#entries +1)
+    end
+  end
+  fd:close()
+  return entries
+end
+openvpn_server_user_.entries = getentries
+
+local function getup()
+  local users = {}
+  local fd, msg = open(psw_file)
+  if not fd then
+    return ""
+  end
+  local count = 0
+  local userid
+  while true do
+    local line = fd:read("*line")
+    if line == nil then break end
+    if line:find("%s") then
+      count = count + 1
+      userid = "user"..tostring(count)
+      users[userid] = {}
+      local k, v = line:match("(.*)%s+(.*)")
+      users[userid]["username"] = k or ""
+      users[userid]["password"] = v or ""
+    end
+  end
+  fd:close()
+  return users
+end
+
+openvpn_server_user_.get = function(mapping, paramname, key)
+  local users = getup()
+  if users == "" or users[key] == nil then
+    return ""
+  end
+  return users[key][paramname] or ""
+end
+openvpn_server_user_.getall = function(mapping, key)
+  local users = getup()
+  if users == "" or users[key] == nil then
+    return {}
+  end
+  return users
+end
+
+local function setup(action, paramName,paramValue, key)
+  local newcontent = {}
+  if lfs.attributes(psw_file, "mode") ~= "file" then
+    os.execute("touch " ..psw_file)
+  end
+  local fd, msg = open(psw_file, "r")
+  if not fd then
+    return false
+  end
+  local count = 0
+  local userid
+  while true do
+    local line = fd:read("*line")
+    if line == nil then break end
+    if line:find("%s") then
+      count = count + 1
+      userid = "user"..tostring(count)
+      if userid == key then
+        if action == "set" then
+          local k, v = line:match("(.*)%s+(.*)")
+          if paramName == "username" then
+            newcontent[#newcontent+1] = format("%s %s", paramValue, v)
+          elseif paramName == "password" then
+            newcontent[#newcontent+1] = format("%s %s", k, paramValue)
+          end
+        elseif action == "del" then
+          --not add in newcontent
+        end
+      else
+        newcontent[#newcontent+1] = line
+      end
+    end
+  end  
+  fd:close()
+  local num = key:match("user(%d+)")
+  if tonumber(num) > count then
+    if paramName == "username" then
+      newcontent[#newcontent+1] = format("%s NT", paramValue)
+    elseif paramName == "password" then
+      newcontent[#newcontent+1] = format("NT %s", paramValue)
+    end
+  end
+  fd, msg = open(psw_file, "w")
+  if not fd then
+    return false
+  end
+  for i, v in pairs(newcontent) do
+    fd:write(v)
+    fd:write("\n")
+  end
+  fd:close()
+  return true
+end
+
+openvpn_server_user_.set = function(mapping, paramName,paramValue, key)
+   return setup("set", paramName,paramValue, key)
+end
+
+openvpn_server_user_.add = function(mapping, name)
+    local users = getentries()
+    local username = "user"..tostring(#users + 1)
+    setup("set", "username","NT", username)
+    return username
+end
+
+openvpn_server_user_.delete = function(mapping, key)
+    --not support delete
+    return setup("del", nil, nil, key)
+end
+
+openvpn_server_user_.commit = function()
+    --no commit needed
+end
+
+openvpn_server_user_.revert = function()
+    --no revert needed
+end
+
+register(openvpn_server_user_)
+
+local openvpn_server_client_ = {
+    objectType = {
+        name = "rpc.openvpn.server.client.@.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+          commonname = {
+                access = "readOnly",
+                type = "string",
+            },
+          realaddress = {
+              access = "readOnly",
+              type = "string",
+          },
+          bytesreceived = {
+              access = "readOnly",
+              type = "string",
+          },
+          bytessent = {
+              access = "readOnly",
+              type = "string",
+          },
+          connectedsince = {
+              access = "readOnly",
+              type = "string",
+          },
+        },
+    }
+}
+local status_file = "/tmp/openvpn-status.log"
+
+local function readfile()
+  local client_entries,param_entries = {}, {}
+  local fd, msg = open(status_file)
+  if not fd then
+    return {}
+  end
+  local cn, ra, br, bs,cs
+  local count = 0
+  while true do
+    local line = fd:read("*line")
+    if line == nil then break end
+    if line:find(".*,.*,.*,.*,.+") and not line:find("Common%s*Name") then
+      client_entries[#client_entries + 1] = "client"..tostring(#client_entries + 1)
+      cn, ra, br, bs,cs = line:match("(.*),(.*),(.*),(.*),(.+)")
+      count = count + 1
+      local tmppath = "client"..tostring(count)
+      param_entries[tmppath] = {}
+      param_entries[tmppath]["commonname"] = cn or ""
+      param_entries[tmppath]["realaddress"] = ra or ""
+      param_entries[tmppath]["bytesreceived"] = br or ""
+      param_entries[tmppath]["bytessent"] = bs or ""
+      param_entries[tmppath]["connectedsince"] = cs or ""
+    end
+  end
+  fd:close()
+  return client_entries, param_entries
+end
+
+openvpn_server_client_.entries =  function()
+  local entries = readfile()
+  return entries
+end
+
+openvpn_server_client_.get = function(mapping, paramname, key)
+  local _, params = readfile()
+  return params[key][paramname] or ""
+end
+openvpn_server_client_.getall = function(mapping, key)
+  local _, params = readfile()
+  return params
+end
+register(openvpn_server_client_)
+
+local openvpn_server_rt_ = {
+    objectType = {
+        name = "rpc.openvpn.server.routing.@.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+          virtualaddress = {
+              access = "readOnly",
+              type = "string",
+          },
+          commonname = {
+                access = "readOnly",
+                type = "string",
+          },
+          realaddress = {
+              access = "readOnly",
+              type = "string",
+          },
+          lastref = {
+              access = "readOnly",
+              type = "string",
+          },
+        },
+    }
+}
+local function readrtfilefile()
+  local rt_entries,param_entries = {}, {}
+  local fd, msg = open(status_file)
+  if not fd then
+    return {}
+  end
+  local va, cn, ra, lr
+  local count = 0
+  while true do
+    local line = fd:read("*line")
+    if line == nil then break end
+    if line:find(".*,.*,.*,.+") and not line:find(".*,.*,.*,.*,.+") and not line:find("Common%s*Name") then
+      rt_entries[#rt_entries + 1] = "client"..tostring(#rt_entries + 1)
+      va, cn, ra, lr = line:match("(.*),(.*),(.*),(.+)")
+      count = count + 1
+      local tmppath = "client"..tostring(count)
+      param_entries[tmppath] = {}
+      param_entries[tmppath]["virtualaddress"] = va or ""
+      param_entries[tmppath]["commonname"] = cn or ""
+      param_entries[tmppath]["realaddress"] = ra or ""
+      param_entries[tmppath]["lastref"] = lr or ""
+    end
+  end
+  fd:close()
+  return rt_entries, param_entries
+end
+
+openvpn_server_rt_.entries =  function()
+  local entries = readrtfilefile()
+  return entries
+end
+
+openvpn_server_rt_.get = function(mapping, paramname, key)
+  local _, params = readrtfilefile()
+  return params[key][paramname] or ""
+end
+openvpn_server_rt_.getall = function(mapping, key)
+  local _, params = readrtfilefile()
+  return params
+end
+register(openvpn_server_rt_)

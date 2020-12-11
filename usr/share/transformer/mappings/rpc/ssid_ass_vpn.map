@@ -1,0 +1,195 @@
+local logger = require("transformer.logger")
+local log =logger.new("ssidvpn", 2)
+local tprint = require("tch.tableprint")
+
+
+local SSID_ASS_VPN_NUM = 2
+
+-- Helper functions
+local ucihelper = mapper("ucihelper")
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+local mapping_ssid_ass_vpn_rpc = {
+    objectType = {
+	name = "rpc.ssid_ass_vpn.{i}.",
+	access = "readOnly",
+	minEntries = 0,
+	maxEntries = SSID_ASS_VPN_NUM,
+	parameters = {
+	    interface = {
+		access = "readWrite",
+		type = "string",
+	    },
+	    ssid = {
+		access = "readOnly",
+		type = "string"
+	    }
+	}
+    }
+}
+
+local function get_wifi_ap_name(key)
+    local ap_name
+
+    if key == "1" then
+	ap_name = "ap4"
+    elseif key == "2" then
+	ap_name = "ap5"
+    end
+
+    return ap_name
+end
+
+local function get_intf_status(key)
+    local dhcp = ucihelper.get_from_uci({config="dhcp", sectionname="ssid_vpn"..key, option="ignore"})
+    local lan = ucihelper.get_from_uci({config="network", sectionname="ssid_vpn"..key, option="auto", default="1"})
+    local wifi = ucihelper.get_from_uci({config="wireless", sectionname=get_wifi_ap_name(key), option="state", default="1"})
+
+    if dhcp == "0" and lan == "1" and wifi == "1" then
+	return true
+    else
+	return false
+    end
+end
+
+local function is_openvpn_intf(intf)
+    if string.sub(intf, 1, 8) == "OpenVPN_" then
+        return true
+    else
+        return false
+    end
+end
+
+local function get_openvpn_intf_name(intf)
+    if string.sub(intf, 1, 8) == "OpenVPN_" then
+        return string.sub(intf, 9)
+    end
+end
+
+
+local function attach_openvpn_intf_to_rt_table(intf, table)
+    ucihelper.set_on_uci({config="openvpn", sectionname=intf, option="ip4table"}, table, commitapply)
+    ucihelper.set_on_uci({config="openvpn", sectionname=intf, option="route_noexec"}, "1", commitapply)
+    ucihelper.commit({config="openvpn"})
+end
+
+local function enable_ssid_ass_vpn(key, intf)
+    ucihelper.set_on_uci({config="dhcp", sectionname="ssid_vpn"..key, option="ignore"}, "0", commitapply)
+    ucihelper.commit({config="dhcp"})
+
+    if is_openvpn_intf(intf) then
+	attach_openvpn_intf_to_rt_table(get_openvpn_intf_name(intf), "vpn"..key)
+    else
+	ucihelper.set_on_uci({config="network", sectionname=intf, option="ip4table"}, "vpn"..key, commitapply)
+    end
+    ucihelper.set_on_uci({config="network", sectionname="ssid_vpn"..key, option="auto"}, "1", commitapply)
+    ucihelper.commit({config="network"})
+    ucihelper.set_on_uci({config="wireless", sectionname=get_wifi_ap_name(key), option="state"}, "1", commitapply)
+    ucihelper.commit({config="wireless"})
+
+    -- reset default route as WAN, if current defaut route is this VPN interface
+    os.execute(". /lib/functions/vpn_common_inc.sh; reset_def_route_as_wan " .. intf)
+    return true
+end
+
+
+local function find_openvpn_intf_by_rt_table_name(table_name)
+    local intf = ""
+    ucihelper.foreach_on_uci({config="openvpn", sectionname="openvpn"}, function (s)
+        if s["ip4table"] == table_name then
+            intf = "OpenVPN_" .. s[".name"]
+        end
+    end)
+
+    return intf
+end
+
+-- find the network interface whose table name (ip4table) is same as the given value in table_name
+local function find_intf_by_table_name(table_name)
+    local intf = ""
+
+    ucihelper.foreach_on_uci({config="network", sectionname="interface"}, function (s)
+        if s["ip4table"] == table_name then
+            intf = s[".name"]
+        end
+    end)
+
+    if intf == "" then
+	intf = find_openvpn_intf_by_rt_table_name(table_name)
+    end
+
+    return intf
+end
+
+local function rm_openvpn_intf_from_rt_table(intf)
+    ucihelper.delete_on_uci({config="openvpn", sectionname=intf, option="ip4table"}, commitapply)
+    ucihelper.delete_on_uci({config="openvpn", sectionname=intf, option="route_noexec"}, commitapply)
+    ucihelper.commit({config="openvpn"})
+end
+
+local function disable_ssid_ass_vpn(key)
+    local old_intf = find_intf_by_table_name("vpn"..key)
+    if old_intf == "" then
+	return true
+    end
+
+    ucihelper.set_on_uci({config="dhcp", sectionname="ssid_vpn"..key, option="ignore"}, "1", commitapply)
+    ucihelper.commit({config="dhcp"})
+
+    if is_openvpn_intf(old_intf) then
+        rm_openvpn_intf_from_rt_table(get_openvpn_intf_name(old_intf))
+    else
+    	ucihelper.delete_on_uci({config="network", sectionname=old_intf, option="ip4table"}, commitapply)
+    end
+
+    ucihelper.set_on_uci({config="network", sectionname="ssid_vpn"..key, option="auto"}, "0", commitapply)
+    ucihelper.commit({config="network"})
+    ucihelper.set_on_uci({config="wireless", sectionname=get_wifi_ap_name(key), option="state"}, "0", commitapply)
+    ucihelper.commit({config="wireless"})
+end
+
+mapping_ssid_ass_vpn_rpc.get = {
+    interface = function(mapping, paramname, key)
+	if get_intf_status(key) == false then
+	    return ""
+	end
+
+	return find_intf_by_table_name("vpn"..key)
+    end,
+    ssid = function(mapping, paramname, key)
+	local sect = ""
+	if key == "1" then
+	    sect = "wl0_2"
+        else
+	    sect = "wl0_3"
+	end
+	return ucihelper.get_from_uci({config="wireless", sectionname=sect, option="ssid", default=""})
+    end
+}
+
+local function mapping_set_intf(mapping, paramname, value, key)
+    if value == "" or value == nil then
+	disable_ssid_ass_vpn(key)
+    else
+	local intf = find_intf_by_table_name("vpn"..key)
+	if intf ~= "" then
+	    disable_ssid_ass_vpn(key)
+	end
+
+	enable_ssid_ass_vpn(key, value)
+    end
+
+    return true
+end
+
+mapping_ssid_ass_vpn_rpc.set = {
+    interface = mapping_set_intf
+}
+
+mapping_ssid_ass_vpn_rpc.entries = function (mapping)
+    return {"1", "2"}
+end
+
+register(mapping_ssid_ass_vpn_rpc)
+

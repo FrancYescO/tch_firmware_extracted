@@ -1,0 +1,186 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+_log() {
+	logger -t minidlna-hotplug "$1"
+}
+
+LOCAL_DB_DIR="/var/run/minidlna"
+LOCAL_LOG_DIR="/var/log"
+
+# Helper function to check if the currently set db_dir still points to a mounted device
+__db_usable()
+{
+	local currDbDir=$(uci_get minidlna config db_dir "")
+	if [[ ! -z "$currDbDir" ]]; then
+		local mountdir=$(uci_get mountd mountd path "/mnt/usb/")
+		local found=$(find ${currDbDir}/files.db | grep ${mountdir})
+		if [[ ! -z "$found" ]]; then
+			_log "No database setup needed: ${currDbDir} is still usable"
+			return 1
+		fi
+	fi
+
+	_log "Current database ${currDbDir:-<empty>} is not usable"
+
+	return 0
+}
+
+# Helper function to set db_dir and log_dir (target) to a specified directory (path)
+__prepare_db()
+{
+	local target="$1"
+	local path="$2"
+	local forcecreateparent=${3:-0}
+
+	if [[ -z "$target" ]]; then
+		_log "ERROR __prepare_db: target empty"
+		return
+	fi
+	if [[ -z "$path" ]]; then
+		_log "ERROR __prepare_db: path empty"
+		return
+	fi
+
+	if [[ ! -d "$path" ]]; then
+		if [[ "$forcecreateparent" -eq 1 ]]; then
+			_log "mkdir -p for ${path}"
+			mkdir -p ${path}
+		else
+			_log "mkdir for ${path}"
+			mkdir ${path}
+		fi
+	else
+		_log "dir ${path} exists"
+	fi
+
+	uci set minidlna.config.${target}=${path}
+	_log "Set minidlna.config.${target} to ${path}"
+}
+
+# Helper function to setup paths for minidlna's db_dir and log_dir
+#   In essence, it will be tried to set db_dir and log_dir to a mounted disk
+#      (background: may become huge files; must no burden the gateway itself)
+#   If no disks are mounted (anymore), db_dir and log_dir will be set to a conservative path, i.e. on gateway itself.
+__setup_paths()
+{
+	_log "setup_paths for action $ACTION"
+
+	# Candidates are mounted disks to store the database and log file on.
+	local candidates
+
+	local mountdir=$(uci_get mountd mountd path "/mnt/usb/")
+
+	if [[ "$ACTION" == "remove" ]]; then
+		# Take NAME and shave of last digits representing partition number.
+		# Will have number(s) in case we receive events for disks with multiple partitions;
+		# Will have no number for disks with only one partition.
+		local exclude=$(echo "$NAME" | sed s/[0-9]*$//)
+		# Any mount points belonging to a disk which is being removed is not a candidate.
+		# Note that the events will arrive consecutively with significant delay for partitions
+		# belonging to a disk that was just unplugged.
+		candidates=$(find ${mountdir} -type l -maxdepth 1 ! -name "${exclude}*")
+	elif [[ "$ACTION" == "add" ]]; then
+		__db_usable || return
+		# All current mount points are potential candidates
+		candidates=$(find ${mountdir} -type l  -maxdepth 1)
+	else
+		_log "setup_paths was called with action ${ACTION:-<empty>}"
+		return
+	fi
+
+	local dbDir
+	local logDir
+	local forcecreateparent
+
+	if [[ ! -z "$candidates" ]]; then
+		_log "Found candidates ${candidates}"
+		# Does one of the disks already has files.db?
+		# Simply choose the first one if more than one candidate found.
+		local candidate=$(find -L ${candidates} -name files.db | head -1)
+
+		if [[ ! -z "$candidate" ]]; then
+			_log "Found candidate ${candidate}"
+			local cDir=$(dirname ${candidate})
+			dbDir=${cDir}
+			logDir=${dbDir}
+		else
+			_log "Found no candidate; choosing first disk"
+			# Simply choose first disk available in list
+			local candidate=$(echo "$candidates" | head -1)
+			dbDir="${candidate}/.dlna"
+			logDir=${dbDir}
+		fi
+	else
+		_log "Found no candidates; choosing gateway"
+		# Choose gateway itself
+		dbDir=${LOCAL_DB_DIR}
+		logDir=${LOCAL_LOG_DIR}
+		# Only force creation parents if directories are set to local gateway
+		forcecreateparent=1
+	fi
+
+	# Keep gateway clean; delete any left overs from previous session(s)
+	#   If db_dir and log_dir set to gateway, this makes sure log and database will be (re)generated.
+	#   If db_dir and log_dir set to connected disk, this makes sure local log and database will be deleted (no pollution).
+	rm -rf ${LOCAL_DB_DIR}
+	rm  -f ${LOCAL_LOG_DIR}/minidlna.log
+
+	_log "Using dbDir ${dbDir} and logDir ${logDir}"
+	__prepare_db "db_dir" ${dbDir} "$forcecreateparent"
+	__prepare_db "log_dir" ${logDir} "$forcecreateparent"
+}
+
+# Helper function to finalize the setup:
+#   * Setup the database and logging paths
+#   * Commit minidlna's config
+#     and restart the minidlna daemon and its affiliated processes - see /etc/init.d/minidlna for details.
+__finalize()
+{
+	__setup_paths
+
+	uci commit minidlna
+	/etc/init.d/minidlna restart
+}
+
+# Entry point function
+#   In essence, minidlna config's media_dir, db_dir and log_dir will be properly set
+#   according to the disks being mounted or currently mounted, if any.
+#   * Handles mountd's `add` and `remove` hotplug events for mounted disks.
+#   * Sets up minidlna's UCI config and then restarts minidlna - see /etc/init.d/minidlna for details.
+#   *    Interpretes variables ACTION; this is e.g. `add`, `remove`
+#   *    Interpretes variables NAME; this is e.g. `USB-A1`, `USB-A`, `USB-B1`, etc. for mounted partitions listed as `/mnt/usb/USB-A1`, ...
+_setup()
+{
+	_log "Setting up DLNA ($ACTION)"
+
+	# Assume auto_share if not explicitly set to `0`
+	local autoshare=$(uci_get minidlna config auto_share 1)
+	_log "Autoshare is set to $autoshare"
+
+	if [[ "0" != "$autoshare" ]]; then
+		local mountdir=$(uci_get mountd mountd path "/mnt/usb/")
+		local startDir=$(uci_get minidlna config start_dir "/")
+		local mediaDir=${mountdir}${NAME}${startDir}
+		if [[ "$ACTION" == "add" ]]; then
+			_log "Adding media dir ${mediaDir}"
+			uci del_list minidlna.config.media_dir=${mediaDir}
+			uci add_list minidlna.config.media_dir=${mediaDir}
+		elif [[ "$ACTION" == "remove" ]]; then
+			_log "Removing media dir ${mediaDir}"
+			uci del_list minidlna.config.media_dir=${mediaDir}
+		fi
+		__finalize
+	fi
+
+	_log "Done setting up DLNA ($ACTION)"
+}
+
+_log "Event $ACTION for device $DEVICE with name $NAME"
+
+case "$ACTION" in
+	add | remove)
+		_setup
+	;;
+esac

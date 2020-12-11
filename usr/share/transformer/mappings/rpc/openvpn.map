@@ -1,0 +1,320 @@
+local register, require = register, require
+local lfs = require("lfs")
+local match, tostring, open, format = string.match, tostring, io.open, string.format
+local popen = io.popen
+local posix = require("tch.posix")
+local uci_helper = mapper("ucihelper")
+local openvpn_path = "/etc/openvpn/"
+local openvpn_root_ = {
+    objectType = {
+        name = "rpc.openvpn.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {},
+    }
+}
+register(openvpn_root_)
+
+local function set_keys(mapping, paramName,paramValue, key)
+    local fd, msg, result, filename
+    if key ~= nil then
+      if  paramName == "ca" then
+          filename = format("%s%s_ca.crt", openvpn_path, key)
+      elseif paramName == "cert" then
+          filename = format("%s%s.crt", openvpn_path, key)
+      elseif paramName == "key" then
+          filename = format("%s%s.key", openvpn_path, key)
+      elseif paramName == "dh" then
+          filename = format("%sdh2048.pem", openvpn_path, key)
+      end
+    else
+      if  paramName == "ca" then
+          filename = format("%sca.crt", openvpn_path)
+      elseif paramName == "cert" then
+          filename = format("%sserver.crt", openvpn_path)
+      elseif paramName == "key" then
+          filename = format("%sserver.key", openvpn_path)
+      elseif paramName == "dh" then
+          filename = format("%sdh2048.pem", openvpn_path)
+      end
+    end
+    fd, msg = open(filename, "w")
+    if not fd then
+        return nil
+    end
+    --DOS/WINDOS format file
+    paramValue = paramValue:gsub("\r\n", "\n")
+    --MAC OS format file
+    paramValue = paramValue:gsub("\r", "\n")
+    result = fd:write(paramValue)
+    fd:close()
+    return result
+end
+local openvpn_server_ = {
+    objectType = {
+        name = "rpc.openvpn.server.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            dh = {
+                access = "readWrite",
+                type = "string",
+            },
+            ca = {
+                access = "readWrite",
+                type = "string",
+            },
+            cert = {
+                access = "readWrite",
+                type = "string",
+            },
+            key = {
+                access = "readWrite",
+                type = "string",
+            },
+        },
+    }
+}
+
+local server_ca_path = "/etc/openvpn/ca.crt"
+local server_cert_path = "/etc/openvpn/server.crt"
+local server_key_path = "/etc/openvpn/server.key"
+local server_dh_path = "/etc/openvpn/dh2048.pem"
+local function readfile(filename)
+    local fd, msg = open(filename)
+    if not fd then
+        return ""
+    end
+    local result = fd:read("*all")
+    fd:close()
+    return result
+end
+
+openvpn_server_.get = {
+  dh = function(mapping, param, key)
+    return readfile(server_dh_path)
+  end,
+  ca = function(mapping, param, key)
+    return readfile(server_ca_path)
+  end,
+  cert = function(mapping, param, key)
+    return readfile(server_cert_path)
+  end,
+  key = function(mapping, param, key)
+    return readfile(server_key_path)
+  end,
+}
+
+openvpn_server_.set = set_keys
+openvpn_server_.add = function(mapping, name)
+    --not support add
+    return true
+end
+
+openvpn_server_.delete = function(mapping, key)
+    --not support delete
+    return true
+end
+
+openvpn_server_.commit = function()
+    --no commit needed
+end
+
+openvpn_server_.revert = function()
+    --no revert needed
+end
+
+register(openvpn_server_)
+local openvpn_server_client_ = {
+    objectType = {
+        name = "rpc.openvpn.server.client.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            ca = {
+                access = "readOnly",
+                type = "string",
+            },
+            cert = {
+                access = "readOnly",
+                type = "string",
+            },
+            key = {
+                access = "readOnly",
+                type = "string",
+            },
+        },
+    }
+}
+
+local server_client_cert_path = "/etc/openvpn/client.crt"
+local server_client_key_path = "/etc/openvpn/client.key"
+openvpn_server_client_.get = {
+  ca = function(mapping, param, key)
+    return readfile(server_ca_path)
+  end,
+  cert = function(mapping, param, key)
+    return readfile(server_client_cert_path)
+  end,
+  key = function(mapping, param, key)
+    return readfile(server_client_key_path)
+  end,
+}
+
+register(openvpn_server_client_)
+
+local openvpn_client_ = {
+    objectType = {
+        name = "rpc.openvpn.client.@.",
+        access = "readWrite",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            username = {
+                access = "readWrite",
+                type = "string",
+            },
+            password = {
+                access = "readWrite",
+                type = "password",
+            },
+            ca = {
+                access = "readWrite",
+                type = "string",
+            },
+            cert = {
+                access = "readWrite",
+                type = "string",
+            },
+            key = {
+                access = "readWrite",
+                type = "string",
+            },
+        },
+    }
+}
+
+local function getline(filename)
+    local fd, msg = open(filename)
+    local username, passwd = "", ""
+    if not fd then
+        return "",""
+    end
+    local result = fd:read("*all")
+    fd:close()
+    if result == nil or result == "" then
+        return "",""
+    end
+    if result:find("%s") then
+        username, passwd = result:match("(.*)%s(.*)%s")
+    else
+        username = result
+    end
+    return username or "", passwd or ""
+end
+
+local function get_up(mapping, paramName, key)
+    local username, passwd= "", ""
+    local filename = format("%s%s_passwd", openvpn_path, key)
+    username, passwd= getline(filename)
+    if paramName == "username" then
+        return username
+    end
+    return passwd
+end
+
+local function set_up(mapping, paramName,paramValue, key)
+    local fd, msg, result, value
+    local filename = format("%s%s_passwd", openvpn_path, key)
+    local oldusername, oldpasswd = getline(filename)
+    local newcontent = {}
+    fd, msg = open(filename, "w")
+    if not fd then
+        return nil
+    end
+    if paramName == "username" then
+        newcontent[#newcontent + 1] = paramValue
+        newcontent[#newcontent + 1] = oldpasswd
+    else
+        newcontent[#newcontent + 1] = oldusername
+        newcontent[#newcontent + 1] = paramValue
+    end
+    for i, v in pairs(newcontent) do
+      fd:write(v)
+      fd:write("\n")
+    end
+    fd:close()
+    return ""
+end
+
+
+local client_binding = { config="openvpn",  sectionname = "openvpn"}
+
+openvpn_client_.entries =  function()
+    local entries = {}
+    uci_helper.foreach_on_uci(client_binding, function(s)
+        if s['.name']:find("client") then
+            entries[#entries+1] = s['.name']
+        end
+    end)
+    return entries
+end
+openvpn_client_.get = {
+  username = function(mapping, param, key)
+    return get_up(mapping, paramName, key)
+  end,
+  password = function(mapping, param, key)
+    return ""
+  end,
+  ca = function(mapping, param, key)
+    local filename = format("%s%s_ca.crt", openvpn_path, key)
+    return readfile(filename)
+  end,
+  cert = function(mapping, param, key)
+    local filename = format("%s%s.crt", openvpn_path, key)
+    return readfile(filename)
+  end,
+  key = function(mapping, param, key)
+    local filename = format("%s%s.key", openvpn_path, key)
+    return readfile(filename)
+  end,
+}
+openvpn_client_.set = {
+    username = function(mapping, paramName,paramValue, key)
+       return set_up(mapping, paramName,paramValue, key)
+    end,
+    password = function(mapping, paramName,paramValue, key)
+       return set_up(mapping, paramName,paramValue, key)
+    end,
+    ca = function(mapping, paramName,paramValue, key)
+       return set_keys(mapping, paramName,paramValue, key)
+    end,
+    cert = function(mapping, paramName,paramValue, key)
+       return set_keys(mapping, paramName,paramValue, key)
+    end,
+    key = function(mapping, paramName,paramValue, key)
+       return set_keys(mapping, paramName,paramValue, key)
+    end,
+}
+openvpn_client_.add = function(mapping, name)
+    --not support add
+    return true
+end
+
+openvpn_client_.delete = function(mapping, key)
+    --not support delete
+    return true
+end
+
+openvpn_client_.commit = function()
+    --no commit needed
+end
+
+openvpn_client_.revert = function()
+    --no revert needed
+end
+
+register(openvpn_client_)

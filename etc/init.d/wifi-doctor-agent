@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_DAEMONIZE=1
+export WD_UUID_FILE="/etc/wifi-doctor-agent/radio_id"
+if [ -z "$WD_DEVICE_ID" ]; then                                      
+        export WD_DEVICE_ID="$(uci get env.rip.eth_mac | tr '[A-Z]' '[a-z]')"
+fi
+if [ -z "$ENV_WIFI_DOCTOR_PLATFORM_VERSION" ]; then
+	export ENV_WIFI_DOCTOR_PLATFORM_VERSION="$(uci get version.@version[0].product)-$(uci get version.@version[0].version)"
+fi
+
+start() {
+        config_load wifi_doctor_agent
+        config_get_bool enabled config enabled 0
+        [ $enabled -gt 0 ] || return 1
+        if [ ! -e "${WD_UUID_FILE}" ]; then
+          #This is an easy way to have a persistent random radio_id
+          cp /proc/sys/kernel/random/uuid "${WD_UUID_FILE}"
+        fi
+        echo "Start wifi-doctor-agent" > /dev/console
+        service_start /usr/bin/wifi-doctor-agent
+}
+
+stop() {
+        service_stop /usr/bin/wifi-doctor-agent
+}
+
+reload() {
+        restart
+}
