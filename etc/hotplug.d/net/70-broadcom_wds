@@ -1,0 +1,75 @@
+#!/bin/sh
+. /lib/functions/network.sh
+. /lib/functions.sh
+. /lib/network/config.sh
+
+get_network() {
+   local wl="$1"
+   if [ "$wl" = "$2" ]; then
+      config_get ntw "$wl" network
+      break
+   fi
+}
+
+setup_broadcom_wds() {
+
+    SUBINDEX=$(echo $INTERFACE |awk '{print substr($0,6,1)}' | head -c 1 )
+    #checking if wds is on a main interface
+    if [ "${SUBINDEX}" == "0" ]; then
+       INDEX=$(echo "${INTERFACE}" | awk '{print substr($0,4)}' | head -c -5)
+    else
+       INDEX=$(echo "${INTERFACE}" | awk '{print substr($0,4)}' | head -c -3)
+    fi
+    logger -t Hotplug broadcom_wds_script "interface = $INTERFACE Index = $INDEX subindex = $SUBINDEX"
+    wl_interface="wl$INDEX"
+
+    config_load wireless
+    config_foreach get_network wifi-iface $wl_interface
+    if [ -z ${ntw} ]; then 
+       logger -t Hotplug broadcom_wds_script "WDS bridge configuration not found. Skipping. Wl interface=$wl_interface"
+       return 0
+    fi
+    setup_interface "$INTERFACE" "$ntw"
+    ifconfig $INTERFACE up
+    # Create QoS WDS interface
+    QOSRULE=$(uci get qos.$INTERFACE)
+    if [ ${QOSRULE} == "device" ]; then
+       logger -t  Hotplug broadcom_wds_script "QoS already configured on WDS interface $INTERFACE"
+    else
+       logger -t Hotplug broadcom_wds_script "Configure QoS WDS interface $INTERFACE"
+       uci set qos.$INTERFACE=device
+       uci set qos.$INTERFACE.classgroup='TO_WLAN'
+       uci set qos.$INTERFACE.enable='1'
+       uci commit
+       /etc/init.d/qos reload
+    fi
+}
+
+remove_qos_wds_intf() {
+    #Remove QoS for WDS interface
+    QOSRULE=$(uci get qos.$INTERFACE)
+    if [ ${QOSRULE} == "device" ]; then
+        logger -t Hotplug broadcom_wds_script "Remove QoS WDS interface $INTERFACE"
+        uci delete qos.$INTERFACE
+        uci commit
+        /etc/init.d/qos reload
+    fi
+}
+
+
+case "${ACTION}" in
+    add|register)
+       reqsubstr="wds"
+       if [ -z "${INTERFACE##*$reqsubstr*}" ]
+       then
+         setup_broadcom_wds
+       fi
+       ;;
+    remove)
+       reqsubstr="wds"
+       if [ -z "${INTERFACE##*$reqsubstr*}" ]
+       then
+          remove_qos_wds_intf
+       fi
+       ;;
+esac
