@@ -1,0 +1,200 @@
+#!/bin/sh /etc/rc.common
+
+START=13
+
+nvram_load()
+{
+    rm -f /data/.kernel_nvram.setting # Always start from clean
+
+    PROD_ID=$(cat /proc/nvram/boardid)
+    NVM_FILE=$(find /etc/wlan/ -name '*_nvram.nvm' | head -n1)
+    [ -z "$NVM_FILE" ] && return
+
+    mkdir -p /mnt/nvram
+    mount -t tmpfs none /mnt/nvram
+    ln -s $NVM_FILE /mnt/nvram/nvram.nvm
+    nvram restore_mfg /data/.kernel_nvram.setting
+    nvram kernelset /data/.kernel_nvram.setting
+
+    WL0_MAC=`uci_get env.rip.wifi_mac`
+    if [ "$?" == "0" ]; then
+        # GCNT-U, GCNT-Q, GCNT-R, GCNT-S, VCNT-F, VCNT-3 and GBNT-R has different pcie boot sequence than the rest
+        # Also the NVRAM mac addresses are swapped wl0 -> pcie1 (2:)  and wl1 -> pcie0 (1:)
+        if [ "$PROD_ID" = "VCNT-F" ] || [ "$PROD_ID" = "VCNT-W" ] || [ "$PROD_ID" = "GBNT-R" ] || [ "$PROD_ID" = "GCNT-D" ] || [ "$PROD_ID" = "VCNT-3" ] || [ "$PROD_ID" = "GCNT-Q" ] || [ "$PROD_ID" = "GCNT-R" ] || [ "$PROD_ID" = "GCNT-S" ] || [ "PROD_ID" = "GCNT-U" ]  ; then
+            echo "uci get MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set 2:macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            if [ -n "$L_WL_MAC" ]; then
+                WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+                echo "uci get MAC WL1:$WL1_MAC"
+                [ -n "$WL1_MAC" ] && nvram set 1:macaddr="$WL1_MAC"
+            fi
+        elif [ "$PROD_ID" = "VCNT-D" ]; then
+            # VCNT-D and GCNT-C has normal pcie boot sequence
+            echo "uci get MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set 1:macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+            echo "uci get MAC WL1:$WL1_MAC"
+            [ -n "$WL1_MAC" ] && nvram set 2:macaddr="$WL1_MAC"
+        elif [ "$PROD_ID" = "GBNT-4" ] || [ "$PROD_ID" = "GCNT-F" ] || [ "$PROD_ID" = "GCNT-N" ] || [ "$PROD_ID" = "GCNT-O" ] || [ "$PROD_ID" = "GCNT-W" ]; then
+            # GBNT-4 has different nvram setting than other
+            echo "uci get MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set 0:macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            if [ -n "$L_WL_MAC" ]; then
+                WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+                echo "uci get MAC WL1:$WL1_MAC"
+                [ -n "$WL1_MAC" ] && nvram set 1:macaddr="$WL1_MAC"
+            fi
+        elif [ "$PROD_ID" = "GCNT-C" ] || [ "$PROD_ID" = "GCNT-J" ]; then
+            #GCNT-C has 3 radios, and the pcie boot order is wl0(2.4G)-->pcie2, wl1(5G low)-->pcie0, wl2(5G high)-->pcie1
+            echo "uci get MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set 3:macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            if [ -n "$L_WL_MAC" ]; then
+                WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+                WL2_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x10) % 256)))"
+                echo "nvram set MAC WL1:$WL1_MAC"
+                nvram set sb/1/macaddr="$WL1_MAC"
+                [ -n "$WL1_MAC" ] && nvram set 1:macaddr="$WL1_MAC"
+                echo "nvram set MAC WL2:$WL2_MAC"
+                [ -n "$WL2_MAC" ] && nvram set 2:macaddr="$WL2_MAC"
+            fi
+        elif [ "$PROD_ID" = "GCNT-P" ]; then
+            #GCNT-P has 3 radios, and the pcie boot order is wl0(2.4G)-->pcie0, wl1(5G low)-->pcie2, wl2(5G high)-->pcie1
+            echo "uci get MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set 1:macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            if [ -n "$L_WL_MAC" ]; then
+                WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+                WL2_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x10) % 256)))"
+                echo "nvram set MAC WL1:$WL1_MAC"
+                nvram set sb/1/macaddr="$WL1_MAC"
+                [ -n "$WL1_MAC" ] && nvram set 3:macaddr="$WL1_MAC"
+                echo "nvram set MAC WL2:$WL2_MAC"
+                [ -n "$WL2_MAC" ] && nvram set 2:macaddr="$WL2_MAC"
+            fi
+        elif [ "$PROD_ID" = "VANT-W" ] || [ "$PROD_ID" = "VBNT-H" ]; then
+            echo "nvram set MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set macaddr="$WL0_MAC"
+        else
+            echo "nvram set MAC WL0:$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set sb/0/macaddr="$WL0_MAC"
+            [ -n "$WL0_MAC" ] && nvram set pci/0/1/macaddr="$WL0_MAC"
+
+            #WL1: Locally administered and add 8 to last byte (mod 256)
+            L_WL_MAC=`uci_get env.var.local_wifi_mac`
+            WL1_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x08) % 256)))"
+
+            # 3 radios
+            if [ -f "/etc/wlan/brcm_country_map_radio2" ]; then
+                WL2_MAC="${L_WL_MAC:0:15}$(printf "%02X" $(((0x${L_WL_MAC:15:16} + 0x10) % 256)))"
+                echo "nvram set MAC WL1:$WL1_MAC"
+                nvram set sb/1/macaddr="$WL1_MAC"
+                echo "nvram set MAC WL2:$WL2_MAC"
+                nvram set pci/1/1/macaddr="$WL2_MAC"
+            else
+                echo "nvram set MAC WL1:$WL1_MAC"
+                nvram set pci/1/1/macaddr="$WL1_MAC"
+            fi
+        fi
+        if [ "$PROD_ID" = "GCNT-D" ] || [ "$PROD_ID" = "VCNT-3" ]; then
+            if [ ! -f "/etc/wlan/apply_pa_trim_2G.sh" ] || [ ! -f "/etc/wlan/apply_pa_trim_5G.sh" ]; then
+                if [ -f "/etc/wlan/parse_pa_trimming.sh" ]; then
+                    echo "No patch scripts available. Parsing"
+                    sh /etc/wlan/parse_pa_trimming.sh
+                fi
+            fi
+            if [ -f "/etc/wlan/apply_pa_trim_2G.sh" ] && [ -f "/etc/wlan/apply_pa_trim_5G.sh" ]; then
+                echo "Patching PA parameters"
+                sh /etc/wlan/apply_pa_trim_2G.sh
+                sh /etc/wlan/apply_pa_trim_5G.sh
+            else
+                echo "No PA patching available for this platform"
+            fi
+        fi
+        if [ "$PROD_ID" = "GCNT-L" ] || [ "$PROD_ID" = "VCNT-J" ]; then
+            if [ ! -f "/etc/wlan/apply_pa_trim_5G.sh" ]; then
+                if [ -f "/etc/wlan/parse_pa_trimming.sh" ]; then
+                    echo "No patch scripts available. Parsing"
+                    sh /etc/wlan/parse_pa_trimming.sh
+                fi
+            fi
+            if [ -f "/etc/wlan/apply_pa_trim_5G.sh" ]; then
+               echo "Patching PA parameters"
+               sh /etc/wlan/apply_pa_trim_5G.sh
+            else
+               echo "No PA patching available for this platform"
+            fi
+        fi
+        if [ "$PROD_ID" = "GCNT-E" ] || [ "$PROD_ID" = "GCNT-R" ] || [ "$PROD_ID" = "GCNT-M" ] || [ "$PROD_ID" = "GCNT-N" ] || [ "$PROD_ID" = "GCNT-W" ] || [ "$PROD_ID" = "GCNT-P" ]; then
+            # check if PA trimming is enabled for this platform
+            if [ -f "/etc/wlan/nvram2rip.cfg" ]; then
+
+                # check if first boot
+                if [ ! -f "/etc/wlan/set_nvram_radio_wl0.sh" ] && [ ! -f "/etc/wlan/set_nvram_radio_wl1.sh" ] && [ ! -f "/etc/wlan/set_nvram_radio_wl2.sh" ]; then
+                    echo "Parsing eRIP"
+                    sh /usr/sbin/parse_pa_trimming.sh
+                fi
+                if [ -f "/etc/wlan/set_nvram_radio_wl0.sh" ]; then
+                    sh /etc/wlan/set_nvram_radio_wl0.sh
+                fi
+                if [ -f "/etc/wlan/set_nvram_radio_wl1.sh" ]; then
+                    sh /etc/wlan/set_nvram_radio_wl1.sh
+                fi
+                if [ -f "/etc/wlan/set_nvram_radio_wl2.sh" ]; then
+                    sh /etc/wlan/set_nvram_radio_wl2.sh
+                fi
+            else
+               echo "No PA trimming available for this platform"
+            fi
+        fi
+        nvram commit
+    else
+        echo "uci get MAC error...Continue"
+    fi
+    umount /mnt/nvram
+    rm -rf /mnt/nvram
+}
+
+# to get instance base mixed with dhd and wl
+get_max_nic_radio()
+{
+    unit=1; # GCNT-Q, GCNT-R, GCNT-S, VCNT-J, GBNT-4, GCNT-F, GCNT-N, GCNT-O, GCNT-A, GBNT-2, GBNT-5, GBNT-6, GCNT-B, GCNT-W
+    boardid=$(cat /proc/nvram/boardid)
+    if [ "$boardid" = "GBNT-3" ] || [ "$boardid" = "GCNT-E" ] || [ "$boardid" = "GCNT-L" ] || [ "$boardid" = "GCNT-M" ] || [ "$boardid" = "VCNT-P" ] || [ "$boardid" = "VCNT-R" ] || [ "$boardid" = "VCNT-4" ] || [ "$boardid" = "VCNT-S" ] || [ "$boardid" = "VCNT-2" ] || [ "$boardid" = "VCNT-U" ] || [ "$boardid" = "GCNT-H" ] ; then
+        unit=2
+    elif [ "$boardid" = "GBNT-R" ] || [ "$boardid" = "GCNT-D" ] || [ "$boardid" = "VCNT-F" ] || [ "$boardid" = "VCNT-W" ] || [ "$boardid" = "VCNT-D" ] || [ "$boardid" = "VCNT-3" ] || [ "$boardid" = "GCNT-C" ] || [ "$boardid" = "GCNT-U" ] || [ "$boardid" = "GCNT-P" ] || [ "$boardid" = "GCNT-J" ] || [ "$boardid" = "VBNT-6" ] || [ "$boardid" = "VCNT-I" ] || [ "$boardid" = "VCNT-E" ] || [ "$boardid" = "VCNT-C" ] || [ "$boardid" = "VCNT-H" ] || [ "$boardid" = "VCNT-A" ] || [ "$boardid" = "VCNT-X" ] || [ "$boardid" = "VBNT-Y" ] || [ "$boardid" = "VCNT-Z" ] || [ "$boardid" = "VBNT-7" ]; then
+        unit=0
+    fi
+    echo "max_nic_radio=$unit"
+}
+
+start()
+{
+    modprobe wfd 2>/dev/null
+    modprobe wlcsm 2>/dev/null
+    [ -e /usr/bin/nvram ] && nvram_load
+
+    modprobe hnd 2>/dev/null
+    modprobe emf 2>/dev/null
+    modprobe igs 2>/dev/null
+    if [ -e /data/.kernel_nvram.setting ]; then
+        insmod wl `get_max_nic_radio` 2>/dev/null
+    else
+        modprobe wl 2>/dev/null
+    fi
+    #modprobe dhd 2>/dev/null
+    insmod dhd dhd_dpc_prio=-1 2>/dev/null
+}

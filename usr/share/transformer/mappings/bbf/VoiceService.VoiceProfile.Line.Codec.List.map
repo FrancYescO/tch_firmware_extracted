@@ -1,0 +1,346 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local string = string
+local match, format, commitapply, mapper, math = string.match, string.format, commitapply, mapper, math
+local uciHelper = mapper("ucihelper")
+local mt = { __index = function() return "" end }
+local transactions = {}
+local mmpbxBinding = { config = "mmpbx" }
+local tr104Helper = require("transformer.shared.tr104helper")
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.Codec.List.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            EntryID = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                description = "Unique identifier for each entry in this table",
+            },
+            Codec = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+                description = "Identifier of the codec type",
+            },
+            BitRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "is the number of bits that are conveyed or processed per unit of time",
+            },
+            PacketizationPeriod = {
+                access = "readOnly", --ReadWrite not supported
+                list = true,
+                type = "string",
+                max = "64",
+                descripton = "is the duration of time (expressed in milliseconds) between two RTP packets",
+            },
+            SilenceSuppression = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Indicates support for silence suppression for this codec",
+            },
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "true",
+                description = "Enable or disable the use of this combination of codec parameters",
+            },
+            Priority = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                default = "1",
+                description = "Indicates the priority for this combination of codec parameters",
+            },
+        }
+    }
+}
+
+local Multi_Services_VoiceService_i_CodecProfile_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CodecProfile.{i}.",
+        access = "readWrite",
+        numEntriesParameter = "CodecProfileNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or disable the use of this combination of codec parameters",
+            },
+            --[[Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+                description = "provides a mechanism for an ACS to label this instance for future reference",
+            },]]--
+            Codec = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.Capabilities.Codec.{i}.",
+                description = "MUST be the Path Name of a row in the Capabilities.Codec table",
+            },
+            PacketizationPeriod = {
+                access = "readWrite",
+                list = true,
+                type = "string",
+                max = "64",
+                descripton = "is the duration of time (expressed in milliseconds) between two RTP packets",
+            },
+            SilenceSuppression = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Indicates support for silence suppression for this codec",
+            },
+        }
+    }
+}
+
+local function commitObject()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revertObject()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local codecPtime = setmetatable({
+    PCMU = "20",
+    PCMA = "20",
+    G722 = "20",
+    ["G726-16"] = "20",
+    ["G726-24"] = "20",
+    ["G726-32"] = "20",
+    ["G726-40"] = "20",
+    G729 = "20",
+    G723 = "30",
+    ["telephone-event"] = "20",
+    AMR = "20"
+}, mt)
+
+local codecRates = setmetatable({
+    PCMU = "64000",
+    PCMA = "64000",
+    G722 = "64000",
+    ["G726-16"] = "16000",
+    ["G726-24"] = "24000",
+    ["G726-32"] = "32000",
+    ["G726-40"] = "40000",
+    G729 = "8000",
+    G723 = "6300",
+    AMR = "12200"
+}, mt)
+
+local cvtBoolean = setmetatable({
+    ['0'] = '1',
+    ['1'] = '0',
+}, mt)
+
+local contentCodec = {}
+
+local function getCodecSection(key)
+    key = match(key, "^([^_]+)_")
+    return contentCodec[key] or {}
+end
+
+local codecMap = {
+    EntryID = function(s)
+        return s._entryID or s._key  -- backwards compatibility; see entries()
+    end,
+    Codec = "name",
+    BitRate = function(s)
+        return codecRates[s.name]
+    end,
+    PacketizationPeriod = function(s)
+        return codecPtime[s.name]
+    end,
+    SilenceSuppression = function(s)
+        return cvtBoolean[s.remove_silence_suppression]
+    end,
+    Enable = "allow",
+    Priority = "priority",
+}
+
+local setCodecMap = {
+    SilenceSuppression = function(binding, value)
+        binding.option = "remove_silence_suppression"
+        value = cvtBoolean[value]
+        uciHelper.set_on_uci(binding, value, commitapply)
+    end,
+    Enable = "allow",
+    Priority = "priority",
+}
+
+local function getAllParams(name)
+    return function(mapping, key)
+        local data = {}
+        local codecSection = getCodecSection(key)
+        for param,_ in pairs(name.objectType.parameters) do
+            if codecMap[param] then
+                if type(codecMap[param]) == "function" then
+                    data[param] = codecMap[param](codecSection) or ""
+                else
+                    data[param] = codecSection[codecMap[param]] or ""
+                end
+            end
+        end
+        return data
+    end
+end
+
+local function getParam()
+    return function(mapping, param, key)
+        local codecSection = getCodecSection(key)
+        if codecMap[param] then
+            if type(codecMap[param]) == "function" then
+                return codecMap[param](codecSection) or ""
+            else
+                return codecSection[codecMap[param]] or ""
+            end
+        end
+        return ""
+    end
+end
+
+local function setParam()
+    return function(mapping, param, value, key)
+        local codecSection = getCodecSection(key)
+        mmpbxBinding.sectionname = codecSection['.name']
+        if setCodecMap[param] then
+            if type(setCodecMap[param]) == "function" then
+                setCodecMap[param](mmpbxBinding, value)
+                transactions[mmpbxBinding.config] = true
+                return true
+            elseif type(setCodecMap[param]) == "string" then
+                mmpbxBinding.option = setCodecMap[param]
+                uciHelper.set_on_uci(mmpbxBinding, value, commitapply)
+                transactions[mmpbxBinding.config] = true
+                return true
+            end
+        else
+            return nil, "Invalid parameter"
+        end
+    end
+end
+
+local function getEntries()
+    return function(mapping, parentKey)
+        local entries = {}
+        local missingID = {}
+        local maxID = 0
+        local blacklist
+        local codecList = " "
+        local flag = 0
+        local codecBlacklist = ""
+        local deviceBinding = {config = "mmpbxbrcmfxsdev", sectionname = "device"}
+        uciHelper.foreach_on_uci(deviceBinding, function(s)
+            blacklist = s.codec_black_list
+            if blacklist ~= nil then
+                if type(blacklist) == "table" and flag == 0 then
+                    blacklist = table.concat(blacklist, " ")
+                    flag = 1
+                end
+                if codecBlacklist ~= "" then
+                    if type(blacklist) == "string" then
+                        if match(codecBlacklist, blacklist) then
+                            codecList = codecList..blacklist
+                        end
+                    elseif type(blacklist) == "table" then
+                        for _,codec in ipairs(blacklist) do
+                            if match(codecBlacklist, codec) then
+                                codecList = codecList..codec
+                            end
+                        end
+                    end
+                else
+                    codecBlacklist = blacklist
+                end
+            end
+        end)
+        mmpbxBinding.sectionname = "codec_filter"
+        uciHelper.foreach_on_uci(mmpbxBinding, function(s)
+            -- We need to be backwards compatible: key generation has been updated
+            -- to store entryID as _key but the new code has to be able to deal with
+            -- the old _key and _entryID fields.
+            -- First check if there's a _entryID field and if so assume the old
+            -- way of working.
+            if s.name ~= "telephone-event" and (not codecList:match(s.name)) then
+                local entryID = s._entryID
+                if not entryID then
+                    missingID[#missingID + 1] = s
+                else
+                    local id = tonumber(entryID)
+                    if id > maxID then
+                        maxID = id
+                    end
+                    entries[#entries + 1] = format("%s_%s", entryID, parentKey)
+                    contentCodec[entryID] = s
+                end
+            end
+        end)
+        if #missingID > 0 then
+            for _, s in ipairs(missingID) do
+                maxID = maxID + 1
+                local entryID = tostring(maxID)
+                mmpbxBinding.sectionname = s[".name"]
+                uciHelper.generate_key_on_uci(mmpbxBinding, entryID)
+                entries[#entries + 1] = format("%s_%s", entryID, parentKey)
+                contentCodec[entryID] = s
+            end
+            uciHelper.commit_keys(mmpbxBinding)
+        end
+        return entries
+    end
+end
+
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.entries = getEntries()
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.getall = getAllParams(Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_)
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.get = getParam()
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.set = setParam()
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.commit = commitObject
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.revert = revertObject
+
+Multi_Services_VoiceService_i_CodecProfile_i_.entries = getEntries()
+Multi_Services_VoiceService_i_CodecProfile_i_.getall = getAllParams(Multi_Services_VoiceService_i_CodecProfile_i_)
+Multi_Services_VoiceService_i_CodecProfile_i_.get = getParam()
+Multi_Services_VoiceService_i_CodecProfile_i_.set = setParam()
+
+Multi_Services_VoiceService_i_CodecProfile_i_.add = function(mapping, parentKey)
+    return nil, "Not supported for add"
+end
+
+Multi_Services_VoiceService_i_CodecProfile_i_.delete = function(mapping, key, parentKey)
+    return nil, "Not supported for delete"
+end
+
+Multi_Services_VoiceService_i_CodecProfile_i_.commit = commitObject
+Multi_Services_VoiceService_i_CodecProfile_i_.revert = revertObject
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_", Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_, register)
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CodecProfile_i_", Multi_Services_VoiceService_i_CodecProfile_i_, register)

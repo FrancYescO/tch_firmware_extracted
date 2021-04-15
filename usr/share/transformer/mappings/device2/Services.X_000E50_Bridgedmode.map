@@ -1,0 +1,114 @@
+local optical_supported, optical = pcall(require,"transformer.shared.optical")
+local gpon_supported
+if optical_supported and string.match(optical.getBoardtype(), "gpon")then
+  gpon_supported = true
+else
+  return
+end
+
+local Device_Services_X_000E50_Bridgedmode_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_Bridgedmode.",
+    description = "BridgeMode Specific parameters",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "0",
+        description = "Enable/Disable the Bridged mode",
+      },
+    }
+  }
+}
+
+local binding = {}
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local transactions = {}
+
+local function getUciValue(config, section, option, default)
+  binding.config = config
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  binding.state = false
+  return getFromUci(binding)
+end
+
+local function setUciValue(config, section, option, value)
+  binding.config = config
+  binding.sectionname = section
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  transactions[config] = true
+end
+
+
+local function setEnable(pppoeRelay, lanIfname, wanIfname, dhcpIgn, gponIntf, gponl3dev)
+  setUciValue("network", "lan", "pppoerelay", pppoeRelay)
+  setUciValue("network", "lan", "ifname", lanIfname)
+  setUciValue("dhcp", "lan", "ignore", dhcpIgn)
+  setUciValue("gponl3", gponIntf, "l3dev", gponl3dev)
+  commitapply:newset("bridgedMode.reboot")
+end
+
+Device_Services_X_000E50_Bridgedmode_.get = {
+  Enable = function(mapping, param)
+    local gponIntf 
+    local gponl3Binding = { config = "gponl3" }
+    forEachOnUci(gponl3Binding, function(s)
+      if s.mode == "bridged" then
+         gponIntf = s.ifname
+      end
+    end)
+    local lanIntf = getUciValue("network", "lan", "ifname", "")
+    return gponIntf and lanIntf ~= "" and string.match(lanIntf, gponIntf) and "1" or "0"
+  end
+}
+
+Device_Services_X_000E50_Bridgedmode_.set = {
+  Enable = function(mapping, param, value)
+    local gponIntf
+    local gponl3Binding = { config = "gponl3" }
+      forEachOnUci(gponl3Binding, function(s)
+        if s.mode == "bridged" then
+          gponIntf = s.ifname
+        end
+      end)
+    local lanIntf = getUciValue("network", "lan", "ifname", "")
+    local wanIntf = getUciValue("network", "wan", "ifname", "")
+    local gponl3dev = getUciValue("gponl3", wanIntf, "l3dev", "")
+    local bridgedIntf = gponIntf and lanIntf ~= "" and lanIntf.." "..gponIntf or ""
+    if value == "1" then
+      if bridgedIntf == "" then
+        return nil, "Bridged mode configuration not supported"     
+      else
+        setEnable("", bridgedIntf, wanIntf, "0", gponIntf, gponl3dev)
+      end
+    else
+      local intfName = gponIntf and string.gsub(lanIntf, " "..gponIntf, "") or lanIntf
+      setEnable(wanIntf, intfName, wanIntf, "", gponIntf, gponl3dev)
+    end
+  end
+}
+
+Device_Services_X_000E50_Bridgedmode_.commit = function()
+  for config,_ in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_Services_X_000E50_Bridgedmode_.revert = function()
+  for config,_ in pairs(transactions) do
+    uciHelper.revert({config =  config})
+  end
+  transactions = {}
+end
+
+register(Device_Services_X_000E50_Bridgedmode_)

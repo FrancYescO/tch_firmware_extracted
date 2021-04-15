@@ -1,0 +1,61 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2018-2019 CUJO LLC. All rights reserved.
+
+CHAIN_PREFIX="CUJO_"
+
+# This variable is used by rabid.sh, which sources this.
+# shellcheck disable=SC2034
+SET_PREFIX="cujo_"
+
+INPUT_CHAIN="${CHAIN_PREFIX}INPUT"
+OUTPUT_CHAIN="${CHAIN_PREFIX}OUTPUT"
+FORWARD_CHAIN="${CHAIN_PREFIX}FORWARD"
+
+ENTRY_CHAINS="${INPUT_CHAIN} ${OUTPUT_CHAIN} ${FORWARD_CHAIN}"
+
+# This variable is used by rabid.sh, which sources this.
+# shellcheck disable=SC2034
+if [ -e "$CUJO_HOME"/bin/ipset ]; then
+        ipset=$CUJO_HOME/bin/ipset
+else
+        ipset=ipset
+fi
+
+have_firewall_iptables=false
+if [ -e "$CUJO_HOME"/bin/firewall-iptables ]; then
+	have_firewall_iptables=true
+fi
+
+if $have_firewall_iptables; then
+	iptables=$CUJO_HOME/bin/firewall-iptables
+	ip6tables=$CUJO_HOME/bin/firewall-ip6tables
+
+	flush_rabid_firewall() {
+		ret=0
+		"$CUJO_HOME"/bin/firewall-iptables flush-everything || ret=1
+
+		return $ret
+	}
+else
+	iptables=iptables
+	ip6tables=ip6tables
+
+	flush_rabid_firewall() {
+		ret=0
+
+		for ipt in $iptables $ip6tables; do
+			chains=$(${ipt} -w -S | grep -- "^-N ${CHAIN_PREFIX}" | cut -f2 -d' ')
+			for chain in $chains; do
+				${ipt} -w -F "$chain" || ret=1
+			done
+			for chain in $chains; do
+				if ! echo -- "${ENTRY_CHAINS}" | grep -wq -- "${chain}"; then
+					    ${ipt} -w -X "$chain" || ret=1
+				fi
+			done
+		done
+
+		return $ret
+	}
+fi

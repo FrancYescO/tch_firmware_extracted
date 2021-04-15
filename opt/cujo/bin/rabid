@@ -1,0 +1,45 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2018-2019 CUJO LLC. All rights reserved.
+
+# shellcheck source=nf-chains.sh
+. "$CUJO_HOME"/bin/nf-chains
+
+cleanup_firewall() {
+    flush_rabid_firewall
+    $ipset list -name | grep -- "^${SET_PREFIX}" | while read -r set; do
+        $ipset destroy "$set"
+    done
+}
+
+cleanup_exit() {
+    rv=$?
+    cleanup_firewall
+    exit $rv
+}
+
+cleanup_term() {
+    kill "$RABID_PID"
+    cleanup_firewall
+}
+
+trap cleanup_exit EXIT
+trap cleanup_term HUP INT QUIT ABRT TERM
+
+for setting in bridge-nf-call-iptables bridge-nf-call-ip6tables; do
+    file=/proc/sys/net/bridge/$setting
+    if [ -e $file ]; then
+        echo 1 > $file
+    else
+        echo >&2 "ERROR: $file not found, so e.g. MDNS captures will not work"
+        echo >&2 "Make sure CONFIG_BRIDGE_NETFILTER is enabled in the kernel"
+        echo >&2 "And that br_netfilter is loaded if it's enabled as a module"
+        echo >&2 "Continuing, but all functionality will not be available"
+    fi
+done
+
+echo 0 > /proc/sys/net/netfilter/nf_conntrack_tcp_loose
+
+"$CUJO_HOME"/bin/lua "$CUJO_HOME"/share/lua/cujo/init.lua &
+RABID_PID=$!
+wait
