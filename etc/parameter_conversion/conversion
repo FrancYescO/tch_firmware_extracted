@@ -1,0 +1,368 @@
+debug_on
+
+copy_file /etc/config/button
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+
+uci_set cwmpd.cwmpd_config.acs_url
+uci_set cwmpd.cwmpd_config.acs_user
+uci_set cwmpd.cwmpd_config.acs_pass
+uci_set cwmpd.cwmpd_config.connectionrequest_username
+uci_set cwmpd.cwmpd_config.connectionrequest_password
+uci_set cwmpd.cwmpd_config.periodicinform_enable
+uci_set cwmpd.cwmpd_config.periodicinform_interval
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convcwmpd.lua
+
+uci_section cwmpd.@single_config.-ssl_certificate,ssl_privatekey,ssl_verifypeer,backoff_minwait,backoff_multiplier,connectionrequest_throttle_time,connectionrequest_throttle_number
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','ssl_verifypeer') v1=o:get('env','custovar_sensing','Scenario') if (v == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','/etc/ssl/d6d84089.0') if (v1 == '1') then n:set('cwmpd','cwmpd_config','ssl_certificate','<tbd>') end end n:commit('cwmpd')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('cwmpd','cwmpd_config','backoff_multiplier') if (v == '1320') then n:set('cwmpd','cwmpd_config','backoff_multiplier','2000') end n:commit('cwmpd')\"
+
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('cwmpd','cwmpd_config','upgrade_rollback_timeout','300') n:commit('cwmpd')\"
+copy_dir /usr/share/transformer
+copy_dir /usr/lib/lua
+
+
+
+
+uci_section ddns.@service
+
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'dtdns.com') then n:set('ddns','myddns_ipv4','service_name', 'dyn.com') end n:commit('ddns')\"
+
+uci_set dhcp.dnsmasq.addmac
+uci_set dhcp.dnsmasq.cachesize
+uci_set dhcp.dnsmasq.rebind_protection
+uci_set dhcp.odhcpd.leasefile
+uci_set dhcp.odhcpd.leasetrigger
+
+
+uci_section dhcp.@dhcp
+
+uci_set dhcp.lan.ra_max_mtu dhcp.lan.ra_mtu
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ra_max_mtu') if (v ~= nil) then n:delete('dhcp','lan','ra_max_mtu') end n:commit('dhcp')\"
+uci_set dhcp.wlnet_b_24.ra_max_mtu dhcp.wlnet_b_24.ra_mtu
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_24','ra_max_mtu') if (v ~= nil) then n:delete('dhcp','wlnet_b_24','ra_max_mtu') end n:commit('dhcp')\"
+uci_set dhcp.wlnet_b_5.ra_max_mtu dhcp.wlnet_b_5.ra_mtu
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_5','ra_max_mtu') if (v ~= nil) then n:delete('dhcp','wlnet_b_5','ra_max_mtu') end n:commit('dhcp')\"
+
+uci_set dhcp.lan.ra_min_interval dhcp.lan.ra_mininterval
+uci_set dhcp.lan.ra_max_interval dhcp.lan.ra_maxinterval
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ra_min_interval') if (v ~= nil) then n:delete('dhcp','lan','ra_min_interval') end n:commit('dhcp')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ra_max_interval') if (v ~= nil) then n:delete('dhcp','lan','ra_max_interval') end n:commit('dhcp')\"
+uci_set dhcp.dhcp.wlnet_b_24.ra_min_interval dhcp.dhcp.wlnet_b_24.ra_mininterval
+uci_set dhcp.dhcp.wlnet_b_24.ra_max_interval dhcp.dhcp.wlnet_b_24.ra_maxinterval
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','dhcp.wlnet_b_24','ra_min_interval') if (v ~= nil) then n:delete('dhcp','dhcp.wlnet_b_24','ra_min_interval') end n:commit('dhcp')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','dhcp.wlnet_b_24','ra_max_interval') if (v ~= nil) then n:delete('dhcp','dhcp.wlnet_b_24','ra_max_interval') end n:commit('dhcp')\"
+uci_set dhcp.wlnet_b_5.ra_min_interval dhcp.wlnet_b_5.ra_mininterval
+uci_set dhcp.wlnet_b_5.ra_max_interval dhcp.wlnet_b_5.ra_maxinterval
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_5','ra_min_interval') if (v ~= nil) then n:delete('dhcp','wlnet_b_5','ra_min_interval') end n:commit('dhcp')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_5','ra_max_interval') if (v ~= nil) then n:delete('dhcp','wlnet_b_5','ra_max_interval') end n:commit('dhcp')\"
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wan','ignore') if (v == '1') then n:set('dhcp','wan','dhcpv4','disabled') else n:set('dhcp','wan','dhcpv4','server') end n:commit('dhcp')\"
+uci_section dhcp.@host id=name
+uci_set dhcp.lan.dhcpv4
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ignore') if (v ~= nil) then if (v == '1') then n:set('dhcp','lan','dhcpv4','disabled') else n:set('dhcp','lan','dhcpv4','server') end end n:commit('dhcp')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_24','ignore') if (v ~= nil) then if (v == '1') then n:set('dhcp','wlnet_b_24','dhcpv4','disabled') n:set('dhcp','wlnet_b_24','ignore','') else n:set('dhcp','wlnet_b_24','dhcpv4','server') end end n:commit('dhcp')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wlnet_b_5','ignore') if (v ~= nil) then if (v == '1') then n:set('dhcp','wlnet_b_5','dhcpv4','disabled') n:set('dhcp','wlnet_b_5','ignore','') else n:set('dhcp','wlnet_b_5','dhcpv4','server') end end n:commit('dhcp')\"
+uci_section dhcp.@relay
+uci_section dhcp.@relaybackup
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convdhcprelay.lua
+
+copy_file /etc/config/dscp2pbit
+uci_section firewall.@zone id=name
+uci_section firewall.@forwarding
+uci_section firewall.@rule id=name
+
+uci_section firewall.@cone id=name
+uci_section firewall.@fwconfig
+uci_set firewall.dmzredirects.enabled
+uci_set firewall.dmzredirect.enabled
+uci_set firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirect.dest_ip
+uci_section firewall.@userredirect
+uci_section firewall.@rulesgroup id=name
+uci_section firewall.@highrule id=name
+uci_section firewall.@defaultrule id=name
+uci_section firewall.@userrule id=name
+uci_section firewall.@userrule_v6 id=name
+uci_section firewall.@fwconfig
+uci_section firewall.@zone id=name
+
+inline_sh_cmd lua /usr/lib/parameter_conversion/copy_firewall_helpers.lua
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+
+
+
+
+uci_set minidlna.config.enabled dlnad.config.enabled
+uci_set minidlna.config.friendly_name dlnad.config.friendly_name
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+uci_set dlnad.config.dynamic
+
+uci_set dlnad.log.mud_logLevel
+uci_set dlnad.log.mvfs_logLevel
+uci_set dlnad.log.dlnad_logLevel
+
+
+uci_section mmpbx.@mmpbx
+uci_section mmpbx.@syslog
+inline_sh_cmd uci set mmpbx.global.country=''
+uci_section mmpbx.@incoming_map id=profile
+uci_section mmpbx.@outgoing_map id=device
+
+uci_section mmpbx.@scc
+uci_section mmpbx.@dial_plan
+uci_section mmpbx.@dial_plan_entry id=pattern
+inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('mmpbx','dial_plan_generic','no_match_include_eon','1') n:commit('mmpbx')\"
+uci_section mmpbx.@media_filter
+uci_section mmpbx.@codec_filter id=name
+uci_section mmpbx.@audionotification.-callhold.event_description
+uci_section mmpbx.@areacode_translation id=prefix
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','codec_filter_sip_net_g722','allow') if (v == '0') then n:set('mmpbx','codec_filter_sip_net_g722','allow','1') end n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','codec_filter_sip_net_g722','remove_silence_suppression') if (v == '0') then n:set('mmpbx','codec_filter_sip_net_g722','remove_silence_suppression','1') end n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','codec_filter_sip_net_g722','priority') if (v == '4') then n:set('mmpbx','codec_filter_sip_net_g722','priority','1') end n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','codec_filter_sip_net_g729','priority') if (v == '1') then n:set('mmpbx','codec_filter_sip_net_g729','priority','2') end n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','codec_filter_sip_net_pcma','priority') if (v == '2') then n:set('mmpbx','codec_filter_sip_net_pcma','priority','3') end n:commit('mmpbx')\"
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('mmpbx','global','dial_timeout','20') n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('mmpbx','congestion','loop_iterations','100') n:commit('mmpbx')\"
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','dial_plan_generic','open_inter_digit_timer') if (v == '5000') then n:set('mmpbx','dial_plan_generic','open_inter_digit_timer','3000') end n:commit('mmpbx')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbx','dial_plan_generic','closed_inter_digit_timer') if (v == '5000') then n:set('mmpbx','dial_plan_generic','closed_inter_digit_timer','3000') end n:commit('mmpbx')\"
+
+inline_sh_cmd [ -f %%OLDCONFIG%%/etc/config/mmpbxbrcmdectdev ] && mv %%OLDCONFIG%%/etc/config/mmpbxbrcmdectdev %%OLDCONFIG%%/etc/config/mmpbxdectdev && sed -i 's/mmpbxbrcmdectdev/mmpbxdectdev/' %%OLDCONFIG%%/etc/config/mmpbxdectdev
+copy_file /etc/config/mmpbxdectdev
+
+uci_section mmpbxbrcmfxsdev.global
+uci_section mmpbxbrcmfxsdev.@device id=user_friendly_name
+uci_section mmpbxbrcmfxsdev.@keypad
+
+
+copy_file /etc/config/mmpbxinternalnet
+
+uci_section mmpbxrvsipnet.@profile
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convsippassword.lua
+
+uci_section mmpbxrvsipnet.@network.-user_agent
+inline_sh_cmd lua -e \"uc=require 'uciconv' n=uc.uci('new') n:set('mmpbxrvsipnet','sip_net','provisional_timer','1200') n:commit('mmpbxrvsipnet')\"
+inline_sh_cmd uci set mmpbxrvsipnet.sip_net.early_media_detection='1'
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbxbrcmfxsdev','fxs_dev_0','cid_display_calling_party_name_enabled') if (v == '1') then n:set('mmpbxbrcmfxsdev','fxs_dev_0','cid_display_calling_party_name_enabled','0') end n:commit('mmpbxbrcmfxsdev')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbxbrcmfxsdev','fxs_dev_1','cid_display_calling_party_name_enabled') if (v == '1') then n:set('mmpbxbrcmfxsdev','fxs_dev_0','cid_display_calling_party_name_enabled','0') end n:commit('mmpbxbrcmfxsdev')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('mmpbxbrcmcountry','fsk','remove_reason_noname') if (v == '0') then n:set('mmpbxbrcmcountry','fsk','remove_reason_noname','1') end n:commit('mmpbxbrcmcountry')\"
+
+
+
+copy_file /etc/config/mmpbxbrcmfxonet
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_section mobiled.@profile id=id
+uci_section mobiled.@sim id=iccid
+uci_section mobiled.@device id=imei
+inline_sh_cmd lua /usr/lib/parameter_conversion/copy_mobiled_device_defaults.lua
+
+uci_set network.ppp.password
+uci_set network.ppp.username
+uci_set network.ppp.graceful_restart
+
+
+
+uci_section network.@interface
+uci_section network.@device
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','public_lan','ipaddr') if (v ~= '0.0.0.0') then n:set('network','public_lan','disabled_info','') end n:commit('network')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') wan_ipv6=o:get('network','wan','ipv6') if ( wan_ipv6 ~= "0") then n:set('network','wan6','auto','1') n:set('network','waneth4','ipv6','1') n:set('network','wanptm0','ipv6','1') end n:commit('network')\"
+
+inline_sh_cmd uci delete network.loopback.dns
+inline_sh_cmd uci delete network.loopback.dns_metric
+
+inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','wan6','reqopts') if (v ~= nil) then n:set('network','wan6','defaultreqopts','0') else n:set('network','wan6','defaultreqopts','1') end n:commit('network')\"
+
+uci_set network.wwan.profile
+
+copy_file /etc/config/nslookupdiag
+
+uci_section parental.@parental
+uci_section parental.@URLfilter
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convparental.lua
+uci_section parental.@filterkeyword
+
+copy_file /etc/config/portmirror
+
+copy_file /etc/config/power
+
+copy_file /etc/config/pppoerelayd
+
+copy_file /etc/config/printersharing
+
+
+uci_set samba.@samba[0].name
+uci_set samba.@samba[0].workgroup
+uci_set samba.@samba[0].description
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('samba','samba','enabled') w=o:get('samba','samba','filesharing') if (w == nil) then if (v == '0') then n:set('samba','samba','enabled','1') n:set('samba','samba','filesharing','0') else n:set('samba','samba','enabled','1') n:set('samba','samba','filesharing','1') end else n:set('samba','samba','filesharing',w) n:set('samba','samba','enabled',v) end n:commit('samba')\"
+uci_section samba.userauth
+
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+uci_set system.@system[0].conloglevel
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+uci_set system.config.enable_usb3_support
+uci_set system.config.enable_usb2_support
+uci_set system.config.enable_usb1_support
+
+uci_set tod.global.time_change_monfreq
+uci_set tod.global.enabled
+uci_section tod.@action
+uci_section tod.@timer
+uci_section tod.@host
+uci_section tod.@ap
+
+copy_file /etc/config/traceroute
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convpingtraceroute.lua
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+uci_set upnpd.config.datamodel_version
+
+copy_file /etc/config/user_friendly_name
+
+
+
+
+
+copy_web_users
+inline_sh_cmd convcmds copy_shadow_psw engineer
+
+copy_file /etc/config/wifidoctor_station_importance
+
+copy_file /etc/config/wifi-conductor
+copy_file /etc/config/mosquitto
+
+
+uci_section wireless.@wifi-device.-acs_rescan_period,acs_channel_monitor_period,allowed_channels
+uci_section wireless.@wifi-iface
+uci_section wireless.@wifi-radius-server
+uci_section wireless.@wifi-bandsteer
+
+uci_section wireless.@wifi-ap-credential.passphrase
+
+uci_section wireless.@wifi-ap.-acl_mode
+
+uci_set wifi_conductor.global.enabled
+copy_file /etc/station_db.json
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('wireless','wl1_1','uapsd') if (v == 'nil') then n:set('wireless','wl1_1','uapsd','0') end n:commit('wireless')\"
+
+
+
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convwireless.lua
+
+inline_sh_cmd uci set wireless.radio_5G.mumimo='0'
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/xtm
+
+copy_file /etc/config/gpon
+copy_file /etc/config/gponl3
+
+copy_file /etc/config/datausage
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convshaping.lua
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convtod.lua
+
+uci_list web.default.users
+
+uci_set env.var.provisioning_code
+uci_set env.var.ppp_realm_ipv6
+uci_set env.var.ppp_realm_ipv4
+
+uci_section system.@kernel_crash
+uci_section ngwfdd.@values
+
+uci_section ethernet.@globals
+
+uci_section wifi_doctor_agent.@acs
+uci_section wifi_doctor_agent.@config
+uci_section wifi_doctor_agent.@as_config
+
+
+uci_section iperf.@iperf
+
+uci_set env.var.unlockGUIbutton
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','var','unlockGUIbutton') if (v == nil) then n:set('env','var','unlockGUIbutton','1') end n:commit('env')\"
+uci_set env.var.unlockedstatus
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','var','unlockedstatus') if (v == nil) then n:set('env','var','unlockedstatus','0') end n:commit('env')\"
+
+uci_section webservice.@user
+uci_set webservice.disabled.disallowed_paths
+uci_set webservice.disabled.allowed_commands
+
+
+uci_set env.custovar_sensing.Scenario
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_sensing','Scenario') if (v == nil) then n:set('env','custovar_sensing','Scenario','0') end n:commit('env')\"
+uci_set env.custovar_network.LTE_Data
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','LTE_Data') if (v == nil) then n:set('env','custovar_network','LTE_Data','83') end n:commit('env')\"
+uci_set env.custovar_network.LTE_VoIP
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','LTE_VoIP') if (v == nil) then n:set('env','custovar_network','LTE_VoIP','84') end n:commit('env')\"
+uci_set env.custovar_network.Standard_EthData
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','Standard_EthData') if (v == nil) then n:set('env','custovar_network','Standard_EthData','835') end n:commit('env')\"
+uci set env.custovar_network.Standard_PTMData
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('env','custovar_network','Standard_PTMData') if (v == nil) then n:set('env','custovar_network','Standard_PTMData','835') end n:commit('env')\"
+
+uci_set mwan.if1_mwan.interface
+uci_set mwan.if1_e.dest_port
+uci_set mwan.if1_f.dest_port
+
+
+
+uci_section wansensing.global
+uci_section wansensing.@L2State id=name
+uci_section wansensing.@L3State id=name
+uci_section wansensing.worker1
+
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convusers.lua
+

@@ -1,0 +1,214 @@
+--Manually generated
+local Multi_X_000E50_ngwfdd_= {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "The data model of the native gateway field diagnostics daemon",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable the daemon",
+      },
+      Tag = {
+        access = "readWrite",
+        type = "string",
+        max = "32",
+        description = "Specifies a tag to annotate the collected data with. This tag can then be used in search queries on the field diagnostics",
+      },
+      BaseURL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "The remote end-point to send the collected data to",
+      },
+      FlushInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "900",
+        description = "Indicates how frequent the daemon sends data to the remote back-end",
+      },
+      FlushSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "30",
+        description = "The maximum number of messages the daemon reads from the fifo files before sending them towards the back-end",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local binding = {config="ngwfdd"}
+local setSomething
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+local paramMap = {
+  ["Enable"] = "enable",
+  ["Tag"] = "tag",
+  ["BaseURL"] = "base_url",
+  ["FlushInterval"] = "flush_interval",
+  ["FlushSize"] = "flush_size",
+  ["Enabled"] = "enabled",
+  ["Interval"] = "interval",
+}
+
+local uciDefaults = {
+  ["Enable"] = "0",
+  ["FlushInterval"] = "900",
+  ["FlushSize"] = "30",
+  ["cpustats"] = "600",
+  ["meminfo"] = "300",
+  ["slabinfo"] = "300",
+  ["process"] = "300",
+  ["lte"] = "300",
+  ["dsl"] = "1800",
+  ["wan"] = "1800",
+  ["video"] = "1800",
+  ["conntrack"] = "1800",
+  ["devices"] = "3600",
+  ["dev_connected"] = "1800",
+}
+
+local function getUciParam(mapping, param)
+  binding.sectionname = "config"
+  binding.option = paramMap[param]
+  binding.default = uciDefaults[param]
+  return uci_helper.get_from_uci(binding)
+end
+
+Multi_X_000E50_ngwfdd_.get = getUciParam
+
+Multi_X_000E50_ngwfdd_.getall = function(mapping)
+  binding.sectionname = "config"
+  local allValues = uci_helper.getall_from_uci(binding)
+  return {
+    Enable = allValues.enable or uciDefaults["Enable"],
+    Tag = allValues.tag or "",
+    BaseURL = allValues.base_url or "",
+    FlushInterval = allValues.flush_interval or uciDefaults["FlushInterval"],
+    FlushSize = allValues.flush_size or uciDefaults["FlushSize"],
+  }
+end
+
+local function setUciParam(mapping, param, value)
+  binding.sectionname = "config"
+  binding.option = paramMap[param]
+  uci_helper.set_on_uci(binding, value, commitapply)
+  setSomething = true
+end
+
+Multi_X_000E50_ngwfdd_.set = setUciParam
+
+Multi_X_000E50_ngwfdd_.commit = function()
+  if setSomething then
+    uci_helper.commit(binding)
+    setSomething = nil
+  end
+end
+
+Multi_X_000E50_ngwfdd_.revert = function()
+  if setSomething then
+    uci_helper.revert(binding)
+    setSomething = nil
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_ngwfdd_, "#ROOT", {"InternetGatewayDevice.Services.X_000E50_ngwfdd.", "Device.Services.X_000E50_ngwfdd.", "Device.Services.X_BELGACOM_ngwfdd."})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match("^InternetGatewayDevice.") or dupli.objectType.name:match("Device.Services.X_000E50_ngwfdd.") then
+    dupli.objectType.parameters["FlushSize"] = nil
+  end
+  register(dupli)
+end
+
+--Manually generated
+local Device_Services_X_000E50_ngwfdd_multi_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_ngwfdd_#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "The data model of the native gateway field diagnostics daemon",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "If 1 the collector is started when the daemon is started",
+      },
+      Interval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "The collector data polling interval.",
+      },
+    }
+  }
+}
+
+local sectionMap = {
+  ["Cpustats"] = "cpustats",
+  ["Meminfo"] = "meminfo",
+  ["Slabinfo"] = "slabinfo",
+  ["Process"] = "process",
+  ["Lte"] = "lte",
+  ["Wan"] = "wan",
+  ["Video"] = "video",
+  ["Conntrack"] = "conntrack",
+  ["Device"] = "devices",
+  ["Devconnected"] = "dev_connected",
+  ["Fhcd"] = "fhcd",
+  ["Dsl"] = "dsl",
+}
+
+local function getUciValue(mapping, param)
+  binding.sectionname = mapping.sectionname
+  binding.option = paramMap[param]
+  if param == "Interval" then
+     binding.default = uciDefaults[param]
+  elseif param == "Enabled" and mapping.sectionname == "fhcd" then
+     binding.default = "0"
+  else
+     binding.default = "1"
+  end
+  return uci_helper.get_from_uci(binding)
+end
+
+local function setUciValue(mapping, param, value)
+  binding.sectionname = mapping.sectionname
+  binding.option = paramMap[param]
+  uci_helper.set_on_uci(binding, value, commitapply)
+  setSomething = true
+end
+
+Device_Services_X_000E50_ngwfdd_multi_.get = getUciValue
+
+Device_Services_X_000E50_ngwfdd_multi_.set = setUciValue
+
+Device_Services_X_000E50_ngwfdd_multi_.commit = function()
+  if setSomething then
+    uci_helper.commit(binding)
+    setSomething = nil
+  end
+end
+
+Device_Services_X_000E50_ngwfdd_multi_.revert = function()
+  if setSomething then
+    uci_helper.revert(binding)
+    setSomething = nil
+  end
+end
+
+local duplicates = duplicator(Device_Services_X_000E50_ngwfdd_multi_, "#ROOT", {"Cpustats", "Meminfo", "Slabinfo", "Process", "Lte", "Dsl", "Wan", "Video", "Conntrack", "Fhcd", "Device", "Devconnected"})
+for _, dupli in ipairs(duplicates) do
+  dupli.sectionname = sectionMap[(dupli["objectType"]["name"]:match("X_000E50_ngwfdd_(.*)%.$"))]
+  register(dupli)
+end
