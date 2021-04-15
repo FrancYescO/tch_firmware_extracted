@@ -1,0 +1,259 @@
+-- Manually generated
+local Multi_X_000E50_AccessControl_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Configuration of internet access control for specific hosts",
+    parameters = {
+      BlockInternet = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Allow/ Block the internet traffic for the entire house hold",
+        default = "0"
+      },
+      WhiteListHosts = {
+        access = "readWrite",
+        type = "string",
+        description = "A list of hosts that can access the internet even when internet is blocked for the entire home."
+      },
+    }
+    -- HostNumberOfEntries
+    -- automatically created when #ROOT is loaded
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local forEachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local firewallBinding = { config = "firewall" }
+local parentalBinding = { config = "parental" }
+local networkBinding = { config = "network" }
+local network = require("transformer.shared.common.network")
+local common = mapper("nwcommon")
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local isConfigChanged = false
+local match, format, gsub, concat  = string.match, string.format, string.gsub, table.concat
+
+local function getUciValue(binding, sectionName, paramName, default)
+  binding.sectionname = sectionName
+  binding.option = paramName
+  binding.default = default
+  return getFromUci(binding)
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  isConfigChanged = true
+end
+
+local function deleteWhiteHosts(key)
+  local binding = {config = "parental"}
+  binding.sectionname = key
+  binding.option = nil
+  uciHelper.delete_on_uci(binding, commitapply)
+end
+
+local function enableWhiteListURLs()
+  local flag
+  local gwIP = getUciValue(networkBinding, "lan" , "ipaddr")
+
+  -- Add Gateway IP to parental config so that GW IP will be accessible While WhiteList is enabled.
+  parentalBinding.sectionname = "URLfilter"
+  forEachOnUci(parentalBinding, function(s)
+    if s["site"] == gwIP then
+      flag = true
+    end
+  end)
+  if gwIP and not flag then
+    local URLfilter = network.getNewSection("parental", "URLfilterGWIP")
+    parentalBinding.sectionname = URLfilter
+    parentalBinding.option = nil
+    setOnUci(parentalBinding, "URLfilter", commitapply)
+    setUciValue(parentalBinding , URLfilter , "site", gwIP)
+  end
+  isConfigChanged = true
+end
+
+local function setWhiteListHosts(value, getSection)
+  parentalBinding.sectionname = URLfilter
+  forEachOnUci(parentalBinding, function(s)
+    if s["mac"] and s["mac"] ~= "" then
+      deleteWhiteHosts(s[".name"])
+    end
+  end)
+  if value and value ~= "" then
+    for mac in string.gmatch(value, '([^,]+)') do
+      if not common.isMAC(mac) and mac ~= "" then
+        return nil, "Invalid MAC address"
+      end
+      local URLfilter = network.getNewSection("parental", "URLfilterWhiteListHosts")
+      parentalBinding.sectionname = URLfilter
+      parentalBinding.option = nil
+      setOnUci(parentalBinding, "URLfilter", commitapply)
+      setUciValue(parentalBinding , URLfilter , "mac", mac)
+      setUciValue(parentalBinding , URLfilter , "skip_site_check", "1")
+    end
+  end
+  isConfigChanged = true
+end
+
+Multi_X_000E50_AccessControl_.get = {
+  BlockInternet = function(mapping, param, key)
+      return getUciValue(parentalBinding, "general", "enable") or "0"
+  end,
+  WhiteListHosts = function(mapping, param, key)
+    local whiteListHosts = {}
+    parentalBinding.sectionname = "URLfilter"
+    uciHelper.foreach_on_uci(parentalBinding, function(s)
+      if s["mac"] and s["mac"] ~= "" then
+        whiteListHosts[#whiteListHosts+1] = s["mac"]
+      end
+    end)
+    return type(whiteListHosts) == "table" and concat(whiteListHosts, ",") or ""
+  end,
+}
+
+Multi_X_000E50_AccessControl_.set = {
+  BlockInternet = function(mapping, param, value)
+    if value and value == "0" then
+      setUciValue(parentalBinding, "general", "exclude", "1")
+      setUciValue(parentalBinding, "general", "enable", "0")
+    elseif value == "1" then
+      setUciValue(parentalBinding, "general", "exclude", "0")
+      setUciValue(parentalBinding, "general", "enable", "1")
+      commitapply:newset("guiaccessonly")
+    else
+      return nil
+    end
+    return true
+  end,
+  WhiteListHosts = function(mapping, param, value)
+    return setWhiteListHosts(value, getSection)
+  end,
+}
+
+Multi_X_000E50_AccessControl_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(firewallBinding)
+    uciHelper.commit(parentalBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_X_000E50_AccessControl_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(firewallBinding)
+    uciHelper.revert(parentalBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_AccessControl_, "#ROOT", {"InternetGatewayDevice.X_000E50_AccessControl.", "Device.X_000E50_AccessControl.", "Device.Hosts.X_DT_AccessControl."})
+for _, dupli in ipairs(duplicates) do
+  if not dupli.objectType.name:match('Device.Hosts.X_DT_AccessControl.') then
+    dupli.objectType.parameters.BlockInternet = nil
+    dupli.objectType.parameters.WhiteListHosts = nil
+  end
+  register(dupli)
+end
+
+local Multi_X_000E50_AccessControl_WhiteListURLs_i_ = {
+  objectType = {
+    name = "Device.Hosts.X_DT_AccessControl.WhiteListURLs.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "WhiteListURLsNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        description = "list of whitelisturls",
+      },
+    }
+  }
+}
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.entries = function()
+  local entries = {}
+  parentalBinding.sectionname = "URLfilter"
+  uciHelper.foreach_on_uci(parentalBinding, function(s)
+    if s[".type"] == "URLfilter" and not s["mac"] then
+      entries[#entries + 1] = s[".name"]
+    end
+  end)
+  return entries
+end
+
+local function setURL(site, key)
+  local URLsite = ""
+  site = gsub(site, " ", "")
+  if site:match("://") then
+    site = site:match("//([^/]+)")
+  end
+  if site:match("www") then
+    site = site:match("%.(%S+)")
+  end
+  site = site:match("([^/]+)")
+  URLsite = site
+  if URLsite and URLsite ~= "" then
+    setUciValue(parentalBinding, key, "site",  URLsite)
+    setUciValue(parentalBinding, key, "device", "all")
+  end
+end
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.get = {
+  URL = function(mapping, param, key)
+    return getUciValue(parentalBinding, key, "site")
+  end,
+}
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.set = {
+  URL = function(mapping, param, value, key)
+    return setURL(value, key)
+  end,
+}
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.add = function(mapping)
+  local URLfilter = network.getNewSection("parental", "URLfilter")
+  parentalBinding.sectionname = URLfilter
+  parentalBinding.option = nil
+  uciHelper.set_on_uci(parentalBinding, "URLfilter", commitapply)
+  enableWhiteListURLs()
+  isConfigChanged = true
+  return URLfilter
+end
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.delete = function(mapping, key)
+  parentalBinding.sectionname = key
+  parentalBinding.option = nil
+  uciHelper.delete_on_uci(parentalBinding, commitapply)
+  isConfigChanged = true
+  return true
+end
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(parentalBinding)
+    uciHelper.commit(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_X_000E50_AccessControl_WhiteListURLs_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(parentalBinding)
+    uciHelper.revert(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Multi_X_000E50_AccessControl_WhiteListURLs_i_)

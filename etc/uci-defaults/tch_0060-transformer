@@ -1,0 +1,41 @@
+#!/bin/sh
+#NG-73564 (removed  uci add_list transformer.@main[0].vendor_patterns='X_TELECOMITALIA_')
+#NG-85629
+#NG-100382 TI: Optical interface data model parameters present in VBNT-K
+
+
+if [ ! -f /etc/config/transformer ]; then
+	touch /etc/config/transformer
+fi
+
+uci show transformer.@main[0] >/dev/null 2>/dev/null
+if [ $? -ne 0 ]; then
+	uci add transformer main
+fi
+
+sfp=$(uci get env.rip.sfp)
+if [ $sfp -ne "1" ]; then
+	uci add_list transformer.@main[0].ignore_patterns='rpc%.optical%.'
+	uci add_list transformer.@main[0].ignore_patterns='Device%.Optical%.'
+fi
+
+uci add_list transformer.@main[0].ignore_patterns='^InternetGatewayDevice%.'
+uci add_list transformer.@main[0].ignore_patterns='^Device.DHCPv4.Server.Pool.{i}%.X_000E50_AddMAC'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.SoftwareBank%.'
+uci add_list transformer.@main[0].ignore_patterns='DeviceInfo%.NewSoftwareBank$'
+uci add_list transformer.@main[0].ignore_patterns='Device%.FAST%.'
+uci add_list transformer.@main[0].ignore_patterns='Device.Services.X_000E50_IGMPProxy.State'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.WiFi%.AccessPoint%.{i}%.Security%.WEPKey$'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.WiFi%.AccessPoint%.{i}%.Security%.KeyPassphrase$'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.LANConfigSecurity.ConfigPassword'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.ManagementServer%.Password'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.ManagementServer%.ConnectionRequestPassword'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.PPP.Interface.{i}%.Password'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.Services.VoiceService.{i}%.VoiceProfile.{i}%.SIP.InboundAuthPassword'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.Services.VoiceService.{i}%.VoiceProfile.{i}%.Line.{i}%.SIP.AuthPassword'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.Users.User.{i}%.Password'
+uci add_list transformer.@main[0].unhide_patterns='^Device%.DynamicDNS.Client.{i}%.Password'
+uci add_list transformer.@main[0].vendor_patterns='X_TELECOMITALIA_IT_'
+
+
+uci commit transformer

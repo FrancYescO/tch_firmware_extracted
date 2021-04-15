@@ -1,0 +1,942 @@
+local lfs = require("lfs")
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local tr104Helper = require("transformer.shared.tr104helper")
+local voiceNetworkHelper = require("transformer.shared.voice_network_helper")
+local subscribeBinding = { config = "mmpbxrvsipnet", sectionname = "subscription", option = "subscription_event"}
+local commitApply = commitapply
+local regExpire
+local binding = {}
+local transactions = {}
+local format = string.format
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_SIP_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.SIP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            ProxyServer = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "Host name or IP address of the SIP proxy server",
+            },
+            ProxyServerPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5060",
+		description = "Destination port to be used in connecting to the SIP proxy server",
+            },
+            ProxyServerTransport = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "TCP",
+                    "UDP",
+                    "undefined",
+                },
+                default = "UDP",
+		description = "Transport protocol to be used in connecting to the SIP proxy server",
+            },
+            RegistrarServer = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+                description = "Host name or IP address of the SIP registrar server",
+            },
+            RegistrarServerPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5060",
+		description = "Destination port to be used in connecting to the SIP registrar server",
+            },
+            RegistrarServerTransport = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "TCP",
+                    "UDP",
+                    "undefined",
+                },
+                default = "UDP",
+		description = "Transport protocol to be used in connecting to the registrar server",
+            },
+            AuthRealm = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "AuthRealm for authentication with the specified values of Client.{i}.AuthUserName and Client.{i}.AuthPassword",
+            },
+            UserAgentDomain = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "CPE domain string",
+            },
+            UserAgentPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0",
+		description = "Port used for incoming call control signaling",
+            },
+            UserAgentTransport = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "TCP",
+                    "UDP",
+                    "undefined",
+                },
+                default = "UDP",
+		description = "Transport protocol to be used for incoming call control signaling",
+            },
+            OutboundProxy = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "The Fully Qualified Domain Name or IP Address of the outbound proxy",
+            },
+            OutboundProxyPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5060",
+		description = "Destination port to be used in connecting to the outbound proxy",
+            },
+            Organization = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "Text string to be used in the Organization header",
+            },
+            RegistrationPeriod = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "60",
+                        max = "600000",
+                    },
+                },
+		description = "Duration in seconds after which the user agent needs to register again",
+            },
+            TimerT1 = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer T1 in milliseconds",
+            },
+            TimerT2 = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer T2 in milliseconds",
+            },
+            TimerT4 = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer T4 in milliseconds",
+            },
+            TimerA = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer A in milliseconds",
+            },
+            TimerB = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer B in milliseconds",
+            },
+            TimerC = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer C in milliseconds",
+            },
+            TimerD = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer D in milliseconds",
+            },
+            TimerE = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer E in milliseconds",
+            },
+            TimerF = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer F in milliseconds",
+            },
+            TimerG = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer G in milliseconds",
+            },
+            TimerH = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer H in milliseconds",
+            },
+            TimerI = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer I in milliseconds",
+            },
+            TimerJ = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer J in milliseconds",
+            },
+            TimerK = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "value of SIP timer K in milliseconds",
+            },
+            InviteExpires = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "Invite request Expires header value in seconds",
+            },
+            ReInviteExpires = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                default = "0",
+		description = "Re-invite request Expires header value in seconds",
+            },
+            RegisterExpires = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "60",
+                        max = "600000",
+                    },
+                },
+		description = "Register request Expires header value in seconds",
+            },
+            RegistersMinExpires = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "Register request Min-Expires header value in seconds",
+            },
+            RegisterRetryInterval = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+		description = "Register retry interval in seconds",
+            },
+            InboundAuth = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "None",
+                    "Digest",
+                },
+                default = "None",
+		description = "Type of inbound authentication",
+            },
+            InboundAuthUsername = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "username credentials",
+            },
+            InboundAuthPassword = {
+                access = "readOnly",
+                hidden = "true",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "password credentials",
+            },
+            UseCodecPriorityInSDPResponse = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+		description = "When true codec with highest priority offered invite first",
+            },
+            DSCPMark = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "63",
+                    },
+                },
+                default = "0",
+		description = "Diffserv code point to be used for outgoing SIP signaling packets",
+            },
+            VLANIDMark = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                default = "-1",
+		description = "VLAN ID to be used for outgoing SIP signaling packets",
+            },
+            EthernetPriorityMark = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                default = "-1",
+		description = "Ethernet priority code to be used for outgoing SIP signaling packets",
+            },
+            X_000E50_401407Waiting = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                    },
+                },
+                default = "0",
+                description = "Time in seconds to be waited for new register request when 401/407 is received for previous one (if 0, stops)",
+            },
+            X_000E50_RegisterBackOffTimer = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                description = "Backoff timer in re-registration procedure, when previous registration is responded with 503",
+            },
+            X_AltRegistrarServer = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+                description = "Defines a Host name or IP address of the SIP secondary registrar server",
+            },
+            X_AltRegistrarServerPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5095",
+                description = "Defines the Port number of secondary Registrar Server",
+            },
+            X_000E50_SecProxyServer = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+                description = "Defines a Host name or IP address of the Secondary Proxy Server",
+            },
+            X_000E50_SecProxyServerPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5060",
+                description = "Defines the Port number of Secondary Proxy Server",
+            },
+            X_AltProxyServer = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+                description = "Defines a Host name or IP address of the Secondary Proxy Server",
+            },
+            X_AltProxyServerPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5095",
+                description = "Destination Port to be used in connecting to the Secondary Proxy Server",
+            },
+            X_000E50_MaxRetransInvite = {
+                access = "readWrite",
+                type = "int",
+                default = "-1",
+                description = "Maximum number of retransmissions for a INVITE request",
+            },
+            X_000E50_MaxRetransNonInvite = {
+                access = "readWrite",
+                type = "int",
+                default = "-1",
+                description = "Maximum number of retransmissions for a non-INVITE request",
+            },
+            -- automatically created when Multi.Services.VoiceService.{i}.VoiceProfile.{i}.SIP.EventSubscribe.{i}. is loaded
+            -- SIPEventSubscribeNumberOfElements = {
+            --     access = "readOnly",
+            --     type = "unsignedInt",
+            --     default = "0",
+            -- },
+            -- SIPResponseMapNumberOfElements
+            SIPResponseMapNumberOfElements = {
+                access = "readOnly",
+                type = "unsignedInt",
+		description = "Indicates the number of SIPResponseMap objects",
+            },
+            -- automatically created when Multi.Services.VoiceService.{i}.VoiceProfile.{i}.SIP.ResponseMap.{i}. is loaded
+            X_FASTWEB_RegisterExpiresRefreshPercent = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "100",
+                    },
+                },
+                description = "Register refresh rate based on register expiration value",
+            },
+            X_FASTWEB_RegisterSleepTimeMin = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                description = "Minimum waiting time, until next REGISTER request is sent out",
+            },
+            X_FASTWEB_RegisterSleepTimeMax = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                description = "Maximum waiting time, until next REGISTER request is sent out",
+            },
+            X_000E50_403Waiting = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "86400",
+                    },
+                },
+                default = "0",
+                description = "Time in seconds before retrying REGISTER after a 403 response",
+            },
+            X_000E50_400503Waiting = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "86400",
+                    },
+                },
+                default = "0",
+                description = "Time in seconds before retrying REGISTER after a 400/503 response",
+            },
+            X_000E50_Other4xx5xx6xxWaiting = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "86400",
+                    },
+                },
+                default = "0",
+                description = "Time in seconds before retrying REGISTER after a 4xx/5xx/6xx response",
+            },
+            X_000E50_TimerFExpWaiting = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "86400",
+                    },
+                },
+                default = "0",
+                description = "Time in seconds before retrying REGISTER after a 4xx/5xx/6xx response",
+            },
+            X_000E50_StopRegisterOn403 = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Stops registration after 403 response when enabled",
+            },
+            X_000E50_StopRegisterOnTimerF = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Stops registration after timer f expired when enabled",
+            },
+            X_000E50_StopRegisterOn408 = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Stops registration after 408 response when enabled",
+            },
+            X_000E50_RegisterBackOffTimerMax = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "86400",
+                    },
+                },
+                default = "0",
+                description = "Maximum value of backoff timer used for registration",
+            },
+            X_000E50_CallWaitingRejectResponse = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "480",
+                    "486",
+                },
+                default = "486",
+                description = "Modify/View Call Waiting Reject Reply",
+            },
+            X_000E50_NoAnswerResponse = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "480",
+                    "486",
+                    "487",
+                },
+                default = "480",
+                description = "Modify/View No Answer Reply",
+            },
+            ConferenceCallDomainURI = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                default = "",
+		description = "URI of the network conference bridge for the multiway conference call service",
+            },
+            X_SessionExpires = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "1800",
+                description = "Session expiration timer before which SIP session needs to be refreshed to be kept alive",
+            },
+            X_0876FF_PreRegisterState = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "NOTSTARTED",
+                    "COMPLETE",
+                    "FAILED",
+                },
+                default = "NOTSTARTED",
+                description = "Displays the PreRegistration state",
+            },
+            X_0876FF_PreRegisterEnable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+                description = "Enable/Disable the PreRegister functionality",
+            },
+            X_000E50_IgnoreAssertedID = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Enable/Disable the use of values from the From header instead of the P-Asserted-Identity header for Calling Line Identity Presentation",
+            },
+            X_DT_ReRegisterTimer = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "Percentage of Register Expire timer on which CPE will perform re-Register",
+            },
+            X_DT_ProxySwitchWhenRetryAfterPresent = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+                description = "Decides whether proxy switch will be done if Retry-After parameter is present",
+            },
+            X_DT_RetryAfterMinValue = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "30",
+                description = "The minimum value of register retry-after header value in seconds, if the received value below this minimum value, then Timer F will be used",
+            },
+            X_DT_QuarantineTimer = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "900",
+                description = "Duration in seconds of no contact period (Quarantine) towards a particular sip proxy",
+            },
+        }
+    }
+}
+
+local function commit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local function setSipnetValue(mapping, param, value, key, parentKey)
+    return voiceNetworkHelper.setSipnetParam(mappping, param, value, key, parentKey, transactions, commitApply)
+end
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.get = voiceNetworkHelper.getSipnetParam()
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.getall = voiceNetworkHelper.getAllSipnetParams(Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.objectType.parameters)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.set = setSipnetValue
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.commit = commit
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoiceProfile_i_SIP_", Multi_Services_VoiceService_i_VoiceProfile_i_SIP_, register)
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.SIP.EventSubscribe.{i}.",
+        access = "readWrite",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "SIPEventSubscribeNumberOfElements",
+        parameters = {
+            Event = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "reg",
+                    "message-summary",
+                    ""
+                },
+                default = "",
+            },
+            Notifier = {
+                access = "readWrite",
+                --hidden = "true",
+                type = "string",
+                max = "256",
+                default = "",
+            },
+            NotifierPort = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0"
+            },
+            --[[NotifierTransPort = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+                default = "",
+            },--]]
+
+            ExpireTime = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                    },
+                },
+                default = "",
+            },
+            X_FASTWEB_SubscribeRefreshPercent = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "Percentage of refresh timer at which the subscription must be refreshed",
+                range = {
+                    {
+                        min = "0",
+                        max = "100",
+                    },
+                },
+                default = "99"
+
+            },
+            X_FASTWEB_SubscribeSleepTimeMin = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "Minimum waiting time, until SUBSCRIBE refresh is sent out",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "1800"
+
+            },
+            X_FASTWEB_SubscribeSleepTimeMax = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "Maximum waiting time, until SUBSCRIBE refresh is sent out",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "2100"
+
+            },
+
+            -- automatically created when Multi.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.SIP.EventSubscribe.{i}. is loaded
+        }
+    }
+}
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    uciHelper.foreach_on_uci(subscribeBinding, function(s)
+        if parentKey:match("mmpbxrvsipnet") then
+            entries[#entries + 1] = s['.name']
+        end
+    end)
+    return entries
+end
+
+local subscribeMap = {
+    Event = "event",
+    Notifier = "notifier",
+    NotifierPort = "notifier_port",
+    ExpireTime = "expire_time",
+    X_FASTWEB_SubscribeRefreshPercent = "expire_time_T_before",
+    X_FASTWEB_SubscribeSleepTimeMin = "retry_time_min",
+    X_FASTWEB_SubscribeSleepTimeMax = "retry_time_max",
+}
+
+local function subscribeGetter(mapping, paramName, key)
+    binding.config = "mmpbxrvsipnet"
+    binding.sectionname = key
+    binding.option = subscribeMap[paramName]
+    local value = getFromUci(binding)
+
+    if (paramName == "X_FASTWEB_SubscribeRefreshPercent") then
+        binding.option = "expire_time"
+        regExpire = tonumber(getFromUci(binding))
+        if (regExpire ~= nil and regExpire ~= 0) then
+            value = tostring(math.modf((regExpire - value) / regExpire * 100))
+        else
+            value = "0"
+        end
+    end
+
+    return value
+end
+
+local function subscribeSetter(mapping, paramName, paramvalue, key)
+    binding.config = "mmpbxrvsipnet"
+    binding.sectionname = key
+
+    local value = paramvalue
+    if (paramName == "X_FASTWEB_SubscribeRefreshPercent") then
+        binding.option = "expire_time"
+        regExpire = tonumber(getFromUci(binding))
+        if (regExpire ~= nil and regExpire ~= 0) then
+            value = tostring(regExpire - math.modf(regExpire * value / 100))
+        else
+            value = "0"
+        end
+    end
+
+    binding.option = subscribeMap[paramName]
+    setOnUci(binding, value, commitApply)
+end
+
+local function subscribeAdder(mapping, parentKey)
+    local subscribeName = format ("subscribe_notifier_%s", math.random(0xFFFF))
+    subscribeBinding.sectionname = subscribeName
+    subscribeBinding.option = nil
+    setOnUci(subscribeBinding, "subscription", commitApply)
+    local section = parentKey:match("^.*|(.*)$")
+    local configDefaults = {
+          network = section,
+          event = "message-summary",
+    }
+    for key,val in pairs(configDefaults) do
+        subscribeBinding.option = key
+        setOnUci(subscribeBinding, val, commitApply)
+    end
+    return subscribeName
+end
+
+local function subscribeDelete(mapping, key, parentKey)
+    subscribeBinding.sectionname = key
+    uciHelper.delete_on_uci(subscribeBinding, commitApply)
+    return true
+end
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.get = subscribeGetter
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.set = subscribeSetter
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.add = subscribeAdder
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.delete = subscribeDelete
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.commit = function()
+    uciHelper.commit({config = "mmpbxrvsipnet"})
+end
+
+Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_.revert = function()
+    uciHelper.revert({config = "mmpbxrvsipnet"})
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_", Multi_Services_VoiceService_i_VoiceProfile_i_SIP_EventSubscribe_i_, register)
