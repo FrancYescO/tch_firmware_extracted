@@ -1,0 +1,89 @@
+#!/bin/sh /etc/rc.common
+
+. $IPKG_INSTROOT/lib/functions/functions-tch.sh
+
+# After modules loaded and XDSL started
+START=19
+
+# Match the priorities Broadcom set on several kthreads.
+# Information based on eid_bcm_kthreads.txt, wlmngr and running threads.
+
+setRadioIntAffinity() {
+    local radio=$1;
+    local affinity=$2;
+    local irq=$(cat /proc/interrupts | grep wl$radio | cut -d: -f1 | tr -d ' ');
+    if [ ! -z $affinity ]; then
+        echo $affinity >/proc/irq/$irq/smp_affinity 2>/dev/NULL
+        #nvram kset wl${radio}_interrupt_affinity=${affinity}
+    fi
+}
+
+start() {
+    local BCM_MODEL=`cat /proc/device-tree/model 2>/dev/null`
+
+    # USB workqueue thread
+    setrtprio khubd 5
+
+    # Broadcom Buffer Pool Manager thread
+    setrtprio bpm 75
+
+    # Broadcom FAP GSO LOOPBACK thread
+    setrtprio fapGsoLoopBk 5
+
+    # Broadcom bcmenet driver threads
+    setrtprio bcmsw_rx 5
+    setcpumask bcmsw_rx 1
+
+    setrtprio bcmxtm_rx 5
+    setcpumask bcmxtm_rx 1
+
+    if [ "$BCM_MODEL" == "Broadcom BCM947622" ]; then  # Archer based platforms with 4 cpu cores
+        setrtprio bcm_archer_us 0 other
+        setcpumask bcm_archer_us 8
+
+        setrtprio bcm_archer_wlan 0 other
+
+        setrtprio bcmsw_recycle 75 fifo
+
+        setrtprio bcmFlwStatsTask 0 other
+    elif [ "$BCM_MODEL" == "Broadcom BCM963178" ]; then # Archer based platforms with 3 cpu cores
+        setrtprio bcm_archer_us 0 other
+        setcpumask bcm_archer_us 4
+
+        setrtprio bcm_archer_wlan 0 other
+        setcpumask bcm_archer_wlan 2
+
+        setrtprio bcmsw_recycle 75 fifo
+        setcpumask bcmsw_recycle 4
+
+        setrtprio bcmxtm_recycle 75 fifo
+        setcpumask bcmxtm_recycle 4
+
+        setrtprio bcmFlwStatsTask 0 other
+    fi
+
+    ## WLAN ##
+
+    #VCNT-3 related settings
+    setrtprio wfd0-thrd 5
+    setrtprio wfd1-thrd 5
+    setRadioIntAffinity 0 1
+    setRadioIntAffinity 1 2
+    setcpumask wfd0-thrd     1
+    setcpumask wfd1-thrd     2
+    setcpumask skb_free_task 1    
+
+
+
+
+
+    #Broadcom traffic manager kernel thread affinity(see eid_bcm_kthreads.txt)
+    if [ "$(process_exists bcm_tm_thread)" = "1" ] ; then
+        setcpumask bcm_tm_thread 2
+        setrtprio bcm_tm_thread 99 fifo
+    fi
+
+    #############################################
+    #Configure priority for Technicolor Packages#
+    #############################################
+}

@@ -1,0 +1,101 @@
+-- Manually generated
+local Multi_MultiAP_X_000E50_BandSteering_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_BandSteering.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Object to customize BandSteering",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable bandsteering",
+      },
+      BandsteerThresh2p4GHZ = {
+        access = "readWrite",
+        type = "int",
+        description = "Threshold of 2.4GHz bandsteer"
+      },
+      BandsteerThresh5GHZ = {
+        access = "readWrite",
+        type = "int",
+        description = "Threshold of 5GHz bandsteer"
+      },
+      BandsteerHoldTime = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "This is timeout period to stop consecutive band steering attempts"
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local steeringBinding = { config = "wee" , sectionname = "cs"}
+local configChanged
+
+local optionMappingTable = {
+  ["Enabled"] = "enable_band_steering",
+  ["BandsteerThresh2p4GHZ"] = "2G_bandsteer_thresh",
+  ["BandsteerThresh5GHZ"] = "5G_bandsteer_thresh",
+  ["BandsteerHoldTime"] = "bandsteer_hold_time"
+}
+
+local defaultMap = {
+  ["BandsteerThresh_5GHZ"] = "-65",
+  ["BandsteerThresh_2p4GHZ"] = "-35",
+  ["Enabled"] = "1",
+  ["BandsteerHoldTime"] = "1800"
+}
+
+local function setUciValue(option, value)
+  steeringBinding.option = option
+  setOnUci(steeringBinding, value, commitApply)
+  configChanged = true
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.set = function(mapping, param, value)
+  setUciValue(optionMappingTable[param], value)
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.get = function(mapping, param)
+  steeringBinding.default = defaultMap[param]
+  steeringBinding.option = optionMappingTable[param]
+  return getFromUci(steeringBinding) or defaultMap[param]
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.getall = function(mapping)
+  local getAllValues = {}
+  local result = getAllFromUci(steeringBinding) or {}
+  for param, option in pairs(optionMappingTable) do
+    getAllValues[param] = result[option] or defaultMap[param]
+  end
+  return getAllValues
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.commit = function()
+  if configChanged then
+    commit({config = "wee"})
+  end
+  configChanged = false
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.revert = function()
+  if configChanged then
+    revert({config =  "wee"})
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_X_000E50_BandSteering_, "#ROOT", { "Device.WiFi.MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+   register(dupli)
+end

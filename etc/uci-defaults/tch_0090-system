@@ -1,0 +1,53 @@
+#!/bin/sh
+. /lib/functions/uci-defaults.sh
+
+uci set system.@system[0].hostname='modemtim'
+uci set system.@system[0].zonename='Europe/Rome'
+uci set system.@system[0].timezone='CET-1CEST,M3.5.0,M10.5.0/3'
+uci set system.@system[0].log_buffer_size='4096'
+uci delete system.ntp.server
+uci add_list system.ntp.server='ntp-tr069-1.interbusiness.it'
+uci add_list system.ntp.server='ntp-tr069-2.interbusiness.it'
+uci add_list system.ntp.server='ntp1.inrim.it'
+
+uci delete system.config.export_commonkey
+uci delete system.config.import_commonkey
+#removed from generic
+uci delete system.@kernel_crash[0]
+#NG-73365 parameter changed to 0
+uci set system.config.import_plaintext='0'
+uci set system.config.enable_usb3_support='0'
+uci set system.config.enable_usb2_support='1'
+uci set system.config.enable_usb1_support='1'
+
+uci set system.@coredump[0].action='compress'
+uci set system.@coredump[0].url='https://internal-core.tgwfd.org:5443/'
+
+uci set system.kernelcrash1='kernel_crash'
+uci set system.kernelcrash1.url='https://tim-core.tgwfd.org:5443/'
+uci set system.kernelcrash1.action='compress'
+uci set system.kernelcrash1.upload='0'
+
+uci add system importversion
+board=`uci get env.var.hardware_version`
+if [ $board == "VBNT-K" ]; then
+  uci set system.@importversion[0].version_match='AGTEF_%d%.%d.%d[_%d]*'
+
+elif [ $board == "VBNT-S" ]; then
+  uci set system.@importversion[0].version_match='AGTHP_%d%.%d.%d[_%d]*'
+
+elif [ $board == "VCNT-E" ] || [ $board == "VCNT-D" ]; then
+  uci set system.@importversion[0].version_match='AGTSA_%d%.%d.%d[_%d]*'
+
+elif [ $board == "VCNT-3" ]; then
+  uci set system.@importversion[0].version_match='AGTHF_%d%.%d.%d[_%d]*'
+
+fi
+uci set system.@importversion[0].importer='/etc/import/import_ti.lua'
+
+# Disable console logging
+uci set system.@system[0].conloglevel=1
+
+uci set system.@system[0].autochannel_enable='Auto'
+
+uci commit system

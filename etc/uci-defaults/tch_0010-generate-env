@@ -1,0 +1,96 @@
+#!/bin/sh
+
+# if config file does not exist, create it
+[ -f /etc/config/env ] || touch /etc/config/env
+
+#if env.var does not exist, create it
+uci get env.var || uci set env.var=envvars
+
+#create generated variables
+uci set env.var.oui=`uci get env.rip.eth_mac | awk 'BEGIN {FS= ":"}  {print $1 $2 $3}'`
+uci set env.var.hardware_version=`uci get env.rip.board_mnemonic`
+uci set env.var.prod_description="`uci get env.var.company_name` Internet Gateway Device"
+uci set env.var.friendly_sw_version_activebank=`lua -e "t=require'transformer.shared.banktable' print(t.getCurrentVersion())"`
+uci set env.var.friendly_sw_version_passivebank=`lua -e "t=require'transformer.shared.banktable' print(t.getOtherVersion())"`
+#create local administrated mac
+a=`uci get env.rip.eth_mac`
+uci set env.var.local_eth_mac="$(printf "%02X" $((0x${a:0:2} | 0x02)))${a:2}"
+b=`uci get env.rip.wifi_mac`
+uci set env.var.local_wifi_mac="$(printf "%02X" $((0x${b:0:2} | 0x02)))${b:2}"
+if [ -d "/qtn" ]; then
+  c=`uci get env.var.local_wifi_mac`
+  uci set env.var.qtn_eth_mac="${c:0:15}$(printf "%02X" $(((0x${c:15:16} + 0x08) % 256)))"
+fi
+
+homeware_banksize=`grep \"bank_1\" /proc/mtd | cut -d' ' -f2`
+lte_kernel=`grep \"kernel1\" /proc/mtd | cut -d' ' -f2`
+lte_root=`grep \"root1\" /proc/mtd | cut -d' ' -f2`
+ubi=`grep \"ubi\" /proc/mtd | cut -d' ' -f2`
+if [ -n "$homeware_banksize" ]; then
+  uci set env.var.banksize="$(printf "%d" 0x$homeware_banksize)"
+elif [ -n "$lte_kernel" ] && [ -n "$lte_root" ]; then
+  uci set env.var.banksize="$(printf "%d" $((0x$lte_kernel + 0x$lte_root)))"
+elif [ -n "$ubi" ]; then
+  #currently set to the size of ubi directly. Needs to be changed in the future
+  uci set env.var.banksize="$(printf "%d" 0x$ubi)"
+else
+  uci set env.var.banksize=134217728
+fi
+serial_suffix=''
+uci set env.var.serial=$(uci get env.rip.factory_id)$(uci get env.rip.serial)${serial_suffix}
+uci set env.var.vendor_config='<serial>-TechnicolorAGConfig-<date>.bin'
+uci set env.var.vendor_log='<serial>-TechnicolorAGLog-<date>.log'
+
+# In generic, VendorConfigFile.Name should be reported as `bank_x`
+uci set env.var.mask_override_igd_bank_1=bank_1
+uci set env.var.mask_override_igd_bank_2=bank_2
+
+# DGA4132 (VBNT-K_SFP)
+sfp=`uci get env.rip.sfp`
+board=`uci get env.rip.board_mnemonic`
+if [ $sfp == 1 ] && [ $board == VBNT-K ]; then
+  uci set env.var.prod_friendly_name='DGA4132'
+  uci set env.var.variant_friendly_name='DGA4132'
+  uci set env.var.prod_number='4132'
+  uci set env.var.hardware_version=`uci get env.rip.board_mnemonic`_SFP
+fi
+
+# Define the Custo Specific SSID-Prefix
+uci set env.var.ssid_prefix='TIM-'
+#NG-71142; NG-71196; NG-96899
+#********************************************************************
+#*              To distinguish boards
+#*********************************************************************
+
+board=`uci get env.var.hardware_version`
+if [ $board == "VANT-6" ]; then
+        uci set env.var.variant_friendly_name='AGCOMBO'
+elif [ $board == "VBNT-K" ]; then
+        uci set env.var.variant_friendly_name='AGEVO'
+elif [ $board == "VBNT-K_SFP" ]; then
+        uci set env.var.variant_friendly_name='AGHP'
+elif [ $board == "VBNT-S" ]; then
+        uci set env.var.variant_friendly_name='AGHP'
+elif [ $board == "VBNT-F" ]; then
+        uci set env.var.variant_friendly_name='AGEVO_reference'
+elif [ $board == "VCNT-E" ]; then
+        uci set env.var.variant_friendly_name='AGMY2018'
+elif [ $board == "VCNT-D" ]; then
+        uci set env.var.variant_friendly_name='AGMY2020'
+elif [ $board == "VCNT-3" ]; then
+        uci set env.var.variant_friendly_name='AGMY2020'
+fi
+
+#to address TCOMITAGW-2000
+uci set env.var.prod_friendly_name_TIM='Modem TIM'
+#to address NG-71196
+uci set env.var.ppp_realm_ipv6=`uci get env.var.serial`-`uci get env.var.oui`@00000.agcombo.unicav6
+uci set env.var.ppp_realm_ipv4=`uci get env.var.serial`-`uci get env.var.oui`@00000.agcombo.unica
+
+# Create Unlock GW parameters
+uci set env.var.unlockedstatus='0'
+uci set env.var.unlockGUIbutton='1'
+
+uci set env.var.em_new_ui_layout='0'
+
+uci commit env

@@ -1,0 +1,120 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local mapper = mapper
+local tr104Helper = require("transformer.shared.tr104helper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local conn = mapper("ubus").connect()
+local callStatsList = "CALL STATISTICS"
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallLog_i_Session_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallLog.{i}.Session.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "SessionNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            StreamType = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Audio",
+                    "Video",
+                    "Fax",
+                    "Modem",
+                },
+                description = "The type of media stream used in this session",
+            },
+            Start = {
+                access = "readOnly",
+                type = "dateTime",
+                description = "The time that the session started, in UTC",
+            },
+            Duration = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Length of the session in seconds",
+            },
+            SessionID = {
+                access = "readOnly",
+                type = "string",
+                max = "16",
+                description = "Session identifier",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local statsName = {
+    Start      = "SessionStartTime",
+    Duration   = "SessionDuration",
+}
+
+local mediaType = {
+    audio  = "Audio",
+    video  = "Video",
+    image  = "Fax",
+    data  = "Modem"
+}
+
+local function getCallSession(mapping, param, key)
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, callStatistics in ipairs (callStatsData[callStatsList]) do
+            if tostring(callStatistics["CallKey"]) == keyValue then
+                if param == "StreamType" then
+                    return mediaType[callStatistics["MediaType"]] or ""
+                else
+                    return callStatistics[statsName[param]] and tostring(callStatistics[statsName[param]]) or ""
+                end
+            end
+        end
+    end
+    return ""
+end
+
+local function getAllCallSession(mapping, key)
+    local result = {}
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            for param in pairs(Multi_Services_VoiceService_i_CallLog_i_Session_i_.objectType.parameters) do
+                if tostring(sessionData["CallKey"]) == keyValue then
+                    if param == "StreamType" then
+                         result[param] = mediaType[sessionData["MediaType"]] or ""
+                    else
+                        result[param] = sessionData[statsName[param]] and tostring(sessionData[statsName[param]]) or ""
+                    end
+                end
+           end
+       end
+    end
+    return result
+end
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_.get = getCallSession
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_.getall = getAllCallSession
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            if parentKey == tostring(sessionData["CallKey"]) then
+                entries[#entries + 1] = sessionData["CallKey"].."|"..sessionData["DirectoryNumber"]
+            end
+        end
+    end
+    return entries
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallLog_i_Session_i_", Multi_Services_VoiceService_i_CallLog_i_Session_i_, register)
