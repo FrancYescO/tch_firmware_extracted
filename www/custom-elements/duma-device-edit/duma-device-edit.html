@@ -1,0 +1,362 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+require "libos"
+local platform_information = os.platform_information()
+%> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/granite-led/granite-led.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% if platform_information.model == "R2" then %> <link rel="import" href="/apps/com.netdumasoftware.devicemanager/desktop/device-wifi-stats.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% end %> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/devices.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-device-edit"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning iron-flex-alignment"> :host #loading {
+        background-color: transparent;
+        box-shadow: none;
+      }
+      .status > div:first-child {
+        min-width: 7em;
+      }
+      .items { <% if platform_information.vendor == "TELSTRA" then %> opacity: 0.75; <% else %> color: var(--secondary-text-color); <% end %> }
+      .status granite-led {
+        margin-left: -6px;
+        margin-right: 2px;
+        --granite-led-opacity: 1;
+        --granite-led-background-color: var(--rating-d);
+        --granite-led-background-color-powered: var(--rating-a);
+      }
+      .status.addresses {
+        margin-top: 1em;
+      }
+      .type-icon {
+        width: 32px;
+        height: 32px;
+        margin-left: 8px;
+        padding: 16px;
+      }
+      #deviceTypes {
+        flex-grow: 1;
+      } </style> <paper-dialog id="loading" with-backdrop> <paper-spinner-lite active></paper-spinner-lite> </paper-dialog> <paper-dialog id="dialog" modal> <h2 dialog-label><%= i18n.deviceSettings %></h2> <paper-dialog-scrollable> <div class="inner"> <paper-input id="deviceName" label="<%= i18n.deviceNameLabel %>" maxlength="35" pattern="^(?!\s*$).+" auto-validate error-message="<%= i18n.deviceNameError %>" char-counter value="{{name}}"></paper-input> <div class="layout horizontal"> <paper-dropdown-menu id="deviceTypes" label="<%= i18n.deviceTypeLabel %>" required auto-validate error-message="<%= i18n.deviceTypeError %>"> <paper-listbox class="dropdown-content" selected="{{type}}" attr-for-selected="name"> <template is="dom-repeat" items="[[types]]"> <paper-item name="[[item.value]]">[[_getTypeDisplayName(item)]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> <iron-icon icon="[[_getDeviceIcon(type)]]" class="type-icon"></iron-icon> </div> </div> <div class="inner"> <paper-checkbox checked="{{blocked}}"><%= i18n.block %></paper-checkbox> <div class="layout vertical"> <div class="layout horizontal status"> <div class="layout horizontal center"> <granite-led powered$="[[_isDeviceOnline(device)]]"></granite-led> [[status]] <% if platform_information.model == "R2" then %> <template is="dom-if" if="[[_isWireless(device)]]"> <device-wifi-stats device="[[device]]"></device-wifi-stats> </template> <% end %> </div> </div> <template is="dom-if" if="[[extender]]"> <div class="layout horizontal status"> <div><%= i18n.extender %></div> <div class="layout horizontal center"> [[_getExtenderName(extender)]] </div> </div> </template> </div> </div> <div class="inner"> <div class="status addresses"> <div><%= i18n.macAddresses %></div> </div> <div class="layout vertical items"> <template is="dom-repeat" items="[[macs]]"> <div>[[item]]</div> </template> </div> <div class="status addresses"> <div><%= i18n.ipAddresses %></div> </div> <div class="layout vertical items"> <template is="dom-repeat" items="[[ips]]"> <div>[[item]]</div> </template> </div> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button on-click="cancel"> [[_getClosedText(device,name,type,blocked)]] </paper-button> <paper-button on-click="delete" disabled="[[_isDeviceOnline(device)]]"><%= i18n.delete %></paper-button> <paper-button on-click="save"><%= i18n.apply %></paper-button> </div> </paper-dialog> <duma-alert id="deviceAlert"></duma-alert> </template> <script> Polymer({
+      is: "duma-device-edit",
+
+      properties: {
+        name: {
+          type: String,
+          observer: "_nameChanged"
+        },
+        type: String,
+        blocked: Boolean,
+        macs: Array,
+        ips: Array,
+
+        types: Array,
+        device: Object,
+        extender: Object,
+      },
+
+      _getClosedText: function(device,name,type,blocked){
+        return this._hasSomethingChanged(device,name,type,blocked) ? "<%= i18n.cancel %>" : "<%= i18n.close %>";
+      },
+
+      _hasSomethingChanged: function(device,name,type,blocked){
+        return device.name !== name
+          || device.type !== this._getDevType(type).name
+          || device.blocked !== blocked;
+      },
+
+      _getDeviceIcon: function(type){
+        return duma.devices.get_devices_icon(type);
+      },
+
+      _getTypeDisplayName: function(type){
+        return type.name.replace(/_/g," ");
+      },
+
+      _getDevType: function(type){
+        for(var i = 0; i < this.types.length; i++){
+          var t = this.types[i];
+          if(t.value === type || t.name === type){
+            return t;
+          }
+        }
+        return this._getDevType("computer");
+      },
+
+      _setDevType: function(type){
+        for(var i = 0; i < this.types.length; i++){
+          var t = this.types[i];
+          if(t === type || t.name === type){
+            this.type = t.value;
+            return
+          }
+        }
+        this.type = "computer";
+      },
+
+      _isDeviceOnline: function(device,matches){
+        var activeWirelessInterface = device.interfaces.find(function(v) {
+          var match = matches && matches[v.mac.toUpperCase()];
+          return typeof v.ssid === "string" || (match && match.online);
+        });
+
+        var onlineInterface;
+        for (var i = 0; i < device.interfaces.length; i++) {
+          if (device.interfaces[i].ips.length > 0) {
+            onlineInterface = device.interfaces[i];
+          }
+        }
+        if (onlineInterface && onlineInterface.wifi && !activeWirelessInterface) {
+          return false;
+        }
+        return !!onlineInterface;
+      },
+
+      _isWireless: function(device){
+        for(var i = 0; i < device.interfaces.length; i++){
+          if(device.interfaces[i].wifi) return true;
+        }
+        return false;
+      },
+
+      getConnectionStatusString: function(wifi,frequency){
+        if(wifi){
+          if(frequency){
+            return "<%= i18n.wifi %>".format(frequency + "<%= i18n.ghz %>").replace(" )",")");;
+          }else{
+            return "<%= i18n.wifi %>".format("")
+          }
+        }
+        return "<%= i18n.lan %>";
+      },
+
+      perInterface: function(interface,macArr,ipArr){
+        var newMac = interface.mac ? interface.mac.toUpperCase() : "";
+        if(newMac  && !macArr.includes(newMac)){
+          macArr.push(newMac);
+        }
+        ipArr.push.apply(ipArr,interface.ips);
+        if(!this.status){
+          this.status = "<%= i18n.connected %>".format(this.getConnectionStatusString(interface.wifi,interface.freq));
+        }
+      },
+
+      loadDevice: function(device,extenders,matches){
+        this.name = device.name || "unnamed device";
+        this._setDevType(device.type);
+        this.blocked = !!device.blocked;
+
+        this.status = null;
+        var macs = [];
+        var ips = [];
+
+        for(var i = 0; i < device.interfaces.length; i++){
+          this.perInterface(device.interfaces[i],macs,ips);
+        }
+
+        if(!this._isDeviceOnline(device)){
+          this.status = "<%= i18n.offline %>";
+        }
+
+        this.macs = macs;
+        this.ips = ips;
+
+        this.extender = this.findExtender(device.interfaces,extenders,matches) || null;
+        this.device = device;
+      },
+
+      setTypes: function(types){
+        var processedTypes = [];
+        for (var k in types) {
+          if (types.hasOwnProperty(k)) {
+            processedTypes.push({
+              name: types[k],
+              value: k
+            });
+          }
+        }
+
+        processedTypes.sort(function(lhs,rhs) { 
+          if (lhs.name < rhs.name) {
+            return -1;
+          } else if (lhs.name > rhs.name) {
+            return 1;
+          } else {
+            return 0;
+          }
+        });
+
+        this.types = processedTypes;
+      },
+
+      
+      findExtender: function(interfaces,extenders,matches){
+        for(var m = 0; m < interfaces.length && extenders && extenders.length; m++){
+          var devmac = interfaces[m].mac.toUpperCase();
+          if(matches[devmac]){
+            var extmac = matches[devmac].ext;
+            for(var i = 0; i < extenders.length; i++){
+              if(extenders[i].mac === extmac){
+                return [extenders[i], matches[devmac]];
+              }
+            }
+          }
+        }
+        return null;
+      },
+      
+      processExtenders: function(extenders){
+        if(extenders.length == 1) extenders = extenders[0];
+        if(!extenders || !extenders.length) return [];
+        var new_exts = new Array(extenders.length);
+        for(var i = 0; i < extenders.length; i++){
+          var extender = extenders[i];
+          var append = {
+            name: extender.name || "<%= i18n.unknownExtender %>",
+            mac: extender.mac,
+            brand: extender.brand,
+            type: "offline"
+          }
+          if(extender.owl){
+            append.type = extender.owl.connect_type == "Ether" ? "wired" : "wireless";
+            append.name = extender.owl.device_name;
+          }else if(extender.agent){
+            if(extender.agent.NoOfRadios !== "")
+            append.type = extender.agent.NoOfRadios == "" ? "offline" : "wireless";
+            append.name = extender.agent.Alias;
+          }
+          new_exts[i] = append;
+        }
+        return new_exts
+      },
+      
+      filterMatches: function(extenders,matches){
+        var filtered = {};
+        if(matches && extenders && extenders.length){
+          matches = matches[0];
+          for(var k in matches){
+            var m = matches[k];
+            for(var i = 0; i < extenders.length; i++){
+              if(extenders[i].mac.toUpperCase() === m.ext.toUpperCase()){
+                filtered[k] = m;
+              }
+            }
+          }
+        }
+        return filtered;
+      },
+
+      open: function(deviceId){
+        this.$.loading.open();
+        Q.spread([
+          get_devices(),
+          long_rpc_promise("com.netdumasoftware.devicemanager", "get_types", []),
+          long_rpc_promise("com.netdumasoftware.devicemanager", "get_extenders", []),
+          long_rpc_promise("com.netdumasoftware.devicemanager", "get_matches", []),
+        ], function (devices, types, extenders, matches) {
+          this.setTypes(types[0]);
+          var device = devices[deviceId];
+          if(!device) throw new Error("<%= i18n.deviceNotFoundError %>".format(deviceId));
+          var extens = this.processExtenders(extenders);
+          this.loadDevice(device,extens,this.filterMatches(extens,matches));
+          this.$.loading.close();
+          this.$.dialog.open();
+        }.bind(this))
+      },
+      close: function(){
+        this.$.dialog.close();
+      },
+
+      cancel: function(){
+        this.close();
+      },
+
+      delete: function(){
+        var deviceId = this.device.id;
+        long_rpc_promise("com.netdumasoftware.devicemanager", "delete_device", [deviceId]).done(function (success) {
+          flush_devices_cache();
+
+          if (success)  {
+            this.close();
+
+            $(document).trigger("device-update", {
+              id: deviceId,
+              delete: true
+            });
+
+          } else {
+            this.$.deviceAlert.show("<%= i18n.deviceRemovalError %>");
+          }
+        }.bind(this));
+      },
+
+      _nameChanged: function(newName){
+        if(!this.$.deviceName.validate() || newName.length > this.$.deviceName.maxlength) {
+          this.$.deviceName.invalid = true;
+        }
+      },
+
+      _validType: function(type){
+        for(var i = 0; i < this.types.length; i++){
+          if(this.types[i].value === type){
+            return true;
+          }
+        }
+        return false;
+      },
+
+      validate: function(){
+        return this.$.deviceName.validate()
+          && this._validType(this.type)
+          && typeof this.blocked === "boolean";
+      },
+
+      save: function(){
+        if(this.validate()){
+
+          if(this.blocked !== this.device.blocked){
+            this._setBlocked(this.blocked);
+          }
+          this._update(this.name,this.type);
+          this.close();
+        }
+      },
+
+      _setBlocked: function(block){
+        var deviceId = this.device.id;
+        long_rpc_promise(
+          "com.netdumasoftware.devicemanager", "block_device", 
+          [deviceId, JSON.stringify(block)]
+        ).done(function () {
+          flush_devices_cache();
+
+          $(document).trigger("device-update", {
+            id: deviceId,
+            blocked: block
+          });
+
+          if (block) {
+            this.$.deviceAlert.show(
+              "<%= i18n.deviceBlockedWarning %>",
+
+              [{ text: "<%= i18n.gotIt %>", action: "confirm" }], 
+
+              {
+                enabled: true,
+                packageId: "com.netdumasoftware.devicemanager",
+                id: "devicemanager-device-block-warning"
+              } 
+            );
+          }
+        }.bind(this));
+      },
+
+      _update: function(deviceName,deviceType){
+        var deviceId = this.device.id;
+        Q.spread([
+          this.device.name !== deviceName ? long_rpc_promise("com.netdumasoftware.devicemanager", "set_device_name", [deviceId, deviceName]) : null,
+          this._getDevType(deviceType).value !== this._getDevType(this.device.type).value ? long_rpc_promise("com.netdumasoftware.devicemanager", "set_device_type", [deviceId, deviceType]) : null
+        ], function () {
+          flush_devices_cache();
+          $(document).trigger("device-update", {
+            id: deviceId,
+            name: deviceName,
+            type: deviceType
+          });
+        }.bind(this));
+      }
+
+    }); </script> </dom-module> 

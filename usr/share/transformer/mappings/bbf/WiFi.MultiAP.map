@@ -1,0 +1,184 @@
+local Multi_MultiAP_ = {
+  objectType = {
+    name = "#ROOT.MultiAP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- APDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.MultiAP.APDevice.{i}. is loaded
+    X_000E50_ControllerEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_controller",
+	default = "0",
+      },
+    X_000E50_AgentEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_agent",
+	default = "0",
+      },
+    X_000E50_Multi_AP_Priority = {
+        access = "readWrite",
+        type = "int",
+	description = "Priority of MultiAP",
+        range = {
+            {
+                min = "0",
+                max = "255"
+            },
+        },
+	default = "10",
+      },
+    X_000E50_ControllerSelection = {
+        access = "readWrite",
+        type = "string",
+	description = "MultiAP Controller Selection",
+        enumeration = {
+          "telus",
+          "disabled",
+        },
+      },
+    X_000E50_Role = {
+        access = "readOnly",
+        type = "string",
+	description = "MultiAP Role",
+        enumeration = {
+          "Agent",
+          "Controller",
+        }
+      }
+    }
+  }
+}
+
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local multiapBinding = { config = "multiap" }
+local transactions = {}
+local eventsource, multiapRole = eventsource, ""
+
+local function getUciParam(sectionName, option, default)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  multiapBinding.default = default
+  return getFromUci(multiapBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  setOnUci(multiapBinding, value, commitApply)
+  transactions["multiap"] = true
+end
+
+local function controller_selection()
+  local supported = getUciParam("controller_selection", "state")
+  if supported ~= "" then
+    return true
+  end
+end
+
+local function getMultiAPUbusEvent(mapping, event, data)
+  if data["controller"] == "active" then
+    multiapRole = "Controller"
+  elseif data["agent"] == "active" then
+    multiapRole = "Agent"
+  end
+end
+
+Multi_MultiAP_.get = {
+  X_000E50_ControllerEnabled = function(mapping, param)
+    return getUciParam("controller", "enabled", "0")
+  end,
+  X_000E50_AgentEnabled = function(mapping, param)
+    return getUciParam("agent", "enabled", "0")
+  end,
+  X_000E50_Multi_AP_Priority = function(mapping, param)
+    return getUciParam("controller_selection", "priority", "10")
+  end,
+  X_000E50_ControllerSelection = function(mapping, param)
+    return getUciParam("controller_selection", "state")
+  end,
+  X_000E50_Role = function(mapping, param)
+    local controllerState = getUciParam("controller_selection", "state")
+    if controllerState == "disabled" then
+      local agentActive = getUciParam("agent", "enabled")
+      local controllerActive = getUciParam("controller", "enabled")
+      if agentActive == "1" and controllerActive == "1" then
+        return "Agent"
+      elseif controllerActive == "1" or agentActive == "0" then
+        return "Controller"
+      end
+    elseif controllerState == "telus" then
+      return multiapRole
+    end
+    return ""
+  end
+}
+
+Multi_MultiAP_.set = {
+  X_000E50_ControllerEnabled = function(mapping, param, value)
+    setUciParam("controller", "enabled", value)
+  end,
+  X_000E50_AgentEnabled = function(mapping, param, value)
+    setUciParam("agent", "enabled", value)
+  end,
+  X_000E50_Multi_AP_Priority = function(mapping, param, value)
+    setUciParam("controller_selection", "priority", value)
+  end,
+  X_000E50_ControllerSelection = function(mapping, param, value)
+    local currentSelection = getUciParam("controller_selection","state")
+    if value and currentSelection and currentSelection ~= value then
+      setUciParam("controller_selection", "state", value)
+      if value == "telus" then
+        setUciParam("controller","enabled","0")
+        commitapply:newset("stopControllerProcess")
+      elseif value == "disabled" then
+        local controllerState = getUciParam("controller","enabled")
+        commitapply:newset("RestartAgent")
+        if controllerState == "1" then
+          commitapply:newset("RestartController")
+        end
+      end
+    end
+  end
+}
+
+Multi_MultiAP_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, getMultiAPUbusEvent, "map_role")
+end
+
+Multi_MultiAP_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.revert = function()
+  for config in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+local controller_selection = controller_selection()
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_, "#ROOT", { "Device.WiFi", "rpc.X_000E50_MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  if not controller_selection then
+    dupli.objectType.parameters["X_000E50_Multi_AP_Priority"] = nil
+    dupli.objectType.parameters["X_000E50_ControllerSelection"] = nil
+  end
+  register(dupli)
+end
+

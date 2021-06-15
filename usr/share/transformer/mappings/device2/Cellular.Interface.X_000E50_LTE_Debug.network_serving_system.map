@@ -1,0 +1,164 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Network_ServingSystem.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			Service_State = {
+				access = "readOnly",
+				type = "string"
+			},
+			CS_State = {
+				access = "readOnly",
+				type = "string"
+			},
+			PS_State = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PLMN_Description = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PLMN_MCC = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PLMN_MNC = {
+				access = "readOnly",
+				type = "string"
+			},
+			Tracking_Area_Code = {
+				access = "readOnly",
+				type = "string"
+			},
+			Connection_Max_RX_Rate = {
+				access = "readOnly",
+				type = "string"
+			},
+			Connection_Max_TX_Rate = {
+				access = "readOnly",
+				type = "string"
+			},
+			Cell_ID = {
+				access = "readOnly",
+				type = "string"
+			},
+			Roaming_State = {
+				access = "readOnly",
+				type = "string"
+			},
+			NAS_State = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+
+function obj.getall(_, key)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.network", "serving_system", key)
+	if data then
+		result.Service_State = data.service_state
+		result.CS_State = data.cs_state
+		result.PS_State = data.ps_state
+		result.PLMN_Description = data.plmn_info.description
+		result.PLMN_MCC = data.plmn_info.mcc
+		result.PLMN_MNC = data.plmn_info.mnc
+		result.Tracking_Area_Code = data.tracking_area_code
+		result.Connection_Max_RX_Rate = data.connection_rate.max_rx_rate
+		result.Connection_Max_TX_Rate = data.connection_rate.max_tx_rate
+		result.Cell_ID = data.cell_id
+		result.Roaming_State = data.roaming_state
+		result.NAS_State = data.nas_state
+	end
+
+	return result
+end
+
+function obj.get(_, paramName, key)
+	return obj.getall(_, key)[paramName]
+end
+
+register(obj)
+
+local Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Network_ServingSystem.NeighbourCells.{i}.',
+		access = 'readOnly',
+		numEntriesParameter = "NeighbourCellsNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			RSRQ = {
+				access = "readOnly",
+				type = "string"
+			},
+			RSRP = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Band_Type = {
+				access = "readOnly",
+				type = "string"
+			},
+			PHY_Cell_ID = {
+				access = "readOnly",
+				type = "string"
+			},
+			DL_EARFCN = {
+				access = "readOnly",
+				type = "string"
+			},
+			RSSI = {
+				access = "readOnly",
+				type = "string"
+			},
+
+		}
+	}
+}
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells.getall(_, key, parentKey)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	key = tonumber(key)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.network", "serving_system", parentKey)
+	if data and data.neighbour_cells and data.neighbour_cells[key] then
+		local neighbour_cell = data.neighbour_cells[key]
+		result.RSRQ = neighbour_cell.rsrq
+		result.RSSI = neighbour_cell.rssi
+		result.RSRP = neighbour_cell.rsrp
+		result.Band_Type = neighbour_cell.band_type
+		result.PHY_Cell_ID = neighbour_cell.phy_cell_id
+		result.DL_EARFCN = neighbour_cell.dl_earfcn
+	end
+    return result
+end
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells.get(mapping, paramName, key, parentKey)
+	return Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells.getall(mapping, key, parentKey)[paramName] or ""
+end
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells.entries(_, parentKey)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.network", "serving_system", parentKey)
+	local neighbour_cell_indexes = {}
+
+	if type(data.neighbour_cells) == "table" then
+		for neighbour_cell_index in ipairs(data.neighbour_cells) do
+			table.insert(neighbour_cell_indexes, tostring(neighbour_cell_index))
+		end
+	end
+	return neighbour_cell_indexes
+end
+
+register(Device_Cellular_Interface_i_X__000E50_LTE_Debug_Network_NeighbourCells)

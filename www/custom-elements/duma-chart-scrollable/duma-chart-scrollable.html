@@ -1,0 +1,208 @@
+<!-- 
+  (C) NETDUMA Software
+  Kian Cross <kian.cross@netdma.com>
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-chart-scrollable"> <template> <style include="duma-theme"> :host .chartWrapper,
+      :host .chartAreaWrapper,
+      :host .chartAreaWrapper2,
+      :host ::content duma-chart {
+        width: 100%;
+        height: 100%;
+      }
+
+      .chartWrapper {
+        position: relative;
+      }
+
+      .chartWrapper > canvas {
+        position: absolute;
+        pointer-events: none;
+        top: 0;
+        left: 16px;
+      }
+
+      :host[horizontal] .chartAreaWrapper {
+        overflow-x: scroll;
+      }
+      :host:not([horizontal]) .chartAreaWrapper {
+        overflow-y: scroll;
+      }
+      .chartAreaWrapper2 {
+        min-height: 100%;
+      } </style> <div class="chartWrapper"> <div class="chartAreaWrapper"> <div class="chartAreaWrapper2"> <content></content> </div> </div> <canvas id="myChartAxis"></canvas> </div> </template> <script> Polymer({
+      is: "duma-chart-scrollable",
+
+      properties: {
+        horizontal: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+        showUnderAxis: {
+          type: Boolean,
+          value: false
+        },
+        /**
+        You can set this with `no-auto-size` to make it so that this doesn't automatically attempt to resize to the parent's size
+        */
+        noAutoSize: {
+          type: Boolean,
+          value: false
+        },
+
+        tableMode: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        }
+      },
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      listeners: {
+        "iron-resize": "_resize"
+      },
+
+      /**
+        This function will attempt to resize the container to be the size of the parent container,
+        because in order to allow scrolling, something needs to be a set size, either parent or child,
+        and not auto size or 100% size like the child duma-chart is.
+        We can get around this by set the container size (this) to be the parent's size manually,
+        and updating it whenever the chart changes, or the window resizes.
+        */
+      _resize: function(){
+        if(this.$.chart && this.$.chart.chart){
+
+          // This is here if you don't want the chart to automatically adjust to the parent's size
+          // This if statement will subtract all of the sibling's heights from the parent's height, and then set [this] height to the remainder.
+          if(!this.noAutoSize){
+            var jthis = $(this);
+            jthis.width(0);
+            jthis.height(0);
+            var parent = jthis.parent();
+            var sibs = jthis.siblings();
+            var rem = parent.innerHeight();
+            for(var i = 0; i < sibs.length; i++) rem -= $(sibs[i]).outerHeight();
+            jthis.width(parent.innerWidth());
+            jthis.height(rem);
+          }
+
+          var jChartWrapper = $(".chartWrapper",this);
+          var targetCanvas = this.$.chart.chart.canvas;
+          var rect = targetCanvas.getBoundingClientRect();
+          var rectParent = jChartWrapper[0].getBoundingClientRect();
+
+          //Setting the size to 0 throws an error, so there must be a minimum size
+          var minSize = 10;
+          if(targetCanvas.width < minSize) targetCanvas.width = minSize;
+          if(targetCanvas.height < minSize) targetCanvas.height = minSize;
+          if(this.horizontal){
+            this.$.myChartAxis.height = targetCanvas.height;
+            this.$.myChartAxis.width = jChartWrapper.width();
+          }else{
+            this.$.myChartAxis.height = jChartWrapper.height();
+            this.$.myChartAxis.width = targetCanvas.width;
+          }
+        }
+      },
+
+      ready: function(){
+        this.tableMode = top.chartsAsTables;
+        if(!this.$.chart){
+          var jChart = $(this).find("duma-chart");
+          this.$.chart = jChart[0];
+          if(!this.$.chart){
+            throw new Error("No duma-chart in duma-chart-scrollable!");
+          }
+          this.$.canvas = jChart.find("canvas#chart")
+          jChart.on("data-changed",this._onDataChanged.bind(this));
+          jChart.on("chart-changed",this._onChartChanged.bind(this));
+        }
+        this._resize();
+        this.setComplete();
+        this.onProgress();
+        this.$.chart.chart.update();
+      },
+
+      setComplete: function(event){
+        var existFunc = this.$.chart.chart.options.animation.onComplete;
+        if(!existFunc || existFunc.name === "noop"){
+          this.$.chart.chart.options.animation.onProgress = this.onProgress.bind(this);
+        }
+      },
+
+      _onChartChanged: function(){
+        this.setComplete();
+      },
+      _onDataChanged: function(event){
+        var dataset = event.detail.value.datasets[0];
+        if(dataset){
+          var newheight = 0;
+          var newwidth = 0;
+          for(x=0;x < dataset.data.length;x++) {
+            if(this.horizontal){
+              newwidth += 60;
+            }else{
+              newheight += 60;
+            }
+          }
+          if(!newheight)
+            newheight = 'auto';
+          if(this.horizontal){
+            newwidth = Math.max(newwidth,$(this).parent().innerWidth());
+          }
+          if(!newwidth)
+            newwidth = 'auto';
+          $('.chartAreaWrapper2',this).height(newheight);
+          $('.chartAreaWrapper2',this).width(newwidth);
+        }
+      },
+
+      onProgress: function(){
+        this._resize();
+        if(this.tableMode) return;
+        var sourceCanvas = this.$.chart.chart.canvas;
+        var sourceCtx = sourceCanvas.getContext("2d");
+        var targetCtx = this.$.myChartAxis.getContext("2d");
+        var copyX = 0;
+        var copyY = 0;
+        var copyToX = 0;
+        var copyToY = 0;
+        var copyWidth = 0;
+        var copyHeight = 0;
+        if(this.horizontal){
+          var axis = this.$.chart.chart.scales['y-axis-0'];
+          copyWidth = axis.width;
+          copyX = axis.right - copyWidth;
+          copyToX = 16; //16 for the duma-chart padding
+
+          copyHeight = axis.top + axis.height + 4;
+          copyY = 0;
+          copyToY = 0;
+        }else{
+          var axis = this.$.chart.chart.scales['x-axis-0'];
+          copyX = axis.left - 4;
+          copyWidth = targetCtx.canvas.width - copyX;
+          copyToX = copyX;
+
+          copyHeight = axis.height;
+          copyY = axis.bottom - copyHeight;
+          copyToY = targetCtx.canvas.height - copyHeight - 16; //16 for the duma-chart padding
+        }
+        targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
+        targetCtx.drawImage(sourceCanvas, copyX, copyY, copyWidth, copyHeight, copyToX, copyToY, copyWidth, copyHeight);
+        sourceCtx.clearRect(copyX, copyY, copyWidth, copyHeight);
+        if(!this.showUnderAxis){
+          var scrollElem = $(".chartAreaWrapper",this);
+          if(this.horizontal){
+            var scrollAmount = scrollElem[0].scrollLeft;
+            sourceCtx.clearRect(0, 0, scrollAmount + copyWidth, copyHeight);
+          }else{
+            var scrollAmount = scrollElem[0].scrollTop;
+            sourceCtx.clearRect(0, scrollAmount + copyToY, sourceCtx.canvas.width, sourceCtx.canvas.height);
+          }
+        }
+      }
+
+    }); </script> </dom-module> 

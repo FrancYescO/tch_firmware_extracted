@@ -1,0 +1,91 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+. ${IPKG_INSTROOT}/lib/functions.sh
+
+set_default_acs()
+{
+  local radio=$1
+  local ubus_call
+  local acs_list
+  local chan_list
+  local list
+  config_load "wireless"
+  config_get acs_list $radio acs_allowed_channels
+  if [ -z "$acs_list" ]
+  then
+    # list is empty, try UBUS
+    # We need the intersect of .radio and .radio.acs (see NG-177126)
+    ubus_call="ubus call wireless.radio.acs get '{ \"name\" : \"$radio\" }' | grep allowed_channels"
+    acs_list="`eval $ubus_call`"
+    if [ $? != 0 ]
+    then
+       logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - UBUS returned error"
+       return
+    fi
+
+    ubus_call="ubus call wireless.radio get '{ \"name\" : \"$radio\" }' | grep allowed_channels"
+    chan_list="`eval $ubus_call`"
+    if [ $? != 0 ]
+    then
+       logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - UBUS returned error"
+       return
+    fi
+
+    # Calculate the intersect of both lists
+    # Note the itteration 1 - 200 is crude, but limited AWK functionality on OWA ...
+    # This limits the channel range from 1 .. 200 which should be OK.
+    list="`echo $acs_list $chan_list | sed "s/[^0-9 ]//g" `"
+    acs_list=`echo "${list} " | awk 'BEGIN {RS=" "; ORS=" "} { cnts[$0] += 1} END { for ( i=1 ; i < 200 ; i++ ) if (cnts[i] > 1 ) print i }'`
+    if [ ${#acs_list} -lt 2 ] # Check that there is at least one channel in the list (has a leading ' ')
+    then
+      logger -t "wifi-doctor-agent" "[procd setting defaults]: $radio - empty ACS list"
+      return
+    fi
+  fi
+
+  logger -t "wifi-doctor-agent" "[procd setting defaults]: Setting $radio acs allowed channels to : $acs_list"
+  uci_set wifi_doctor_agent default_acs_channels $radio "$acs_list"
+  uci_commit wifi_doctor_agent
+}
+
+service_triggers()
+{
+  procd_add_reload_trigger "wifi_doctor_agent"
+}
+
+start_service()
+{
+  local config_wd="wifi_doctor_agent"
+  local UUID
+  local def_acs_2G
+  local def_acs_5G
+
+  config_load $config_wd
+  config_get UUID config uuid
+  if [ "${UUID}" == "" ] ; then
+    logger -t $config_wd "No UUID was found, Generating new uuid"
+    uci_set $config_wd config uuid "$(cat /proc/sys/kernel/random/uuid)"
+    uci_commit $config_wd config
+  fi
+  config_get_bool enabled config enabled 0
+  [ ${enabled} -gt 0 ] || return 1
+
+  config_get def_acs_2G default_acs_channels radio_2G
+  config_get def_acs_5G default_acs_channels radio_5G
+  set_default_acs "radio_2G"
+  set_default_acs "radio_5G"
+
+  procd_open_instance wifi-doctor-agent
+  procd_set_param command /usr/bin/wifi-doctor-agent
+  procd_set_param respawn
+  procd_close_instance
+}
+
+reload_service()
+{
+  restart
+}

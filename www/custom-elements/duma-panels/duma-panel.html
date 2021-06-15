@@ -1,0 +1,393 @@
+<!-- 
+  (C) NETDUMA Software
+  Kian Cross
+  Iain Fraser <iainf@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-toolbar/paper-toolbar.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-drawer-panel/paper-drawer-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-header-panel/paper-header-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-scroll-effects/app-scroll-effects.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-panel"> <template> <style include="duma-theme"> :host {
+        display: block;
+        height: 100%;
+        position: relative;
+      }
+
+      :host .grid-stack-item-content {
+        height: 100%;
+      }
+
+      :host.grid-stack-item.ui-draggable-dragging .grid-stack-item-content {
+        opacity: 1;
+      }
+	  
+      :host .paper-drawer-panel {
+        background: var(--primary-color);
+      }
+
+      :host .content {
+        height: calc(100% - 56px);
+        overflow-y: auto;
+      }	  
+      ::content #mainContainer {
+        @apply(--layout);
+      }
+      ::content div[main] {
+        @apply(--layout);
+        @apply(--layout-flex-auto);
+        width: 100%;
+      }
+      ::content div[main].vertical {
+        @apply(--layout-vertical);
+      }
+      
+      .help-dialog-content,
+      .help-dialog-tip {
+        margin: 0 24px;
+      }
+
+      .help-dialog-tip span {
+        display: inline-block;
+      }
+
+      /* paper-toolbar */
+      paper-toolbar {
+        --calculated-paper-toolbar-height: var(--paper-toolbar-height, 56px);
+        --paper-toolbar-background: var(--transparent-background-color);
+        --paper-toolbar-title: {
+          margin-left: 8px;
+          line-height: 1.2
+        };
+        color: var(--primary-text-color);
+        transition: background 0.2s ease;
+      }
+
+      paper-header-panel ::content #dropShadow.has-shadow,
+      paper-toolbar ::content #dropShadow {
+        box-shadow: none;
+        opacity: 0;
+      }
+
+      *[at-top] paper-toolbar { 
+        background: transparent;  
+      }      
+
+      paper-toolbar ::content .toolbar-tools {
+        padding: 0 8px;
+      }
+
+      paper-toolbar ::content .toolbar-tools paper-icon-button[icon=menu] {
+        margin-right: 0;
+      }
+      
+      /* paper-drawer-panel */
+      paper-drawer-panel {
+        --paper-drawer-panel-drawer-container: {
+          box-shadow: none !important;
+        };
+      }     
+      
+      paper-drawer-panel { 
+        --paper-drawer-panel-drawer-container: {
+          background-color: var(--primary-background-color);
+          z-index: 100;
+        };          
+        --paper-drawer-panel-scrim: {
+          background-color: var(--transparent-background-color);
+        };
+      }   
+      paper-drawer-panel ::content div[drawer] {
+        padding-bottom: 8px;
+      }
+      :host[disabled] paper-drawer-panel ::content #scrim  {
+        opacity: 1;
+        visibility: visible;
+      }
+      :host[disabled] paper-toolbar  {
+        z-index: 2;
+      }
+      .disabled-header {
+        color: var(--disabled-text-color);
+      }
+
+      .skip-to-next-panel {
+        left: -999px;
+        position: absolute;
+        top: auto;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        z-index: -999;
+      }
+      .skip-to-next-panel:focus-within {
+        left: auto;
+        right: 80px;
+        width: auto;
+        height: auto;
+        overflow: auto;
+        white-space: nowrap;
+        padding: 8px;
+        text-align: center;
+        z-index: 999;
+      } </style> <div class="grid-stack-item-content"> <paper-drawer-panel disable-swipe force-narrow on-selected-changed="_onDrawerChange"> <paper-header-panel drawer mode="seamed"> <paper-toolbar> <paper-icon-button icon="close" on-tap="_drawerCloseClick" paper-drawer-toggle aria-label="<%= i18n.close %>"></paper-icon-button> <div class="title">[[drawerHeader]]</div> <template is="dom-if" if="[[showDrawerHelp]]"> <paper-icon-butto icon="help-outline" on-tap="_drawerHelpClick" aria-label$="[[__formatHelp('<%= i18n.menuHelp %>',header,helpHeader)]]"></paper-icon-butto> </template> </paper-toolbar> <div class="inner"> <content select="[drawer]"></content> </div> </paper-header-panel> <paper-header-panel main mode="waterfall"> <paper-toolbar class="panel-toolbar"> <paper-button on-tap="_focusNextPanel" class="skip-to-next-panel" aria-label="<%= i18n.focusNextPanel %>"><%= i18n.focusNextPanel %></paper-button> <template is="dom-if" if="[[showDrawer]]"> <paper-icon-button class="duma-panel-drawer-button" icon="menu" on-tap="_drawerOpenClick" paper-drawer-toggle aria-label$="[[__format('<%= i18n.drawer %>',header)]]"></paper-icon-button> </template> <h2 class="title" role="heading"> [[header]] <template is="dom-if" if="[[disabled]]"> <span class="disabled-header">[[[disabledText]]]</span> </template> </h2> <content select="[header]"></content> <template is="dom-if" if="[[_shouldShowPin(showPin, _pinned)]]"> <paper-icon-button class="duma-panel-pin-button" icon="[[_getPinIcon(_pinned)]]" disabled="[[!_pinEnabled]]" on-tap="_pinClick" aria-label$="[[__format('<%= i18n.pin %>',header)]]"></paper-icon-button> </template> <template is="dom-if" if="[[showHelp]]"> <paper-icon-button class="duma-panel-help-button" icon="help-outline" on-tap="_helpClick" aria-label$="[[__formatHelp('<%= i18n.help %>',header,helpHeader)]]" aria-haspopup="true"></paper-icon-button> </template> <template is="dom-if" if="[[showClose]]"> <paper-icon-button icon="close" on-tap="_closeClick"></paper-icon-button> </template> </paper-toolbar> <content select="[main]"></content> </paper-header-panel> </paper-drawer-panel> </div> <paper-dialog class="duma-panel-help-dialog" modal> <h2 dialog-label><iron-icon icon="help-outline"></iron-icon> [[__formatHelp('<%= i18n.help %>',header,helpHeader)]]</h2> <paper-dialog-scrollable> <div class="help-dialog-content"> <content select="[help-content]"></content> </div> <template is="dom-if" if="[[showHelpTip]]"> <div class="help-dialog-tip"> <iron-icon icon="lightbulb-outline"></iron-icon> <%= i18n.tip %>: <span><content select="[help-tip]"></content></span> </div> </template> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss autofocus><%= i18n.close %></paper-button> </div> </paper-dialog> <paper-dialog class="duma-panel-drawer-help-dialog" modal> <h2 dialog-label><iron-icon icon="help-outline"></iron-icon> [[__formatHelp('<%= i18n.menuHelp %>',header,helpHeader)]]</h2> <paper-dialog-scrollable> <div class="help-dialog-content"> <content select="[drawer-help-content]"></content> </div> <template is="dom-if" if="[[showDrawerHelpTip]]"> <div class="help-dialog-tip"> <iron-icon icon="lightbulb-outline"></iron-icon> <%= i18n.tip %>: <span><content select="[drawer-help-tip]"></content></span> </div> </template> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss autofocus><%= i18n.close %></paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "duma-panel",
+      properties: {
+        header: {
+          type: String,
+          value: "",
+          observer: "headerChanged"
+        },
+        // override the header on the help dialogs
+        helpHeader: {
+          type: String,
+          value: "",
+        },
+        drawerHeader: String,
+        
+        showClose: {
+          type: Boolean,
+          observer: "_onButtonChange"
+        },
+
+        showPin: {
+          type: Boolean,
+          observer: "_onButtonChange"
+        },
+
+        showDrawer: {
+          type: Boolean,
+          observer: "_onButtonChange"
+        },
+
+        showHelp: {
+          type: Boolean,
+          observer: "_onButtonChange"
+        },
+
+        showDrawerHelp: {
+          type: Boolean,
+          observer: "_onButtonChange"
+        },
+        
+        showHelpTip: Boolean,
+        showDrawerHelpTip: Boolean,
+
+        drawerOpen: {
+          type: Boolean,
+          value: false,
+          readOnly: true
+        },
+
+        data: {
+          type: Object,
+          readOnly: true,
+          computed: "_getData(_data)"
+        },
+
+        destructorCallback: Function,
+
+        loaded: {
+          type: Boolean,
+          notify: true
+        },
+
+        disabled: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+        disabledText: {
+          type: String,
+          value: "<%= i18n.disabled %>"
+        },
+
+        _file: String,
+        _package: String,
+        _pinned: Boolean,
+        _width: Number,
+        _height: Number
+      },
+      
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      observers: [
+        "_loadPinnedStatus(_package, _file, data)"
+      ],
+      
+      _desktopPackageId: "com.netdumasoftware.desktop",
+
+      __formatHelp: function(base,name,override){
+        return base.format(override || name);
+      },
+
+      __format: function(){
+        return String.format.apply(this,arguments);
+      },
+
+      headerChanged: function(header){
+        $(this).closest(".panel-wrapper").attr("aria-label",header);
+      },
+
+      forceLoadedCheck: function()
+      {
+        Polymer.RenderStatus.afterNextRender(this, function()
+        {
+          if (this.loaded)
+            this.fire("loaded-changed", {value: this.loaded});
+
+        }.bind(this));
+      },
+
+      ready: function (){
+        /** Avoids causing interactions to break.
+        * Without if, when dragging text or image etc.. will cause an overlay blocking interaction with panel content.
+        */
+        $(this.$$(".grid-stack-item-content")).on("dragstart resizestart",function(event){
+          event.stopPropagation();
+        });
+      },
+
+      detached: function () {
+        if (this.destructorCallback) {
+          this.destructorCallback();
+        }
+      },
+
+      // Doesn't resolve until both dependencies are
+      // not null so keeps icon hidden until we know
+      // if it should be pinned/unpinned. Otherwise
+      // some browsers show broken image picture.
+      _shouldShowPin: function (showPin, pinned) {
+        return showPin;
+      },
+
+      _loadPinnedStatus: function (package, file, data) {
+        long_rpc_promise(
+          this._desktopPackageId,
+          "is_pinned", 
+          [package, file, data]
+
+        ).done(function (pinned) {
+          this._pinned = pinned[0];
+        }.bind(this));
+      },
+
+      _getData: function (data) {
+        return data;
+      },
+
+      _getPinIcon: function (pinned) {
+        return pinned ? "duma-icons:unpin" : "duma-icons:pin";
+      },
+       
+      _onButtonChange: function () {
+        this.fire("buttonChange", { target: this });
+      },
+
+      _shouldShowHelp: function (content, pin) {
+        return content || pin;
+      },
+
+      _pinClick: function () {
+        
+        this._pinEnabled = false;
+
+        long_rpc_promise(
+          this._desktopPackageId, this._pinned ? "unpin" : "pin",
+          [
+            this._package,
+            this._file,
+            this._data,
+            this._width,
+            this._height
+          ]
+
+        ).done(function() {
+
+          this._pinned = !this._pinned;
+          this._pinEnabled = true;
+          this.fire("pinClick", { target: this, pinned: this._pinned });
+
+        }.bind(this));
+      },
+      
+      _closeClick: function () {
+        this._triggerDestructor();
+        this.fire("closeClick", { target: this });
+      },
+
+      _triggerDestructor: function () {
+        if (this.destructor) {
+          this.destructor();
+        }
+      },
+      
+      _helpClick: function () {
+        this.fire("helpClick", { target: this });
+        this.$$(".duma-panel-help-dialog").open();
+      },
+
+      _drawerHelpClick: function () {
+        this.fire("drawerHelpClick", { target: this })
+        this.$$(".duma-panel-drawer-help-dialog").open();
+      },
+      
+      _drawerOpenClick: function () {
+        this.fire("drawerOpenClick", { target: this });
+      },
+
+      _drawerCloseClick: function () {
+        this.fire("drawerCloseClick", { target: this });
+      },
+
+      _onDrawerChange: function () {
+        this._setDrawerOpen(this.$$("paper-drawer-panel").selected === "drawer");
+        
+        if (this.drawerOpen) {
+          this.fire("drawerOpen");
+        } else {
+          this.fire("drawerClose");
+        }
+      },
+
+      getHelpButton: function () {
+        return this.$$(".duma-panel-help-button");
+      },
+      
+      getPinButton: function () {
+        return this.$$(".duma-panel-pin-button");
+      },
+      
+      getDrawerButton: function () {
+        return this.$$(".duma-panel-drawer-button");
+      },
+
+      closeDrawer: function () {
+        this.$$("paper-drawer-panel").closeDrawer();
+      },
+
+      openDrawer: function () {
+        this.$$("paper-drawer-panel").openDrawer();
+      },
+
+      close: function () {
+        this._closeClick();
+      },
+
+      pin: function () {
+        if (!this._pinned) {
+          this._pinClick();
+        }
+      },
+
+      unpin: function () {
+        if (this._pinned) {
+          this._pinClick();
+        }
+      },
+
+      _focusNextPanel: function(){
+        // find the next panel (% panel count to loop back to start), and focus on it's skip button
+        var panels = $("duma-panel");
+        var thisIndex = panels.index(this);
+        var nextIndex = (thisIndex + 1) % panels.length;
+        $(panels[nextIndex]).find(".skip-to-next-panel:first").focus();
+      }
+    }); </script> </dom-module> 

@@ -1,0 +1,570 @@
+----------------------------------------------------------
+-- Mapping for bbf #ROOT.User.{i}.
+----------------------------------------------------------
+
+local Multi_User_i_= {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "UserNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        hidden = "true",
+        max = "64",
+      },
+      RemoteAccessCapable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "true",
+      },
+      X_000E50_Role = {
+        access = "readWrite",
+        type = "string",
+        description = "Specifies the role of the Gateway user",
+        max = "64",
+      },
+      X_BELGACOM_Role = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "Specifies the role of the user",
+      },
+      Language = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+        default = "",
+      },
+      X_0876FF_RemoteAccessCapableTimeout = {
+        access = "readWrite",
+        type = "int",
+        default = "0",
+        description = "Timeout value for Service User Accessibility",
+      },
+      X_0876FF_SetDefaultPassword = {
+        access = "readWrite",
+        type = "int",
+        default = "0",
+        description = "If set to non-zero(1), restores the User password to default one",
+      },
+      X_BELGACOM_SetDefaultPassword = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "If set to true, restores the User password to default one",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local gui_present, srp = pcall(require, "srp")
+local scp = require 'transformer.shared.setClashPassword'
+local mapper, ipairs, pairs, table = mapper, ipairs, pairs, table
+local remove = table.remove
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local foreachOnUci = uciHelper.foreach_on_uci
+local generateKey = uciHelper.generate_key
+local setOnUci_raw = uciHelper.set_on_uci -- `raw` because we wrap it in setOnUci
+local deleteOnUci_raw = uciHelper.delete_on_uci -- `raw` because we wrap it in deleteOnUci
+local renameOnUci = uciHelper.rename_on_uci
+local commitApply = commitapply
+local cliPwds = {}
+local process = require("tch.process")
+local clashBinding = { config = "clash" }
+local open = io.open
+local transactions = {}
+
+local function setOnUci(binding, value)
+  setOnUci_raw(binding, value, commitApply)
+  transactions[binding.config] = true
+end
+
+local function deleteOnUci(binding, value)
+  deleteOnUci_raw(binding, value, commitApply)
+  transactions[binding.config] = true
+end
+
+local function webBinding(sectionname, option, default)
+  return { config = "web", sectionname = sectionname, option = option, default = default }
+end
+
+local function envBinding(sectionname, option, default)
+  return { config = "env", sectionname = sectionname, option = option, default = default }
+end
+
+local function getUserName(user)
+  return getFromUci(webBinding(user, "name"))
+end
+
+local function getRole(user)
+  return getFromUci(webBinding(user, "role"))
+end
+
+local function getRoleFromUsername(username)
+  local role
+  foreachOnUci(webBinding("user"), function(s)
+    if s.name == username then
+      role = s.role
+      return false -- break loop
+    end
+  end)
+  return role
+end
+
+local function isUserInAssistance(user)
+  local section = getFromUci(webBinding("remote", "sessionmgr"))
+  local remoteUsers =  getFromUci(webBinding(section, "users"))
+  if type(remoteUsers) == "table" then
+    for _, rUser in ipairs(remoteUsers) do
+      if user == rUser then
+        return true
+      end
+    end
+  end
+end
+
+local function isUserInRemote(user)
+  local assistName = getFromUci(webBinding("remote", "user"))
+  return assistName == getUserName(user)
+end
+
+local function isRemoteUser(user)
+  return isUserInAssistance(user) and isUserInRemote(user)
+end
+
+local function isDefaultUser(user)
+  -- the user with `gak_id 1` is considered to be the default user;
+  -- they have the password printed on the box's sticker.
+  if getFromUci(webBinding(user, "gak_id")) == "1" then
+    return true
+  end
+  -- Check another criterion; defaultuser from uidefault
+  local defaultuser = getFromUci(webBinding("uidefault", "defaultuser"))
+  return defaultuser == user
+end
+
+local function getRemoteAccessCapable(user)
+  local data = "0"
+  if user == "usr_assist" then
+    local fileHandler = io.open("/tmp/.remoteassistance", "r")
+    if fileHandler then
+      data = fileHandler:read()
+      fileHandler:close()
+    end
+  end
+  return data
+end
+
+local function getUserEnabled(user)
+  local defaultUserList = getFromUci(webBinding("default","users"))
+  if type(defaultUserList) == "table" then
+    for key, defaultUser in ipairs(defaultUserList) do
+      if user == defaultUser then
+        return "1"
+      end
+    end
+  end
+  return "0"
+end
+
+local function setUserEnabled(user, value)
+  local defaultUserList = getFromUci(webBinding("default","users"))
+  local retVal = "0"
+  if type(defaultUserList) == "table" then
+    for key, defaultUser in ipairs(defaultUserList) do
+      if value == "0" and user == defaultUser then
+        remove(defaultUserList, key)
+      elseif value == "1" and user == defaultUser then
+        retVal = "1"
+        return
+      end
+    end
+    if value == "1" and retVal == "0" then
+      table.insert(defaultUserList, user)
+    end
+  else
+    defaultUserList = {user}
+  end
+  setOnUci(webBinding("default","users"), defaultUserList)
+  commitApply:newset("webuser_add")
+end
+
+local function setGuiPw(user, username, value)
+  local srp_salt, srp_verifier = srp.new_user(username, value)
+  setOnUci(webBinding(user, "password_reminder"), "0")
+  local unlockStatus = getFromUci(envBinding("var", "unlockedstatus")) or ""
+  if unlockStatus ~= "" and unlockStatus == "1" then
+    local gakID = getFromUci(webBinding(user, "gak_id"))
+    if gakID and gakID ~= "" then
+      local data = process.popen("get_access_key", {"gakID"})
+      if data then
+        local password = data:read()
+        data:close()
+        if value == password then
+           setOnUci(webBinding(user, "password_reminder"), "1")
+        end
+      end
+    end
+  elseif unlockStatus == "0" then
+     if value ~= "" and string.match(user, value) then
+        setOnUci(webBinding(user, "password_reminder"), "1")
+     end
+  else
+     setOnUci(webBinding(user, "password_reminder"), "0")
+  end
+  setOnUci(webBinding(user, "srp_salt"), srp_salt)
+  setOnUci(webBinding(user, "srp_verifier"), srp_verifier)
+
+ -- [NG-48489] handle the GUI username/password migration from legacy build
+  setOnUci(webBinding(user, "legacy_salt"), "")
+end
+
+local function webUserExists(name)
+  foreachOnUci(webBinding("user"), function(s)
+    if s[".name"] == name then
+      return true
+    end
+  end)
+end
+
+local function webUserNameExists(username)
+  local result
+  foreachOnUci(webBinding("user"), function(s)
+    if s.name == username then
+      result = true
+      return false
+    end
+  end)
+  return result
+end
+
+local function updateNewClashUserPwd(oldUser, newUser, file)
+  if file == "/etc/passwd" then
+    local oldDir = "/home/" .. oldUser
+    local newDir = "/home/" .. newUser
+
+    process.execute("mv", { oldDir, newDir })
+  end
+
+  local updatedUser = ""
+  local newLines = ""
+  local fd = open(file, "r")
+  if fd then
+    for line in fd:lines() do
+      if line:match(oldUser) then
+        updatedUser = line:gsub(oldUser, newUser) or ""
+        newLines = newLines .. updatedUser .. "\n"
+      else
+        newLines = newLines .. line .. "\n"
+      end
+    end
+    fd:close()
+  end
+
+  local f = open(file, "w")
+  if f then
+    f:write(newLines)
+    f:close()
+  end
+end
+
+local function setNewClashUser(user, username)
+  local oldUser = getUserName(user)
+  clashBinding.sectionname = oldUser
+  renameOnUci(clashBinding, username, commitApply)
+  updateNewClashUserPwd(oldUser, username, "/etc/passwd")
+  updateNewClashUserPwd(oldUser, username, "/etc/shadow")
+  transactions[clashBinding.config] = true
+end
+
+local function setUserName(user, username)
+  local isUserEnabled = getUserEnabled(user)
+  if username == "" then
+    if isUserEnabled == "1" then
+      return nil, "User name must not be empty for enabled user"
+    end
+  else
+    if username == getUserName(user) then
+      return true --do not complain if the same name is written to a user
+    elseif scp.isClashUser(username) then
+      return nil, "A CLI user with that name already exists"
+    elseif webUserNameExists(username) then
+      return nil, "A web user with that name already exists"
+    end
+  end
+
+  if scp.isClashUser(getUserName(user)) then
+    setNewClashUser(user, username)
+  end
+
+  setOnUci(webBinding(user, "name"), username)
+  return true
+end
+
+local function setCliPw(username, password)
+  if not scp.isClashUser(username) then
+    return true -- simply return success for non-CLI user
+  else
+    local valid, msg = scp.validateCredentials(username, password)
+    if not valid then
+      return nil, msg
+    else
+      -- Store CLI password if credentials valid; effective update happens in commit()
+      cliPwds[username] = password
+      return true
+    end
+  end
+end
+
+local function setPassword(user, password)
+  local username = getUserName(user)
+  if username == "" then
+    return nil, "Cannot set password for user with empty username"
+  end
+
+  -- (1) Set GUI password; never returns errors
+  if gui_present then
+    setGuiPw(user, username, password)
+
+  -- (2) Set CLI password; may return errors
+    local ret =  setCliPw(username, password)
+
+    commitApply:newset("webuser_password")
+    return ret
+  end
+  return true
+end
+
+local function setRemoteAccess(key, value)
+  if key == "usr_assist" then
+    local fileHandler = io.open("/tmp/.remoteassistance",'w')
+    if fileHandler then
+      fileHandler:write(value)
+      fileHandler:close()
+    end
+    commitapply:newset("UserInterface.RemoteAccess.Enable")
+  else
+    return nil, "RemoteAccessCapable can be enabled only for usr_assist"
+  end
+end
+
+local function setDefaultPassword(mapping, param, value, key)
+  if value ~= "0" then
+    local gakID = getFromUci(webBinding(key, "gak_id"))
+    if gakID and gakID ~= "" then
+      local data = process.popen("get_access_key", {gakID})
+      if data then
+        local password = data:read()
+          data:close()
+          if password and #password > 0 then
+            local username = getUserName(key)
+            if username == "" then
+              return nil, "Cannot set password for user with empty username"
+            end
+
+            -- (1) Set GUI password; never returns errors
+            if gui_present then
+              setGuiPw(key, username, password)
+
+            -- (2) Set CLI password; may return errors
+              local ret =  setCliPw(username, password)
+
+              return ret
+            end
+            return true
+          end
+      end
+    end
+    return nil, "Error resetting password"
+  end
+end
+
+local function setRole(user, role)
+  if role == "" then
+    return nil, "Role must not be empty"
+  end
+  setOnUci(webBinding(user, "role"), role)
+  return true
+end
+
+Multi_User_i_.entries = function()
+  local users = {}
+  foreachOnUci(webBinding("user"), function(s)
+    users[#users+1] = s['.name']
+  end)
+  return users
+end
+
+local function getDefaultRole()
+  local defaultuser = getFromUci(webBinding("uidefault", "defaultuser"))
+  return getRoleFromUsername(defaultuser) or "guest" -- return something sensible in case not default user or no role found
+end
+
+local function addUser()
+  local username
+  repeat
+    username = "usr_default_" .. generateKey()
+  until not webUserExists(username)
+
+  setOnUci(webBinding(username), "user")
+
+  local role = getDefaultRole()
+  setRole(username, role)
+
+  local binding = webBinding("default","users")
+  local usernames =  getFromUci(binding)
+
+  if type(usernames) == "table"  then
+    usernames[#usernames + 1] = username
+    setOnUci(binding, usernames)
+  end
+
+  -- Trigger web server restart; needed to make new user available
+  commitApply:newset("webuser_add")
+
+  return username
+end
+
+local function deleteUser(user)
+  deleteOnUci(webBinding(user))
+
+  local binding = webBinding("default","users")
+  local defaultUserList = getFromUci(binding)
+  for key, defaultUser in ipairs(defaultUserList) do
+    if user == defaultUser then
+      remove(defaultUserList, key)
+      break
+    end
+  end
+  setOnUci(binding, defaultUserList)
+
+  return true
+end
+
+Multi_User_i_.add = function(mapping)
+  local user = addUser()
+  if not user then
+    return nil, "Could not add user"
+  end
+  return user
+end
+
+Multi_User_i_.delete = function(mapping, key)
+  local username = getUserName(key)
+  -- Following users must not be deleted:
+  --    the default user, users with remote access, users with CLI access
+  if isDefaultUser(username) then
+    return nil, "The default user cannot be deleted"
+  elseif isRemoteUser(key) then
+    return nil, "User with remote access cannot be deleted"
+  elseif scp.isClashUser(username) then
+    return nil, "User with CLI access cannot be deleted"
+  end
+  return deleteUser(key)
+end
+
+Multi_User_i_.get = {
+  Password = "", -- passwords always shown as empty string
+  Enable = function(mapping, param, key)
+    return getUserEnabled(key)
+  end,
+  Username = function(mapping, param, key)
+    return getUserName(key)
+  end,
+  RemoteAccessCapable = function(mapping, param, key)
+    return getRemoteAccessCapable(key)
+  end,
+  X_000E50_Role = function(mapping, param, key)
+    return getRole(key)
+  end,
+  Language = "en-us",
+  X_BELGACOM_Role = function(mapping, param, key)
+    return getRole(key)
+  end,
+  X_0876FF_RemoteAccessCapableTimeout = function()
+    return getFromUci(webBinding("assistance", "timeout", "0"))
+  end,
+  X_0876FF_SetDefaultPassword = "0",
+  X_BELGACOM_SetDefaultPassword = "0",
+}
+
+Multi_User_i_.set = {
+  Enable = function(mapping, param, value, key)
+    if key ~= "usr_assist" and key ~= "usr_guest" then
+      return setUserEnabled(key, value)
+    else
+      return nil, "Enable not applicable for guest and assist users"
+    end
+  end,
+  Username = function(mapping, param, value, key)
+    return setUserName(key, value)
+  end,
+  Password = function(mapping, param, value, key)
+    return setPassword(key, value)
+  end,
+  RemoteAccessCapable = function(mapping, param, value, key)
+    return setRemoteAccess(key, value)
+  end,
+  X_000E50_Role = function(mapping, param, value, key)
+    return setRole(key, value)
+  end,
+  X_BELGACOM_Role = function(mapping, param, value, key)
+    return setRole(key, value)
+  end,
+  X_0876FF_RemoteAccessCapableTimeout = function(mapping, param, value, key)
+    return setOnUci(webBinding("assistance", "timeout"), value)
+  end,
+  X_0876FF_SetDefaultPassword = setDefaultPassword,
+  X_BELGACOM_SetDefaultPassword = setDefaultPassword,
+}
+
+Multi_User_i_.commit = function ()
+  for config in pairs(transactions) do
+    uciHelper.commit({ config = config })
+  end
+  transactions = {}
+
+  for user, pass in pairs(cliPwds) do
+    scp.setPassword(user, pass)
+  end
+  cliPwds = {}
+end
+
+Multi_User_i_.revert = function ()
+  for config in pairs(transactions) do
+    uciHelper.revert({ config = config })
+  end
+  transactions = {}
+  cliPwds = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_User_i_, "#ROOT", {"InternetGatewayDevice.User", "Device.Users.User"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

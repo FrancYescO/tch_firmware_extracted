@@ -1,0 +1,745 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+require "libos"
+local platform = os.platform_information()
+
+local allowUpload = platform.model ~= "DJA0231"
+%> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-progress/paper-progress.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-tick/duma-tick.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/colours.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="qos-auto-setup"> <template> <style include="iron-flex iron-positioning iron-flex-alignment duma-theme"> :host #dialog {
+        min-width: 40em;
+      }
+      :host .wrapper {
+        height: 100%;
+      }
+      .top-part {
+        margin-bottom: 2em;
+      }
+      .top-part paper-progress {
+        margin-top: 0.3em;
+        margin-right: 0.5em;
+        width: 100%;
+        --paper-progress-transition-duration: 0.5s;
+      }
+      .top-part > div:nth-child(n+2) {
+        margin-top: 2em;
+      }
+      .top-part .download paper-progess {
+        --paper-progress-active-color: var(--primary-color);
+      }
+      .top-part .upload paper-progress {
+        --paper-progress-active-color: var(--accent-color);
+      }
+      .top-part .legend-square {
+        display: inline-block;
+        width: 16px;
+        height: 12px;
+        outline: 3px solid;
+        outline-offset: -3px;
+        margin-right: 5px;
+      }
+      .top-part .download .legend-square {
+        outline-color: var(--primary-color);
+      }
+      .top-part .upload .legend-square {
+        outline-color: var(--accent-color);
+      }
+      .top-part .idle .legend-square {
+        outline-color: var(--theme-color-2);
+      }
+      .chart-wrapper {
+        position: relative;
+        height: 30em;
+      }
+      .tick-wrapper {
+        position: absolute;
+        z-index: 10;
+        right: 0;
+        top: 16px;
+      }
+      .chart-wrapper duma-chart {
+        height: 100%;
+      }
+      .marg-left {
+        margin-left: 1em;
+      }
+      .sub-header {
+        opacity: 0.75;
+      }
+      :host duma-tick {
+        --duma-tick-color: var(--primary-text-color);
+      }
+      :host .qos-bandwidth {
+        margin-left: 16px;
+        min-width: 72px;
+        text-align: right;
+      }
+      :host .unrealistic {
+        margin: -2px 0 -2px 8px;
+        height: 24px;
+        line-height: 24px;
+        display: inline-block;
+      }
+      :host .unrealistic label {
+        opacity: 0.75;
+      }
+      :host .unrealistic iron-icon {
+        color: var(--rating-c);
+      }
+      :host paper-checkbox#anti-spikes-checkbox {
+        margin: 0 0 8px 0;
+      }
+      :host paper-spinner-lite {
+        margin-left: 12px;
+      } </style> <paper-dialog id="dialog" modal> <div> <h2 dialog-label>[[_getHeader(page,phase,finished,_currentlyDoingUpload)]]</h2> </div> <paper-dialog-scrollable class="wrapper"> <iron-pages selected="[[page]]"> <!-- Auto setup intro, can be skipped in future runs --> <iron-page> <div class="inner"> <%= i18n.descriptionFirst %> <paper-checkbox checked="{{dontShowAgain}}"><%= i18n.dontShowAgain %></paper-checkbox> </div> </iron-page> <!-- Auto setup mode select and internet warning, advanced vs basic --> <iron-page> <div class="inner"> <%= i18n.description %> </div> </iron-page> <!-- Running Test page --> <iron-page> <div class="layout vertical"> <div class="top-part inner layout vertical"> <div class="layout vertical download"> <div class="layout horizontal baseline"> <span class="legend-square"></span> <span><%= i18n.downloadSetting %></span> <duma-tick active="[[finished]]"></duma-tick> </div> <div class="layout horizontal center-center"> <paper-progress class="transiting" min="0" max="100" value="[[download]]"></paper-progress> <label>[[download]]%</label> </div> </div> <% if allowUpload then %> <div class="layout vertical upload"> <div class="layout horizontal baseline"> <span class="legend-square"></span> <span><%= i18n.uploadSetting %></span> <duma-tick active="[[finished]]"></duma-tick> </div> <div class="layout horizontal center-center"> <paper-progress class="transiting" min="0" max="100" value="[[upload]]"></paper-progress> <label>[[upload]]%</label> </div> </div> <% end %> <div class="layout vertical idle"> <div class="layout horizontal baseline"> <span class="legend-square"></span> <span>[[_getIdleText(phase)]]</span> </div> </div> <% if not allowUpload then %> <div class="layout vertical"> <div class="layout horizontal center"> <span>[[_noUploadAllowedText]]</span> <paper-spinner-lite active="[[_currentlyDoingUpload]]"></paper-spinner-lite> </div> </div> <% end %> </div> <div class="chart-wrapper"> <duma-chart id="chart" type="line"></duma-chart> </div> </div> </iron-page> <!-- Advanced setup --> <iron-page> <div class="inner layout vertical"> <!-- Target ping vs idle --> <div class="layout horizontal"> <label><%= i18n.targetPingVsIdle %></label> <template is="dom-if" if="[[isTargetUnreasonable]]"> <span class="unrealistic"> <iron-icon icon="duma-icons:hazard"></iron-icon> <label><%= i18n.unrealisticTargetPing %></label> </span> </template> </div> <div class="layout horizontal"> <paper-slider max="50" id="target-ping-slider" value="[[targetPing]]" immediate-value="{{targetPing}}" pin secondary-progress="[[targetPingThreshold]]" secondary-above aria-label="<%= i18n.targetPing %>" aria-value-unit="<%= i18n.milliseconds %>"></paper-slider> <div class="flex-none self-center"> <span class="title" id="target-ping-readout"></span>[[targetPing]]<span><%= i18n.msUnit %></span> </div> </div> <!-- Min download --> <label><%= i18n.minDownloadSetting %></label> <div class="layout horizontal"> <div class="flex"> <% if platform.vendor == "TELSTRA" then %> <paper-slider max="95" id="adv-download-slider" pin editable value="[[downPercent]]" immediate-value="{{downPercent}}" max-markers="95" secondary-progress="50" secondary-as-min aria-label$="<%= i18n.minDownload %>" aria-value-unit="<%= i18n.percent %>"></paper-slider> <% else %> <paper-slider max="95" id="adv-download-slider" pin editable value="[[downPercent]]" immediate-value="{{downPercent}}" max-markers="95" secondary-progress="30" secondary-as-min aria-label$="<%= i18n.minDownload %>" aria-value-unit="<%= i18n.percent %>"></paper-slider> <% end %> </div> <div class="flex-none self-center qos-unit">%</div> <div class="flex-none self-center qos-bandwidth"> <span class="title" id="adv-download-achievable-bandwidth"></span>[[computeBandwidth(downPercent, downBandwidth)]]<span><%= i18n.mbpsUnit %></span> </div> </div> <% if allowUpload then %> <!-- Min upload --> <label><%= i18n.minUploadSetting %></label> <div class="layout horizontal"> <div class="flex"> <% if platform.vendor == "TELSTRA" then %> <paper-slider max="95" id="adv-upload-slider" pin editable accent value="[[upPercent]]" immediate-value="{{upPercent}}" max-markers="95" secondary-progress="85" secondary-as-min aria-label$="<%= i18n.minUpload %>" aria-value-unit="<%= i18n.percent %>"></paper-slider> <% else %> <paper-slider max="95" id="adv-upload-slider" pin editable accent value="[[upPercent]]" immediate-value="{{upPercent}}" max-markers="95" secondary-progress="30" secondary-as-min aria-label$="<%= i18n.minUpload %>" aria-value-unit="<%= i18n.percent %>"></paper-slider> <% end %> </div> <div class="flex-none self-center qos-unit">%</div> <div class="flex-none self-center qos-bandwidth"> <span class="title" id="adv-upload-achievable-bandwidth"></span>[[computeBandwidth(upPercent, upBandwidth)]]<span><%= i18n.mbpsUnit %></span> </div> </div> <% end %> <!-- Anti spikes --> <paper-checkbox class="flex-none" id="anti-spikes-checkbox" checked="{{antiSpikes}}"><%= i18n.antiSpikes %></paper-checkbox> <label><%= i18n.maxSpikeSize %></label> <div class="layout horizontal"> <paper-slider max="100" id="max-spike-slider" pin value="[[maxSpikes]]" immediate-value="{{maxSpikes}}" disabled="[[!antiSpikes]]" aria-label="<%= i18n.maxSpikeSize %>" aria-value-unit="<%= i18n.milliseconds %>"></paper-slider> <div class="flex-none self-center"> <span class="title" id="max-spike-readout"></span>[[maxSpikes]]<span><%= i18n.msUnit %></span> </div> </div> </div> </iron-page> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <!-- Cancel --> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <!-- Continue --> <template is="dom-if" if="[[_isPage(page,0)]]"> <paper-button on-click="next"><%= i18n.continue %></paper-button> </template> <!-- Advanced --> <template is="dom-if" if="[[_isPage(page,1)]]"> <paper-button on-click="showAdvanced"><%= i18n.advanced %></paper-button> </template> <!-- Start --> <template is="dom-if" if="[[_isPage(page,1)]]"> <paper-button on-click="start"><%= i18n.getStarted %></paper-button> </template> <!-- Retry test --> <template is="dom-if" if="[[_isPage(page,2)]]"> <paper-button on-click="start" disabled="[[!finished]]"><%= i18n.testAgain %></paper-button> </template> <!-- Save settings--> <template is="dom-if" if="[[_isPage(page,2)]]"> <paper-button on-click="save" disabled="[[!finished]]"><%= i18n.save %></paper-button> </template> <!-- Start Advanced --> <template is="dom-if" if="[[_isPage(page, 3)]]"> <paper-button on-click="startAdvanced"><%= i18n.getStarted %></paper-button> </template> </div> </paper-dialog> <duma-alert id="noWanAlert"> <%= i18n.error %> </duma-alert> <paper-button id="auto-setup-button" on-click="open" background><%= i18n.autoSetup %></paper-button> </template> <script> Polymer({
+      is: "qos-auto-setup",
+      properties: {
+        maxSpikes: {
+          type: Number,
+          value: 50
+        },
+        targetPing: {
+          type: Number,
+          value: 5
+        },
+        download: {
+          type: Number,
+          value: 100
+        },
+        upload: {
+          type: Number,
+          value: 100
+        },
+        page: {
+          type: Number,
+          value: 0
+        },
+        phase: {
+          type: Number,
+          value: 0
+        },
+        testRunning: {
+          type: Boolean,
+          value: false
+        },
+        saved: {
+          type: Number,
+          value: 20
+        },
+        finished: {
+          type: Boolean,
+          value: false
+        },
+        dontShowAgain: {
+          type: Boolean,
+          value: null,
+          observer: "_dontShowAgainChanged"
+        },
+        _websocket: {
+          type: Object,
+          value: null
+        },
+        _datasets: {
+          type: Array,
+          value: [],
+          observer: "_datasetsChanged"
+        },
+        callback: {
+          type: Function,
+          value: null
+        },
+        upBandwidth:
+        {
+          type: Number,
+          value: 100,
+        },
+        downBandwidth:
+        {
+          type: Number,
+          value: 100,
+        },
+        upPercent:
+        {
+          type: Number,
+          value: 50,
+        },
+        downPercent:
+        {
+          type: Number,
+          value: 50,
+        },
+        antiSpikes:
+        {
+          type: Boolean,
+          value: false,
+        },
+        targetPingThreshold:
+        {
+          type: Number,
+          computed: 'getUnrealisticValue(upPercent, downPercent)',
+        },
+        isTargetUnreasonable:
+        {
+          type: Boolean,
+          computed: 'isTargetUnrealistic(targetPingThreshold, targetPing)'
+        },
+        isAdvancedTest:
+        {
+          type: Boolean,
+          value: false,
+        },
+        _currentlyDoingUpload: {
+          type: Boolean,
+          value: true
+        },
+        _noUploadAllowedText: {
+          type: String,
+          computed: 'get_noUploadAllowedText_state(phase, _currentlyDoingUpload, finished)'
+        },
+      },
+
+      _dontShowAgainChanged: function(newVal){
+        var storageNameSpace = "com.netdumasoftware.qos";
+        var storageNameKey = "autoSetupDontShowFirstPage";
+        if(newVal !== null){
+          duma.storage(storageNameSpace,storageNameKey,newVal);
+        }else{
+          this.dontShowAgain = duma.storage(storageNameSpace,storageNameKey) === "true";
+        }
+      },
+
+      _nextDisabled: function(spikeMode){
+        return !spikeMode;
+      },
+
+      _getHeader: function(page,phase,finished,currentlyDoingUpload){
+        if(page <= 1) return "<%= i18n.autoSetupHeader %>";
+        if (page == 3) return "<%= i18n.advancedSetupHeader %>";
+        if(finished) return "<%= i18n.finishedTest %>";
+        if(phase <= 0) return "<%= i18n.phase_idle %>"; <% if allowUpload then %> return "<%= i18n.phase_test %>".format(phase); <% else %> if(phase <= 1 && currentlyDoingUpload) return "Auto Setup - Found Ping Target";
+        return currentlyDoingUpload ? "Auto Setup - Test {0} Complete".format(phase - 1) : "<%= i18n.phase_test %>".format(phase); <% end %> },
+      
+      get_noUploadAllowedText_state: function(phase,isUpload,finished){
+        if(finished) return "Test Complete";
+        return phase > 0 ? (isUpload ? "Setting Up Test {0}" : "Running Test {0}").format(phase) : "Preparing Auto-Setup";
+      },
+
+      _datasetsChanged: function(newVal){
+        $(this.$.chart).prop("data",{datasets: newVal});
+      },
+
+      _getPhaseText: function(phase){
+        if(phase === -1){
+          return "";
+        }else if(phase === 0){
+          return "<%= i18n.phase_idle %>";
+        }else{
+          return "<%= i18n.phase_test %>".format(phase);
+        }
+      },
+
+      _getIdleText: function(phase){
+        return phase > 0 ? "<%= i18n.target %>" : "<%= i18n.idle %>";
+      },
+
+      _isPage: function(current,match){
+        return current == match;
+      },
+
+      reset: function(notPage){
+        this.phase = -1;
+        this.testRunning = false;
+        this.finished = false;
+        this._datasets = [];
+        this.upload = 100;
+        this.download = 100;
+      },
+
+      resetConfig: function()
+      {
+        this.antiSpikes = false;
+        this.upPercent = 50;
+        this.downPercent = 50;
+      },
+
+      ready: function(){
+        $(this.$.chart).prop("options", {
+          tooltips:
+          {
+            enabled: false,
+            callbacks:
+            {
+              label: (tooltipItem, data) => `${data.datasets[tooltipItem.datasetIndex].label}: ${tooltipItem.yLabel.toFixed(2)}ms`,
+              title: function() {} //(tooltipItem, data) => (tooltipItem[0].xLabel / 1000).toFixed(2) + 's',
+            },
+          },
+          legend:
+          {
+            display: false,
+          },
+          scales:
+          {
+            xAxes:
+            [
+              {
+                type: 'time',
+                offset: false,
+                display: false,
+                distribution: 'linear',
+                ticks:
+                {
+                  source: "labels",
+                },
+                bounds: "ticks",
+              },
+            ],
+
+            yAxes: [{
+              ticks:
+              {
+                beginAtZero: true,
+                maxTicksLimit: 5,
+                suggestedMin: 0,
+                suggestedMax: 20,
+              },
+              scaleLabel:
+              {
+                display: true,
+                labelString: "<%= i18n.buffer_yAxisLabel %>",
+              },
+            }],
+          },
+            
+          elements:
+          {
+            line:
+            {
+              tension: 0.1,
+              fill: false,
+            },
+          },
+        });
+        this.reset();
+        this.resetConfig();
+
+        this.page = 0;
+        this.$.dialog.addEventListener("iron-overlay-closed",this._onDialogClosed.bind(this));
+        this._colours = getAllColours();
+      },
+
+      formatBandwidth: function(val){
+        return val / (1000 * 1000);
+      },
+
+      _attemptCloseWebsocket: function(){
+        if(this._websocket){
+          var closing = this._websocket;
+          this._websocket = null;
+          if(closing.readyState !== WebSocket.CLOSED){
+            closing.send("stop");
+            setTimeout(function(){
+              closing.close(1000);
+            }.bind(this),100);
+          }
+        }
+      },
+      
+      _onDialogClosed: function(){
+        this.end();
+      },
+
+      update: function(){
+        if(this.$.chart.chart){
+          this.$.chart.chart.update();
+        }
+      },
+
+      save: function(){
+        if(this.callback) this.callback(this.upload / 100,this.download / 100);
+        this.$.dialog.close();
+      },
+
+      open: function(){
+        this.reset();
+        this.page = this.dontShowAgain ? 1 : 0;
+        this.isAdvancedTest = false;
+        this.$.dialog.open();
+
+        // Init user bandwidth
+        long_rpc("com.netdumasoftware.qos", "get_bandwidth", [], function (up, down)
+        {
+          this.upBandwidth = up;
+          this.downBandwidth = down;
+        }.bind(this));
+      },
+
+      _originalThrottle: null,
+      _enableThrottle: function(){
+        return Q.promise(function(resolve,reject){
+          long_rpc_promise("com.netdumasoftware.qos", "auto_throttling", []).done(function(result){
+            this._originalThrottle = result[0];
+            long_rpc_promise("com.netdumasoftware.qos", "auto_throttling", [ 1 ]).done(function(after){
+              resolve(after);
+            });
+          }.bind(this));
+        }.bind(this));
+      },
+      _resetThrottle: function(){
+        if(this._originalThrottle){
+          return long_rpc_promise("com.netdumasoftware.qos", "auto_throttling", [this._originalThrottle]).done(function(result){
+            this._originalThrottle = null;
+          }.bind(this));
+        }
+      },
+
+      next: function(){
+        this.page = this.page + 1;
+      },
+
+      start: function(){
+        this.reset();
+        this.resetConfig();
+        this.page = 2;
+        this.phase = 0;
+        this.testRunning = true;
+        this._enableThrottle().then(function(){
+          this.openSocket();
+        }.bind(this));
+      },
+
+      showAdvanced: function(){
+        this.page = 3;
+      },
+
+      computeBandwidth: function(percent, total)
+      {
+        return Math.round((total / (1000 * 1000)) * (percent / 100));
+      },
+
+      isTargetUnrealistic: function(threshold, currentTarget)
+      {
+        return threshold > currentTarget;
+      },
+
+      getUnrealisticValue: function(upPercent, downPercent)
+      {
+        // Originally used more complex algo here but decided on single locked value
+        // Left here incase complex algo needs to be implemented
+        return 5;
+      },
+
+      startAdvanced: function(){
+        this.reset();
+        this.page = 2;
+        this.phase = 0;
+        this.testRunning = true;
+        this.isAdvancedTest = true;
+        this._enableThrottle().then(function(){
+          this.openSocket();
+        }.bind(this));
+      },
+
+      end: function(){
+        this._attemptCloseWebsocket();
+        this._resetThrottle();
+        this.finished = true;
+        this.testRunning = false;
+        this.$.chart.chart.config.options.tooltips.enabled = true;
+        this.update();
+      },
+
+      openSocket: function(){
+        this._websocket = newWebSocket(8086, "autoqos");
+        this._websocket.addEventListener(`open`, this._onSocketOpen.bind(this));
+        this._websocket.addEventListener(`close`, this._onSocketClose.bind(this));
+        this._websocket.addEventListener(`error`, this._onSocketError.bind(this));
+        this._websocket.addEventListener(`message`, this._onSocketMessage.bind(this));
+      },
+
+      _onSocketOpen: function(){
+        this._hadFirstMessage = false;
+        this._websocket.send(this.antiSpikes);
+        if (this.isAdvancedTest)
+          this._websocket.send("200-{0}-{1}-{2}-{3}".format(this.targetPing, this.maxSpikes, this.upPercent, this.downPercent));
+        else
+          this._websocket.send("201-0-0-0-0")
+      },
+      _onSocketClose: function(){
+        this.end();
+      },
+      _onSocketError: function(e){
+        console.error(e);
+        this.end();
+      },
+      _onSocketMessage: function(e){
+        var split = e.data.split("-").map((x) => {var y = parseFloat(x); return isNaN(y) ? x : y;});
+        if(this._hadFirstMessage){
+          this._handeMessageData(split);
+        }else{
+          this._initMessage(split);
+        }
+      },
+
+      _initMessage: function(data){
+        this.$.chart.chart.config.options.scales.xAxes[0].ticks.max = data[1] * 1000;
+        this.$.chart.chart.config.options.tooltips.enabled = false;
+        this._data = {
+          idleStart: 0,
+          idleData: [],
+          downloadInitStart: 0,
+          downloadInitData: [],
+          uploadInitStart: 0,
+          uploadInitData: [],
+          downloadStart: 0,
+          downloadData: [],
+          uploadStart: 0,
+          uploadData: [],
+          downloadIndex: 0,
+          uploadIndex: 0,
+          isFirstDownload: true,
+          isFirstUpload: true,
+        }
+        this._datasets.push({
+          type:"line",
+          borderColor: this._colours[2][0],
+          pointBackgroundColor: this._colours[2][0],
+          pointRadius: 0,
+          pointHitRadius: 5,
+          label: this._getIdleText(this.phase),
+          data: this._data.idleData
+        });
+        this._hadFirstMessage = true;
+        this.update();
+      },
+
+      _setAnim: function(reset){
+        if(reset){
+          this.$.chart.chart.config.options.animation.duration = 1000;
+          this.$.chart.chart.config.options.animation.easing = "easeOutQuart";
+        }else{
+          this.$.chart.chart.config.options.animation.duration = 750;
+          this.$.chart.chart.config.options.animation.easing = "linear";
+        }
+      },
+
+      _changeIdleToTarget: function(){
+        this.phase += 1;
+        this._setAnim(false);
+        var dataset = this._datasets[0];
+        dataset.label = this._getIdleText(this.phase);
+        dataset.borderDash = [10,10,10];
+        dataset.borderColor = (new Color(this._colours[2][0])).setVal(128,3).rgba(true);
+        var data = dataset.data;
+        var sum = 0;
+        for(var i = 0; i < data.length; i++){
+          sum += data[i].y;
+        }
+        var average = sum / data.length;
+        for(var i = 0; i < data.length; i++){
+          data[i].y = average;
+        }
+        this.update();
+        setTimeout(this._changeIdleToTargetEnd.bind(this),1000);
+      },
+      _changeIdleToTargetEnd: function(){
+        this._setAnim(true);
+        
+        this._datasets.unshift({
+          type:"line",
+          borderColor: this._colours[0][0],
+          pointBackgroundColor: this._colours[0][0],
+          pointRadius: 0,
+          pointHitRadius: 5,
+          label: "<%= i18n.downloadInit %>",
+          data: this._data.downloadInitData,
+          spanGaps: false
+        },{
+          type:"line",
+          borderColor: this._colours[1][0],
+          pointBackgroundColor: this._colours[1][0],
+          pointRadius: 0,
+          pointHitRadius: 5,
+          label: "<%= i18n.uploadInit %>",
+          data: this._data.uploadInitData,
+          spanGaps: false
+        });
+        this.update();
+        this._websocket.send("continue");
+      },
+
+      _cloneData: function(from,to){
+        for(var i = 0; i < from.length; i++){
+          var f = from[i];
+          var dupe = Object.assign({},f);
+          to[i] = dupe; 
+        }
+        return to;
+      },
+
+      _postBoth: function(){
+        if(this._data.isFirstDownload){
+          var preDuration = this.$.chart.chart.config.options.animation.duration;
+          this.$.chart.chart.config.options.animation.duration = 0;
+          this._datasets[0].borderColor = (new Color(this._colours[0][1])).setVal(64,3).rgba(true);
+          this._datasets[0].pointBackgroundColor = (new Color(this._colours[0][1])).setVal(64,3).rgba(true);
+          this._datasets[1].borderColor = (new Color(this._colours[1][1])).setVal(64,3).rgba(true);
+          this._datasets[1].pointBackgroundColor = (new Color(this._colours[1][1])).setVal(64,3).rgba(true);
+          this._datasets.unshift({
+            type:"line",
+            borderColor: this._colours[0][0],
+            pointBackgroundColor: this._colours[0][0],
+            pointRadius: 0,
+            pointHitRadius: 5,
+            label: "<%= i18n.download %>",
+            data: this._cloneData(this._data.downloadInitData,this._data.downloadData),
+          spanGaps: false
+          },{
+            type:"line",
+            borderColor: this._colours[1][0],
+            pointBackgroundColor: this._colours[1][0],
+            pointRadius: 0,
+            pointHitRadius: 5,
+            label: "<%= i18n.upload %>",
+            data: this._cloneData(this._data.uploadInitData,this._data.uploadData),
+          spanGaps: false
+          });
+          this.update();
+          this.$.chart.chart.config.options.animation.duration = preDuration;
+        }
+        this._websocket.send("continue");
+      },
+      
+      _handeMessageData: function(data){
+        switch (data[0]) {
+          case 100: // sliders - upload
+            this.upload = data[1];
+            break;
+          case 101: // sliders - download
+            this.download = data[1];
+            break;
+          case 2: // idle
+            switch (data[1]){
+              case 0: // idle data [2,0, ping, ?, time]
+                this._handle_Idle(data[2],data[4] * 1000);
+                break;
+              case 2: // end of idle, do squash animation
+                this._changeIdleToTarget();
+                break;
+              case 3: // upload
+                this._handle_Upload(data[2],data[4] * 1000);
+                break;
+              case 4: // upload end
+                this._handle_end_Upload();
+                break;
+              case 6: // download
+                this._handle_Download(data[2],data[4] * 1000);
+                break;
+              case 7: // download end
+                this._handle_end_Download();
+                break;
+              }
+            break;
+          case 800: // ERROR
+            this.$.dialog.close();
+            this.$.noWanAlert.show();
+            break;
+          case 900: // sliders - upload
+            this.upload = data[1];
+            break;
+          case 901: // sliders - download
+            this.download = data[1];
+            break;
+          case 999: // sliders - download
+            this.end();
+            break;
+        }
+      },
+      _handle_Idle: function(ping,time){
+        this._currentlyDoingUpload = true;
+        if(!this._data.idleStart) this._data.idleStart = time;
+        var startTime = this._data.idleStart;
+        var newTime = time - startTime;
+        var newData = {
+          y: ping,
+          t: newTime
+        }
+        this._data.idleData.push(newData);
+        this.update();
+      },
+      _set_point: function(arr,index,point){
+        arr[index] = point;
+        if(arr[index + 1]){
+          arr[index + 1].y = NaN;
+        }
+      },
+      _clear_post_nan: function(arr){
+        var post_nan = false;
+        for(var i = 0; i < arr.length; i++){
+          if(!post_nan && isNaN(arr[i].y)) post_nan = true;
+          if(post_nan){
+            arr[i].y = NaN;
+          }
+        }
+        this.update();
+      },
+      _handle_Upload: function(ping,time){
+        this._currentlyDoingUpload = true; <% if allowUpload then %> if(this._data.isFirstUpload){
+          if(!this._data.uploadInitStart) this._data.uploadInitStart = time;
+          var startTime = this._data.uploadInitStart;
+          var newTime = time - startTime;
+          var newData = {
+            y: ping,
+            t: newTime
+          }
+          this._data.uploadInitData.push(newData);
+        }else{
+          if(!this._data.uploadStart) this._data.uploadStart = time;
+          var startTime = this._data.uploadStart;
+          var newTime = time - startTime;
+          var newData = {
+            y: ping,
+            t: newTime
+          }
+          this._set_point(this._data.uploadData,this._data.uploadIndex,newData);
+          this._data.uploadIndex ++;
+        }
+        this.update(); <% end %> },
+      _handle_Download: function(ping,time){
+        this._currentlyDoingUpload = false;
+        if(this._data.isFirstDownload){
+          if(!this._data.downloadInitStart) this._data.downloadInitStart = time;
+          var startTime = this._data.downloadInitStart;
+          var newTime = time - startTime;
+          var newData = {
+            y: ping,
+            t: newTime
+          }
+          this._data.downloadInitData.push(newData);
+        }else{
+          if(!this._data.downloadStart) this._data.downloadStart = time;
+          var startTime = this._data.downloadStart;
+          var newTime = time - startTime;
+          var newData = {
+            y: ping,
+            t: newTime
+          }
+          this._set_point(this._data.downloadData,this._data.downloadIndex,newData);
+          this._data.downloadIndex ++;
+        }
+        this.update();
+      },
+      _handle_end_Download: function(){
+        this._clear_post_nan(this._data.downloadData);
+        this._postBoth();
+        this._data.isFirstDownload = false;
+        this._data.downloadStart = 0;
+        this._data.downloadIndex = 0;
+        this.phase += 1;
+      },
+      _handle_end_Upload: function(){
+        this._clear_post_nan(this._data.uploadData);
+        this._data.isFirstUpload = false;
+        this._data.uploadStart = 0;
+        this._data.uploadIndex = 0;
+      },
+    }); </script> </dom-module> 

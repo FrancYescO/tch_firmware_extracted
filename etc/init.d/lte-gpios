@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+
+START=00
+
+set_gpio() {
+	local pin="$1"
+	local value="$2"
+
+	if ! [ -e "/sys/class/gpio/gpio$pin" ]; then
+		echo "$pin" >"/sys/class/gpio/export"
+		echo out >"/sys/class/gpio/gpio$pin/direction"
+		echo "$value" >"/sys/class/gpio/gpio$pin/value"
+	fi
+}
+
+boot() {
+	if hardware_version="$(uci -q get env.var.hardware_version)"; then
+		case "$hardware_version" in
+			VBNT-V)
+				set_gpio 73 0
+				set_gpio 98 1
+			;;
+			VBNT-Y|VCNT-A)
+				set_gpio 54  0
+				set_gpio 115 1
+			;;
+			VCNT-Z)
+				set_gpio 54  1
+				set_gpio 115 1
+			;;
+		esac
+	fi
+}

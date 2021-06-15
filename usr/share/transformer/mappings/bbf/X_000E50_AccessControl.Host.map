@@ -1,0 +1,472 @@
+-- Manually generated
+local Multi_X_000E50_AccessControl_Host_i_ = {
+  objectType = {
+    name = "#ROOT.Host.{i}.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    numEntriesParameter = "HostsNumberOfEntries",
+    description = "Configuration to 'allow' or 'block' access from host based on MAC",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "The flag to enable or disable the rule.",
+      },
+      MACAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "MACAddress of the host.",
+      },
+      StartTime = {
+        access = "readWrite",
+        type = "string",
+        description = "Start time of the schedule. In format of '[hour]:[minute]'. Only one clock time '[hour]:[minute]' can be specified.",
+      },
+      StopTime = {
+        access = "readWrite",
+        type = "string",
+        description = "Stop time of the schedule. In format of '[hour]:[minute]'. Only one clock time '[hour]:[minute]' can be specified.",
+      },
+      Weekdays = {
+        access = "readWrite",
+        type = "string",
+        description = "Weekday can be any value of 'Mon, Tue, Wed, Thu, Fri, Sat, Sun'.",
+      },
+      Mode = {
+        access = "readWrite",
+        type = "string",
+        description = "Mode to allow/block the host.",
+        enumeration = {
+          "Allow",
+          "Block",
+        }
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "The flag to enable or disable the rule.",
+      },
+      PhysAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "MACAddress of the host.",
+      },
+      Schedule = {
+        access = "readWrite",
+        type = "string",
+        description = "Set of access restrictions settings, including both days and hours per day",
+      }
+    }
+  }
+}
+
+local lower = string.lower
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local common = mapper("nwcommon")
+local todBinding = { config = "tod" }
+local network = require("transformer.shared.common.network")
+local configChanged = false
+local modeMap = {
+  allow = "Allow",
+  block = "Block"
+}
+
+local knownWeekDay = {
+  Mon = true,
+  Tue = true,
+  Wed = true,
+  Thu = true,
+  Fri = true,
+  Sat = true,
+  Sun = true,
+  All = true
+}
+
+local knowndays = {
+ ["SUN"] = "Sun",
+ ["MON"] = "Mon",
+ ["TUE"] = "Tue",
+ ["WED"] = "Wed",
+ ["THU"] = "Thu",
+ ["FRI"] = "Fri",
+ ["SAT"] = "Sat",
+}
+
+local uciValueToDays = {}
+for index, uciValue in pairs(knowndays) do
+   uciValueToDays[uciValue] = index
+end
+
+local function getUciValue(section, option, default)
+  todBinding.sectionname = section
+  todBinding.option = option
+  todBinding.default = default
+  return getFromUci(todBinding)
+end
+
+local function setUciValue(section, option, value)
+  todBinding.sectionname = section
+  todBinding.option = option
+  setOnUci(todBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getWeekdays(weekdays)
+  local validDays = {}
+  for _, day in ipairs(weekdays) do
+    if knownWeekDay[day] then
+      validDays[#validDays + 1] = day
+    end
+  end
+  return table.concat(validDays, ",")
+end
+
+local weekDaysOrder = " Sun Mon Tue Wed Thu Fri Sat"
+
+local function getScheduleValues(param, key)
+   local startTime = getUciValue(key, "start_time")
+   local stopTime = getUciValue(key, "stop_time")
+   local weekDays = getUciValue(key, "weekdays", {})
+   local days = ""
+   local dayRange, timeRange = "", ""
+   for key, uciValue in ipairs(weekDays) do
+     days = days .. " " .. uciValue
+   end
+   if days ~= "" and weekDaysOrder:match(days) then
+      dayRange = uciValueToDays[weekDays[1]] .. "-" .. uciValueToDays[weekDays[#weekDays]]
+      if weekDays[1] == "Sun" and weekDays[#weekDays] == "Sat" then
+         dayRange =  "*"
+      elseif weekDays[1] == weekDays[#weekDays] then
+        dayRange =  uciValueToDays[weekDays[1]]
+      end
+   else
+      local dayRangeStart, dayRangeEnd = string.match(getWeekdays(weekDays), "(.*)-(.*)")
+      if dayRangeStart and  dayRangeEnd then
+         dayRange = uciValueToDays[dayRangeStart] .. " " .. uciValueToDays[dayRangeEnd]
+      end
+   end
+   timeRange = (startTime == "00:00" and stopTime == "23:59") and "*" or startTime .. "-" .. stopTime
+   return dayRange .. " " .. timeRange or ""
+end
+
+local function getSchedule(param, key)
+   local schedRange = getScheduleValues(param, key)
+   todBinding.sectionname = "host"
+   uciHelper.foreach_on_uci(todBinding, function(s)
+     if s["_key"] and s["_key"] == key then
+        schedRange = schedRange .. "," .. getScheduleValues(param, s[".name"])
+     end
+   end)
+   return schedRange
+end
+
+
+Multi_X_000E50_AccessControl_Host_i_.entries = function(mapping)
+  local entries = {}
+  todBinding.sectionname = "host"
+  uciHelper.foreach_on_uci(todBinding, function(s)
+    if mapping.objectType.name:match("^Device.Hosts.X_DT_AccessControl") then
+      -- Form entries with the restricted mode rules only
+      if not s["_key"] and s["mode"] == "block" then
+        entries[#entries + 1] = s[".name"]
+      end
+    else
+      entries[#entries + 1] = s[".name"]
+    end
+  end)
+  return entries
+end
+
+Multi_X_000E50_AccessControl_Host_i_.get = {
+  Enabled = function(mapping, param, key)
+    return getUciValue(key, "enabled", "0")
+  end,
+  Enable = function(mapping, param, key)
+    return getUciValue(key, "enabled", "0")
+  end,
+  PhysAddress = function(mapping, param, key)
+    return getUciValue(key, "id")
+  end,
+  MACAddress = function(mapping, param, key)
+    return getUciValue(key, "id")
+  end,
+  StartTime = function(mapping, param, key)
+    return getUciValue(key, "start_time")
+  end,
+  StopTime = function(mapping, param, key)
+    return getUciValue(key, "stop_time")
+  end,
+  Weekdays = function(mapping, param, key)
+    return getWeekdays(getUciValue(key, "weekdays", {}))
+  end,
+  Mode = function(mapping, param, key)
+    return modeMap[getUciValue(key, "mode")] or ""
+  end,
+  Schedule = function(mapping, param, key)
+    return getSchedule(param ,key)
+  end
+}
+
+Multi_X_000E50_AccessControl_Host_i_.getall = function(mapping, key)
+  todBinding.sectionname = key
+  todBinding.option = nil
+  local todData = uciHelper.getall_from_uci(todBinding)
+  return {
+    Enabled = todData.enabled or "0",
+    Enable = todData.enabled or "0",
+    MACAddress = todData.id or "",
+    StartTime = todData.start_time or "",
+    StopTime = todData.stop_time or "",
+    Weekdays = getWeekdays(todData.weekdays or {}),
+    Mode = modeMap[todData.mode] or "",
+    Schedule = getSchedule(param ,key) or "",
+  }
+end
+
+local function validWeekdays(weekdays)
+  local validDays = {}
+  for day in weekdays:gmatch("([^,]+)") do
+    if not knownWeekDay[day] then
+      return nil, "Invalid Weekday(s)"
+    end
+    validDays[#validDays + 1] = day
+  end
+  return validDays
+end
+
+local function numberInRange(value, low, high)
+  if not value and low and high then
+    return false
+  end
+  return (low<=value) and (value<=high)
+end
+
+local function validTime(hour, minute)
+  return numberInRange(hour, 0, 23) and numberInRange(minute, 0, 59)
+end
+
+local function validScheduleTime(time)
+  local hour, minute = time:match("^(%d+):(%d+)$")
+  if hour and minute then
+    return validTime(tonumber(hour), tonumber(minute))
+  end
+end
+
+local function setTimeValue(option)
+  return function(_, _, value, key)
+    if not validScheduleTime(value) then
+      return nil, "Invalid Time"
+    end
+    setUciValue(key, option, value)
+  end
+end
+
+local function setSchedule(value, key)
+    local startDay, endDay, startTime, endTime
+    local days, Time = value:match("(.*)%s(.*)")
+    if days == nil or Time == nil then
+       return "Invalid input. Should be in format SUN-SAT 00:00-23:00"
+    end
+    if days == "*" then
+      startDay, endDay  = "SUN", "SAT"
+    elseif days:match("^%u%u%u$") then
+      startDay = days:match("%u%u%u")
+      endDay = ""
+    else
+      startDay, endDay = days:match("(.*)-(.*)")
+    end
+    if Time == "*" then
+      startTime, endTime = "00:00", "23:59"
+    else
+      startTime, endTime = Time:match("(.*)-(.*)")
+    end
+    if startDay == nil or endDay == nil or startTime == nil or endTime == nil then
+      return "Invalid input. Should be in format SUN-SAT 00:00-23:00"
+    end
+    if not validScheduleTime(startTime) or not validScheduleTime(endTime) then
+      return "Invalid Time"
+    end
+    setUciValue(key, "start_time", startTime)
+    setUciValue(key, "stop_time", endTime)
+    startDay = knowndays[startDay]
+    if endDay ~= "" then
+       endDay = knowndays[endDay]
+    else
+       endDay = ""
+    end
+    if startDay == nil or endDay == nil then
+      return "Invalid weekdays"
+    end
+    local pattern = startDay .. ".*" .. endDay
+    if endDay ~= "" and not string.match(weekDaysOrder,(pattern)) then
+      return "Invalid weekdays. Value should be in the range of \"MON, TUE, WED, THU, FRI, SAT, SUN\" "
+    end
+    local valueRange = endDay ~= "" and string.match(weekDaysOrder,(pattern)) or startDay
+    local setTable = {}
+    for matchDay in string.gmatch(valueRange, "(%a+)") do
+      setTable[#setTable + 1] = matchDay
+    end
+    setUciValue(key, "weekdays", setTable)
+    return ""
+end
+
+Multi_X_000E50_AccessControl_Host_i_.set = {
+  Enable = function(mapping, param, value, key)
+    setUciValue(key, "enabled", value)
+    todBinding.sectionname = "host"
+    uciHelper.foreach_on_uci(todBinding, function(s)
+      if key == s["_key"] then
+        setUciValue(s[".name"], "enabled", value)
+      end
+    end)
+  end,
+  Enabled = function(mapping, param, value, key)
+    setUciValue(key, "enabled", value)
+  end,
+  MACAddress = function(mapping, param, value, key)
+    if not common.isMAC(value) then
+      return nil, "Invalid MAC address"
+    end
+    setUciValue(key, "id", value)
+  end,
+  PhysAddress = function(mapping, param, value, key)
+    if not common.isMAC(value) then
+      return nil, "Invalid MAC address"
+    end
+    setUciValue(key, "id", value)
+    todBinding.sectionname = "host"
+    uciHelper.foreach_on_uci(todBinding, function(s)
+      if key == s["_key"] then
+         setUciValue(s[".name"], "mac", value)
+      end
+    end)
+  end,
+  Weekdays = function(mapping, param, value, key)
+    local weekdays, err = validWeekdays(value)
+    if not weekdays then
+      return nil, err
+    end
+    setUciValue(key, "weekdays", weekdays)
+  end,
+  StartTime = setTimeValue("start_time"),
+  StopTime = setTimeValue("stop_time"),
+  Mode = function(mapping, param, value, key)
+    setUciValue(key, "mode", lower(value))
+  end,
+  Schedule = function(mapping, param, value, key)
+    local count = 0
+    local retValue = ""
+    local schduleList, duplicateTable = {}, {}
+    for schedule in string.gmatch(value, '([^,]+)') do
+      schedule = schedule:match("^%s*(.+)")
+      for _, dupli in pairs(duplicateTable) do
+         if dupli == schedule then
+            return nil, "Duplicate entries found"
+         end
+      end
+      duplicateTable[count] = schedule
+      count = count + 1
+      if count == 1 then
+        retValue = setSchedule(schedule, key)
+      else
+        schduleList[#schduleList + 1] = schedule
+      end
+    end
+    if retValue ~= "" then
+       return nil, retValue
+    end
+    todBinding.sectionname = "host"
+    uciHelper.foreach_on_uci(todBinding, function(s)
+       if s["_key"] == key then
+          todBinding.sectionname = s[".name"]
+          todBinding.option = nil
+          uciHelper.delete_on_uci(todBinding, commitapply)
+       end
+    end)
+    if count ~= 1 then
+      local macId = getUciValue(key, "id") or ""
+      local enabled = getUciValue(key, "enabled") or ""
+      for _, mac in ipairs(schduleList) do
+        local host = network.getNewSection("tod", "host")
+        todBinding.sectionname = host
+        todBinding.option = nil
+        uciHelper.set_on_uci(todBinding, "host", commitapply)
+        setUciValue(host, "type", "mac")
+        setUciValue(host, "mode", "block")
+        setUciValue(host, "id", macId)
+        setUciValue(host, "enabled", enabled)
+        setUciValue(host, "_key", key)
+        retValue = setSchedule(mac, host)
+        if retValue ~= "" then
+          return nil, retValue
+        end
+      end
+     end
+   return retValue
+  end
+}
+
+Multi_X_000E50_AccessControl_Host_i_.add = function(mapping)
+  local host = network.getNewSection("tod", "host")
+  todBinding.sectionname = host
+  todBinding.option = nil
+  uciHelper.set_on_uci(todBinding, "host", commitapply)
+  setUciValue(host, "type", "mac")
+  if mapping.objectType.name:match("^Device.Hosts.X_DT_AccessControl") then
+    setUciValue(host, "mode", "block")
+  end
+  return host
+end
+
+Multi_X_000E50_AccessControl_Host_i_.delete = function(mapping, key)
+  todBinding.sectionname = key
+  todBinding.option = nil
+  uciHelper.delete_on_uci(todBinding, commitapply)
+  if mapping.objectType.name:match("^Device.Hosts.X_DT_AccessControl") then
+    todBinding.sectionname = "host"
+    uciHelper.foreach_on_uci(todBinding, function(s)
+      if key == s["_key"] then
+         todBinding.sectionname = s[".name"]
+         todBinding.option = nil
+         uciHelper.delete_on_uci(todBinding, commitapply)
+      end
+    end)
+  end
+  configChanged = true
+  return true
+end
+
+Multi_X_000E50_AccessControl_Host_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(todBinding)
+  end
+  configChanged = false
+end
+
+Multi_X_000E50_AccessControl_Host_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(todBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicate = duplicator(Multi_X_000E50_AccessControl_Host_i_, "#ROOT", {"InternetGatewayDevice.X_000E50_AccessControl", "Device.X_000E50_AccessControl", "Device.Hosts.X_DT_AccessControl"})
+for _, dupli in ipairs(duplicate) do
+  if dupli.objectType.name:match('Device.X_000E50_AccessControl.') then
+    dupli.objectType.parameters.Enable = nil
+    dupli.objectType.parameters.PhysAddress = nil
+    dupli.objectType.parameters.Schedule = nil
+  else
+    dupli.objectType.parameters.Enabled = nil
+    dupli.objectType.parameters.MACAddress = nil
+    dupli.objectType.parameters.StartTime = nil
+    dupli.objectType.parameters.StopTime = nil
+    dupli.objectType.parameters.Weekdays = nil
+    dupli.objectType.parameters.Mode = nil
+  end
+  register(dupli)
+end

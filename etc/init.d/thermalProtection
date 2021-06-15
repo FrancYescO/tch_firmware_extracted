@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+CRONTABS=/etc/crontabs
+CRONRULE=$CRONTABS/root
+
+CROND=/usr/sbin/crond
+
+start() {
+	logger -t thermalProtection "Starting thermalProtection daemon"
+    recurrence=`uci get thermal_protection.thermalprotection.recurrence`
+    [ -z ${recurrence} ] && {recurrence=5}
+
+    if !(grep -q "thermalProtection" $CRONRULE 2>/dev/null); then
+        #temp1_dirs=$(find /sys/devices/i2c-*/ -name temp1_input | xargs echo)
+        temp1_dirs=$(find /sys/devices -name *temp1_input* | xargs echo)
+        mkdir -p $CRONTABS
+        echo "*/${recurrence} * * * * /usr/bin/thermalProtection ${temp1_dirs}" >> $CRONRULE
+        if ! service_check $CROND; then
+		/etc/init.d/cron start
+        fi
+	fi
+}
+
+stop() {
+	logger -t thermalProtection "Stopping thermalProtection daemon"
+	# service_stop $CROND
+    sed -i '/thermalProtection/d' $CRONRULE
+}

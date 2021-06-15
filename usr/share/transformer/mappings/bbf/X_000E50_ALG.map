@@ -1,0 +1,205 @@
+-- Manually generated
+local Multi_X_000E50_ALG_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Object to customize the ALG",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        description = "Name of the Service"
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables or disables the corresponding ALG"
+      },
+      DestPort = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        default = "0",
+        description = "Destination port of the ALG"
+      },
+      Protocol = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+	  "TCPUDP"
+        },
+        description = "Protocol of the ALG",
+      },
+      Interface = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Interface for the Service"
+      },
+    },
+  }
+}
+
+local upper = string.upper
+local uciHelper = mapper("ucihelper")
+local fwBinding = { config = "firewall" }
+local fwHelpersBinding =  { config = "firewall_helpers" }
+local network = require("transformer.shared.common.network")
+local getMappingType = network.getMappingType
+local transactions = {}
+
+local function getFromUci(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setOnUci(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  uciHelper.set_on_uci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+local function getFirewallIntf(helperName)
+  local intf
+  fwBinding.sectionname = "zone"
+  uciHelper.foreach_on_uci(fwBinding, function(s)
+    for _, helper in pairs(s.helper or {}) do
+      if helper == helperName and s.name ~= "loopback" then
+        intf = s.name
+        return false
+      end
+    end
+  end)
+  return intf
+end
+
+local function getInterface(mapping, helperName)
+  local path
+  local interface = getFirewallIntf(helperName)
+  if interface then
+    mapping._section = getMappingType(mapping)
+    if mapping._section == "device2" then
+      path = resolve("Device.IP.Interface.{i}.", interface)
+    else
+      local lanInterfaces = network.getLanInterfaces()
+      if lanInterfaces[interface] then
+        path = resolve('InternetGatewayDevice.LANDevice.{i}.', interface)
+      else
+        path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", interface)
+      end
+    end
+  end
+  return path or ""
+end
+
+-- get firewall zone sectionname(or cfgid) of given intf name
+local function getFirewallZoneSectionName(intf)
+  local section_name
+  fwBinding.sectionname = "zone"
+  uciHelper.foreach_on_uci(fwBinding, function(s)
+    if s["name"] == intf then
+      section_name = s[".name"]
+      return false
+    end
+  end)
+  return section_name or ""
+end
+
+Multi_X_000E50_ALG_i_.entries = function()
+  local entries = {}
+  fwHelpersBinding.sectionname = "helper"
+  uciHelper.foreach_on_uci(fwHelpersBinding, function(s)
+    entries[#entries + 1] = s[".name"]
+  end)
+  return entries
+end
+
+Multi_X_000E50_ALG_i_.get = {
+  Name = function(mapping, param, key)
+    return upper(getFromUci(fwHelpersBinding, key, "name"))
+  end,
+  Enable = function(mapping, param, key)
+    local name = getFromUci(fwHelpersBinding, key, "name")
+    return getFirewallIntf(name) and "1" or "0"
+  end,
+  DestPort = function(mapping, param, key)
+    return getFromUci(fwHelpersBinding, key, "port", "0")
+  end,
+  Protocol = function(mapping, param, key)
+    return upper(getFromUci(fwHelpersBinding, key, "proto"))
+  end,
+  Interface = function(mapping, param, key)
+    local name = getFromUci(fwHelpersBinding, key, "name")
+    return getInterface(mapping, name)
+  end,
+}
+
+Multi_X_000E50_ALG_i_.getall = function(mapping, key)
+  fwHelpersBinding.sectionname = key
+  local allValues = uciHelper.getall_from_uci(fwHelpersBinding)
+  return {
+    Name = upper(allValues.name or ""),
+    Enable = getFirewallIntf(allValues.name) and "1" or "0",
+    DestPort = allValues.port or "0",
+    Protocol = upper(allValues.proto or ""),
+    Interface = getInterface(mapping, allValues.name),
+  }
+end
+
+Multi_X_000E50_ALG_i_.set = {
+  Enable = function(mapping, param, value, key)
+    local name = getFromUci(fwHelpersBinding, key, "name")
+    local intf = getFirewallIntf(name)
+    local oldValue = intf and "1" or "0"
+    if value ~= oldValue then
+      -- By default add helper list in LAN zone incase Enable 1
+      local interface = value == "1" and "lan" or intf
+      local sectionname = getFirewallZoneSectionName(interface)
+      local helperList = getFromUci(fwBinding, sectionname, "helper", {})
+      if value == "1" then
+        helperList[#helperList + 1] = name
+        setOnUci(fwBinding, sectionname, "helper", helperList)
+      else
+        local newList = {}
+        for _, helper in pairs(helperList) do
+          if helper ~= name then
+            newList[#newList + 1] = helper
+          end
+        end
+        setOnUci(fwBinding, sectionname, "helper", newList)
+      end
+    end
+  end,
+}
+
+Multi_X_000E50_ALG_i_.commit = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_X_000E50_ALG_i_.revert = function()
+  for config in pairs(transactions) do
+    uciHelper.revert({config = config})
+  end
+  transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_ALG_i_, "#ROOT", {"Device.Services.X_BELGACOM_ALG", "Device.Services.X_000E50_ALG", "InternetGatewayDevice.X_000E50_ALG" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

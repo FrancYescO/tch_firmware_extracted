@@ -1,0 +1,90 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/storage.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/tour.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-splash"> <template> <style include="duma-theme"> :host #dialog {
+        max-width: 40vw;
+      } </style> <paper-dialog class="splash-dialog" with-backdrop on-iron-overlay-closed="_skip"> <h2 dialog-label>[[title]]</h2> <paper-dialog-scrollable> <div class="inner"> <content></content> </div> </paper-dialog-scrollable> <div class="buttons"> <template is="dom-if" if="[[!noTour]]"> <paper-button on-tap="_skip">[[buttonSkipText]]</paper-button> <paper-button on-tap="_tour">[[buttonTourText]]</paper-button> </template> <template is="dom-if" if="[[noTour]]"> <paper-button on-tap="_skip">[[buttonCloseText]]</paper-button> </template> </div> </paper-dialog> </template> <script> Polymer({
+      is: "duma-splash",
+      properties: {
+        id: String,
+        rapp: String,
+        autoTour: {
+          type: Boolean,
+          value: true
+        },
+        noTour: {
+          type: Boolean,
+          value: false
+        },
+        title: String,
+        buttonCloseText: {
+          type: String,
+          value: "<%= i18n.close %>"
+        },
+        buttonTourText: {
+          type: String,
+          value: "<%= i18n.getStarted %>"
+        },
+        buttonSkipText: {
+          type: String,
+          value: "<%= i18n.skipTour %>"
+        }
+      },
+
+      get $dialog() {
+        return this.__$dialog || (this.__$dialog = this.$$(".splash-dialog"));
+      },
+      
+
+      _getDontShowKey: function () {
+        if(!this.id) throw new Error("duma-splash does not have a set id.");
+        return "__duma-splash-dont-show-again-" + this.id;
+      },
+
+      _setDontShowAgain: function(state){
+        if(!this.id) throw new Error("duma-splash does not have a set id.");
+
+        var key = this._getDontShowKey();
+        duma.storage(this.rapp,key,state ? "true" : null);
+      },
+
+      _skip: function(){
+        if(!this.hasTourTriggered()){
+          this.$dialog.close();
+          if(!this.noTour){
+            duma.tour.fireTourFoundHere();
+            this.fire("skip-tour",{
+              rapp: this.rapp,
+              id: this.id
+            });
+          }
+          this._setDontShowAgain(true);
+        }
+      },
+
+      _tour: function(){
+        this.$dialog.close();
+          this.fire("start-tour",{
+            rapp: this.rapp,
+            id: this.id
+          });
+        if(this.autoTour && !this.noTour){
+          hopscotch.startTour(duma.tour.getTour()(0), 0);
+        }
+        this._setDontShowAgain(true);
+      },
+
+      ready: function(){
+        if(!this.id) throw new Error("duma-splash does not have a set id.");
+        if(!this.rapp) this.rapp = top.location.hash.replace("#","");
+        var state = duma.storage(this.rapp,this._getDontShowKey());
+        if(state !== "true" && state !== true){
+          this.$dialog.open();
+        }
+        $("[remove-hidden][hidden]",this).attr("hidden",null);
+      },
+
+      hasTourTriggered: function(){
+        return duma.storage(this.rapp,this._getDontShowKey()) === "true";
+      }
+    }); </script> </dom-module> 

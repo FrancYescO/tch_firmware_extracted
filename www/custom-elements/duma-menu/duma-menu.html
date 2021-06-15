@@ -1,0 +1,275 @@
+<!-- 
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <!--
+Custom property | Description | Default
+----------------|-------------|----------
+`--duma-menu-color`               || `--secondary-text-color`
+`--duma-menu-hover-color`         || `--primary-text-color`
+`--duma-menu-not-color`           || `--primary-text-color`
+`--duma-menu-disabled-color`      || `--disabled-text-color`
+`--duma-menu-divider-color`       || `--divider-color`
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-menu/paper-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-menu"> <template> <style include="duma-theme iron-flex iron-flex-alignment iron-positioning"> ::content iron-icon {
+        --iron-icon: {
+          flex-shrink: 0;
+        };
+      }
+      ::content iron-icon:first-of-type {
+        margin-right: 12px;
+      }
+      ::content iron-page > div,
+      ::content iron-page paper-menu {
+        margin: 8px 0;
+      }
+      ::content iron-page > div > div,
+      ::content paper-menu paper-item {
+        min-width: 256px;      
+        position: relative;
+        cursor: pointer;
+        min-height: 40px;
+        line-height: 24px;
+        padding: 0 16px;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        color: var(--duma-menu-color, --secondary-text-color);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        transition: color 150ms ease-in-out;
+      }
+      ::content iron-page > div hr,
+      ::content paper-menu hr {
+        margin: 8px 0;
+        border: none;
+        border-top: thin solid var(--duma-menu-divider-color, --divider-color);
+      }
+      ::content iron-page > div > div:hover,
+      ::content paper-menu paper-item:hover {
+        color: var(--duma-menu-hover-color, --primary-text-color);
+      }
+      ::content iron-page > div > div[disabled],
+      ::content paper-menu paper-item[disabled] {
+        color: var(--duma-menu-disabled-color, --disabled-text-color);
+        cursor: default;
+      }
+      ::content iron-page > div > div[not-a-button],
+      ::content paper-menu paper-item[not-a-button] {
+        color: var(--duma-menu-not-color, --primary-text-color);
+        cursor: initial;
+      }
+      ::content iron-page > div > div iron-icon,
+      ::content paper-menu paper-item iron-icon {
+        flex-shrink: 0;
+      }
+      ::content iron-page > div > div paper-checkbox:first-child,
+      ::content paper-menu paper-item paper-checkbox:first-child {
+        margin-left: 3px;
+      }
+      ::content iron-page > div > div paper-checkbox:first-child + span,
+      ::content paper-menu paper-item paper-checkbox:first-child + span {
+        margin-left: -6px;
+      }
+      ::content iron-page > div > div iron-icon[icon="chevron-right"],
+      ::content iron-page > div > div *[right],
+      ::content paper-menu paper-item iron-icon[icon="chevron-right"],
+      ::content paper-menu paper-item *[right] {
+        margin-left: auto;
+      } </style> <div class="pages-container" aria-labelledby$="aria-announce-menu-[[ariaId]]"> <span class="sr-only" id$="aria-announce-menu-[[ariaId]]" role="status"></span> <iron-pages class="pages" selected="{{selected}}" attr-for-selected="{{attrForSelected}}"> <content select="iron-page"></content> </iron-pages> </div> </template> <script> Polymer({
+      is: "duma-menu",
+      properties: {
+        selected: {
+          type: String,
+          value: "main",
+          notify: true,
+          observer: "_onSelectedChanged"
+        },
+        attrForSelected: {
+          type: String,
+          value: "name"
+        },
+        resetOnOverlayClose: {
+          type: Boolean,
+          value: false,
+        },
+        ariaId: {
+          type: Number,
+          value: (nextMenuId=0,() => nextMenuId++)
+        }
+      },
+
+      //function (jpages,jtarget,jdiv)
+      //return false to return and quit
+      _attributeFunctions: {
+        "disabled": false,
+        "goto": function(pages,target,div){
+          this.selected = div.attr("goto");
+          return false;
+        },
+        "click-this": function(pages,target,div){
+          target.find(div.attr("click-this")).click();
+        },
+        "href": function(pages,target,div){
+          var newwin = window.open(div.attr("href"),'_blank');
+          newwin.focus();
+        },
+        "dont-close": false,
+      },
+
+      listeners: {
+        "click": "clickHandler",
+        "tap": "clickHandler",
+      },
+
+      get $pages() {
+        return this.__$pages || (this.__$pages = this.$$(".pages"));
+      },
+
+      get $pagesContainer() {
+        return this.__$pagesContainer || (this.__$pagesContainer = this.$$(".pages-container"));
+      },
+
+      _setStatus: function(){
+        var page = $("iron-page[name=\"" + this.selected + "\"]",this);
+        var text = page.attr("page-read");
+        if(page[0] !== $(this.$pages).find("iron-page")[0]){
+          text = "<%= i18n.ariaStatusSubmenu %>".format(text);
+        }
+        this.$$("#aria-announce-menu-" + this.ariaId).textContent = text;
+      },
+
+      _onSelectedChanged: function(newSel,oldSel){
+        if(!oldSel) return;
+        var page = $("iron-page[name=\"" + newSel + "\"]",this);
+        this.setFocus(oldSel);
+      },
+
+      removeSelected: function(){
+        $("paper-menu",this).prop("selected",null);
+        $("[aria-current]",this).attr("aria-current",null);
+      },
+
+      setFocus: function(highlightFromPage){
+        //delay because we need to wait for page transitions
+        var page = $("iron-page[name=\"" + this.selected + "\"]",this);
+        // get the item that links to the page just linked from, then the first item
+        //get if there is a link to the previous page, that is not the first-child link at the top
+        var item = page.find("paper-item[goto=\"" + (highlightFromPage || "AUTO") + "\"]",page), item = item[0] ? item : page.find("paper-item");
+        this.removeSelected();
+        if(item[0]) {
+          item[0].focus();
+          setTimeout(() => {
+            this.fakeKeyPressToMoveFocusToMenu();
+            this._setStatus();
+          },10);
+        };
+      },
+
+      fakeKeyPressToMoveFocusToMenu: function(){
+        var keyboardEvent = document.createEvent('KeyboardEvent');
+        var initMethod = typeof keyboardEvent.initKeyboardEvent !== 'undefined' ? 'initKeyboardEvent' : 'initKeyEvent';
+
+        // make a fake shift key keypress, so that the focus transfers back to the menu, otherwise, screen reader will focus on the parent paper-menu-button
+        keyboardEvent[initMethod](
+          'keydown', // event type: keydown, keyup, keypress
+          true, // bubbles
+          true, // cancelable
+          window, // view: should be window
+          false, // ctrlKey
+          false, // altKey
+          true, // shiftKey
+          false, // metaKey
+          16, // keyCode: unsigned long - the virtual key code, else 0 - 16 is shift
+          0, // charCode: unsigned long - the Unicode character associated with the depressed key, else 0
+        );
+        document.dispatchEvent(keyboardEvent);
+      },
+
+      clickHandler: function(e){
+        var janimPages = $(this.$pages);
+        var animPages = janimPages[0];
+        var jtarget = $(e.target);
+        var divButton = jtarget.closest("paper-item")[0] ? jtarget.closest("paper-item") : jtarget.closest("iron-page").find("*:not(paper-menu) > div").has(e.target);
+
+        for(var key in this._attributeFunctions){
+          var func = this._attributeFunctions[key];
+          if(divButton.attr(key) !== undefined){
+            if(func === false) return;
+
+            if(typeof func === "function"){
+              var result = func.call(this,janimPages,jtarget,divButton);
+              if(result === false) return;
+            }
+          }
+        }
+        var jcheckboxElem = divButton.children("paper-checkbox");
+        if(jcheckboxElem.length){
+          if(!jtarget.closest("paper-checkbox")[0]){
+            jcheckboxElem[0].set('checked',!jcheckboxElem[0].checked);
+          }
+          return;
+        }
+        var jtoggleElem = divButton.children("paper-toggle-button");
+        if(jtoggleElem.length){
+          if(!jtarget.closest("paper-toggle-button")[0]){
+            jtoggleElem[0].set('checked',!jtoggleElem[0].checked);
+          }
+          return;
+        }
+        this.fire("menu-click");
+      },
+
+      _bindPreventIronOverlayPropogation: function(){
+        this.$pagesContainer.addEventListener("focus",(e) => {
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        });
+        $(this.$pagesContainer).on("iron-overlay-closed, iron-select, iron-activate, click, tap, iron-items-changed, focus",function(e){
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        });
+      },
+
+      ready: function(){
+        this._bindPreventIronOverlayPropogation();
+      },
+
+      firstPage: function(){
+        this.selected = $(this.$pages).find("iron-page")[0].attributes.name.value;
+      },
+
+      _closeChildDropdowns: function(){
+        $(this.$pages).find("iron-dropdown").each(function(index,element){
+          if(element.close) element.close();
+        });
+      },
+
+      _onDropdownClose: function(){
+        this.firstPage();
+        this._closeChildDropdowns();
+        this.removeSelected();
+      },
+
+      _preDrop: null,
+      _preOpen: null,
+      attached: function(){
+        var drop = $(this.$pages).closest("iron-dropdown, paper-dialog")[0];
+        if(drop && this.resetOnOverlayClose){
+          function onOpen(){
+            this.setFocus();
+            this._setStatus();
+          }
+          function onClose(){
+            this._onDropdownClose();
+          }
+          if(this._preDrop){
+            drop.removeEventListener("iron-overlay-closed",onClose.bind(this));
+          }
+          if(this._preOpen){
+            drop.removeEventListener("iron-overlay-opened",onOpen.bind(this));
+          }
+
+          this._preDrop = drop.addEventListener("iron-overlay-closed",onClose.bind(this));
+          this._preOpen = drop.addEventListener("iron-overlay-opened",onOpen.bind(this));
+        }
+      }
+    }); </script> </dom-module> 

@@ -1,0 +1,94 @@
+-- Automatically generated from Device:2.2
+-- using generator version 2.1
+local Device_WiFi_ = {
+  objectType = {
+    name = "Device.WiFi.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- RadioNumberOfEntries
+      -- automatically created when Device.WiFi.Radio.{i}. is loaded
+      -- SSIDNumberOfEntries
+      -- automatically created when Device.WiFi.SSID.{i}. is loaded
+      -- AccessPointNumberOfEntries
+      -- automatically created when Device.WiFi.AccessPoint.{i}. is loaded
+      -- EndPointNumberOfEntries
+      -- automatically created when Device.WiFi.EndPoint.{i}. is loaded
+      X_FASTWEB_AssociatedDeviceExpiredTime = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      X_DT_EncryptionKey = {
+        access = "readWrite",
+        type = "string",
+        description = "The encryption key used to encypt the value of the Wifi WPA KeyPassphrase",
+      },
+    }
+  }
+}
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local binding = {}
+local transactions = {}
+local function getUciParam(config, sectionName, option, default)
+  binding.config = config
+  binding.sectionname = sectionName
+  binding.default = default
+  if option then
+    binding.option = option
+    return getFromUci(binding)
+  end
+  return getAllFromUci(binding)
+end
+
+local function setUciParam(config, sectionName, option, value)
+  binding.config = config
+  binding.sectionname = sectionName
+  binding.option = option
+  setOnUci(binding,value,commitApply)
+  transactions[config] = true
+end
+
+Device_WiFi_.get = {
+  X_FASTWEB_AssociatedDeviceExpiredTime = function(mapping, param, key)
+    return  getUciParam("wireless", "global", "device_expired_time", "0")
+  end,
+  X_DT_EncryptionKey = function(mapping, param, key)
+    return  getUciParam("wireless", "global", "provisioned_key")
+  end
+}
+
+Device_WiFi_.set = {
+  X_FASTWEB_AssociatedDeviceExpiredTime = function(mapping, param, value, key)
+    setUciParam("wireless", "global", "device_expired_time", value)
+  end,
+  X_DT_EncryptionKey = function(mapping, param, value, key)
+    setUciParam("wireless", "global", "provisioned_key", value)
+  end
+}
+
+Device_WiFi_.commit = function()
+  for config,_ in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_WiFi_.revert = function()
+  for config,_ in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+
+
+register(Device_WiFi_)

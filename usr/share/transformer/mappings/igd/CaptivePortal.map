@@ -1,0 +1,132 @@
+local lfs = require("lfs")
+local captivePortal_supported = lfs.attributes("/etc/config/captive_portal", "mode") == "file"
+if not captivePortal_supported then
+  return
+end
+
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local InternetGatewayDevice_CaptivePortal_ = {
+  objectType = {
+    name = "InternetGatewayDevice.CaptivePortal.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_URLEmpty",
+          "Error",
+        },
+      },
+      AllowedList = {
+        access = "readWrite",
+        list = true,
+        max = "10000",
+        type = "string",
+      },
+      CaptivePortalURL = {
+	access = "readWrite",
+        type = "string",
+        max = "2000",
+      },
+    }
+  }
+}
+
+local mapper, commitApply = mapper, commitapply
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local captiveBinding = {config = "captive_portal", sectionname = "global"}
+local configChanged
+local conn = mapper("ubus").connect()
+
+local function getUciValue(option, default)
+  captiveBinding.option = option
+  captiveBinding.default = default
+  return getFromUci(captiveBinding)
+end
+
+local function setUciValue(option, value)
+  captiveBinding.option = option
+  setOnUci(captiveBinding, value, commitApply)
+  configChanged = true
+end
+
+InternetGatewayDevice_CaptivePortal_.get = {
+  Enable = function(mapping, param, value)
+    return getUciValue("enable", "0")
+  end,
+  Status = function(mapping, param, value)
+    if getUciValue("enable", "0") == "0" then
+      return "Disabled"
+    elseif getUciValue("redirect_url") == "" then
+      return "Error_URLEmpty"
+    else
+      return "Enabled"
+    end
+  end,
+  AllowedList = function(mapping, param, value)
+    local result = getUciValue("allowed_ip")
+    return result ~="" and table.concat(result, ',') or ""
+  end,
+  CaptivePortalURL = function(mapping, param, value)
+    return getUciValue("redirect_url")
+  end,
+}
+
+InternetGatewayDevice_CaptivePortal_.set = {
+  Enable = function(mapping, param, value)
+    setUciValue("enable", value)
+    local wanStatus = conn:call("network.interface.wan", "status", {})
+    if wanStatus.up then
+      local fd = io.open("/sys/class/leds/internet:orange/brightness", 'w+')
+      if fd then
+        if value == "1" then
+          fd:write('255')
+        else
+          fd:write('0')
+        end
+        fd:close()
+      end
+    end
+  end,
+  AllowedList = function(mapping, param, value)
+    local IPList = {}
+    for ip in string.gmatch(value, '([^,]+)') do
+      IPList[#IPList + 1] = ip
+    end
+    setUciValue("allowed_ip", IPList)
+  end,
+  CaptivePortalURL = function(mapping, param, value)
+    setUciValue("redirect_url", value)
+  end,
+}
+
+InternetGatewayDevice_CaptivePortal_.commit = function()
+  if configChanged then
+    commit(captiveBinding)
+    configChanged = false
+  end
+end
+
+InternetGatewayDevice_CaptivePortal_.revert = function()
+  if configChanged then
+    revert(captiveBinding)
+    configChanged = false
+  end
+end
+
+register(InternetGatewayDevice_CaptivePortal_)

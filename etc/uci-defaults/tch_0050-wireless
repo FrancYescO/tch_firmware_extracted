@@ -1,0 +1,108 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s1`
+
+uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+
+uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap3.wep_key=`uci get env.var.default_wep_key_r1_s1`
+
+uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r1_s1`
+
+uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s1`
+
+if [ "$DEV" == "dev" ] ; then
+  uci set wireless.radio_5G.channel=36
+fi
+
+SUPPORTED=`uci get wireless.ap0.supported_security_modes`
+for security in $SUPPORTED
+do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+    uci set wireless.ap0_credential0=wifi-ap-credential
+    uci set wireless.ap0_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+  fi
+done
+
+SUPPORTED=`uci get wireless.ap1.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap1_credential0=wifi-ap-credential
+      uci set wireless.ap1_credential0.passphrase=`uci get env.var.default_key_r0_s1`
+    fi
+  done
+
+SUPPORTED=`uci get wireless.ap2.supported_security_modes`
+for security in $SUPPORTED
+do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap2_credential0=wifi-ap-credential
+      uci set wireless.ap2_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+    fi
+done
+
+SUPPORTED=`uci get wireless.ap3.supported_security_modes`
+for security in $SUPPORTED
+do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap3_credential0=wifi-ap-credential
+      uci set wireless.ap3_credential0.passphrase=`uci get env.var.default_key_r1_s1`
+    fi
+done
+
+uci set wireless.ap4=wifi-ap
+uci set wireless.ap4.iface=wl1_2
+uci set wireless.ap4.state=1
+uci set wireless.ap4.ap_isolation=1
+uci set wireless.ap4.station_history=1
+uci set wireless.ap4.max_assoc=0
+uci set wireless.ap4.public=0
+uci set wireless.ap4.security_mode=none
+uci set wireless.ap4.pmf=disabled
+uci set wireless.ap4.pmksa_cache=1
+uci set wireless.ap4.wps_state=0
+uci set wireless.ap4.wps_w7pbc=0
+uci set wireless.ap4.wsc_state=configured
+uci set wireless.ap4.wps_ap_setup_locked=1
+uci set wireless.ap4.acl_mode=unlock
+uci set wireless.ap4.acl_registration_time=60
+uci set wireless.ap4.trace_level=some
+uci set wireless.ap4.bandsteer_id='off'
+
+uci set wireless.wl1_2=wifi-iface
+uci set wireless.wl1_2.device=radio_5G
+uci set wireless.wl1_2.mode=ap
+uci set wireless.wl1_2.state=1
+uci set wireless.wl1_2.reliable_multicast=0
+uci set wireless.wl1_2.ssid='Telstra_BH'
+uci set wireless.wl1_2.network='lan'
+uci set wireless.wl1_2.backhaul=1
+
+uci commit wireless

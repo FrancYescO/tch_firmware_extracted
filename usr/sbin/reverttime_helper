@@ -1,0 +1,70 @@
+#!/usr/bin/env lua
+
+local format = string.format
+local open, remove, execute = io.open, os.remove, os.execute
+local uci = require("uci")
+local cursor = uci.cursor()
+local lfs = require("lfs")
+local pattern = "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+local cronChanged = false
+
+local function deleteExistingCron(intf)
+  if lfs.attributes("/etc/crontabs/root", "mode") == "file" then
+    -- Remove if any cron jobs related to current interface is present.
+    execute("crontab -c /etc/crontabs/ -l | grep -v '/usr/share/transformer/scripts/sshserver.sh "..intf.."' | crontab -c /etc/crontabs/ -")
+    cronChanged = true
+  end
+end
+
+local function getRevertTime(intf)
+  local revertTime = ""
+  local fd = open("/tmp/.sshintf_" .. intf)
+  if fd then
+    revertTime = fd:read("*l")
+    fd:close()
+    remove("/tmp/.sshintf_" .. intf)
+  end
+  return revertTime
+end
+
+local crons = {}
+cursor:foreach("dropbear", "dropbear", function(s)
+  if s.enable == "0" or s.revert_time == "0" then
+    deleteExistingCron(s.Interface)
+  elseif s.Interface and lfs.attributes("/tmp/.sshintf_" .. s.Interface, "mode") == "file" then
+    deleteExistingCron(s.Interface)
+    local revertTime = getRevertTime(s.Interface)
+    local year, month, day, hour, minute = revertTime:match(pattern)
+    if year then
+      crons[#crons + 1] = format('%d %d %d %d * test `/bin/date +%%Y` == %d && /usr/share/transformer/scripts/sshserver.sh %s\n', minute, hour, day, month, year, s.Interface)
+    end
+  end
+end)
+
+if #crons > 0 then
+  -- Save the existing cron jobs if any to temp file /tmp/sshserver
+  execute("crontab -c /etc/crontabs/ -l 2>/dev/null > /tmp/sshserver")
+
+  -- Now append the given sshserver job to the list of existing cron jobs
+  local f = open("/tmp/sshserver", "a")
+  if not f then
+    error("could not append /tmp/sshserver")
+  end
+  for _, cron in pairs(crons) do
+    f:write(cron)
+  end
+  f:close()
+
+  -- Set the cron job
+  execute("crontab -c /etc/crontabs/ /tmp/sshserver")
+  cronChanged = true
+
+  -- Remove temp file /tmp/sshserver
+  remove("/tmp/sshserver")
+end
+
+if cronChanged then
+  execute("/etc/init.d/cron restart")
+end
+
+cursor:close()

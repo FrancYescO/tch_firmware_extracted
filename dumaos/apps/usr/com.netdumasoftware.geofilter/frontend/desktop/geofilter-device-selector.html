@@ -1,0 +1,403 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/devices.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="geofilter-device-selector"> <style is="custom-style" include="duma-theme"> .header-class {
+      margin-bottom: 0px !important;
+    }
+    .dev-name {
+      opacity: 0.75;
+    }
+    .invis-but-not-hidden {
+      visibility: hidden;
+    } </style> <template> <paper-dialog modal aria-label="<%= i18n.ariaDialog %>"> <h2 dialog-label class="header-class" id="geo-add-device-header">[[ _header(_selectedPageIndex,_profileMode) ]]</h2> <template is="dom-if" if="[[!_isFirstPage(_selectedPageIndex)]]"> <span class="dev-name">[[_subHeader(_selectedDeviceElement,_selectedServiceElement)]]</span> </template> <paper-dialog-scrollable> <iron-pages selected="{{_selectedPageIndex}}" attr-for-selected="name"> <iron-page name="start"> <div class="inner"> <p>[[_getDeviceCountText(_devices)]]</p> <paper-checkbox checked="{{_allDevices}}"><%= i18n.showAllDevices %></paper-checkbox> </div> <paper-listbox selected-item="{{_selectedDeviceElement}}" selected="{{_selectedDeviceIndex}}"> <template is="dom-repeat" items="[[_devices]]" as="device" sort="_sortDevices"> <template is="dom-if" if="[[_shouldShowDevice(device,_allDevices)]]"> <paper-item device="[[device]]">[[device.name]]</paper-item> </template> </template> </paper-listbox> </iron-page> <iron-page name="console" aria-labelledby="geo-add-device-header" role="region"> <div class="inner" id="geo-dev-explain-radio-recommend"> <span class="sr-only"><%= i18n.headerConsole %>.</span> <p> <%= i18n.consoleExplain1 %> </p> <p> <%= i18n.consoleExplain2 %> </p> </div> <div class="inner"> <paper-radio-group selected="{{_chooseSelected}}" focus-here aria-labelledby="geo-dev-explain-radio-recommend"> <paper-radio-button name="rec"><%= i18n.chooseRecommend %></paper-radio-button> <paper-radio-button name="man"><%= i18n.chooseManually %></paper-radio-button> </paper-radio-group> </div> </iron-page> <iron-page name="apps"> <paper-listbox selected-item="{{_selectedServiceElement}}" selected="{{_selectedServiceIndex}}" focus-here aria-label="<%= i18n.ariaAppSelect %>"> <template is="dom-repeat" items="[[_services]]" as="service" sort="_sortServices"> <template is="dom-if" if="[[_shouldShowService(service, tags)]]"> <paper-item service="[[service]]">[[service.application]]</paper-item> </template> </template> </paper-listbox> </iron-page> <iron-page name="filterrec" aria-labelledby="geo-add-device-header" role="region"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerFilterRec %>.</span> <p>[[_format("<%= i18n.filterModeRecommendedContent %>",_selectedServiceElement.service.application)]]</p> <p><%= i18n.filterModeRecommendedContent2 %></p> </div> </iron-page> <iron-page name="filternonrec" aria-labelledby="geo-add-device-header" role="region"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerFilterNonRec %>.</span> <p>[[_format("<%= i18n.filterModeNotRecommendedContent %>",_selectedServiceElement.service.application)]]</p> <p><%= i18n.filterModeNotRecommendedContent2 %></p> </div> </iron-page> <iron-page name="choose" aria-labelledby="geo-add-device-header"> <div class="inner" id="geo-dev-explain-fliter-toggle"> <span class="sr-only"><%= i18n.headerChoose %>.</span> <%= i18n.chooseContent %> </div> <div class="inner"> <paper-toggle-button checked="{{_doFilterMode}}" focus-here aria-labelledby="geo-dev-explain-fliter-toggle"><%= i18n.filteringMode %></paper-toggle-button> </div> </iron-page> <iron-page name="devAddFilt" aria-labelledby="geo-add-device-header"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerDevAddFilt %>.</span> <%= i18n.devAddFilt %> </div> </iron-page> <iron-page name="devAddNonFilt" aria-labelledby="geo-add-device-header"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerDevAddNonFilt %>.</span> <%= i18n.devAddNonFilt %> </div> </iron-page> <iron-page name="devAddCantFilt" aria-labelledby="geo-add-device-header"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerDevAddCantFilt %>.</span> <%= i18n.devAddCantFilt %> </div> </iron-page> <iron-page name="error" aria-labelledby="geo-add-device-header"> <div class="inner" role="status"> <span class="sr-only"><%= i18n.headerError %>.</span> <pre>[[_error]]</pre> </div> </iron-page> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <template is="dom-if" if="[[_isFirstPage(_selectedPageIndex,_profileMode)]]"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> </template> <template is="dom-if" if="[[_showBack(_selectedPageIndex,_profileMode)]]"> <paper-button on-tap="_onBackButtonClick"><%= i18n.back %></paper-button> </template> <template is="dom-if" if="[[_isPage(_selectedPageIndex,'filterrec')]]"> <paper-button on-tap="_onFilterNonRecClick"><%= i18n.doNotFilter %></paper-button> </template> <template is="dom-if" if="[[_isPage(_selectedPageIndex,'filternonrec')]]"> <paper-button on-tap="_onFilterRecClick"><%= i18n.filterAnyway %></paper-button> </template> <paper-button id="geoDeviceAddNextButton" on-tap="_onNextButtonClick" disabled="[[_isNextButtonDisabled(_selectedDeviceElement, _selectedServiceElement, _selectedPageIndex)]]"> [[_getNextButtonText(_selectedDeviceElement, _selectedPageIndex,_profileMode)]]</paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "geofilter-device-selector",
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties: {
+        tags: {
+          type: Array,
+          value: ["pc", "gaming"]
+        },
+
+        header: {
+          type: String,
+          value: "<%= i18n.header %>"
+        },
+
+        _selectedPageIndex: {
+          type: String,
+          value: "NULL",
+          observer: "_onPageIndexChanged"
+        },
+
+        _profileMode: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      _pageInfo: {
+        start: { header: "<%= i18n.headerStart %>", next: "<%= i18n.next %>" },
+        console: { header: "<%= i18n.headerConsole %>", next: "<%= i18n.continue %>" },
+        apps: { header: "<%= i18n.headerApps %>", next: "<%= i18n.next %>" },
+        filterrec: { header: "<%= i18n.headerFilterRec %>", next: "<%= i18n.continue %>" },
+        filternonrec: { header: "<%= i18n.headerFilterNonRec %>", next: "<%= i18n.continue %>" },
+        choose: { header: "<%= i18n.headerChoose %>", next: "<%= i18n.continue %>" },
+        devAddFilt: { header: "<%= i18n.headerDevAddFilt %>", next: "<%= i18n.finish %>" },
+        devAddNonFilt: { header: "<%= i18n.headerDevAddNonFilt %>", next: "<%= i18n.finish %>" },
+        devAddCantFilt: { header: "<%= i18n.headerDevAddCantFilt %>", next: "<%= i18n.finish %>" },
+        error: { header: "<%= i18n.headerError %>", next: "<%= i18n.finish %>" },
+      },
+
+      _format: function(){
+        return String.format.apply(this,arguments);
+      },
+
+      ready: function () {
+        this._refreshDevices();
+        this._refreshServices();
+      },
+
+      _refreshDevices: function () {
+
+        get_devices().done(function (devices) {
+
+          var processedDevices = [];
+          for (var id in devices) {
+            if (devices.hasOwnProperty(id)) {
+              processedDevices.push(devices[id]);
+            }
+          }
+
+          this._devices = processedDevices;
+        }.bind(this));
+      },
+
+
+      _refreshServices: function () {
+        this._servicesPromise = Q($.getJSON(
+          "/json/_services_.json?cache=0",
+          function (services) {
+            this._services = services;
+          }.bind(this)
+        ));
+      },
+
+      _shouldShowService: function (service, tags) {
+
+        for (var i = 0; i < tags.length; i++) {
+          if (service.tags.indexOf(tags[i]) === -1) {
+            return false;
+          }
+        }
+
+        return true;
+      },
+      
+      _sortServices: function (service1, service2) {
+        if (service1.application < service2.application) {
+          return -1;
+        }
+
+        if (service1.application > service2.application) {
+          return 1;
+        };
+        
+        return 0;
+      },
+
+      _isPage: function(selectedPageIndex,pageCompare){
+        return selectedPageIndex === pageCompare;
+      },
+
+      _isFirstPage: function(selectedPageIndex,profileMode){
+        return this._isPage(selectedPageIndex,"start") || (profileMode && this._isPage(selectedPageIndex,"apps"));
+      },
+
+      _isLastPage: function(selectedPageIndex){
+        return this._isPage(selectedPageIndex,"devAddFilt") || this._isPage(selectedPageIndex,"devAddNonFilt") || this._isPage(selectedPageIndex,"devAddCantFilt") || this._isPage(selectedPageIndex,"error");
+      },
+
+      _showBack: function(selectedPageIndex,profileMode){
+        return !this._isFirstPage(selectedPageIndex) && !this._isLastPage(selectedPageIndex) && !profileMode;
+      },
+
+      _header: function(page,profileMode){
+        if(profileMode) return this._profileHeader;
+        return this._pageInfo[page] ? this._pageInfo[page].header : this.header;
+      },
+
+      _subHeader: function(selectedDeviceElement, selectedServiceElement){
+        if(selectedDeviceElement && selectedDeviceElement.device){
+          var ret = selectedDeviceElement.device.name;
+          
+          if(!this._isDeviceConsole(selectedDeviceElement.device.type) && selectedServiceElement && selectedServiceElement.service){
+            ret = ret + " - " + selectedServiceElement.service.name;
+          }
+
+          return ret;
+        }
+        return "";
+      },
+
+      _isDeviceConsole: function (deviceType) {
+        return deviceType === "PlayStation" ||
+               deviceType === "Xbox" ||
+               deviceType === "Wii" ||
+               deviceType === "NintendoSwitch" ||
+               deviceType === "Nintendo_Wii" ||
+               deviceType === "Games Console" ||
+               deviceType === "Games_Console";
+      },
+      
+      _otherShowTypes: ["Laptop","Computer","Nintendo_DS"],
+      _showDeviceType: function(type){
+        if(this._isDeviceConsole(type)) return true;
+        for(var i = 0; i < this._otherShowTypes.length; i++){
+          if(type === this._otherShowTypes[i]){
+            return true;
+          }
+        }
+        return false;
+      },
+
+      _shouldShowDevice: function (device, show_all) {
+        var ret = device.id > 0 && (
+          show_all ||
+          this._showDeviceType(device.type)
+        );
+        return ret
+      },
+
+      _getDeviceCountText: function(devices){
+        var count = 0;
+        for(var i = 0; i < devices.length; i ++){
+          if(this._showDeviceType(devices[i].type)) count += 1;
+        }
+        return "<%= i18n.gamingDevicesFound %>".format(count);
+      },
+
+      _sortDevices: function (device1, device2) {
+
+        if (
+          this._isDeviceConsole(device1.type) ===
+          this._isDeviceConsole(device2.type)
+        ) {
+        
+          return device1.name.localeCompare(device2.name);
+
+        } else {
+        
+          return this._isDeviceConsole(device1.type) ? -1 : 1;
+        }
+
+      },
+
+      _getNextButtonText: function (
+        selectedDeviceElement,
+        selectedPageIndex,
+        profileMode
+      ) {
+
+        if (!profileMode && this._pageInfo[selectedPageIndex]) {
+          return this._pageInfo[selectedPageIndex].next;
+        }
+
+        return "<%= i18n.done %>";
+      },
+
+      _isNextButtonDisabled: function (
+        selectedDeviceElement,
+        selectedServiceElement,
+        selectedPageIndex
+      ) {
+
+       return selectedPageIndex === "start" ? !selectedDeviceElement :
+              selectedPageIndex === "apps" ? !selectedServiceElement :
+              false
+      },
+
+      _consoleEnd: function (device){
+      },
+
+      _consoleDeviceSelected: function (device) {
+        this._selectedPageIndex = "console";
+      },
+
+      _otherDeviceSelected: function () {
+        this._selectedPageIndex = "apps";
+      },
+
+      _getCanFilter: function(service){
+        return service.tags && service.tags.includes("geofilter")
+      },
+
+      _getFilterRec: function(service){
+        return service.tags && service.tags.includes("geofilter-suggested");
+      },
+
+      _displayError: function(message){
+        this.$$("paper-dialog").open();
+        this._selectedPageIndex = "error";
+        this._error = message.toString();
+        throw new Error(message);
+      },
+
+      _doCallback: function(){
+        var filter = this._doFilterMode;
+        var device = this._selectedDeviceElement ? this._selectedDeviceElement.device : null;
+
+        if(device && this._isDeviceConsole(device.type)){
+          this._callback(device, {
+            name: "<%= i18n.console %>",
+            tags: ["geofilter", "console", "gaming"],
+            services: [{
+              sport: [1024, 0xffff],
+              dport: [1024, 0xffff],
+              proto: 17
+            }]
+          },filter,this._displayError.bind(this));
+        }else{
+          if(!this._selectedServiceElement){
+            console.error("No Service Selected for non-console");
+            this.close();
+            return;
+          }
+          this._callback(device,this._selectedServiceElement.service,filter,this._displayError.bind(this))
+        }
+
+      },
+
+      _setToLastPage: function(disallowed){
+        if (this._doFilterMode){
+          this._selectedPageIndex = "devAddFilt";
+        }else{
+          this._selectedPageIndex = disallowed ? "devAddCantFilt" : "devAddNonFilt";
+        }
+        this._doCallback();
+      },
+
+      _onFilterRecClick: function(){
+        this._doFilterMode = true;
+        this._setToLastPage();
+      },
+      _onFilterNonRecClick: function(){
+        this._doFilterMode = false;
+        this._setToLastPage();
+      },
+
+      _onProfilesModeNextClick: function(){
+        this._doCallback();
+      },
+
+      _onNextButtonClick: function () {
+        
+        var device;
+        if (this._selectedDeviceElement) {
+          device = this._selectedDeviceElement.device;
+        }
+
+        var service;
+        if (this._selectedServiceElement){
+          service = this._selectedServiceElement.service;
+        }
+
+        if (this._selectedPageIndex === "start") {
+          if (this._isDeviceConsole(device.type)) {
+            this._consoleDeviceSelected(device);
+          } else {
+            this._otherDeviceSelected();
+          }
+
+        } else if (this._selectedPageIndex === "console") {
+          if (this._chooseSelected === "rec"){
+            this._selectedPageIndex = "apps";
+          }else{
+            this._selectedPageIndex = "choose";
+          }
+
+        } else if (this._selectedPageIndex === "apps") {
+          if(this._profileMode){
+            this._onProfilesModeNextClick();
+            this.close();
+            return;
+          }
+          if(this._getCanFilter(service)){
+            if (this._getFilterRec(service)){
+              this._selectedPageIndex = "filterrec";
+            }else{
+              this._selectedPageIndex = "filternonrec";
+            }
+          }else{
+            this._doFilterMode = false;
+            this._setToLastPage(true);
+          }
+
+        } else if (this._selectedPageIndex === "filterrec") {
+          this._onFilterRecClick();
+
+        } else if (this._selectedPageIndex === "filternonrec") {
+          this._onFilterNonRecClick();
+
+        } else if (this._selectedPageIndex === "choose") {
+          this._setToLastPage();
+
+        } else {
+          this.close();
+        }
+      },
+
+      _onBackButtonClick: function(){
+        this._doAddStack = false;
+        this._stack.pop();
+        this._selectedPageIndex = this._stack[this._stack.length - 1] || "start";
+        this._doAddStack = true;
+      },
+
+      //Auto focus on an element for screen reader
+      _autoFocus: function() {
+        var page = $("iron-page[name=" + this._selectedPageIndex + "]");
+        //focus
+        var elem = page.find("[focus-here]")[0];
+        if(!elem) elem = this.$.geoDeviceAddNextButton;
+        $(document.activeElement = elem).focus();
+      },
+
+      _onPageIndexChanged: function(newVal,oldVal){
+        if(this._doAddStack)
+          this._stack.push(newVal);
+        
+        this._autoFocus();
+      },
+
+      open: function (callback) {
+        this._callback = callback;
+
+        this._selectedPageIndex = "start";
+        this._stack = [this._selectedPageIndex];
+        this._doAddStack = true;
+        this._chooseSelected = "rec";
+        this._selectedDeviceIndex = -1;
+        this._selectedServiceIndex = -1;
+        this._selectedDeviceElement = null;
+        this._selectedServiceElement = null;
+        this._allDevices = false;
+        this._doFilterMode = true;
+        this._profileMode = false;
+        this._error = "Everything is Awesome!";
+        this.tags = ["pc", "gaming"];
+
+        this._refreshDevices();
+
+        this.$$("paper-dialog").open();
+
+        this._autoFocus();
+      },
+
+      close: function () {
+        this.$$("paper-dialog").close();
+      }
+    }); </script> </dom-module> 

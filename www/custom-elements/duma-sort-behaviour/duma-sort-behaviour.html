@@ -1,0 +1,150 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <script> var Duma = Duma || {};
+  Duma.SortBehaviour = {
+    properties: {
+      sortingMethods: {
+        type: Array,
+        value: [],
+      },
+      sortKey: {
+        type: String,
+        value: "",
+      },
+      sortAscending: {
+        type: Boolean,
+        value: true,
+      },
+      sortFunction: Function,
+    },
+
+    observers: [
+      "_sortChanged(sortKey,sortAscending,sortingMethods,sortingMethods.*)"
+    ],
+
+    listeners: {
+      tap: '_onSortClick',
+      keydown: '_onSortClick'
+    },
+
+    _onSortClick: function(e){
+      if(!(e.type === "tap" || e.code === "Enter" || e.code === "Space")) return;
+      var sortElem = $(e.target).closest("[sort-click]");
+      if(sortElem[0]){
+        var sort = sortElem.attr("sort-click");
+        if(typeof sort !== "function"){
+          if(sort === this.sortKey){
+            this._toggleAscending();
+          }else{
+            this.sortAscending = this._getSortDefault(sort);
+            this.sortKey = sort;
+          }
+        }
+      }
+    },
+
+    _toggleAscending: function(){
+      this.sortAscending = !this.sortAscending;
+    },
+
+    _getSortIcon: function(match,key,ascending){
+      if(match !== key)
+        return "blank";
+      else {
+        return ascending ? "arrow-drop-up" : "arrow-drop-down";
+      }
+    },
+
+    _sortChanged: function(key,asc,methods){
+      var func = this._getSortFunc(key);
+      this.sortFunction = function(a,b){
+        return (asc === true ? 1 : -1) * func.call(this,a,b,asc);
+      }
+    },
+    _sortCompareArrays: function(a,b){
+      var sortFunc = (a,b) => {
+        if(a === b) return 0;
+        return (a > b) ? 1 : -1;
+      }
+      var valA = Array.isArray(a) ? a.map(v=>v).sort(sortFunc)[0] : a;
+      var valB = Array.isArray(b) ? b.map(v=>v).sort(sortFunc)[0] : b;
+
+      return sortFunc(valA,valB);
+    },
+    // try to get a number from the string to sort by, if it exists
+    _sortStringsOrNumbers: function(a, b) {
+      var aNum = parseFloat(a) || a;
+      var bNum = parseFloat(b) || b;
+      // if the same type, use Num values. If not, use raw a / b;
+      return ( (typeof aNum === typeof bNum) ? (aNum > bNum) : (a > b) ) ? 1 : -1
+    },
+    addSortingMethod: function(key,func,defaultAscending){
+      if(typeof func !== "function"){
+        switch(typeof func){
+          case "number":
+          case "bigint":
+          case "string":
+          case "boolean":
+            func = (a,b) => {
+              if(a === b) return 0;
+              return this._sortStringsOrNumbers(a,b);
+            }
+            break;
+          default:
+            func = (a,b) => {
+              if(Array.isArray(a) || Array.isArray(b)){
+                return this._sortCompareArrays(a,b);
+              }
+              if(a === b) return 0;
+              return (!!a > !!b) ? 1 : -1;
+            }
+            break;
+        }
+      }
+      this.sortingMethods.push({
+        key: key,
+        func: func,
+        defaultAscending: !!defaultAscending
+      });
+    },
+    setSortingMethod: function(key,func,defaultAscending){
+      for(var i = 0; i < this.sortingMethods.length; i++){
+        var o = this.sortingMethods[i];
+        if(o.key === key){
+          o.func = func;
+          o.defaultAscending = defaultAscending;
+          return;
+        }
+      }
+      this.addSortingMethod(key,func,defaultAscending);
+    },
+
+    _getSortMethod: function(key){
+      if(this.sortingMethods && this.sortingMethods.length)
+        for(var i = 0; i < this.sortingMethods.length; i++){
+          var m = this.sortingMethods[i];
+          if(m.key === key){
+            return m;
+          }
+        }
+      return null;
+    },
+
+    _getSortDefault: function(key){
+      var m = this._getSortMethod(key);
+      return !!(m && m.defaultAscending); 
+    },
+    _getSortFunc: function(key){
+      var m = this._getSortMethod(key);
+      if(m){
+        return m.func;
+      }
+      return function(){
+        return 0;
+      };
+    },
+    noSort: function(){
+      this.sortKey = "";
+    },
+  }; </script> 

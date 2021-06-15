@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <%
+      local function logs()
+        local dir = "/tmp/ndcl"
+        local p = io.popen( string.format( "ls -1 '%s'", dir ), "r" )
+
+        if not p then
+          return nil
+        end
+       
+        local function content( name )
+          local f = io.open( string.format( "%s/%s", dir, name ), "r" )
+
+          if not f then
+            return ""
+          end
+
+          local out = f:read( "*all" )
+          f:close()
+          return out
+        end
+
+        return function()
+          local file = p:read()
+
+          if not file then
+            p:close()
+            return nil
+          end
+
+          return file,content( file )
+        end
+      end
+
+      for file,content in logs() do
+%><p><%= file %></p>
+<textarea readonly cols = "250" rows="30"><%= content %></textarea><%
+      end
+    %>
+  </body>
+</html>

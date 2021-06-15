@@ -1,0 +1,598 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../duma-sort-behaviour/duma-sort-behaviour.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-data-table/data-table-templatizer-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-table"> <template> <style include="duma-theme"> :host {
+        display: block;
+        height: 100%;
+        width: 100%;
+      }
+
+      :host .container:not([data-scroll="0"]) thead th {
+        background-color: var(--primary-background-color);
+      }
+      :host thead th {
+        position: sticky;
+        top: 0;
+        transition: background-color 0.2s ease;
+      }
+      :host th[sort-click] {
+        cursor: pointer;
+      }
+
+      :host .container {
+        overflow: auto;
+        height: 100%;
+        width: 100%;
+        position: relative;
+      }
+
+      :host tbody tr:focus-within {
+        color: var(--primary-text-color);
+      }
+      :host[selection-enabled] tbody tr:hover {
+        color: var(--primary-text-color);
+        cursor: pointer;
+      }
+
+      :host tbody td[scrollable] > div {
+        overflow: auto;
+        max-height: 3em;
+      } </style> <div id="container" class="container"> <table id="table" aria-label$="[[caption]]"> <caption class="sr-only">[[caption]]</caption> <thead> <tr> <template is="dom-repeat" items="[[columns]]" as="column"> <th sort-click$="[[_getSortKey(column,column.key,column.sortable)]]" tabindex="-1" role="columnheader" scope="col" aria-colindex$="[[index]]"> <span> [[column.name]] </span> <iron-icon sort-icon icon="[[_getSortIcon(column.key,sortKey,sortAscending)]]"></iron-icon>  </th></template> </tr> </thead> <tbody> <template is="dom-repeat" items="[[rows]]" as="row" sort="[[sortFunction]]"> <tr on-tap="rowClick" on-keydown="rowClick" aria-haspopup$="[[selectionEnabled]]"> <template is="dom-repeat" items="[[row]]" index-as="columnIndex"> <td item="[[item]]" item-key="[[item.valueKey]]" scrollable$="[[item.scrollable]]" tabindex="-1" role="cell" aria-haspopup$="[[_hasPopupAttr(selectionHasPopup)]]" aria-colindex$="[[columnIndex]]"> <div> <!-- If the column has a template, use it --> <template is="dom-if" if="[[item.column.template]]"> <duma-table-cell item="[[item]]" column="[[item.column]]" index="[[columnIndex]]" template="[[item.column.template]]"></duma-table-cell> </template> <!-- Otherwise, use this default layout --> <template is="dom-if" if="[[!item.column.template]]"> <template is="dom-if" if="[[!_isArrayValues(item.value)]]"> [[item.value]] </template> <template is="dom-if" if="[[_isArrayValues(item.value)]]"> <template is="dom-repeat" items="[[item.value]]" as="arrItem"> <span>[[arrItem]]</span> <br> </template> </template> </template> </div> </td> </template> </tr> </template> </tbody> </table> </div> <content select="duma-table-column"></content> </template> <script> Polymer({
+      is: "duma-table",
+      properties: {
+
+        // table caption
+        caption: {
+          type: String,
+          value: ""
+        },
+
+        // list of duma-table-column elems
+        columnsElems: {
+          type: Array,
+          observer: "_columnsElemsChange",
+          value: function() {
+            return [];
+          }
+        },
+        // objects for each column
+        columns: {
+          type: Array,
+          value: function() {
+            return [];
+          }
+        },
+        // object for each row
+        rows: {
+          type: Array,
+          computed: "_getRows(columns,columns.*)"
+        },
+
+        // the items to parse data from
+        items: {
+          type: Array,
+          value: null,
+        },
+
+        // objects to handle parsing data between columns and items
+        _fromParse: {
+          type: Object,
+          value: function(){
+            return {};
+          }
+        },
+
+        // fallback order to sort by
+        sortByWhenEqual: {
+          type: Array,
+          value: function(){
+            return ["name","id"];
+          },
+          observer: "sortByWhenEqualChanged"
+        },
+
+        // can the rows be selected
+        selectionEnabled: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+
+        selectionHasPopup: {
+          type: Boolean,
+          value: false
+        },
+
+        //focus coordinates when using arrow keys
+        //origin is top-left
+        focusX: {
+          type: Number,
+          value: 0
+        },
+        focusY: {
+          type: Number,
+          value: 0
+        },
+        // previously focused keyboard navigation
+        arrowNavFocused: Object
+      },
+
+      listeners: {
+        keydown: 'onKeyDown'
+      },
+
+      observers: [
+        "parse(items,columnsElems,items.*,columnsElems.*)",
+        "_arrow_navigation(focusX,focusY,rows,columns,columns.*)"
+      ],
+
+      _hasPopupAttr: function(selectionHasPopup){
+        return selectionHasPopup ? "true" : "false";
+      },
+
+
+      // Keyboard navigation using arrow keys
+
+      onKeyDown: function(e){
+        var focusedInTable = $(document.activeElement).closest("table");
+        if(focusedInTable[0] === this.$.table){
+          if(e.code === "ArrowRight") this.focusX += 1, e.preventDefault();
+          else if(e.code === "ArrowLeft") this.focusX -= 1, e.preventDefault();
+          else if(e.code === "ArrowDown") this.focusY += 1, e.preventDefault();
+          else if(e.code === "ArrowUp") this.focusY -= 1, e.preventDefault();
+        }
+      },
+
+      _get_td_at_x_y(x,y){
+        var row = $("tr",this)[y];
+        return $("td, th",row)[x];
+      },
+
+      _arrow_navigation(x,y,rows,columns){
+        this.focusX = x = Math.max( Math.min( x || 0, columns.length-1), 0);
+        this.focusY = y = Math.max( Math.min( y || 0, rows.length), 0);
+        
+        
+        // remove old focusable
+        if(this.arrowNavFocused) this.arrowNavFocused.attr("tabindex",-1);
+        
+        // focus on new one
+        this.arrowNavFocused = $(this._get_td_at_x_y(x,y));
+        this.arrowNavFocused.attr("tabindex",0)
+        var focusedInTable = $(document.activeElement).closest("table");
+        if(focusedInTable[0] === this.$.table) this.arrowNavFocused.focus(), this.arrowNavFocused[0].scrollIntoView( { behavior: "auto", block: "center", inline: "nearest" });
+      },
+
+
+      // Is 'values' and array
+      _isArrayValues: function(values){
+        return Array.isArray(values);
+      },
+
+      // on click of a row
+      rowClick: function(e){
+        if(this.selectionEnabled){
+          //if mouse event, or key down for space or enter
+          if(e.type === "tap" || e.code === "Enter" || e.code === "Space"){
+            e.preventDefault();
+            var td = $(e.target).closest("td")[0] || $(e.target).closest("td").children("td")[0];
+            var data = td.item;
+            var item = this.items[data.itemIndex];
+            this.fire("selecting-item",{
+              item: item,
+              key: data.valueKey
+            });
+          }
+        }
+      },
+
+      // onChange of sortByWhenEqual variable - reset sorting direction
+      sortByWhenEqualChanged: function(newVal){
+        if(!this.sortKey){
+          this.sortAscending = false;
+          this.sortKey = "";
+        }
+      },
+
+      // parse ddata from items
+      parse: function(arr,columnsElems){
+        if(!Array.isArray(arr)) return false;
+        var columns = {};
+
+        for(var i = 0; i < arr.length; i++){
+          var obj = arr[i];
+          var keys = Object.keys(obj);
+          for(var k = 0; k < keys.length; k++){
+            var key = keys[k];
+            if(!key.startsWith("sort_")){
+              var column = columns[key];
+              if(!column){
+                column = columns[key] = {
+                  key: key,
+                  values: [],
+                  sortValues: []
+                }
+              }
+              if(column){
+                column.values[i] = obj[key];
+                // get sort override
+                column.sortValues[i] = keys.includes("sort_" + key) ? obj["sort_"+key] : null;
+              }
+            }
+          }
+        }
+        
+        // create bindings between item 'values' and column 'values'
+        var keys = Object.keys(columns);
+        for(var k = 0; k < keys.length; k++){
+          var key = keys[k];
+          if(!this._fromParse[key]){
+            var celem = columnsElems.find(c => c.bindTo === key);
+            if(celem){
+              this._fromParse[key] = {
+                elem: celem,
+                key: key,
+                get values(){
+                  return this.elem.values;
+                },
+                set values(val){
+                  this.elem.set('values',val);
+                },
+                get sortValues(){
+                  return this.elem.sortValues;
+                },
+                set sortValues(val){
+                  this.elem.set('sortValues',val);
+                }
+              }
+            }
+          }
+          if(this._fromParse[key]){
+            this._fromParse[key].sortValues = columns[key].sortValues;
+            this._fromParse[key].values = columns[key].values;
+          }
+        }
+      },
+
+      ready: function(){
+        // store scroll value of table
+        function storeScroll(){
+          this.dataset.scroll = this.scrollTop || 0;
+        }
+        this.$.container.addEventListener('scroll',storeScroll);
+        storeScroll.call(this.$.container);
+      },
+
+      created: function() {
+        // make sure columnsElems array is equal to all the children of duma-table-column.
+        // This listens for node changes, and will refind all columns on change
+        this._observer = Polymer.dom(this).observeNodes(function(info) {
+          var hasColumns = function(node) {
+            return (node.nodeType === Node.ELEMENT_NODE && node.tagName.toUpperCase() === 'DUMA-TABLE-COLUMN');
+          };
+
+          if (info.addedNodes.filter(hasColumns).length > 0 ||
+            info.removedNodes.filter(hasColumns).length > 0) {
+            this.set('columnsElems', this.getContentChildren('[select=duma-table-column]'));
+          }
+
+        }.bind(this));
+      },
+
+      // get what rows should be sorted by
+      _getSortKey: function(column){
+        return (column.sortable && column.key) ? column.key : null;
+      },
+
+      // Get the function to sort rows
+      _getSortFunc: function(key,fallback){
+        //return the sort function. a is values in a row, b is values in row to compare against
+        return function(a,b,asc){
+          var m = this._getSortMethod(key);
+          var first = null;
+          var second = null;
+          var ret = 0;
+          // if a sorting function for [key] exists
+          if(m){
+            // get the value belonging to key
+            // this is because if it's null, we don't want to compare them
+            for(var i = 0; i < a.length; i++){
+              if(a[i].key === key) {
+                first = a[i];
+                break;
+              }
+            }
+            if(first === null) return -1;
+            for(var i = 0; i < b.length; i++){
+              if(b[i].key === key) {
+                second = b[i];
+                break;
+              }
+            }
+            if(second === null) return 1;
+            // compare them using the given sort function
+            var firstValue = first.sortValue === null ? first.value : first.sortValue;
+            var secondValue = second.sortValue === null ? second.value : second.sortValue;
+            ret = m.func(firstValue, secondValue, asc);
+          }
+          // if sorting is equal, fallback to next sortable method
+          if(ret === 0){
+            var backupIndex = (fallback || fallback === 0) ? fallback + 1 : 0;
+            if(this.sortByWhenEqual[backupIndex]){
+              return this._getSortFunc(this.sortByWhenEqual[backupIndex],backupIndex)(a,b);
+            }
+          }
+          return ret;
+        }.bind(this);
+      },
+
+      // if elems change
+      _columnsElemsChange: function(newElems,oldElems){
+        for(var i = 0; i < newElems.length; i++){
+          var elem = newElems[i];
+          var key = elem.key;
+          var exists = this._getColumnFromElem(elem);
+          if(!exists){
+            exists = this._newColumn(elem);
+          }
+        }
+      },
+
+      // get a column from key
+      _getColumn: function(key){
+        for(var i = 0; i < this.columns.length; i++){
+          if(this.columns[i].key === key) return this.columns[i];
+        }
+      },
+      // get a column from elem
+      _getColumnFromElem: function(elem){
+        for(var i = 0; i < this.columns.length; i++){
+          if(this.columns[i].elem === elem) return this.columns[i];
+        }
+      },
+      // get the column's index
+      _getColumnIndex: function(inp){
+        for(var i = 0; i < this.columns.length; i++){
+          if(this.columns[i].key === inp || this.columns[i].elem === inp) return i;
+        }
+      },
+      // :D
+
+      // define setter getters on an object that also call this.notifyPath, otherwise polymer wont update values in the cells
+      _genSetGet: function(self,raw,name,notify,callback){
+        var that = this;
+        var getter = function(){
+          return self[raw];
+        };
+        var setter = function(val){
+          self[raw] = val;
+          if(notify){
+            that.notifyPath([notify,self.index,name].join("."));
+          }
+          if(callback){
+            callback.call(self,val);
+          }
+        };
+
+        Object.defineProperty(self,name, {
+          get: getter,
+          set: setter
+        });
+      },
+
+      // create getter / setters for the column's values, for each item passed into the table.
+      // Used for the callbacks to noitify polymer that values have changed
+      _newColumn: function(dumaColumn){
+        var jc = $(dumaColumn);
+        var that = this;
+        var columnObj = {
+          get index(){
+            return that._getColumnIndex(this.elem);
+          },
+          elem: dumaColumn,
+        }
+        // sync the properties for each column between the column objects and the cells in the column
+        this._genSetGet(columnObj,"_name","name","columns");
+        this._genSetGet(columnObj,"_key","key","columns",function(val){
+          that.addSortingMethod(val,this.elem.sortFunc || function(a,b,asc){
+            if(a === b) return 0;
+            if(!a && a !== 0) return -1 * (asc ? -1 : 1);
+            if(!b && b !== 0) return 1 * (asc ? -1 : 1);
+            return (a > b) ? 1 : -1;
+          });
+        });
+        this._genSetGet(columnObj,"_rawValues","values","columns");
+        this._genSetGet(columnObj,"_rawSortValues","sortValues","columns");
+        this._genSetGet(columnObj,"_sortable","sortable","columns");
+        this._genSetGet(columnObj,"_scrollable","scrollable","columns");
+        this._genSetGet(columnObj,"_template","template","columns");
+
+        //listen for changes of duma-table-column properties, to update cells
+        var onChange = function(key,to,format){
+          jc.on(key + '-changed',function(e){
+            columnObj[to || key] = format ? format(e.detail.value) : e.detail.value;
+          }.bind(this));
+        }.bind(this);
+        var binds = {
+          "key": "key",
+          "name": "name",
+          "values": "values",
+          "sortValues": "sort-values",
+          "scrollable": "scrollable",
+          "template": "template",
+          "sortable": {
+            key: "notSortable",
+            change: "not-sortable",
+            format: function(val){
+              return !val;
+            }
+          }
+        }
+        var bindKeys = Object.keys(binds);
+        var withColumn = function(){
+          for(var i = 0; i < bindKeys.length; i++){
+            var key = bindKeys[i];
+            var options = binds[key];
+            if(typeof(options) === "string"){
+              // set value init
+              columnObj[key] = this[options];
+              // bind on-changed event
+              onChange(options,key);
+            }else{
+              // set value init
+              var val = this[options.key];
+              if(options.format) val = options.format.call(this,val);
+              columnObj[key] = val;
+              // bind on-changed event
+              onChange(options.change || options.key, key, options.format);
+            }
+          }
+        }.bind(dumaColumn);
+        if(dumaColumn.ready){
+          withColumn();
+        }else{
+          jc.on("column-ready",withColumn);
+        }
+        this.push('columns',columnObj);
+        return columnObj;
+      },
+
+      // format from columns to rows, as that is how the template works
+      _getRows: function(columns) {
+        //how many iterations of rows. Helpful to debug scrolling behaviour
+        var repeats = 1;
+        //Get max height from columns
+        var max = 0;
+        for(var i = 0; i < columns.length; i++){
+          var c = columns[i];
+          if(c.values && c.values.length) max = Math.max(columns[i].values.length,max);
+        }
+        var rows = new Array(max * repeats);
+        for(var r = 0; r < rows.length; r++){
+          var rowMod = r % max;
+          var row = rows[r] || new Array(columns.length);
+          for(var c = 0; c < row.length; c++){
+            var column = columns[c];
+            if(column.values && column.values.length){
+              row[c] = {
+                key: column.key,
+                value: column.values[rowMod],
+                valueKey: column.elem.bindTo,
+                sortValue: column.sortValues[rowMod],
+                scrollable: column.scrollable,
+                column: column,
+                item: this.items[rowMod],
+                itemIndex: rowMod
+              };
+            }
+          }
+          rows[r] = row;
+        }
+        return rows;
+      },
+
+      behaviors: [Duma.SortBehaviour],
+    }); </script> </dom-module> <dom-module id="duma-table-column"> <template> <style include="duma-theme"> </style> </template> <script> Polymer({
+      is: "duma-table-column",
+      properties: {
+        // name of column
+        name: {
+          type: String,
+          notify: true,
+          value: ""
+        },
+        // generated key
+        // use a generated key just to create it from the name, to prevent having to type in a specific name when the column headers are already unique
+        // I made it like this when initially created duma-table, but it could probably be replaced with manual key ids now, or just use the name column
+        // I tried to remove it in a supposedly friendly way, and everything broke.
+        // So left in it is
+        key: {
+          type: String,
+          notify: true,
+          readyOnly: true,
+          computed: "getKey(name)",
+          reflectToAttribute: true
+        },
+        _realKey: String,
+        // The sort function
+        sortFunc: {
+          type: Object,
+          notify: true,
+          value: "string"
+        },
+        // array of values for this column
+        values: {
+          type: Array,
+          notify: true,
+          value: function(){
+            return [];
+          }
+        },
+        // array of values to use when sorting for this column
+        sortValues: {
+          type: Array,
+          notify: true,
+          value: function(){
+            return [];
+          }
+        },
+        // Should the cells have scrollable behaviour
+        scrollable: {
+          type: Boolean,
+          notify: true,
+          value: false
+        },
+        // Is this column not sortable
+        notSortable: {
+          type: Boolean,
+          value: false,
+          notify: true,
+          reflectToAttribute: true,
+        },
+        // What value to bind the item to
+        bindTo: {
+          type: String,
+          value: null,
+          notify: true
+        },
+        // The template to stamp in the cell
+        template: {
+          type: Object,
+          readOnly: true,
+          value: function() {
+            var template = Polymer.dom(this).querySelector('template:not([is=header])');
+
+            if (template) {
+              if (this.dataHost) {
+                // set dataHost to the context where template has been defined
+                template._rootDataHost = this.dataHost._rootDataHost || this.dataHost;
+              }
+
+              return template;
+            }
+          }
+        }
+      },
+
+      getKey: function(name){
+        if(!this._realKey){
+          if(!name) name = this.name;
+          this._realKey = name.toLowerCase().replace(/\s([a-z])/g,function(g){
+            return g[1].toUpperCase();
+          });
+        }
+        return this._realKey;
+      },
+
+      ready: function(){
+        this.fire('column-ready');
+        this.ready = true;
+      }
+    }); </script> </dom-module> <dom-module id="duma-table-cell"> <template> <style include="duma-theme"> </style> <content></content> </template> <script> Polymer({
+      is: "duma-table-cell",
+      behaviors: [saulis.DataTableTemplatizerBehavior],
+      properties: {
+        column: Object,
+        template: Object,
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,374 @@
+<!--
+Custom property | Description | Default
+----------------|-------------|----------
+`--duma-checkbox-tree-color`           | color of fake checkbox            | `--primary-color`
+`--duma-checkbox-tree-tick-color`      | color of fake checkbox tick       | `--primary-text-color`
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <style is="custom-style" include="duma-theme"> .container {}
+
+
+
+  .tier-category {}
+  .tier-category-collapsed {} </style> <dom-module is="duma-checkbox-tree" large> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        padding: 8px 0;
+      }
+      :content #radioLabel {
+        white-space: nowrap;
+      }
+      ::content paper-checkbox {
+        padding: 11px !important;
+      }
+      ::content paper-checkbox ::content #checkboxLabel {
+        display: none !important;
+      }
+      ::content .name-div {
+        padding: 0;
+        white-space: nowrap;
+      }
+      ::content .name-container {
+        @apply(--paper-font-subhead);
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        padding: 0 16px 0 8px;
+        margin: 0;
+        position: relative;
+      }
+      ::content .name-container > *,
+      ::content .name-container paper-icon-button {
+        flex-shrink: 0;
+      }
+      ::content .tier-container {
+        padding-left: 8px;
+      }
+      ::content .tier-bar {
+        padding: 0px;
+        margin: 0px;
+        width: 100%;
+      }
+      ::content .sub-arrow-icon {
+        opacity: 0.39;
+        top: -3px;
+        left: 6px;
+        flex-shrink: 0;
+      }
+      ::content paper-icon-button[icon="indeterminate-check-box"],
+      ::content paper-icon-button[icon="check-box"] {
+        color: var(--duma-checkbox-tree-color, --primary-color);
+        z-index: 1;
+      }
+      ::content paper-icon-button[icon="indeterminate-check-box"] + .name-div::before,
+      ::content paper-icon-button[icon="check-box"] + .name-div::before {
+        content: "";
+        display: block;
+        position: absolute;
+        left: 20px;
+        background: var(--duma-checkbox-tree-tick-color, --primary-text-color);
+        width: 16px;
+        height: 16px;
+        top: 12px;
+        z-index: 0;
+      } </style> <template is="dom-if" if="[[_hasHeaderProperty(header)]]" restamp> <h2>[[header]]</h2> </template> <div id="tier-root" class="container"> </div> </template> <script> /*
+      Required for values:
+      {
+        display: "Name display",      -- displayed text
+        state: 0 || 1 || 2,           -- default state. Irrelevant for categories
+        subs: [cats] || null          -- sub objects. Having an array here with length > 1 declares it as a category instead of a boolean
+      }
+      optional:
+      {
+        open: true || false           -- if the category is open or closed by default. defaults to false
+        type: 'category' || 'boolean' -- force the state of the object
+      }
+
+      Global options passed in as parameter:
+      {
+        header: String                -- a header to be displayed above the checkbox list
+        subIcons: true || false       -- if the subdirectory icons are displayed. default false
+        centreDisplay: true || false  -- Automatically attempt to adjust the parent objects of type <paper-dialog>, <iron-dropdown>
+      }
+    */
+    Polymer({
+      is: 'duma-checkbox-tree',
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties: {
+
+        header: String,
+
+        selected: {
+          type: Array,
+          value: []
+        }
+
+      },
+      stateIcons: ["check-box-outline-blank", "indeterminate-check-box", "check-box"],
+      categoryIcons: ['arrow-drop-down', 'arrow-drop-up'],
+      _hasHeaderProperty: function (head) {
+        return !(head === undefined || head === null || head.length === 0);
+      },
+      _isCategory: function (values) {
+        if (values.hasOwnProperty('type')){ 
+          return values.type === 'category';
+        }
+        return values.subs !== undefined && values.subs !== null && values.subs.length > 0;
+      },
+      _sb: function (state) {
+        //State to bool conversion
+        return state > 0;
+      },
+      _createHeader: function (tier) {
+        var head = parseInt(140 - (tier * 7));
+        return '<div class="name-div"></div>';
+      },
+      _categoryName: function (values, tier, prepend = undefined) {
+        var fullBar = $('<div class="name-container" type="name_bar"></div>');
+        fullBar.append(prepend);
+        var head = $(this._createHeader(tier));
+        head.text(values.display);
+        fullBar.append(head);
+        //fullBar.append(this._createRight());
+        if (this._isCategory(values)) {
+          fullBar.addClass('tier-category');
+          fullBar.addClass('tier-category-collapsed');
+          var newButton = $('<paper-icon-button icon="' + this._getStateIcon(values.state) + '" class="tier-icon-button";" noink></paper-icon-button>');
+          newButton.on('click', function (e) {
+            this._onCategoryClick(e.target.closest('paper-icon-button'));
+          }.bind(this));
+          fullBar.prepend(newButton);
+          fullBar.append(this._createSubRight(values, tier));
+        } else {
+          if (this._showSubIcons) {
+            fullBar.prepend(this._createSubRight(values, tier));
+          }
+          fullBar.addClass('tier-boolean');
+        }
+        return fullBar;
+      },
+      _createRight: function () {
+        return $('<span style="flex: 1;"></span>');
+      },
+      _createSubRight: function (values, tier) {
+        var iscat = this._isCategory(values);
+        if (!iscat && tier === 0) {
+          return null;
+        }
+        return $(
+          '<iron-icon icon="'
+          + (iscat && !(tier === 0 && !this._topCollapse) ? this.categoryIcons[0] : (tier === 0 ? 'blank' : 'subdirectory-arrow-right'))
+          + '" class="'
+          + (iscat ? 'category-icon' : (tier === 0 ? 'tier-0-icon' : 'sub-arrow-icon'))
+          + '"></iron-icon>'
+        );
+      },
+      _createCheckbox: function (values, tier) {
+        var check = $(
+          '<paper-checkbox class="'
+          + (tier === 0 ? 'tier-0-checkbox' : 'tier-checkbox')
+          + '"></paper-checkbox>'
+        );
+        check.attr('checked', this._sb(values.state) ? true : null);
+        check.on('change', function (values, e) {
+          this._onCheckChange(e.target);
+        }.bind(this, values));
+        return check;
+      },
+      _createCategory: function (values, tier = 0) {
+        var newPart = $(
+          '<div class="tier-container"></div>'
+        );
+        this._createTier(values.subs, newPart, tier + 1);
+        return newPart
+      },
+      _createTier: function (subs, container, tier = 0) {
+        var doAfter = [];
+        for (var i = 0; i < subs.length; i++) {
+          var values = subs[i];
+          if (!this._isCategory(values)) {
+            doAfter.push(values);
+            continue;
+          }
+          var tier_name = this._categoryName(values, tier);
+          container.append(tier_name);
+          tier_name.data("values", values);
+          //container.append('<hr class="head-rule"/>');
+
+          var tier_category = this._createCategory(values, tier);
+          tier_name.data("tier_container", tier_category);
+          if(tier > 0 || this._topCollapse){
+            $(tier_name.children()[1]).on('click', function (e) {
+              this._toggleCategory(e.target.closest('[type=name_bar]'));
+            }.bind(this));
+            $(tier_name.children()[2]).on('click', function (e) {
+              this._toggleCategory(e.target.closest('[type=name_bar]'));
+            }.bind(this));
+          }
+
+          container.append(tier_category);
+          if (!values.hasOwnProperty('open') || values.open === false) {
+            tier_category.hide();
+            tier_category.toggleClass('tier-category-collapsed', true);
+          }else{
+            tier_category.toggleClass('tier-category-expanded', true);
+          }
+        }
+        for (var i = 0; i < doAfter.length; i++) {
+          var values = doAfter[i];
+          var tier_name = this._categoryName(values, tier, this._createCheckbox(values, tier));
+          container.append(tier_name);
+          tier_name.data("values", values);
+        }
+      },
+      _getStateIcon: function (state) {
+        return this.stateIcons[state];
+      },
+      _getIconState: function (icon) {
+        return this.stateIcons.indexOf(icon);
+      },
+      _updateCategoryIcon: function (name_bar_element) {
+        name_bar_element = $(name_bar_element);
+        var state = name_bar_element.data("values").state;
+        var icon_button = name_bar_element.find("paper-icon-button");
+        icon_button.attr('icon', this._getStateIcon(state));
+      },
+      _updateCheckboxIcon: function (name_bar_element) {
+        name_bar_element = $(name_bar_element);
+        var state = name_bar_element.data("values").state;
+        var checkbox = name_bar_element.find("paper-checkbox");
+        checkbox.attr('checked', this._sb(state) ? true : null);
+      },
+      _updateIcons: function (values) {
+        $("[type=name_bar]").each(
+          function (index, element) {
+            var el = $(element);
+            if (this._isCategory(el.data("values"))) {
+              this._updateCategoryIcon(el);
+            } else {
+              this._updateCheckboxIcon(el);
+            }
+          }.bind(this)
+        );
+      },
+
+      _toggleCategory: function (target) {
+        target = $(target);
+        var container = target.data("tier_container")
+        var hidden = container.is(":hidden");
+
+        target.find('.category-icon').attr('icon', hidden ? this.categoryIcons[1] : this.categoryIcons[0]);
+
+        container.slideToggle({
+          duration: 300,
+          start: function () {
+            if (hidden) {
+              target.toggleClass('tier-category-collapsed', false);
+            }
+          }.bind(this),
+          done: function () {
+            if (this._centreDialog) {
+              var dialog = target.parents("paper-dialog:first");
+              if (dialog.length > 0) {
+                dialog[0].center();
+              }
+              var dropdown = target.parents("iron-dropdown:first");
+              if (dropdown.length > 0) {
+                dropdown[0]._onIronResize();
+              }
+            }
+            target.toggleClass('tier-category-expanded', hidden);
+            target.toggleClass('tier-category-collapsed', !hidden);
+          }.bind(this)
+        });
+      },
+      _onCategoryClick: function (target) {
+        target = $(target);
+        var values = target.parent().data('values');
+        var oldState = this._getIconState(target.attr('icon'));
+        var newState = oldState === 0 ? 2 : 0;
+        this._setAllCategoryState(values, newState);
+      },
+
+      _onCheckChange: function (target) {
+        target = $(target);
+        var isChecked = target.attr('checked') !== undefined;
+        var values = target.parent().data('values');
+        this._setState(values, isChecked ? 1 : 0);
+      },
+
+      _updateAllValues: function () {
+        for (var i = 0; i < this.selected.length; i++) {
+          if (this._isCategory(this.selected[i])) {
+            this._updateCategory(this.selected[i]);
+          }
+        }
+        this._updateIcons();
+      },
+      _updateCategory: function (category_values) {
+        var hasTrue = false;
+        var hasFalse = false;
+        for (var i = 0; i < category_values.subs.length; i++) {
+          var values = category_values.subs[i];
+          var testState = -1;
+          if (this._isCategory(values)) {
+            this._updateCategory(values);
+            testState = values.state;
+          } else {
+            testState = values.state * 2;
+          }
+          switch (testState) {
+            case 0:
+              hasFalse = true;
+              break;
+            case 1:
+              hasFalse = true;
+              hasTrue = true;
+              break;
+            case 2:
+              hasTrue = true;
+              break;
+          }
+        }
+        category_values.state = hasTrue == hasFalse ? 1 : hasTrue * 2;
+      },
+      _setState: function (values, state) {
+        values.state = state;
+        this._updateAllValues();
+      },
+      _setAllCategoryState: function (values, state, top = true) {
+        var toState = state === 2 ? 1 : state;
+        values.state = state;
+        for (var i = 0; i < values.subs.length; i++) {
+          var sub_values = values.subs[i];
+          if (this._isCategory(sub_values)) {
+            this._setAllCategoryState(sub_values, state, false);
+          } else {
+            sub_values.state = toState;
+          }
+        }
+        if (top) {
+          this._updateAllValues();
+        }
+      },
+
+
+      create: function (start_values, options = undefined) {
+        this._root = $(this.$$("#tier-root"));
+        this._root.empty();
+
+        this._hasHeaderProperty(options.header) ? this.set('header', otions.header) : null;
+        this._centreDialog = options.centreDialog === undefined ? true : options.centreDialog;
+        this._showSubIcons = options.subIcons === undefined ? false : options.subIcons;
+        this._topCollapse = options.topCollapse === undefined ? false : options.topCollapse;
+
+        this.selected = start_values;
+
+        //calculate all category subs
+        this._updateAllValues();
+
+        this._createTier(start_values, this._root);
+      }
+
+
+    }); </script> </dom-module> 

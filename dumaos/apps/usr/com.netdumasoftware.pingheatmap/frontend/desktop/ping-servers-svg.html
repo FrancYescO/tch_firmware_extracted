@@ -1,0 +1,675 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/d3.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="ping-servers-svg"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        position: absolute;
+        height: 100%;
+        width: calc(100% - 32px);
+        left: 16px;
+        top: 0;
+        overflow: hidden;
+      }
+      :host:not([desktop]) #servers g {
+        cursor: pointer;
+      } </style> <div id="main" class="svg-container"> <svg id="svg"> <g id="zoomg"> <g id="servers"> </g> </g> </svg> </div> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-servers-svg",
+
+      properties: {
+        d3_data: {
+          type: Array,
+          value: []
+        },
+        clusters: {
+          type: Array,
+          value: []
+        },
+        serversG: Object,
+        projection: Object,
+        selectedColour: {
+          type: String,
+          value: "<%= theme.PRIMARY_TEXT_COLOR %>"
+        },
+        closedByDefault: {
+          type: Boolean,
+          value: false,
+          observer: "_defaultChanged"
+        },
+        scaleFactor: {
+          type: Number,
+          value: 1
+        },
+        sqrScaleFactor: {
+          type: Number,
+          value: 1
+        }
+      },
+
+      __map: null,
+      resize_interval: null,
+      resize: function(){
+        if(!this.__map){
+          console.error("__map is undefined!",this.__map,this);
+          return
+        }
+        var map = $(this.__map);
+        $(this).css({
+          top: map.css("top"),
+          left: map.css("left"),
+          height: map.css("height"),
+          width: map.css("width"),
+        });
+        var zoominfo = this.__map.zoomInfo;
+        if(zoominfo){
+          d3.select(this.$.zoomg).transition()
+            .duration(zoominfo.duration)
+            .attr("transform",zoominfo.transform);
+          this.scaleFactor = zoominfo.factor;
+          this.sqrScaleFactor = Math.sqrt(this.scaleFactor);
+          if(zoominfo.duration > 0) this.setD3Data();
+        }
+      },
+      scale: function(number){
+        return number / this.sqrScaleFactor;
+      },
+      scaleFull: function(number){
+        return number / this.scaleFactor;
+      },
+      scaleTransform: function(x,y){
+        var scale = 1/this.sqrScaleFactor;
+        x = parseFloat(x);
+        y = parseFloat(y);
+        var ret = svg_translate(x,y) + svg_scale(scale) + svg_translate(-x,-y);
+        return ret
+      },
+
+      ready: function () {
+        //Allow css on svg elements
+        this.scopeSubtree(this.$$("#main > svg"), true);
+        this.serversG = d3.select(this.$$("#servers"));
+        this.serversG.data([]);
+
+        d3.selection.prototype.moveToFront = function() {
+          return this.each(function(){
+            this.parentNode.appendChild(this);
+          });
+        };
+        window.addEventListener('resize',function(e) {
+          this.resize();
+        }.bind(this));
+        $(this).closest(".grid-stack").on("dragstart resizestart",function(e) {
+          this.resize_interval = setInterval(function(){
+            this.resize();
+          }.bind(this),200);
+          setTimeout(function(){
+            if(this.resize_interval){
+              clearInterval(this.resize_interval);
+              this.resize_interval = null;
+            }
+          }.bind(this),20000)
+        }.bind(this));
+        $(this).closest(".grid-stack").on("dragstop resizestop",function(e) {
+          setTimeout(function(){ //A delay on this because this is called before the automatic adjustment to align with the grid
+            if(this.resize_interval){
+              clearInterval(this.resize_interval);
+              this.resize_interval = null;
+            }
+          }.bind(this),2000);
+        }.bind(this));
+      },
+      _defaultChanged: function(newValue){
+        if(this.serversG){
+          if(newValue){
+            this.closeClusters();
+          }else{
+            this.openClusters();
+          }
+        }
+      },
+      //Projection for lat,long => x,y
+      setProjection: function(map){
+        this.__map = map;
+        
+        var svg = d3.select(this.$$("#main > svg"))
+
+        // svg init
+        svg
+          .attr("width", map.width)
+          .attr("height", map.height)
+          .attr("viewBox", [0, 0, map.width, map.height].join(" "))
+          .attr("preserveAspectRatio", "xMidYMid");
+        this.projection = map.__makeProjection();
+        $(map).on("zoom-info-changed",function(){
+          this.resize();
+          map.saveZoom(packageId);
+          if(this.__map.zoomInfo.duration > 0) setTimeout(this.resize.bind(this),this.__map.zoomInfo.duration);
+        }.bind(this));
+        map.loadZoom(packageId);
+        map._bindMouseZoom(this.$.svg);
+        map._bindMousePan(this.$.svg);
+      },
+      lat_long_to_map: function(lat,lng,projection){
+        return projection( [lng,lat] );
+      },
+
+      /**
+       * Clear svg elements and all data
+       */
+      clearServers: function(refresh = false) {
+        this.d3_data = [];
+        this.clusters = [];
+        //Remove .selected from any svg elements
+        $(this.$.servers).find(".selected").toggleClass("selected");
+        if (refresh)
+          this.setD3Data();
+      },
+
+      //Changes the elements with the .selected class
+      select: function(element){
+        this.stylePingColour(d3.select(this.$.servers).selectAll(".selected").classed("selected",false));
+        if(element) {
+          this.stylePingColour(d3.selectAll(element.childNodes).classed("selected",true));
+          this.stylePingColour(d3.select(element).classed("selected",true));
+        }
+        this.setD3Data();
+      },
+
+      serverHasSelected: function(d, excludeHighlight){
+        var elem = d.element;
+        if(!elem) return false;
+        return elem.classList.contains("selected") || (!excludeHighlight && elem.classList.contains("highlight"))
+      },
+
+      clusterHasSelected: function(c, excludeHighlight){
+        for(var s = 0; s < c.servers.length; s++){
+          if((!excludeHighlight && c.hover) || this.serverHasSelected(c.servers[s], excludeHighlight)){
+            return true;
+          }
+        }
+        return false;
+      },
+
+      closeClusters: function(ignoreSelected){
+        for(var i = 0; i < this.clusters.length; i++){
+          var c = this.clusters[i];
+          if(!c.compact){
+            if(ignoreSelected && this.clusterHasSelected(c)) continue;
+            c.compact = true;
+          }
+        }
+        this.setD3Data();
+      },
+
+      openClusters: function(){
+        for(var i = 0; i < this.clusters.length; i++){
+          var c = this.clusters[i];
+          if(c.compact){
+            c.compact = false;
+          }
+        }
+        this.setD3Data();
+      },
+
+      selectAndClickIP: function(IP){
+        for(var i = 0; i < this.d3_data.length; i++){
+          var d = this.d3_data[i];
+          if(d.server.ip === IP){
+            if(d.cluster && d.cluster.compact){
+              d.cluster.compact = false;
+              this.setD3Data();
+            }
+            this.select(d.element);
+            this.closeClusters(true);
+            break;
+          }
+        }
+      },
+      highlightIP: function(IP){
+        for(var i = 0; i < this.d3_data.length; i++){
+          var d = this.d3_data[i];
+          if(d.server.ip === IP){
+            this.mouseOverFill.call(d.element,this,d);
+            break;
+          }
+        }
+      },
+      dehighlightIP: function(IP){
+        for(var i = 0; i < this.d3_data.length; i++){
+          var d = this.d3_data[i];
+          if(d.server.ip === IP){
+            this.mouseOutFill.call(d.element,this,d);
+            break;
+          }
+        }
+      },
+
+      /**
+       * Creates a new cluster
+       */
+      newCluster: function(startingServer,secondServer){
+        var new_cluster = {
+          x: startingServer.x,
+          y: startingServer.y,
+          servers: [startingServer,secondServer],
+          xdif: 1, //Controls the x direction it spread out to, -1 is to the right instead of to the left by default
+          compact: this.closedByDefault //Should the cluster be compacted?
+        }
+        //if another cluster is within 25 to the left, go right instead
+        for(var i = 0; i < this.clusters.length; i ++){
+          var otherCluster = this.clusters[i];
+          if(Math.abs(new_cluster.x - otherCluster.x) < 25){
+            if(new_cluster.x > otherCluster.x){
+              new_cluster.xdif = -1;
+            }else{
+              otherCluster.xdif = -1;
+            }
+          }
+        }
+        startingServer.cluster = new_cluster;
+        secondServer.cluster = new_cluster;
+        startingServer.selfIndex = 0; //index in cluster list
+        secondServer.selfIndex = 1;
+        startingServer.lines = null;
+        secondServer.lines = null;
+        this.clusters.push(new_cluster);
+        this.clusterAverage(new_cluster);
+        return new_cluster;
+      },
+
+      //The readius is which serevrs will be clustered together, in pixels
+      clusterDistance: 6,
+
+      distanceTo: function(x1,y1,x2,y2){
+        return Math.sqrt( Math.abs(x2-x1)**2 + Math.abs(y2-y1)**2)
+      },
+      inDistance: function(x1,y1,x2,y2){
+        return this.distanceTo(x1,y1,x2,y2) < this.clusterDistance;
+      },
+
+      clusterAverage: function(cluster){
+        var av = 0;
+        for(var i = 0; i < cluster.servers.length; i ++){ av += cluster.servers[i].ping.ping; }
+        cluster.average = scoreUtil.getPingData(Math.round(av/cluster.servers.length));
+      },
+
+      clusterise: function(server){
+        //Check existing clusters, and append to them
+        for(var i = 0; i < this.clusters.length; i ++){
+          var c = this.clusters[i];
+          if(this.inDistance(c.x,c.y,server.x,server.y)){
+            server.cluster = c;
+            server.selfIndex = c.servers.length;
+            c.servers.push(server);
+            this.clusterAverage(c);
+            return c;
+          }
+        }
+        //Check other servers, and create new cluster
+        for(var i = 0; i < this.d3_data.length; i ++){
+          var d = this.d3_data[i];
+          if(this.inDistance(d.x,d.y,server.x,server.y)){
+            var c = this.newCluster(d,server);
+            return c;
+          }
+        }
+      },
+
+      fromHistory: function(timeData){
+        for(var i = 0; i < timeData.length; i ++){
+          var snapshot = timeData[i];
+          for(var s = 0; s < this.d3_data.length; s++){
+            var d = this.d3_data[s];
+            if(d.server.ip === snapshot.server.ip){
+              d.ping = scoreUtil.getPingData(Math.ceil(snapshot.ping));
+            }
+          }
+        }
+        for(var c = 0; c < this.clusters.length; c++){
+          this.clusterAverage(this.clusters[c]);
+        }
+        this.setD3Data();
+      },
+      
+      //Display a server
+      appendServer: function(server, pingOverride) {
+        this.d3_data.push(this.createServer(server, pingOverride));
+      },
+      
+      //Create svg elements
+      createServer: function(data, pingOverride = null) {
+        var pos = this.lat_long_to_map(data.lat, data.long, this.projection);
+        var element = {
+          server: data,
+          ping: scoreUtil.getPingData(pingOverride ? pingOverride : data.ping),
+          x: pos[0],
+          y: pos[1]
+        }
+        //Append to clusters
+        this.clusterise(element);
+        return element;
+      },
+
+      //Will convert a bool to 1 or -1. false = 1, true = -1
+      boolNeg: function(bool){
+        return (bool * -2) + 1;
+      },
+
+      clusterHeightExaggeration: 2.5, //Exaggeretion of the height
+      clusterStepHeight: 12, //Height of the cluster. Actualt max height is height * exaggeration
+      clusterHeightOffsetBottom: 12, //Height of the diagonal line, and the min height of the vertical lines
+      clusterSideCount: 5, //The maximum amount of clusters on top and bottom of a cluster
+
+      sideCount: function(d){
+        return d.cluster ? Math.floor(d.cluster.servers.length / 2) + (d.cluster.servers.length % 2) : this.clusterSideCount;
+      },
+
+      //Get the x coordinate from server data
+      getX: function(d,offset=0,forceNoCompact){
+        if(d.cluster && d.cluster.compact && !forceNoCompact) return d.cluster.x;
+        var x = d.x;
+        var sideCount = this.sideCount(d);
+        if(d.cluster){
+          var useIndex = d.selfIndex >= sideCount ? d.selfIndex - sideCount : d.selfIndex;
+          var dis = (useIndex + (useIndex % 2)) * 10;
+          offset = dis * this.boolNeg(useIndex % 2) * d.cluster.xdif
+          x = d.cluster.x;
+        }
+        return x + this.scale(offset);
+      },
+      //Get the y coordinate from the server data
+      getY: function(d,offset=0,nonFullScaleOffset=0,forceNoCompact){
+        if(d.cluster && d.cluster.compact && !forceNoCompact) return d.cluster.y;
+        var y = d.y;
+        var sideCount = this.sideCount(d);
+        if(d.cluster){
+          var useIndex = d.selfIndex >= sideCount ? d.selfIndex - sideCount : d.selfIndex;
+          // var sideCount = d.selfIndex >= sideCount ? d.cluster.servers.length - sideCount : Math.min(d.cluster.servers.length, sideCount);
+          var clusterStep = this.clusterStepHeight; //* this.clusterHeightExaggeration;
+          offset = (offset - (this.clusterHeightOffsetBottom)) - ((sideCount - (useIndex + (useIndex % 2))) * clusterStep);
+          y = d.cluster.y;
+        }
+        return y + this.scaleFull(offset * this.boolNeg(d.selfIndex >= sideCount)) + this.scale(nonFullScaleOffset * this.boolNeg(d.selfIndex >= sideCount));
+      },
+
+      //Dynamic attributes for server dots
+      _serverCircleAttr: function(thisElement,init=false) {
+        if(init){
+          return{
+          "cx": function(d){ return d.cluster ? d.cluster.x : thisElement.getX(d) },
+          "cy": function(d) { return d.cluster ? d.cluster.y : thisElement.getY(d,d.selfIndex >= thisElement.sideCount(d) ? -15 : -10) },
+          "r": thisElement.scale(5)
+          }
+        }
+        return{
+        "cx": function(d) { return thisElement.getX(d) },
+        "cy": function(d) { return thisElement.getY(d,d.selfIndex >= thisElement.sideCount(d) ? -15 : -10) },
+        "r": thisElement.scale(5)
+        }
+      },
+      //Dynamic attributes for display text
+      _serverTextAttr: function(thisElement,init=false) {
+        if(init){
+          return{
+          "x": function(d) { return d.cluster ? d.cluster.x : thisElement.getX(d) },
+          "y": function(d) { return d.cluster ? d.cluster.y : thisElement.getY(d,0,d.selfIndex >= thisElement.sideCount(d) ? -40 : -17) },
+          "transform": function(d) { return thisElement.scaleTransform(this.attributes.x.value,this.attributes.y.value); },
+          }
+        }
+        return{
+          "x": function(d) { return thisElement.getX(d,0,true) },
+          "y": function(d) { return thisElement.getY(d,0,d.selfIndex >= thisElement.sideCount(d) ? -40 : -17, true) },
+          "transform": function(d) { return thisElement.scaleTransform(this.attributes.x.value,this.attributes.y.value); },
+        }
+      },
+      //Creates the lines to cluster x,y. firstLine=true is the vertical line, =false is the diagonal
+      _clusterLineAttr: function(thisElement,firstLine,init=false) {
+        if(init){
+          return {
+            "x1": function(d) { return d.cluster.x },
+            "y1": function(d) { return d.cluster.y },
+            "x2": function(d) { return d.cluster.x },
+            "y2": function(d) { return d.cluster.y },
+            "stroke-width": this.scale(2)
+          }
+        }
+        if(firstLine){
+          return {
+            "x1": function(d) { return thisElement.getX(d) },
+            "y1": function(d) { return thisElement.getY(d,d.selfIndex >= thisElement.sideCount(d) ? -15 : -10) },
+            "x2": function(d) { return thisElement.getX(d) },
+            "y2": function(d) { return d.cluster.y - thisElement.scaleFull(thisElement.clusterHeightOffsetBottom * thisElement.boolNeg(d.selfIndex >= thisElement.sideCount(d))) },
+            "stroke-width": this.scale(2)
+          }
+        }else{
+          return {
+            "x1": function(d) { return thisElement.getX(d) },
+            "y1": function(d) { return d.cluster.y - thisElement.scaleFull(thisElement.clusterHeightOffsetBottom * thisElement.boolNeg(d.selfIndex >= thisElement.sideCount(d))) },
+            "x2": function(d) { return d.cluster.x },
+            "y2": function(d) { return d.cluster.y },
+            "stroke-width": this.scale(2)
+          }
+        }
+      },
+
+      //While mouse is hovering over the server, set to white
+      mouseOverFill: function(svgElement, d, openCluster){
+        var sel = this;
+        while(sel.tagName !== "g") { sel = this.parentNode; }
+        if(!(d.cluster && d.cluster.compact))
+          d3.selectAll(sel.childNodes).style('fill', svgElement.selectedColour).style('stroke', svgElement.selectedColour).style('opacity',1);
+        if(d.element){
+          d.element.classList.add('highlight');
+        }else{
+          d.hover = true;
+        }
+        //d3.select(sel).moveToFront();
+        if(openCluster === true && d && d.cluster && d.cluster.compact){
+          d.cluster.compact = false;
+        }
+        svgElement.setD3Data();
+      },
+      //When mouse moves out of the server, set to ping colour
+      mouseOutFill: function(svgElement, d, closeCluster){
+        var sel = this;
+        while(sel.tagName !== "g") { sel = this.parentNode; }
+        if(d.element){
+          d.element.classList.remove('highlight');
+        }else{
+          d.hover = false;
+        }
+        d3.selectAll(sel.childNodes).each(function(d,i){
+          svgElement.stylePingColour(d3.select(this),!d.element ? svgElement.selectedColour : null,!d.element);
+        });
+        if(closeCluster === true && d && d.cluster && !d.cluster.compact){
+          d.cluster.compact = true;
+        }
+        svgElement.setD3Data();
+      },
+
+      //Create lines for the cluster
+      clusterLine: function(d3_element){
+        return [
+        this.stylePingColour(d3_element.append('line')
+          .attr(this._clusterLineAttr(this,true,true))),
+        this.stylePingColour(d3_element.append('line')
+          .attr(this._clusterLineAttr(this,false,true)))
+        ];
+      },
+
+      //provides the svg element (this) as the first argument
+      lb: function(func){
+        return function(thisElement){
+          return function(){
+            var arr = Array.prototype.slice.call(arguments);
+            arr.unshift(thisElement);
+            func.apply(this,arr)
+          }
+        }(this)
+      },
+
+      //Attach hover and click events for server elements
+      hover: function(d3_element){
+        d3_element.on("mouseover",this.lb(this.mouseOverFill)).on("mouseout",this.lb(this.mouseOutFill)).on("click",this._onServerClick.bind(this));
+        return d3_element;
+      },
+      //Attach hover and click events for server elements
+      clusterClick: function(d3_element){
+        d3_element.on("mouseover",this.lb(this.mouseOverFill)).on("mouseout",this.lb(this.mouseOutFill)).on("click",this._onClusterClick.bind(this));
+        return d3_element;
+      },
+
+      //Get appropriate colour for either selected or not
+      stylePingColour: function(d3_element,override=null,isCluster=false,isServerTextInit=false){
+        if(isCluster){
+          d3_element.style({
+            'fill': function(d) { return !d.compact && override ? override : (this.clusterHasSelected(d) ? this.selectedColour : (d3_element[0][0] && d3_element[0][0].tagName === "text" ? this.selectedColour : d.average.colour)) }.bind(this),
+            'stroke': function(d) { return !d.compact && override ? override : (this.clusterHasSelected(d) ? this.selectedColour : (d3_element[0][0] && d3_element[0][0].tagName === "text" ? this.selectedColour : d.average.colour)) }.bind(this),
+            'opacity': function(d) { return override || d.compact ? 1 : 0 }
+          })
+          return d3_element
+        }
+        if(override && !this.closedByDefault){
+          d3_element.style({
+            'fill': override,
+            'stroke': override,
+            'opacity': function(d) { return d.cluster && d.cluster.compact && isServerTextInit ? 1 : 0 }
+          });
+          return d3_element;
+        }
+        d3_element.style({
+          "fill": function(d) { return this.serverHasSelected(d) ? this.selectedColour : ((this.closedByDefault && !d.cluster && d3_element[0][0] && d3_element[0][0].tagName ==="text") ? this.selectedColour : d.ping.colour) }.bind(this),
+          "stroke": function(d) { return this.serverHasSelected(d) ? this.selectedColour : ((this.closedByDefault && !d.cluster && d3_element[0][0] && d3_element[0][0].tagName ==="text") ? this.selectedColour : d.ping.colour) }.bind(this),
+          "opacity": function(d) { return ( (d.cluster && d.cluster.compact) || (!d.cluster && this.closedByDefault && override) || (this.closedByDefault && !d.cluster && d3_element[0][0] && d3_element[0][0].tagName ==="text" && !this.serverHasSelected(d)) || isServerTextInit ) ? 0 : 1 }.bind(this)
+        })
+        return d3_element;
+      },
+
+      //Update the svg
+      setD3Data: function() {
+          var data = this.serversG.selectAll('.server').data(this.d3_data);
+          var g = this.hover(data.enter().append("g")); //Create <g> on data .enter()
+          g.classed("server", true);
+          //Add a circle for the servers
+          this.stylePingColour(g.append("circle")
+            .attr(this._serverCircleAttr(this,true)));
+          //Add ping display text
+          this.stylePingColour(g.append("text")
+            .attr({
+              "width": 40,
+              "height": 20,
+              "font-size": 20,
+              "font-family": "Roboto",
+              "text-anchor": "middle",
+            }).attr(this._serverTextAttr(this,true)).text(function (d) { return d.ping.ping }),null,false,true);
+
+          //Get all servers that haven't had lines created. This is due to first server of a cluster wont have lines created if done on the .enter()
+          data.filter(function(d){
+            d.element = this; //set element
+            return !!d.cluster && !d.lines;  //has .cluster and not drawn lines
+          }).each(this.lb(function(thisElement,d,i){
+            d.lines = thisElement.clusterLine(d3.select(this)) //create lines, and set .lines to them
+          }));
+          var duration = 500;
+          //On update - new servers or history change
+          this.stylePingColour(data.select('circle')).transition().attr(this._serverCircleAttr(this)).duration(duration);
+          this.stylePingColour(data.select('text')).transition().attr(this._serverTextAttr(this)).text(function (d) { return d.ping.ping }).duration(duration);
+          //.ease(function(t) {return ((t *= 2) <= 1 ? t * t * t : (t -= 2) * t * t + 2) / 2;});//function(t){ return t >= 1 ? 1 : 1 - Math.sqrt(1 - t * t)});
+          data.selectAll('line').each(this.lb(function(thisElement,d,i){
+            thisElement.stylePingColour(d3.select(this)).transition().attr(thisElement._clusterLineAttr(thisElement,!!this.nextSibling)).duration(duration);
+          }));
+          data.exit().remove();
+
+          var clusterData = this.serversG.selectAll('.cluster').data(this.clusters);
+          var cg = clusterData.enter().append("g"); //Create <g> on data .enter()
+          cg.classed("cluster", true)
+          this.stylePingColour(this.clusterClick(cg.append("rect")
+            .attr({
+              "transform": function(d) { return 'rotate(45 '+d.x+' '+d.y+')' }
+            }).attr(this._clusterRectAttr(this,true))),this.selectedColour,true);
+          //Add cluster average display text
+          // this.stylePingColour(this.clusterClick(cg.append("text").classed("average",true)
+          //   .attr({
+          //     "width": 40,
+          //     "height": 20,
+          //     "font-size": 20,
+          //     "font-family": "Roboto",
+          //     "text-anchor": "middle",
+          //   }).attr(this._clusterTextAttr(this,true)).text(function(d) { return d.average.ping })),null,true);
+          //Add cluster count
+          // this.clusterClick(cg.append("text").classed("count",true)
+          //   .attr({
+          //     "width": 40,
+          //     "height": 20,
+          //     "font-size": 25,
+          //     "font-family": "Roboto",
+          //     "font-weight": "bolder",
+          //     "text-anchor": "middle",
+          //   }).attr(this._clusterCountAttr(this,true)).text(function(d) { return d.servers.length }).style('opacity',function(d) { return d.compact ? 1 : 0 }));
+
+            this.stylePingColour(clusterData.select('rect'),this.selectedColour,true).transition().attr(this._clusterRectAttr(this)).duration(duration);
+            // this.stylePingColour(clusterData.select('.average').transition().attr(this._clusterTextAttr(this)).text(function(d) { return d.average.ping }),null,true).duration(duration);
+            // clusterData.select('.count').transition().attr(this._clusterCountAttr(this)).text(function(d) { return d.servers.length }).style('opacity',function(d) { return d.compact ? 1 : 0 }).duration(duration);
+            clusterData.moveToFront();
+
+          clusterData.exit().remove();
+      },
+
+      clusterSize: 10,
+      clusterSizeCompact: 20,
+      //Get the x coordinate from cluster data
+      getCX: function(d,offset=0){
+        return (d.x - (this.getCSize(d)/2)) + offset;
+      },
+      //Get the y coordinate from the cluster data
+      getCY: function(d,offset=0){
+        return ((d.y - (this.getCSize(d)/2)) + offset);
+      },
+      //Get the size of the cluster diamond
+      getCSize: function(d){
+        return this.scale(d.compact ? this.clusterSizeCompact : this.clusterSize);
+      },
+
+      //Dynamic attributes for cluster diamonds
+      _clusterRectAttr: function(thisElement,init=false) {
+        return{
+          "x": function(d) { return thisElement.getCX(d,0.75) },
+          "y": function(d) { return thisElement.getCY(d,0.75) },
+          "width": function(d) { return thisElement.scale(thisElement.getCSize(d)); },
+          "height": function(d) { return thisElement.scale(thisElement.getCSize(d)); }
+        }
+      },
+      _clusterTextAttr: function(thisElement,init=false) {
+        return{
+          "x": function(d) { return thisElement.getCX(d,thisElement.scale(thisElement.getCSize(d)/2)) },
+          "y": function(d) { return thisElement.getCY(d,thisElement.scale(-10)) }
+        }
+      },
+      _clusterCountAttr: function(thisElement,init=false) {
+        return{
+          "x": function(d) { return thisElement.getCX(d,thisElement.scale(thisElement.getCSize(d)/2)) },
+          "y": function(d) { return thisElement.getCY(d,thisElement.scale(thisElement.getCSize(d)*0.95)) }
+        }
+      },
+
+      _onServerClick: function(d){
+        if(d.cluster && d.cluster.compact){
+          this._onClusterClick(d.cluster);
+          return;
+        }
+        this.select(d.element);
+        this.fire("server-click",d);
+      },
+      _onClusterClick: function(d){
+        if(d.compact){ //opening
+          if(this.closedByDefault) this.closeClusters();
+          d.compact = false;
+        }else{
+          d.compact = true;
+        }
+        this.setD3Data();
+        this.fire("cluster-click",d);
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

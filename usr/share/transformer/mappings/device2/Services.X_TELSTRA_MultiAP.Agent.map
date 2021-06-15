@@ -1,0 +1,384 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_MultiAP_Agent_i_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_MultiAP.Agent.{i}.",
+    access = "readOnly",
+    description = "MultiAP agent parameters",
+    minEntries = 0,
+    maxEntries = 255,
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        type = "string",
+        max = 64,
+        description = "Multi-AP Agent/Device's name. Like Kitchen, living room.",
+      },
+      ModelNumber = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's Model number",
+      },
+      ManufacturerName = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's Manufacturer name",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's serial number",
+      },
+      IEEE1905Id = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent's IEEE 1905 Abstraction Layer (AL) MAC address",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's MAC address",
+      },
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's IP Address",
+      },
+      SignalStrength = {
+        access = "readOnly",
+        type = "int",
+        description = "Signal strength of link. -127 for link by Ethernet.",
+      },
+      LastDataLinkRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Link rate to up layer MultiAP Agent or gateway in kbps",
+      },
+      ParentAccessPoint = {
+        access = "readOnly",
+        type = "string",
+        description = "MultiAP Agents uplink layer. Empty for direct link to gateway",
+      },
+      BSSID2GHZ = {
+        access = "readOnly",
+        type = "string",
+        description = "Repeater's 2.4G BSSID",
+      },
+      BSSID5GHZ = {
+        access = "readOnly",
+        type = "string",
+        description = "Repeater's 5G BSSID",
+      },
+      BSSID2GHZ_Backhaul = {
+        access = "readOnly",
+        type = "string",
+        description = "Repeater's 2.4G Backhaul BSSID",
+      },
+      BSSID5GHZ_Backhaul = {
+        access = "readOnly",
+        type = "string",
+        description = "Repeater's 5G Backhaul BSSID",
+      },
+      ConnectionType = {
+        access = "readOnly",
+        type = "string",
+        description = "Repeater's connection type to up layer. Possible values are 'Ethernet','WiFi2.4G', 'WiFi5G'.",
+      },
+      PowerOnTime = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's last Power On Time",
+      },
+      FactoryResetTime = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's last Factory Reset Time",
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's firmware version",
+      },
+      HardwareVersion = {
+        access = "readOnly",
+        type = "string",
+        description = "Multi-AP Agent/Device's Hardware version",
+      },
+      TotalMemory = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Total memory of MultiAP Agent/Device in KB",
+      },
+      FreeMemory = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Free memory of MultiAP Agent/Device in KB",
+      },
+      UpTime = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Uptime of MultiAP Agent/Device",
+      },
+      MaxAssociatedDevices = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The maximum number of associated devices",
+      },
+      AssociatedDeviceNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The number of associated devices",
+      },
+      LED = {
+        access = "readWrite",
+        type = "string",
+        default = "Normal",
+        enumeration = {
+          "Normal",
+          "Dim",
+          "Off"
+        },
+        description = "Repeater's LED type",
+      },
+      LEDColor = {
+        access = "readOnly",
+        type = "string",
+        default = "Red",
+        enumeration = {
+          "Green",
+          "Yellow",
+          "Red",
+          "Orange",
+          "White",
+          "Purple",
+          "Blue"
+        },
+        description = "Show LED color",
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local mapveBinding = { config = "vendorextensions" }
+local configChanged = false
+local agentsInfo = {}
+local macToKey = {}
+local match = string.match
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.entries = function(mapping)
+  local entries = {}
+  macToKey = {}
+  agentsInfo = {}
+  local mapAgentInfo = conn:call("mapVendorExtensions.agent", "get", {}) or {}
+  mapveBinding.sectionname = "agent"
+  uciHelper.foreach_on_uci(mapveBinding, function(s)
+    local section = s and s[".name"]
+    local aleMac = s and s.aleMac
+    if aleMac then
+      macToKey[aleMac] = section
+      agentsInfo[section] = mapAgentInfo[aleMac]
+    end
+    entries[#entries + 1] = section
+  end)
+
+  return entries
+end
+
+local paramsInUbus = {
+  Alias = true,
+  ModelNumber = true,
+  ManufacturerName = true,
+  SerialNumber = true,
+  IEEE1905Id = true,
+  MACAddress = true,
+  IPAddress = true,
+  SignalStrength = true,
+  LastDataLinkRate = true,
+  ConnectionType = true,
+  PowerOnTime = true,
+  FactoryResetTime = true,
+  SoftwareVersion = true,
+  HardwareVersion = true,
+  TotalMemory = true,
+  FreeMemory = true,
+  UpTime = true,
+  MaxAssociatedDevices = true,
+  AssociatedDeviceNumberOfEntries = true
+}
+
+
+
+local function getRadio(key, radio, radioCount, fh_or_bh)
+  local agentRadioInfo
+  for data in pairs(agentsInfo[key]) do
+    if match(data, "radio") then
+      agentRadioInfo = agentsInfo[key][data]
+      if agentRadioInfo and agentRadioInfo["RadioType"] and agentRadioInfo["RadioType"] == radio then
+        if radio == "radio_2G" or (radio == "radio_5G" and radioCount < 3) then
+          return data
+        else
+          if agentRadioInfo["NoOfBSSID"] == 1 and agentRadioInfo["BSSID"][fh_or_bh] then
+            return data or ""
+          end
+        end
+      end
+    end
+  end
+end
+
+local function getBssidMacs(key, radio, fh_or_bh)
+  local bssMacs
+  local agentInfo = agentsInfo[key]
+  local radioCount = agentInfo["NoOfRadios"]
+  radio = getRadio(key, radio, radioCount, fh_or_bh)
+  if radio and agentInfo and agentInfo[radio] and agentInfo[radio]["BSSID"] then
+    bssMacs = agentInfo[radio]["BSSID"][fh_or_bh] or agentInfo[radio]["BSSID"]["BSSID_Fronthaul_Backhaul"]
+  end
+  return bssMacs and table.concat(bssMacs, ",") or ""
+end
+
+
+
+local function getLocalInterface(key)
+  local parentAp = agentsInfo[key]["ParentAccessPoint"] and tostring(agentsInfo[key]["ParentAccessPoint"]) or ""
+  local connType = agentsInfo[key]["ConnectionType"] or ""
+  if connType == "Ethernet" then
+    for mac,data in pairs(agentsInfo) do
+      local interfaces = agentsInfo[mac]["LocalInterfaces"] or {}
+      interfaces = table.concat(interfaces, ",")
+      if string.match(interfaces, parentAp) then
+        return getBssidMacs(mac, "radio_5G", "BSSID_Backhaul")
+      end
+    end
+  end
+  return parentAp
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.get = function(mapping, param, key)
+  if not agentsInfo[key] then
+    return ""
+  end
+  if paramsInUbus[param] then
+    return agentsInfo[key][param] and tostring(agentsInfo[key][param]) or ""
+  elseif param == "ParentAccessPoint" then
+    return getLocalInterface(key) or ""
+  elseif param == "BSSID2GHZ" then
+    return getBssidMacs(key, "radio_2G", "BSSID_Fronthaul")
+  elseif param == "BSSID5GHZ" then
+    return getBssidMacs(key, "radio_5G", "BSSID_Fronthaul")
+  elseif param == "BSSID2GHZ_Backhaul" then
+    return getBssidMacs(key, "radio_2G", "BSSID_Backhaul")
+  elseif param == "BSSID5GHZ_Backhaul" then
+    return getBssidMacs(key, "radio_5G", "BSSID_Backhaul")
+  elseif param == "LED" or param == "LEDColor" then
+    if agentsInfo[key] and agentsInfo[key]["IEEE1905Id"] then
+      conn:call("mapVendorExtensions.agent", "get_led_status", {["Mac"] = agentsInfo[key]["IEEE1905Id"]})
+    end
+    return param == "LED" and agentsInfo[key].LEDBrightness or agentsInfo[key].LEDColor or ""
+  end
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.getall = function(mapping, key)
+  if agentsInfo[key] and agentsInfo[key]["IEEE1905Id"] then
+    conn:call("mapVendorExtensions.agent", "get_led_status", {["Mac"] = agentsInfo[key]["IEEE1905Id"]})
+  end
+  return agentsInfo[key] and {
+    Alias = agentsInfo[key]["Alias"] and tostring(agentsInfo[key]["Alias"]) or "",
+    ModelNumber = agentsInfo[key]["ModelNumber"] and tostring(agentsInfo[key]["ModelNumber"]) or "",
+    ManufacturerName = agentsInfo[key]["ManufacturerName"] and tostring(agentsInfo[key]["ManufacturerName"]) or "",
+    SerialNumber = agentsInfo[key]["SerialNumber"] and tostring(agentsInfo[key]["SerialNumber"]) or "",
+    IEEE1905Id = agentsInfo[key]["IEEE1905Id"] and tostring(agentsInfo[key]["IEEE1905Id"]) or "",
+    MACAddress = agentsInfo[key]["MACAddress"] and tostring(agentsInfo[key]["MACAddress"]) or "",
+    IPAddress = agentsInfo[key]["IPAddress"] and tostring(agentsInfo[key]["IPAddress"]) or "",
+    SignalStrength = agentsInfo[key]["SignalStrength"] and tostring(agentsInfo[key]["SignalStrength"]) or "",
+    LastDataLinkRate = agentsInfo[key]["LastDataLinkRate"] and tostring(agentsInfo[key]["LastDataLinkRate"]) or "",
+    ParentAccessPoint = getLocalInterface(key) or "",
+    BSSID2GHZ = getBssidMacs(key, "radio_2G", "BSSID_Fronthaul"),
+    BSSID5GHZ = getBssidMacs(key, "radio_5G", "BSSID_Fronthaul"),
+    BSSID2GHZ_Backhaul = getBssidMacs(key, "radio_2G", "BSSID_Backhaul"),
+    BSSID5GHZ_Backhaul = getBssidMacs(key, "radio_5G", "BSSID_Backhaul"),
+    ConnectionType = agentsInfo[key]["ConnectionType"] and tostring(agentsInfo[key]["ConnectionType"]) or "",
+    PowerOnTime = agentsInfo[key]["PowerOnTime"] and tostring(agentsInfo[key]["PowerOnTime"]) or "",
+    FactoryResetTime = agentsInfo[key]["FactoryResetTime"] and tostring(agentsInfo[key]["FactoryResetTime"]) or "",
+    SoftwareVersion = agentsInfo[key]["SoftwareVersion"] and tostring(agentsInfo[key]["SoftwareVersion"]) or "",
+    HardwareVersion = agentsInfo[key]["HardwareVersion"] and tostring(agentsInfo[key]["HardwareVersion"]) or "",
+    TotalMemory = agentsInfo[key]["TotalMemory"] and tostring(agentsInfo[key]["TotalMemory"]) or "",
+    FreeMemory = agentsInfo[key]["FreeMemory"] and tostring(agentsInfo[key]["FreeMemory"]) or "",
+    UpTime = agentsInfo[key]["UpTime"] and tostring(agentsInfo[key]["UpTime"]) or "",
+    MaxAssociatedDevices = agentsInfo[key]["MaxAssociatedDevices"] and tostring(agentsInfo[key]["MaxAssociatedDevices"]) or "32",
+    AssociatedDeviceNumberOfEntries = agentsInfo[key]["AssociatedDeviceNumberOfEntries"] and tostring(agentsInfo[key]["AssociatedDeviceNumberOfEntries"]) or "0",
+    LED = agentsInfo[key].LEDBrightness or "",
+    LEDColor = agentsInfo[key].LEDColor or ""
+  } or {}
+end
+
+local brightness = {
+  ["Normal"] = "2",
+  ["Dim"] = "1",
+  ["Off"] = "0"
+}
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.set = {
+  Alias = function(mapping, param, value, key)
+    if agentsInfo[key] then
+      mapveBinding.sectionname = key
+      mapveBinding.option = "aleMac"
+      local agentMac = uciHelper.get_from_uci(mapveBinding)
+      mapveBinding.sectionname = string.gsub(agentMac, "%:", "") .."_alias"
+      mapveBinding.option = nil
+      uciHelper.set_on_uci(mapveBinding, "alias_name")
+      mapveBinding.option = "Alias"
+      uciHelper.set_on_uci(mapveBinding, value)
+      configChanged = true
+    else
+      return nil, "This agent is not onboarded"
+    end
+  end,
+  LED = function(mapping, param, value, key)
+    if agentsInfo[key] and agentsInfo[key]["IEEE1905Id"] then
+      local fd = io.open("/tmp/.ledbrightness", "a")
+      if fd then
+          fd:write(brightness[value] .. "," .. agentsInfo[key]["IEEE1905Id"], "\n")
+          fd:close()
+          commitapply:newset("multiap_setledbrightess")
+      else
+        return nil, "internal write error"
+      end
+    else
+      return nil, "No agent is onboarded for this instance"
+    end
+  end
+}
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(mapveBinding)
+    configChanged = false
+  end
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(mapveBinding)
+    configChanged = false
+  end
+end
+
+local function ubusEventTriggered(mapping, action, data)
+  local event = {}
+  if data.Action == "powerOnTimeUpdated" then
+    event[#event + 1] = { key = macToKey[data.MAC], paramname = "PowerOnTime"}
+  elseif data.Action == "softwareVersionUpdated" then
+    event[#event + 1] = { key = macToKey[data.MAC], paramname = "SoftwareVersion"}
+  end
+  return event
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, ubusEventTriggered, "mapVendorExtensions.agent")
+end
+
+register(Device_Services_X_TELSTRA_MultiAP_Agent_i_)
