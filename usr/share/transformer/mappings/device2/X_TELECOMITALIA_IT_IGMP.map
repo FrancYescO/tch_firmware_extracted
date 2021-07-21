@@ -1,0 +1,77 @@
+--Manually generated
+local Device_X_TELECOMITALIA_IT_IGMP_ = {
+  objectType = {
+    name = "Device.X_TELECOMITALIA_IT_IGMP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Version = {
+        access = "readWrite",
+        type = "string",
+        default = "0",
+        enumeration = {
+          "0",  -- default value
+          "2",  -- IGMPv2
+          "3",  -- IGMPv3
+        },
+        description = "IGMP version for iptv",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper('ucihelper')
+local isConfigChanged = false
+local networkBinding = { config = "network"}
+local wansensingBinding = { config = "wansensing"}
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+
+local function getUciValue(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return getFromUci(binding) or ""
+end
+
+local function setUciValue(section, option, value)
+  networkBinding.sectionname = section
+  networkBinding.option = option
+  setOnUci(networkBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+Device_X_TELECOMITALIA_IT_IGMP_.get = {
+  Version = function()
+    local currentl2 = getUciValue(wansensingBinding, "global", "l2type", "")
+    local sectionName = currentl2 == "ETH" and "iptveth4" or "iptvptm0"
+    return getUciValue(networkBinding, sectionName, "igmpversion", "0")
+  end
+}
+
+Device_X_TELECOMITALIA_IT_IGMP_.set = {
+  Version = function(mapping, param, value)
+    -- set the igmp version for both sections iptveth4 and iptvptm0
+    setUciValue("iptveth4", "igmpversion", value)
+    setUciValue("iptvptm0", "igmpversion", value)
+    isConfigChanged = true
+  end
+}
+
+Device_X_TELECOMITALIA_IT_IGMP_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_X_TELECOMITALIA_IT_IGMP_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_X_TELECOMITALIA_IT_IGMP_)

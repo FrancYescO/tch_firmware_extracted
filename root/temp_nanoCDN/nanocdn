@@ -1,0 +1,59 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=01
+
+export PATH="/sbin:/usr/sbin:/bin:/usr/bin"
+
+PID_CORE_FILE=/var/run/nanocdn-core.pid
+PID_RR_FILE=/var/run/nanocdn-rr.pid
+PID_MGR_FILE=/var/run/nanocdn-mgr.pid
+NANOCDN_CONF_FILE=/etc/broadpeak/nanocdn.conf
+config_load "system"
+
+start()
+{
+        local enable
+      
+        config_get_bool enable mabr enabled 0
+        [ $enable -eq 0 ] && return 0
+
+	start-stop-daemon -S -x /usr/bin/nanocdn-core -- --conf $NANOCDN_CONF_FILE --pidfile $PID_CORE_FILE "$@"
+# Uncomment below lines to start nanocdn-rr and nanocdn-mgr if they are included in ipk package
+	start-stop-daemon -S -x /usr/bin/nanocdn-rr -- --conf $NANOCDN_CONF_FILE --rr-pidfile $PID_RR_FILE "$@"
+#	start-stop-daemon -S -x /usr/bin/nanocdn-mgr -- --conf $NANOCDN_CONF_FILE --mgr-pidfile $PID_MGR_FILE "$@"
+}
+
+stop()
+{
+	if [ -f $PID_CORE_FILE ]
+	then
+		PID_CORE=`cat $PID_CORE_FILE`
+		start-stop-daemon -K -p $PID_CORE_FILE -s INT && rm -f $PID_CORE_FILE
+		while [[ -f /proc/$PID_CORE/status ]]
+		do
+			sleep 1
+		done
+	fi
+
+	if [ -f $PID_RR_FILE ]
+	then
+		PID_RR=`cat $PID_RR_FILE`
+		start-stop-daemon -K -p $PID_RR_FILE -s INT && rm -f $PID_RR_FILE
+		while [[ -f /proc/$PID_RR/status ]]
+		do
+			sleep 1
+		done
+	fi
+
+	if [ -f $PID_MGR_FILE ]
+	then
+		PID_MGR=`cat $PID_MGR_FILE`
+		start-stop-daemon -K -p $PID_MGR_FILE -s INT && rm -f $PID_MGR_FILE
+		while [[ -f /proc/$PID_MGR/status ]]
+		do
+			sleep 1
+		done
+	fi
+}
+
