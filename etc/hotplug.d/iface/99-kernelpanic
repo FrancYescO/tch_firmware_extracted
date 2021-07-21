@@ -1,0 +1,16 @@
+#!/bin/sh
+
+[ -e "/proc/prozone/panic" ] || exit 0
+. "$IPKG_INSTROOT/lib/functions.sh"
+Haswan=$(uci -q get network.wan)
+if [ -z $Haswan ];then
+  ifname="br-lan"
+else
+  ifname=`ifstatus wan | grep 'l3_device' | cut -d '"' -f 4`
+  if [ -z "$ifname" ];then
+    ifname=`ifstatus wan6 | grep 'l3_device' | cut -d '"' -f 4`
+  fi
+  [ -z "$ifname" ] && exit 0
+fi
+device=$ifname
+[ "$ACTION" = "ifup" ] && [ "$DEVICE" = "$device" ] && sh /sbin/kernel-panic-handler

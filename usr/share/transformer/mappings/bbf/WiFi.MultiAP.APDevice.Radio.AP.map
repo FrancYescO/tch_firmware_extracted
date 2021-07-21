@@ -1,0 +1,53 @@
+-- Manually generated
+local Multi_MultiAP_APDevice_i_Radio_i_AP_i_ = {
+  objectType = {
+    name = "#ROOT.APDevice.{i}.Radio.{i}.AP.{i}.",
+    numEntriesParameter = "APNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      BSSID = {
+        access = "readOnly",
+        type = "string",
+        max = "17"
+      },
+      SSID = {
+        access = "readOnly",
+        type = "string"
+      },
+      -- AssociatedDeviceNumberOfEntries
+      -- automatically created when #ROOT.MultiAP.APDevice.{i}.Radio.{i}.AP.{i}.AssociatedDevice.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_.entries = function(mapping, parent, grand)
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", { almac = grand }) or {}
+  cacheData = cacheData[grand] and cacheData[grand]["radio_info"] and cacheData[grand]["radio_info"][parent] and cacheData[grand]["radio_info"][parent]["bss_info"] or {}
+  for bssMac in pairs(cacheData) do
+    entries[#entries + 1] = bssMac
+  end
+  return entries
+end
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_.get = {
+  BSSID = function(mapping, param, key, parent, grand)
+    return key
+  end,
+  SSID = function(mapping, param, key, parent, grand)
+    local result = cacheData[key] or {}
+    return result.ssid or ""
+  end
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_APDevice_i_Radio_i_AP_i_, "#ROOT", { "Device.WiFi.MultiAP",  "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
