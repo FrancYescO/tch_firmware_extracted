@@ -1,0 +1,102 @@
+-- This maps 1 to 1 on Users.User.{i}.
+-- Used to test cross datamodel eventing
+local Tests_XDE_i_ = {
+  objectType = {
+    name = "Tests.XDE.{i}.",
+    access = "readWrite",
+    enableParameter = "Enable",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      RemoteAccessCapable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      Password = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      Language = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      CreationTime = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+    }
+  }
+}
+
+local uci_binding = {
+  global_config="users",
+  global_type="user",
+  Enable="enable",
+  RemoteAccessCapable="remoteaccesscapable",
+  Username="username",
+  Password="password",
+  Language="language",
+  CreationTime="creationtime",
+}
+
+mapper("multiuci").connect(Tests_XDE_i_,uci_binding)
+
+local uci_helper = mapper("ucihelper")
+local original_entries = Tests_XDE_i_.entries
+local users_binding = {
+  config = "users",
+  sectionname = "user",
+}
+local key_cache = {}
+local function populate_key_cache()
+  key_cache = {}
+  uci_helper.foreach_on_uci(users_binding,function(s)
+    key_cache[s[".name"]] = s["_key"]
+  end)
+end
+
+Tests_XDE_i_.entries = function(mapping)
+  populate_key_cache()
+  return original_entries(mapping)
+end
+
+local reverse_param_translation = {
+  enable = "Enable",
+  remoteaccesscapable = "RemoteAccessCapable",
+  username = "Username",
+  password = "Password",
+  language = "Language",
+  creationtime = "CreationTime",
+}
+
+local function translate_cb(mapping, action, config, sectiontype, sectionname, option)
+  if not next(key_cache) then
+    populate_key_cache()
+  end
+  if not key_cache[sectionname] then
+    return false
+  end
+  return { { key = key_cache[sectionname], paramname = reverse_param_translation[option] } }
+end
+
+Tests_XDE_i_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = translate_cb }, "users", "user", nil, nil)
+  uci_evsrc.watch(mapping, { set = translate_cb }, "users", "user", nil, "username")
+end
+
+register(Tests_XDE_i_)

@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# Install packages before booting
+for ipk in $(ls -1 /etc/ipks/*.ipk); do
+  opkg install --force-depends --force-reinstall ${ipk} && rm ${ipk}
+done
+ls /etc/custo/config/* &>/dev/null && mv /etc/custo/config/* /etc/config
+
+# Check if preinstalled packages need to be enabled or disabled. These files
+# are generated based on the enabled state of the packages on the previous SW
+# build and will be removed afterwards.
+force_enabled="/etc/force_enabled"
+force_disabled="/etc/force_disabled"
+
+if [ -f ${force_disabled} ]; then
+  while read app; do
+    if [ -f /etc/init.d/${app} ]; then
+      /etc/init.d/${app} stop
+      /etc/init.d/${app} disable
+    fi
+  done < ${force_disabled}
+  rm -f "${force_disabled}"
+fi
+
+if [ -f ${force_enabled} ]; then
+  while read app; do
+    if [ -f /etc/init.d/${app} ]; then
+      /etc/init.d/${app} enable
+    fi
+  done < ${force_enabled}
+  rm -f "${force_enabled}"
+fi
+
+. /etc/init.d/rcS S boot
+
+trap "{ run_scripts K shutdown }" SIGPWR
+
+while true; do
+  # Doing nothing
+  sleep 10
+done
