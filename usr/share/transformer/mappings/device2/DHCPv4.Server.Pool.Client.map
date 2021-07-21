@@ -1,0 +1,198 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DHCPv4_Server_Pool_i_Client_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Server.Pool.{i}.Client.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ClientNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Chaddr = {
+        access = "readOnly",
+        type = "string",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      -- IPv4AddressNumberOfEntries
+      -- automatically created when Device.DHCPv4.Server.Pool.{i}.Client.{i}.IPv4Address.{i}. is loaded
+      -- OptionNumberOfEntries
+      -- automatically created when Device.DHCPv4.Server.Pool.{i}.Client.{i}.Option.{i}. is loaded
+    }
+  }
+}
+
+local mapper = mapper
+local ubusConnection= mapper("ubus").connect()
+local nwCommon = mapper("nwcommon")
+local network = require("transformer.shared.common.network")
+local splitKey = nwCommon.split_key
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local dhcpBinding = { config = "dhcp" }
+local pairs, tonumber = pairs, tonumber
+
+local function processSingleDataEntries(val,start,limit)
+  local result
+  for k,v in pairs(val) do
+    if type(v) == "table" and k ~= "dhcp"  then
+      result = processSingleDataEntries(v,start,limit)
+      if result == 1 then break end
+    elseif k == "dhcp" and v["state"] == "connected" then
+      local addr = val["address"]
+      if (addr and addr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$"))  then
+        local chunks = { addr:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$") }
+          if(chunks[4] and tonumber(start) and tonumber(chunks[4])>=tonumber(start) and tonumber(chunks[4])<(tonumber(start)+tonumber(limit))) then
+            return 1
+          end
+       end
+    end
+  end
+  return result
+end
+
+local function getUciParam(key, option)
+  dhcpBinding.sectionname = key
+  dhcpBinding.option = option
+  return getFromUci(dhcpBinding)
+end
+
+Device_DHCPv4_Server_Pool_i_Client_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local present = {}
+  local data = ubusConnection:call("hostmanager.device", "get",  {})
+  local start = getUciParam(parentkey, "start")
+  local limit = getUciParam(parentkey, "limit")
+  local interfaceName = getUciParam(parentkey, "interface")
+  local l3Interface = nwCommon.getIntfName(interfaceName)
+  if data then
+    for key,val in pairs(data) do
+      if val["ipv4"] and val["l3interface"] == l3Interface then
+        local result = processSingleDataEntries(val,start,limit)
+        if result and not present[key] then
+          entries[#entries+1] = parentkey .. "|" ..key
+          present[key] = true
+        end
+      end
+    end
+  end
+  return entries
+end
+
+local function getChaddr(mapping,param,key)
+  local _,devname = splitKey(key)
+  return network.getHostDataByName(devname)["mac-address"] or ""
+end
+
+local function getActive(mapping,param,key)
+  local _,devname = splitKey(key)
+  local devTable = network.getHostDataByName(devname)
+  devTable = devTable and devTable['ipv4'] or {}
+  for _,n in pairs(devTable) do
+    if n["dhcp"] and (n["state"] == "connected" or n["state"] == "stale") then
+      return "1"
+    end
+  end
+  return "0"
+end
+
+Device_DHCPv4_Server_Pool_i_Client_i_.get = {
+  Chaddr = getChaddr,
+  Active = getActive,
+}
+
+Device_DHCPv4_Server_Pool_i_Client_i_.getall = function(mapping,key)
+  local allValues = {
+    Chaddr = getChaddr(mapping,nil,key),
+    Active = getActive(mapping,nil,key),
+  }
+  return allValues
+end
+
+register(Device_DHCPv4_Server_Pool_i_Client_i_)
+
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DHCPv4_Server_Pool_i_Client_i_Option_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Server.Pool.{i}.Client.{i}.Option.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    numEntriesParameter = "OptionNumberOfEntries",
+    parameters = {
+      Tag = {
+        access = "readOnly",
+        type = "string",
+      },
+      Value = {
+        access = "readOnly",
+        type = "hexBinary",
+        max = "255",
+        default = "",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local nwCommon = mapper("nwcommon")
+local network = require("transformer.shared.common.network")
+local splitKey = nwCommon.split_key
+local ubusConnection = mapper("ubus").connect()
+local pairs = pairs
+
+local optionToTag = {
+  vendorclass = "60",
+  clientid = "61",
+  userclassid = "77",
+}
+
+Device_DHCPv4_Server_Pool_i_Client_i_Option_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local _, dev = splitKey(parentkey)
+  for _, value in pairs(optionToTag) do
+    entries[#entries + 1] = dev .. "|" .. value
+  end
+  return entries
+end
+
+Device_DHCPv4_Server_Pool_i_Client_i_Option_i_.get = {
+  Tag = function(mapping, param, key)
+    local _, tag = splitKey(key)
+    return tag
+  end,
+  Value = function(mapping, param, key)
+    local clientDev, tag = splitKey(key)
+    local optVal = {}
+    local data = ubusConnection:call("hostmanager.device", "get",  {}) or {}
+    for dev, val in pairs(data) do
+      if clientDev == dev then
+        local ipv4data = val["ipv4"] or {}
+        for _, host in pairs(ipv4data) do
+          if host.state == "stale" or host.state == "connected" then
+            if tag == "60" then
+              optVal["60"] = host["dhcp"] and host["dhcp"]["vendor-class"]
+            elseif tag == "61" then
+              optVal["61"] = host["dhcp"] and host["dhcp"]["clientid"]
+            else
+              optVal["77"] = host["dhcp"] and host["dhcp"]["userclass"]
+            end
+          end
+        end
+      end
+    end
+    return optVal[tag] and network.stringToHex(optVal[tag]) or ""
+  end,
+}
+
+register(Device_DHCPv4_Server_Pool_i_Client_i_Option_i_)

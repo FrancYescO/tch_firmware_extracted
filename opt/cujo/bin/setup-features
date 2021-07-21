@@ -1,0 +1,29 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+features="fingerprint safebro.reputation safebro.profiles tcptracker apptracker"
+connection_tries=20
+
+tries=$connection_tries
+while [ $tries -gt 0 ] && ! "$CUJO_HOME/bin/rabidsh" 2>/dev/null; do
+    tries=$((tries - 1))
+    echo >&2 "Waiting for Rabid to start up ($tries tries remaining)..."
+    sleep 1
+done
+if [ $tries -eq 0 ]; then
+    echo >&2 "Rabid doesn't seem to be running!"
+    exit 1
+fi
+
+for feature in $features; do
+    cmd="$CUJO_HOME/bin/rabid-feature on $feature"
+
+    if ! eval "$cmd"; then
+        echo >&2 "[setup-features] turning on $feature FAILED!"
+    fi
+done
