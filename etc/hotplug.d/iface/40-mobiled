@@ -1,0 +1,13 @@
+. /lib/functions.sh
+
+_validate_interface() {
+	local _PROTO
+	config_get _PROTO "$1" proto
+	if [ "$INTERFACE" != "${INTERFACE#$1}" ] && [ "$_PROTO" = "mobiled" ]; then
+		ubus send mobiled.network "{\"interface\":\"$INTERFACE\",\"action\":\"$ACTION\"}"
+		return 1
+	fi
+}
+
+config_load network
+config_foreach _validate_interface interface
