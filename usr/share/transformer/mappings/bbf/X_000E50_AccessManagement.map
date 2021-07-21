@@ -1,0 +1,242 @@
+local Multi_Services_X_000E50_AccessManagement_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_AccessManagement.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  },
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_AccessManagement_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_000E50_AccessManagement_SSH_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_AccessManagement.SSH.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  },
+}
+
+duplicates = duplicator(Multi_Services_X_000E50_AccessManagement_SSH_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_AccessManagement.SSH.CliUsers.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Parameters to configure Clash/CLI users via the ACS",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/disable SSH access",
+      },
+      Username = {
+        access = "readOnly",
+        type = "string",
+        description = "Username for SSH access",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        description = "Password for SSH access",
+      },
+      Access = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "LAN",
+          "WAN",
+          "ANY",
+          "NONE",
+        },
+        description = "Specifies via which interface SSH access will be allowed",
+      },
+      RebootPersistent = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Specifies whether to retain non-default SSH settings after reboot",
+      },
+    },
+  },
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local mapper = mapper
+local common = mapper('nwcommon')
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local password = require("transformer.shared.setClashPassword")
+local clashBinding = { config = "clash" }
+local configChanged = false
+local lanIntf = {}
+local wanIntf = {}
+
+local lanInterfaces = common.findLanWanInterfaces(false)
+local wanInterfaces = common.findLanWanInterfaces(true)
+
+local optionMap = {
+  LAN = lanInterfaces,
+  WAN = wanInterfaces,
+}
+
+local function getUciValue(section, option, default)
+  clashBinding.sectionname = section
+  clashBinding.option = option
+  clashBinding.default = default
+  return getFromUci(clashBinding)
+end
+
+local function setUciValue(section, option, value)
+  clashBinding.sectionname = section
+  clashBinding.option = option
+  setOnUci(clashBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getlanWanMap()
+  for _, v in ipairs(lanInterfaces) do
+    lanIntf[v] = true
+  end
+  for _, n in ipairs(wanInterfaces) do
+    wanIntf[n] = true
+  end
+end
+
+local function getAccessType(user)
+  local sshIntfs = getUciValue(user, "ssh_interface", {})
+  for _, v in ipairs(sshIntfs) do
+    if lanIntf[v] then
+      return "LAN"
+    elseif wanIntf[v] then
+      return "WAN"
+    end
+    return "NONE"
+  end
+  return getUciValue(user, "ssh") == "1" and "ANY" or "NONE"
+end
+
+local function setDefaults()
+  clashBinding.sectionname = "user"
+  forEachOnUci(clashBinding, function(s)
+    if s.persist_ssh_on_reboot == "0" then
+      -- default values are hardcoded for now. Later to be restored from the factory default values.
+      setUciValue(s['.name'], "ssh", "0")
+      setUciValue(s['.name'], "ssh_interface", "")
+    end
+  end)
+  uciHelper.commit(clashBinding)
+end
+
+getlanWanMap()
+setDefaults()
+
+local function sshIntfCheck(key)
+  local access = getUciValue(key, "ssh_interface", {})
+  for _, intf in ipairs(access) do
+    if lanIntf[intf] or wanIntf[intf] then
+      return true
+    end
+  end
+  return false
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_.entries = function(mapping)
+  local entries = {}
+  clashBinding.sectionname = "user"
+  forEachOnUci(clashBinding, function(s)
+    entries[#entries + 1] = s['.name']
+  end)
+  return entries
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_.get = {
+  Enable = function(mapping, param, key)
+    local sshAccess = getUciValue(key, "ssh")
+    if sshAccess ~= "" then
+      return sshAccess
+    elseif sshIntfCheck(key) then
+      return "1"
+    end
+    return "0"
+  end,
+  Username = function(mapping, param, key)
+    return key
+  end,
+  Password = "",
+  Access = function(mapping, param, key)
+    return getAccessType(key)
+  end,
+  RebootPersistent = function(mapping, param, key)
+    return getUciValue(key, "persist_ssh_on_reboot", "1")
+  end
+}
+
+Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_.set = {
+  Enable = function(mapping, param, value, key)
+    if value ~= "0" then
+      local sshIntfs = getUciValue(key, "ssh_interface", {})
+      if next(sshIntfs) then
+        return setUciValue(key, "ssh", "")
+      end
+    end
+    setUciValue(key, "ssh", value)
+  end,
+  Password = function(mapping, param, value, key)
+    return password.setPassword(key, value)
+  end,
+  Access = function(mapping, param, value, key)
+    if value == "ANY" then
+      setUciValue(key, "ssh", "1")
+      setUciValue(key, "ssh_interface", "")
+    elseif value == "NONE" then
+      setUciValue(key, "ssh", "0")
+      setUciValue(key, "ssh_interface", "")
+    else
+      setUciValue(key, "ssh_interface", optionMap[value])
+      -- Remove ssh option only if it is set to "1", so that interfaces mentioned in ssh_interface only will be allowed
+      if getUciValue(key, "ssh") == "1" then
+        setUciValue(key, "ssh", "")
+      end
+    end
+  end,
+  RebootPersistent = function(mapping, param, value, key)
+    setUciValue(key, "persist_ssh_on_reboot", value)
+  end
+}
+
+Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(clashBinding)
+  end
+  configChanged = false
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(clashBinding)
+  end
+  configChanged = false
+end
+
+duplicates = duplicator(Multi_Services_X_000E50_AccessManagement_SSH_CliUsers_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
