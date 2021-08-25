@@ -1,0 +1,118 @@
+<link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu-button/paper-menu-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/av-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="adblock-pause-button"> <template> <style include="duma-theme iron-flex"> :host  {
+        display: block;
+      }
+      paper-icon-button {
+        --paper-icon-button: {
+          margin: 8px;
+        };
+      }
+      paper-menu-button paper-icon-button {
+        --paper-icon-button: {
+          margin: 0;
+        };
+      }
+      paper-menu-button paper-button {
+        margin: 8px 16px;
+      } </style> <iron-pages selected="[[showPlayPause]]"> <div> <paper-icon-button on-tap="EnableDevice" icon="av:play-arrow" disabled="[[!internalAdblockEnabled]]"></paper-icon-button> </div> <div> <paper-menu-button disabled="[[!internalAdblockEnabled]]"> <paper-icon-button id="pauseButton" icon="av:pause" class="dropdown-trigger" alt="menu"></paper-icon-button> <paper-listbox class="dropdown-content"> <paper-item on-tap="DisableDevice" data-time="60"><%= i18n.min_1 %></paper-item> <paper-item on-tap="DisableDevice" data-time="300"><%= i18n.min_5 %></paper-item> <paper-item on-tap="DisableDevice" data-time="600"><%= i18n.min_10 %></paper-item> <paper-item on-tap="DisableDevice" data-time="1800"><%= i18n.min_30 %></paper-item> <paper-item on-tap="DisableDevice" data-time="2700"><%= i18n.min_45 %></paper-item> <paper-item on-tap="DisableDevice" data-time="3600"><%= i18n.min_60 %></paper-item> <template is="dom-if" if="[[!disableButton]]"> <paper-button on-tap="DisableDevice" data-time="0" background><%= i18n.disable %></paper-button> </template> </paper-listbox> </paper-menu-button> </div> </iron-pages> </template> <script> Polymer(
+    {
+      is: 'adblock-pause-button',
+      properties:
+      {
+        disableButton:
+        {
+          type: Boolean,
+          value: false,
+        },
+        DeviceEnabled:
+        {
+          type: Boolean,
+          value: true,
+        },
+        DeviceID:
+        {
+          type: Number,
+          value: -1,
+        },
+        disabledRemainder:
+        {
+          type: Number,
+          value: -1,
+          notify: true,
+          observer: "DisabledRemainderChanged"
+        },
+        adblockEnabled:
+        {
+          type: Boolean,
+          value: false,
+          notify: true,
+        },
+        internalAdblockEnabled:
+        {
+          type: Boolean,
+          computed: "IsAdblockEnabled(adblockEnabled, DeviceID, disabledRemainder)",
+        },
+        showPlayPause:
+        {
+          type: Boolean,
+          computed: "ShouldShowPlayPause(DeviceEnabled, DeviceID, adblockEnabled)"
+        }
+      },
+      DisabledRemainderChanged(time, oldValue)
+      {
+        if (this.disableTimeoutID)
+          clearTimeout(this.disableTimeoutID);
+
+        if (time <= 0)
+          return;
+
+        this.disableTimeoutID = setTimeout(function ()
+        {
+          this.DeviceEnabled = true;
+          if (this.DeviceID === -1)
+            this.adblockEnabled = true;
+          this.disabledRemainder = -1;
+        }.bind(this), time * 1000);
+      },
+      EnableDevice()
+      {
+        this.DeviceEnabled = true;
+        if (this.DeviceID === -1)
+          long_rpc_promise("com.netdumasoftware.adblocker", "enable", [true, 0]).done(this.GlobalEnabledCallback.bind(this));
+        else
+        {
+          long_rpc_promise("com.netdumasoftware.adblocker", "enable_device", [this.DeviceID, true, 0]);
+          this.disabledRemainder = -1;
+        }
+      },
+      DisableDevice(event)
+      {
+        var time = event.target.dataset.time;
+
+        if (this.DeviceID === -1)
+          long_rpc_promise("com.netdumasoftware.adblocker", "enable", [false, time]).done(this.GlobalEnabledCallback.bind(this))
+        else
+        {
+          long_rpc_promise("com.netdumasoftware.adblocker", "enable_device", [this.DeviceID, false, time]);
+          this.disabledRemainder = parseInt(time);
+        }
+
+        this.DeviceEnabled = false;
+      },
+      IsAdblockEnabled(adblockEnabled, DeviceID, disabledRemainder)
+      {
+        if (DeviceID === -1)
+          return adblockEnabled || disabledRemainder >= 0;
+        return adblockEnabled;
+      },
+      ShouldShowPlayPause(DeviceEnabled, DeviceID, adblockEnabled)
+      {
+        if (DeviceID == -1)
+          return adblockEnabled;
+        return DeviceEnabled;
+      },
+      GlobalEnabledCallback(result)
+      {
+        this.adblockEnabled = result[0].enabled;
+        this.disabledRemainder = parseInt(result[0].disabled_for);
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,116 @@
+local require, ipairs = require, ipairs
+local proxy = require("datamodel")
+local content_helper = require("web.content_helper")
+local strmatch = string.match
+
+local M = {}
+
+--Note:wl0, wl0-1, wl1, wl1-1, currently there is only one peeriface
+--wl0\wl1 are in one pair, and bsid is bs0
+--wl0_1\wl1_1 are in one pair, and bsid is bs1
+--wl0_2\wl1_2 are in one pair, and bsid is bs2
+
+--local piface = "uci.wireless.wifi-iface."
+function M.getBandSteerPeerIface(curiface)
+    local tmpstr = strmatch(curiface, ".*(_%d+)")
+    local results = proxy.get("uci.wireless.wifi-iface.")
+    local wl_pattern = "uci%.wireless%.wifi%-iface%.@([^%.]*)%."
+
+    if results then
+        for _,v in ipairs(results) do
+            if v.param == "ssid" then
+                local wl = v.path:match(wl_pattern)
+                if wl ~= curiface then
+                    if not tmpstr then
+                        if not strmatch(wl, ".*(_%d+)") then
+                            return wl
+                        end
+                    else
+                        if tmpstr == strmatch(wl, ".*(_%d+)") then
+                            return wl
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+function M.isBaseIface(iface)
+    if "0" == strmatch(iface, "%d+") then
+        return true
+    else
+        return false
+    end
+end
+
+function M.getBandSteerId(wl)
+    local tmpstr = strmatch(wl, ".*_(%d+)")
+    if not tmpstr then
+        return string.format("%s", "bs0")
+    else
+        return string.format("%s", "bs" .. tmpstr)
+    end
+end
+
+function M.disableBandSteer(object, multiap_enabled, isguest)
+    if object.bsid == "" or ((not multiap_enabled or isguest == '1') and (object.bsid == "off" or object.bsid_state == '0')) or (multiap_enabled and object.multiap_cred_secondary_state == "1") then
+        return true
+    else
+        --object.bsid = "off"
+        --object.bspeerid = "off"
+        if (not multiap_enabled or isguest == '1') then
+            object.bsid_state = '0'
+        end
+
+        local ssid = object.ssid
+
+        if object.bspifacessid then
+            object.bspifacessid = ssid .. "-5G"
+        else
+            object.ssid = ssid .. "-5G"
+        end
+
+        if object.multiap_cred_primary_bands then
+            object.multiap_cred_primary_bands = "radio_2G"
+            object.multiap_cred_secondary_state = "1"
+        end
+
+        if object.multiap_bspifacessid then
+            object.multiap_bspifacessid = ssid .. "-5G"
+        end
+    end
+    return true
+end
+
+function M.getBandSteerState(bspeerap, ap, multiap_cred_secondary_path, bsid)
+    local bandsteer_supported, bandsteer_enabled
+    if bspeerap then
+        local content = {}
+        if multiap_cred_secondary_path then
+            content.multiap_cred_secondary_state =  multiap_cred_secondary_path .. ".state"
+        else
+            content.bandsteer_id = "uci.wireless.wifi-ap.@" .. ap .. ".bandsteer_id"
+            content.bandsteer_id_state = "uci.wireless.wifi-bandsteer.@" .. bsid .. ".state"
+        end
+
+        --To get the content value
+        content_helper.getExactContent(content)
+
+        if content.bandsteer_id ~= "" then
+            bandsteer_supported = true
+            if multiap_cred_secondary_path then
+                if content.multiap_cred_secondary_state == "0" then
+                    bandsteer_enabled = true
+                end
+            elseif content.bandsteer_id ~= "off" and content.bandsteer_id_state ~= '0' then
+                bandsteer_enabled = true
+            end
+        end
+    end
+    return bandsteer_supported, bandsteer_enabled
+end
+
+return M

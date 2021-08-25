@@ -1,0 +1,156 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Network_Sessions.{i}.',
+		access = 'readOnly',
+		numEntriesParameter = "NetworkSessionsNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			Session_ID = {
+				access = "readOnly",
+				type = "string"
+			},
+			Name = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Profile = {
+				access = "readOnly",
+				type = "string"
+			},
+			Internal = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Optional = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Activated = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Emergency = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Autoconnect = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Allowed = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Session_State = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Proto = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Interface = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			TX_Packet_Counters_Bytes = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			RX_Packet_Counters_Bytes = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Reject_Cause = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PPP_Device = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PPP_PDP_Type = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PPP_APN = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			DHCP_PDP_Type = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			DHCP_Interface_Name = {
+				 access = "readOnly",
+				 type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+function obj.getall(mapping, key, parentKey)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	key = tonumber(key)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.network", "sessions", parentKey)
+	if data and data.sessions and data.sessions[key] then
+		local session_info = data.sessions[key]
+		result.Session_ID = session_info.session_id
+		result.Name = session_info.name
+		result.Profile = session_info.profile
+		result.Internal = session_info.internal
+		result.Optional = session_info.optional
+		result.Activated = session_info.activated
+		result.Emergency = session_info.emergency
+		result.Autoconnect = session_info.autoconnect
+		result.Allowed = session_info.allowed
+		result.Session_State = session_info.session_state
+		result.Proto = session_info.proto
+		result.Interface = session_info.interface
+		result.Reject_Cause = session_info.reject_cause
+		if session_info.packet_counters then
+			result.TX_Packet_Counters_Bytes = session_info.packet_counters.tx_bytes
+			result.RX_Packet_Counters_Bytes = session_info.packet_counters.rx_bytes
+		end
+		if session_info.ppp then
+			result.PPP_Device = session_info.ppp.device
+			result.PPP_PDP_Type = session_info.ppp.pdptype
+			result.PPP_APN = session_info.ppp.apn
+		end
+		if session_info.dhcp then
+			result.DHCP_PDP_Type = session_info.dhcp.pdptype
+			result.DHCP_Interface_Name = session_info.dhcp.ifname
+		end
+	end
+
+	return result
+end
+
+function obj.get(mapping, paramName, key, parentKey)
+	return obj.getall(mapping, key, parentKey)[paramName]
+end
+
+function obj.entries(_, parentKey)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.network", "sessions", parentKey)
+	local sessions_indexes = {}
+
+	if type(data.sessions) == "table" then
+		for session_index in ipairs(data.sessions) do
+			table.insert(sessions_indexes, tostring(session_index))
+		end
+	end
+	return sessions_indexes
+end
+
+register(obj)
+

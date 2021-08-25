@@ -1,0 +1,565 @@
+#!/bin/sh /etc/rc.common
+# (C) NETDUMA Software 2016
+#
+# Start the DumaOS process manager. This takes care of running and restarting
+# R-Apps installed on the system.
+
+START=99
+PROG="/dumaos/api/cli.lua"
+APP="/dumaos/apps/system/com.netdumasoftware.procmanager"
+
+# Notes - Some platforms (at this point in time non netgear
+# platforms) utilise procd.
+#
+# Procd daemonizes processes, handles retries, killing, stdin
+# stdout redirection, jailing, etc.
+#
+# Procd has a default handler for stopping the service. However
+# we cannot use this as it uses SIGTERM to signal shutdown. This
+# would cause Lua to just quit, instead we signal to the procmanager
+# R-App it needs to cleanup by sending SIGINT.
+#
+# There we need to override the procd shutdown, in future versions
+# there is a function called procd_send_signal that lets you send
+# different signals to the instance. We could then replicate the
+# non procd shutdown.
+#
+# However this is not implemented, so we have three options:
+#   1) Patch procd to have the function
+#   2) Acquire the pid via another procd method
+#   3) Use same code as Netgear which searches ps output for
+#      com.netdumasoftware.procmanager to get the PID
+#
+# I choose 3) as it took the least time, works and has been tested
+# extensively on other platforms. However in researching this I learnt
+# a little how procd is implemented so I'll share here.
+#
+# Procd commnuicates with a ubus object called service. There are are
+# a bunch of wrapper functions in /lib/function.sh which simply cli
+# ubus communication with the ubus object. For example if you'd like to
+# fulfull option 2) then run ubus call service list and you'll see the
+# dumaos PID in the response.   -@Netduma_Iain
+
+# Use procd if available otherwise revert to old method
+if [ -e "$IPKG_INSTROOT/dumaos/api/libs/shell/dumaos_helper.sh" ];then
+  . $IPKG_INSTROOT/dumaos/api/libs/shell/dumaos_helper.sh
+else
+  echo "DumaOS api doesn't exist, Exiting.."
+  exit 1
+fi
+
+if type procd > /dev/null; then
+  USE_PROCD=1
+else
+  USE_PROCD=0
+  SERVICE_DAEMONIZE=1
+  SERVICE_WRITE_PID=1
+fi
+
+create_themes_symbolic_link() {
+  THEMES_SYMBOLIC_LINK=/www/themes
+  THEMES_CLOUD_PATH=/dumaos/themes/cloud
+
+  #-- @depends test
+  #-- @test test 1
+  if [ ! -L "$THEMES_SYMBOLIC_LINK" ]; then
+    #-- @depends ln
+    #-- @test which ln
+    ln -s "$THEMES_CLOUD_PATH" "$THEMES_SYMBOLIC_LINK"
+  fi
+}
+
+init_telemetry_params() {
+  if [ "$MODEL" = "LH1000" -o "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+      if [ ! "$(uci show dumaos | grep "dumaos.telemetry.enabled" 2>&1)" ];then
+          uci delete dumaos.telemetry
+          uci batch << EOF
+set dumaos.telemetry=telemetry
+set dumaos.telemetry.enabled=0
+set dumaos.telemetry.frequency=0
+set dumaos.telemetry.url=NA
+set dumaos.telemetry.debuglevel=0
+set dumaos.telemetry.username=NA
+set dumaos.telemetry.password=NA
+EOF
+          uci commit dumaos
+      fi
+  fi
+}
+
+ins_missing_kmods() {
+  if [ "$MODEL" = "XR700" ] && [ ! "$(lsmod | grep sch_ingress)" ];then
+    find /lib/modules/3.10.20/ -type f -name "sch_*" -exec insmod {} > /dev/null 2>&1 \;
+    find /lib/modules/3.10.20/ -type f -name "cls_*" -exec insmod {} > /dev/null 2>&1 \;
+  fi
+}
+
+preserve_settings() {
+  # Stub for preserving DumaOS data on different ODMs platforms
+  echo "Preserve settings" > /dev/null 1>&2
+}
+
+ch_prio_ndhttpd() {
+if [ "$MODEL" = "LH1000" ];then
+  SET_PR=$(pgrep "/usr/sbin/ndhttpd" -l | cut -d' ' -f1)
+  chrt -o -p 0 $SET_PR
+fi
+}
+
+r1_kernel_mods() {
+if [ "$MODEL" = "R1" ];then
+  modprobe ifb > /dev/null 2>&1
+fi
+}
+
+ts_odm_services() {
+if [ "$MODEL" = "LH1000" -o "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+  if [ "$1" = "stop" ];then
+    echo '0' 1>'/proc/sys/net/nss/super'
+  elif [ "$1" = "start" ];then
+    if [ "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+      #Insert dummy interface kmod and get iface up needed when WAN is disconnected
+      modprobe dummy > /dev/null 2>&1
+      ifconfig dummy0 up
+      if [ "$(uci show web | grep "\/frontend\/" | wc -l)" != "0" ];then
+        sed  -i 's/\/frontend\//\//g' '/etc/config/web'
+	uci commit web
+	/etc/init.d/nginx restart &
+      fi
+    fi
+  fi
+fi
+}
+
+start_service(){
+  create_themes_symbolic_link
+  #-- @depends lua
+  #-- @test lua -v
+  lua /dumaos/set-theme-defaults-if-null.lua
+
+if [ "$MODEL" != "DJA0231" ] &&  [ "$MODEL" != "DJA0230" ]; then
+  if /dumaos/setup_done.sh
+
+  then
+    /dumaos/intercept.sh stop
+  else
+    /dumaos/intercept.sh start
+    /dumaos/ipv6.sh enable
+    INIT_FROM_CLI=true lua /dumaos/apps/system/com.netdumasoftware.procmanager/translation.lua
+    lua /dumaos/reset-initialise-themes.lua
+
+    return 0
+  fi
+elif [ "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+
+	if [ ! "$(which fc)" ];then
+		ln -sn /usr/bin/fcctl /usr/bin/fc && sync
+	fi
+
+        #On DJA0231 or DJA0230, Only initiate DumaOS if enabled
+        #-- @depends chrt
+        #-- @test -e $(which chrt)
+  local state=$(uci_get dumaos.tr69.dumaos_enabled)
+  if [ "$state" = "" ];then
+      generate_dumaos_config
+      ts_odm_services "stop"
+      return 0
+  elif [ "$state" = "0" ];then
+      ts_odm_services "stop"
+      return 0
+  fi
+  # the hotplug script is only place state changes can happen. The problem
+  # is ODMs run this script on boot without going via hotplug. We can tell if this
+  # is a bootup event because the status file will not exist so we will go through
+  # hotplug resume to start and keep state changes in one place
+  # All the state machine logic is now moved to be handled by the hotplug script instead
+  # that way we don't have to worry whether the initd script is being called from hotplug
+  # or directly through passing an action like start as what would normally happen on
+  # system bootup
+  if [ "$1" != "dumaos_hotplug_action" ]; then
+    export ACTION=dumaos_resume;/sbin/hotplug-call dumaos &
+    return 0
+  fi
+fi
+  ins_missing_kmods
+  ts_odm_services "start"
+  r1_kernel_mods
+  init_telemetry_params
+
+  procd_open_instance
+  procd_set_param command "$PROG"
+  procd_set_param env NDPROC="/tmp/ndproc"
+  procd_append_param command -p "/dumaos/apps/system/com.netdumasoftware.procmanager"
+  procd_append_param command "backend"
+  if [ "$MODEL" = "R2" ];then
+     if [ "$MODEL" = "DEBUG"  ];then
+          #Set core files size to unlimited
+        procd_set_param limits core="unlimited"  # Set ulimit core files blocks
+        sysctl -w "kernel.core_pattern=/tmp/%e.%p.%s.%t.core"
+        if [ ! -e "/.init_enable_core"  ];then
+                touch /.init_enable_core
+                sync
+        fi
+     fi
+  fi
+#  procd_set_param respawn # respawn on crash
+  procd_set_param stdout 0 # forward stdout of the command to logd
+  procd_set_param stderr 1 # same for stderr
+
+  # jail it - notice it needs no mount points as no files read/written
+  # No jailing system, this will be part of overall sandbox strategy so
+  # pointless doing half hearted attempt here because all R-Apps are developed
+  # by us and therefore are trusted.
+#  procd_add_jail arpwatchubus log
+#  procd_add_jail_mount_rw
+  procd_close_instance
+}
+
+# procd not available
+start() {
+  run=1       # default to running DumaOS on boot
+  echo "starting DumaOS"
+  create_themes_symbolic_link
+  lua /dumaos/set-theme-defaults-if-null.lua
+
+if [ "$MODEL" = "LH1000" ];then
+	#On LH1000, Only initiate DumaOS if enabled
+	#-- @depends chrt
+	#-- @test -e $(which chrt)
+	if [ ! "$(which chrt)" ];then
+	  chmod +x /usr/bin/chrt
+	fi
+        local state=$(uci_get dumaos.tr69.dumaos_enabled)
+	if [ "$state" = "" ];then
+          generate_dumaos_config
+	  ts_odm_services "stop"
+	  ch_prio_ndhttpd
+	  return 0
+	elif [ "$state" = "0" ];then
+          ts_odm_services "stop"
+	  ch_prio_ndhttpd
+	  return 0
+        else
+          :
+        fi
+if [ ! "$(pgrep ndhttpd)" ];then
+    /www/cgi-bin/ndhttpd.sh start > /dev/null 2>&1
+    ch_prio_ndhttpd
+fi
+  # the hotplug script is only place state changes can happen. The problem
+  # is ODMs run this script on boot without going via hotplug. We can tell if this
+  # is a bootup event because the status file will not exist so we will go through
+  # hotplug resume to start and keep state changes in one place
+  # All the state machine logic is now moved to be handled by the hotplug script instead
+  # that way we don't have to worry whether the initd script is being called from hotplug
+  # or directly through passing an action like start as what would normally happen on
+  # system bootup
+  if [ "$1" != "dumaos_hotplug_action" ]; then
+    export ACTION=dumaos_resume;/sbin/hotplug-call dumaos &
+    return 0
+  fi
+fi
+  ins_missing_kmods
+  ch_prio_ndhttpd
+  ts_odm_services "start"
+  init_telemetry_params
+
+  if [ -f "/dumaos/core_dump.sh"  ];then
+	  #Set core files size to unlimited
+	  ulimit -c unlimited
+	  sh /dumaos/core_dump.sh
+  fi
+  if [ "$MODEL" = "LH1000" ]; then
+	 /etc/init.d/ngcompat restart
+  	 sleep 1
+  fi
+  #-- @depends lua
+  #-- @test lua -v
+  lua /dumaos/set-theme-defaults-if-null.lua
+
+  # detect a factory reset on netgear (dumaos key will be unset)
+
+  #-- @depends test
+  #-- @test test 1
+  if [ -x /bin/config ]; then
+    #-- @depends config
+    #-- @test config show
+    user_signed=$(/bin/config get user_signed)
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$user_signed" == "0" ]; then
+
+      #-- @depends ndtech1-api
+      #-- @test test -e /dumaos/clear-device-manager.sh
+      /dumaos/clear-device-manager.sh
+    fi
+
+    #-- @depends config
+    #-- @test config show
+    x=$(/bin/config get dumaos)
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$x" != "1" ]; then
+
+      #-- @depends ndtech-www-firstparty
+      #-- @test test -e /dumaos/reset.sh
+      /bin/sh /dumaos/reset.sh
+
+      #-- @depends config
+      #-- @test config show
+      /bin/config set dumaos=1
+    fi
+  else # setup logging if not on NETGEAR platform
+    #-- @depends test
+    #-- @test test 1
+    if [ ! -f /tmp/dumaoslogstarted ]; then
+      #-- @depends syslogd
+      #-- @test which syslogd
+      if [ "$MODEL" != "LH1000" ]; then
+        syslogd -V NETDUMA -C1024
+      fi
+
+      #-- @depends echo
+      #-- @test echo procmanager
+      echo "1" > /tmp/dumaoslogstarted
+    fi
+  fi
+
+
+  # Do not start DumaOS if in access point mode
+
+  #-- @depends test
+  #-- @test test 1
+  if [ -x /bin/config ]; then
+
+    #-- @depends config
+    #-- @test config show
+    access_point_mode=`/bin/config get ap_mode`
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$access_point_mode" = "1" ]; then
+
+      #-- @depends lua
+      #-- @test lua -v
+      INIT_FROM_CLI=true lua /dumaos/apps/system/com.netdumasoftware.procmanager/translation.lua
+      lua /dumaos/reset-initialise-themes.lua
+      run=0
+    fi
+  fi
+
+  if [ "$run" = "1" ]; then
+    service_start $PROG -p $APP backend
+  fi
+}
+
+iptables_cleanup() {
+for chain in nat mangle filter
+do
+  CHAINS=$(iptables -nL -t$chain 2>/dev/null | grep "Chain\ " | grep "nd_\|hyperlane\|_mark\|geo\|tc_\|gf.*_" | cut -d' ' -f2)
+  CLEAN=0
+  while [ "$CLEAN" -ne "1" ]
+  do
+    for value in $CHAINS
+    do
+#      echo "$chain - $value"
+      iptables -t$chain -F $value 2>/dev/null
+      iptables -t$chain -X $value 2>/dev/null
+      if [ "$(echo $?)" -ne "0" ];then
+        for ref in INPUT OUTPUT FORWARD POSTROUTING PREROUTING
+        do
+          if [ "$(iptables -t$chain --list-rules $ref 2>/dev/null | grep -ic "$value")" -gt "0" ];then
+             line=$(iptables -t$chain --list-rules $ref 2>/dev/null | grep $value | sed 's/-A/-D/g')
+#             echo "$chain - $ref - $value - $line"
+             if [ -n "$line" ];then
+	       printf "%s\n" "$line" | while IFS= read -r ln
+	       do
+		 iptables -t$chain $ln 2>/dev/null
+	       done
+             fi
+          fi
+        done
+        iptables -t$chain -X $value 2>/dev/null
+      fi
+      if [ "$chain" != "nat" ];then
+        ip6tables -t$chain -F $value 2>/dev/null
+        ip6tables -t$chain -X $value 2>/dev/null
+        if [ "$(echo $?)" -ne "0" ];then
+              for ref in INPUT OUTPUT FORWARD POSTROUTING PREROUTING
+              do
+                if [ "$(ip6tables -t$chain --list-rules $ref 2>/dev/null | grep -ic "$value")" -gt "0" ];then
+                  line=$(ip6tables -t$chain --list-rules $ref 2>/dev/null | grep $value | sed 's/-A/-D/g')
+                  if [ -n "$line" ];then
+                    printf "%s\n" "$line" | while IFS= read -r ln
+		    do
+                      ip6tables -t$chain $ln 2>/dev/null
+                    done
+                  fi
+                fi
+              done
+              ip6tables -t$chain -X $value 2>/dev/null
+       fi
+      fi
+    done
+  if [ ! -n "$(iptables -nL -t$chain 2>/dev/null | grep "Chain\ " | grep "nd_\|hyperlane\|_mark\|geo\|tc_\|gf.*_")" ];then
+    CLEAN=1
+  fi
+  done
+done
+}
+
+dpiclass_cleanup() {
+if [ "$(ps ww | grep -v grep | grep dpiclass | wc -l)" != "0" ];then
+  killall -9 dpiclass > /dev/null 1>&2
+fi
+}
+
+datahistory_cleanup() {
+if [ "$(ps ww | grep -v grep | grep datahistory | wc -l)" != "0" ];then
+  /etc/init.d/datahistory stop
+fi
+}
+
+iprules_cleanup() {
+if [ "$MODEL" != "LH1000" ] && [ "$MODEL" != "DJA0231" ] && [ "$MODEL" != "DJA0230" ];then
+  while [ "$(ip rule show | grep fwmark)" ];
+  do
+    ip rule show | grep fwmark | awk -F":" '{print $1}' | xargs -n1 ip rule del pref > /dev/null 1>&2
+  done
+fi
+for set in $(ipset list | grep -Eo "aaipset[0-9]*")
+do
+  ipset destroy "$set" > /dev/null 1>&2
+done
+return 0
+}
+
+lua_cleanup() {
+   DUMA_RAPPS=$(ps ww | grep 'netdumasoftware' | grep -v grep | sed 's/^[ \t]*//' | cut -d' ' -f 1)
+   for rapp in $DUMA_RAPPS
+   do
+     kill -9 "$rapp" > /dev/null 1>&2
+   done
+}
+
+cleanup() {
+if [ "$2" = "hard" ];then
+dpiclass_cleanup
+#datahistory_cleanup
+if [ "$3" != "nofw" ];then
+  iptables_cleanup "$4"
+  iprules_cleanup
+fi
+  if [ "$1" = "0" ];then
+    if [ "$3" != "nofw" ];then
+      if [ "$MODEL" = "XR500" -o "$MODEL" = "XR700" ];then
+        net-wall start > /dev/null 2>&1
+        net-wall -6 start > /dev/null 2>&1
+      fi
+    fi
+    /etc/init.d/ngcompat restart
+  fi
+  if [ "$MODEL" = "LH1000" -o "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+    export ACTION=cleanup;/sbin/hotplug-call dumaos
+  fi
+elif [ "$2" = "soft" ];then
+  if [ "$1" = "0" ];then
+    /etc/init.d/ngcompat restart
+  fi
+  if [ "$MODEL" = "LH1000" -o "$MODEL" = "DJA0231" -o "$MODEL" = "DJA0230" ];then
+    export ACTION=cleanup;/sbin/hotplug-call dumaos
+  fi
+fi
+}
+
+do_stop() {
+  #-- @depends ps; grep; awk; tr
+  #-- @test which ps && which grep && which awk && which tr
+  x=$( ps ww | grep procman | grep lua | awk '{print $1}' | tr -d '\n' )
+  STATUS=$1
+  if [ -n "$x" ];then
+    kill -2 $x > /dev/null 2>&1
+    # Wait a while for DumaOS to shutdown gracefully otherwise exit. We
+    # shouldn't wait indefinitely as factory resets wait for stop to complete
+    # before rebooting. If we have some issue that stops DumaOS from shutting
+    # down correctly then factory reset will complete, needless to say that is
+    # an unmitigated disaster.
+    #
+    # Furthermore we have a plan B if things go wrong. After factory reset in the
+    # DumaOS start function we check if we just reset. If so we delete all the
+    # files again.
+    #
+    # Extra note on why I've choosen 48s. Procmanager gives each cycle 15 seconds
+    # to cleanup after itself. There are three cycles, so shutdown should not
+    # take longer than 45s. I've padded a few seconds to handle unexpected delays.
+    for i in `seq 1 48`; do
+      kill -2 $x > /dev/null 2>&1 || break
+      #-- @depends sleep
+      #-- @test sleep 0
+      sleep 1
+    done
+  fi
+  if [ "$USE_PROCD" = "1" ];then
+    cleanup "1" "hard" "$1" "$2"
+  elif [ "$USE_PROCD" = "0" ];then
+    cleanup "0" "hard" "$1" "$2"
+  fi
+  ts_odm_services "stop"
+  #-- @depends echo
+  #-- @test echo procmanager
+  if [ -n "$(ps ww | grep 'netdumasoftware' | grep -v grep | sed 's/^[ \t]*//' | cut -d' ' -f 1)" ];then
+    echo "Forcing shutdown"
+    return 1
+  else
+    return 0
+  fi
+}
+
+stop() {
+  if ! do_stop "$1" "$2"; then
+    lua_cleanup
+    if [ "$USE_PROCD" = "1" ];then
+      cleanup "1" "soft" "$STATUS"
+    elif [ "$USE_PROCD" = "0" ];then
+      cleanup "0" "soft" "$STATUS"
+    fi
+  fi
+  return 0
+}
+
+stop_service() {
+  if ! do_stop "$1" "$2"; then
+    lua_cleanup
+    if [ "$USE_PROCD" = "1" ];then
+      cleanup "1" "soft" "$STATUS"
+    elif [ "$USE_PROCD" = "0" ];then
+      cleanup "0" "soft" "$STATUS"
+    fi
+  fi
+  return 0
+}
+
+reload_service(){
+if [ "$VENDOR" = "TELSTRA" ];then
+  echo "Reloading DumaOS in progress..."
+  if [ -z "$(uci_get dumaos.tr69.dumaos_enabled)" ];then
+    generate_dumaos_config
+  fi
+  local state=$(uci_get dumaos.tr69.dumaos_enabled)
+  if [ "$state" = "1" ];then
+    echo "Reload: Starting DumaOS"
+    export ACTION=dumaos_enabled;/sbin/hotplug-call dumaos &
+  elif [ "$state" = "0" ];then
+    echo "Reload: Stopping DumaOS"
+    export ACTION=dumaos_disabled;/sbin/hotplug-call dumaos &
+  else
+    generate_dumaos_config
+  fi
+fi
+}
+
+reload() {
+  reload_service
+}  

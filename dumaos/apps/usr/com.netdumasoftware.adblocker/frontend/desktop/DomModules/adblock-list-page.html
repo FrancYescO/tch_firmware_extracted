@@ -1,0 +1,79 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-list-row.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-add-list-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="adblock-list-page"> <template> <style include="duma-theme iron-flex"> </style> <div> <iron-pages selected="[[noListsPage]]"> <div> <table> <caption class="sr-only">[[caption]]</caption> <thead> <tr> <th scope="col"><%= i18n.enabled %></th> <th scope="col">[[typeName]] <%= i18n.typeName %></th> <th scope="col"><%= i18n.listType %></th> <th scope="col"><%= i18n.edit %></th> <th scope="col"><%= i18n.delete %></th> </tr> </thead> <tbody id="tableBody"></tbody> </table> </div> <div style="text-align: center;"> <h2><%= i18n.noLists %></h2> </div> </iron-pages> <div class="inner"> <paper-button id="addButton" background><%= i18n.addList %></paper-button> </div> </div> <adblock-add-list-dialog id="dialog" is-whitelist="[[isWhitelist]]"></adblock-add-list-dialog> </template> <script> Polymer(
+    {
+      is: 'adblock-list-page',
+      properties:
+      {
+        lists:
+        {
+          type: Object,
+          value: [],
+        },
+        caption: String,
+        typeName: String,
+        isWhitelist:
+        {
+          type: Boolean,
+          value: false,
+        },
+        noListsPage:
+        {
+          type: Number,
+          value: 1,
+        },
+        noListsBool:
+        {
+          type: Boolean,
+          value: true,
+        },
+      },
+      ready: function()
+      {
+        $(this.$.addButton).on("tap", () => this.$.dialog.Show());
+
+        this.$.dialog.addEventListener("reload-lists", this.ReloadList.bind(this));
+        this.$.tableBody.addEventListener("reload-lists", this.ReloadList.bind(this));
+        this.$.tableBody.addEventListener("edit-list", this.EditList.bind(this));
+
+        this.ReloadList();
+      },
+      EditList(event)
+      {
+        this.$.dialog.EditList(event.detail);
+      },
+      ReloadList()
+      {
+        $(this.$.tableBody).empty();
+
+        // Update lists
+        long_rpc_promise("com.netdumasoftware.adblocker", "get_lists", [this.isWhitelist]).done(this.GetListsCallback.bind(this));
+      },
+      GetListsCallback(result)
+      {
+        this.noListsPage = 1;
+        this.noListsBool = true;
+        var lists = [];
+        for (var i = 0; i < result[0].length; i++)
+        {
+          if (!result[0][i].old)
+          {
+            this.AddRow(result[0][i]);
+            lists.push(result[0][i]);
+          }
+        }
+
+        this.lists = lists;
+
+        this.fire("lists-loaded");
+      },
+      AddRow(list)
+      {
+        this.noListsPage = 0;
+        this.noListsBool = false;
+        var html = document.createElement("adblock-list-row");
+        var jQueryHtml = $(html);
+
+        jQueryHtml.prop("list", list);
+
+        Polymer.dom(this.$.tableBody).appendChild(html);
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,277 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+require "libos"
+local platform_information = os.platform_information()
+%> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-location-search"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning iron-flex-alignment"> :host #locationSearchDialog {
+        width: 100vw;
+      }
+
+      :host .results-wrapper {
+        position: relative;
+        width: 100%;
+      }
+      :host .results {
+        position: absolute;
+        background-color: var(--primary-background-color);
+        width: 100%;
+        top: 1em;
+        left: 0;
+        z-index: 1;
+        max-width: 100%;
+      }
+      :host .results paper-item span {
+        text-overflow: ellipsis;
+        overflow: hidden;
+        box-sizing: border-box;
+        max-width: 100%;
+      }
+
+      /* Hide results when not focusing on them or input, or when no results */
+      :host #inFocusWrapper:not(:focus-within) .results,
+      :host .results[count="0"] {
+        display: none;
+      } </style> <paper-dialog id="locationSearchDialog" modal aria-labelledby="locationSearchHeader" aria-describedby="locationSearchDescription"> <h2 id="locationSearchHeader">[[header]]</h2> <div class="inner"> <div> <content select="[description]"></content> </div> <div id="inFocusWrapper"> <paper-input id="queryInput" type="text" value="{{query}}" placeholder="<%= i18n.placeholder %>" aria-label="<%= i18n.placeholder %>" on-value-changed="onValueChange" on-keydown="onKeyDownFromInput" aria-describedby="locationSearchDescription"></paper-input> <div class="results-wrapper"> <div class="results" count$="[[queryResponse.length]]"> <paper-listbox aria-label="<%= i18n.ariaResults %>" on-selected-changed="onSelect" id="results" on-keydown="onKeyDownFromResults" selected="0"> <template is="dom-repeat" items="[[queryResponse]]" as="loc"> <paper-item name="[[loc.properties.id]]" on-tap="selectViaTap"> <span> [[loc.properties.label]] </span> </paper-item> </template> </paper-listbox> </div> </div> </div> <span id="announceSelected" class="sr-only"></span> </div> <div class="buttons"> <paper-button dialog-dismiss aria-label$="[[closeText]]">[[closeText]]</paper-button> <paper-button id="saveButton" on-click="finish" aria-label$="[[saveText]]" disabled="[[!selectedLocation]]">[[saveText]]</paper-button> </div> </paper-dialog> <duma-alert id="noApiAlert"> <p> <%= i18n.apiUnavailable %> </p> </duma-alert> </template> <script> Polymer({
+      is: "duma-location-search",
+
+      properties: {
+        // Header to display
+        header: {
+          type: String,
+          value: "<%= i18n.locationSearch %>"
+        },
+        // text on close button
+        closeText: {
+          type: String,
+          value: "<%= i18n.close %>"
+        },
+        // text on save button
+        finishText: {
+          type: String,
+          value: "<%= i18n.save %>"
+        },
+
+        // The input query to send to geocoding api
+        query: {
+          type: String,
+          value: ""
+        },
+
+        // the responses from the geocoding api
+        queryResponse: {
+          type: Array,
+          value: function(){
+            return []
+          }
+        },
+
+        // the selected location
+        selectedLocation: {
+          type: Object,
+          value: null
+        },
+
+        // callback on end
+        __callback: Function,
+
+        // disable some events/callbacks when changing the query input.
+        // used to avoid recursive loops, and re-calling the api on select
+        __disableEventsOnChange: false,
+
+        // timeout to rate-limit the api calls
+        __searchTimeout: Number
+      },
+
+      // when no items in the response list, we dont want to be able to tab (keyboard nav) to it
+      _getListIsTabbable: function(queryResponse){
+        return (queryResponse && queryResponse.length > 0) ? 0 : -1;
+      },
+
+      // limit query calls to 500ms after the last change, so it doesn't overcall rpcs
+      // when the input changes, it will re-create the rpc, meaning, it happens 500ms after the user's last key press
+      // so when the user is typing fast, it wont create any requests until they stop for a short while
+      // 500ms is arbitrary, could possible be better
+      rateLimitChange: function(){
+        if(this.__disableEventsOnChange) return;
+
+        // clear the timeout if it already exists, as we want to delay it another 500ms
+        if(this.__searchTimeout) clearTimeout(this.__searchTimeout);
+        this.__searchTimeout = setTimeout(() => {
+          this.queryApiCall();
+          this.__searchTimeout = null;
+        },500);
+      },
+
+      // on the value changed in input
+      onValueChange(){
+        if(this.query){
+          // if input has text, call the api
+          this.rateLimitChange();
+        }else{
+          // otherwise, empty response
+          this.queryResponse = [];
+          this.selectedLocation = null;
+        }
+      },
+
+      // focus on results menu
+      _focusOnResults: function(){
+        // on arrow down, move focus to list
+        var results = this.$$("#results");
+        var firstItem = $("paper-item",results)[0];
+        if(firstItem){
+          // when tabbing from input, we need to deselect the items in the menu, so the use can re-select them to trigger the onSelect function
+          results.select(null);
+          firstItem.focus();
+          results._setFocusedItem(firstItem);
+          event.preventDefault();
+        }
+      },
+
+      // focus on input search
+      _focusOnInput: function(){
+        var results = this.$$("#results");
+        // avoid closing the search results when re-selecting item 0
+        this.__disableEventsOnChange = true;
+
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        // re-select item at index 0
+        results.select(0);
+        results._setFocusedItem(null);
+
+        // highlight all text in input
+        this.$.queryInput.$.input.focus();
+        Polymer.RenderStatus.afterNextRender(this,() => {
+          this.$.queryInput.$.input.select();
+        });
+
+        this.__disableEventsOnChange = false;
+      },
+
+      // keydown when focused on the input
+      onKeyDownFromInput(event){
+        if(this.queryResponse.length){
+          if(event.code === "ArrowDown" || event.code === "Tab"){
+            this._focusOnResults();
+          }
+          // on enter, select first item in list
+          if(event.code === "Enter"){
+            this.onSelect({
+              detail: {
+                value: 0
+              }
+            });
+          }
+        }
+      },
+      
+      // keydown when focused on the query result list
+      onKeyDownFromResults(event){
+        // if up arrow is pressed, and currently focused on first item, then focus back to input
+        if(event.code === "ArrowUp"){
+          var focusedItem = $("paper-listbox#results paper-item[focused]",this);
+          if(focusedItem.index() === 0){
+            this._focusOnInput();
+          }
+        }
+        // when shift+tabbing from results to , we need to deselect the items in the menu, so the use can re-select them to trigger the onSelect function
+        if(event.code === "Tab" && event.shiftKey){
+          this._focusOnInput();
+        }
+      },
+
+      // when clicking a paper-item, we need to make sure that we select the item. Because the first item is selected while typing, clicking it wont re-select it, so we need to listen to the "tap" event
+      selectViaTap: function(e){
+        var index = $(e.target).closest("paper-item").index();
+        this.onSelect({
+          detail: {
+            value: index
+          }
+        });
+      },
+
+      // on selection of an item in the menu
+      onSelect(e){
+        // get the index selected
+        var selectedIndex = e.detail.value;
+        // check for __disableEventsOnChange to avoid recursion
+        if(typeof selectedIndex === "number" && !this.__disableEventsOnChange && this.queryResponse[selectedIndex]){
+          this.__disableEventsOnChange = true;
+
+          // select the location, fill in input with the label text
+          this.selectedLocation = this.queryResponse[selectedIndex];
+          this.$$("#results").select(0);
+          this.query = this.selectedLocation.properties.label;
+          this.queryResponse = [];
+          this.$.saveButton.focus();
+          this.announce(this.selectedLocation.properties.label);
+
+          this.__disableEventsOnChange = false;
+        }
+      },
+
+      // announce to screen reader what the user has selected
+      announce: function(text){
+        var elem = this.$.announceSelected;
+        elem.textContent = "<%= i18n.announceSelected %>".format(text);
+        elem.setAttribute("role","status");
+        Polymer.RenderStatus.afterNextRender(this,() => elem.removeAttribute("role"));
+      },
+
+      // call the api, and get results
+      queryApiCall: function(){
+        if(this.query){
+
+          long_rpc_promise("com.netdumasoftware.geofilter","geocode_search",[this.query]).then((response) => {
+            response = response ? response[0] : null;
+            
+            if(typeof response === "string"){
+              // only provide results if there is still a query
+              if(this.query) this.queryResponse = JSON.parse(response).features;
+            }else{
+              this.showErrorAlert();
+            }
+          });
+        }
+      },
+
+      showErrorAlert: function(){
+        this.$.locationSearchDialog.close();
+        this.$.noApiAlert.show();
+      },
+
+      _getStatus: function(success,fail){
+        long_rpc_promise("com.netdumasoftware.geofilter","geocode_status",[]).then((status) => {
+          status = status[0];
+          if(status) success && success()
+          else fail && fail()
+        });
+      },
+
+      reset: function(){
+        this.queryResponse = [];
+        this.query = "";
+        this.selectedLocation = "";
+      },
+
+      open: function(callback){
+        this.reset();
+        this._getStatus(() => {
+          // service available
+          this.__callback = callback;
+          this.$.locationSearchDialog.open();
+        }, () => {
+          // service unavailable
+          this.showErrorAlert();
+        });
+      },
+
+      finish: function(){
+        if(this.__callback) this.__callback(this.selectedLocation);
+        this.$.locationSearchDialog.close();
+      }
+
+    }); </script> </dom-module> 

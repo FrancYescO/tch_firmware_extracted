@@ -1,0 +1,112 @@
+<!--
+Custom property | Description | Default
+----------------|-------------|----------
+`--duma-zoom-slider-section-color`          | color of zoom-slider sections         | `--dark-primary-color`
+`--duma-zoom-slider-section-color-active`   | color of active zoom-slider sections  | `--primary-color`
+`--duma-zoom-slider-section-color-hover`    | color of hovered zoom-slider sections | `--light-primary-color`
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/vertical-slider/vertical-slider.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module is="duma-zoom-slider"> <template> <style> :host{
+        display: block;
+        height: 100%;
+      }
+      :host > div {
+        height: 100%;
+        @apply(--layout-vertical);
+        @apply(--layout-center);        
+      }
+      .zoom-slider-container {
+        @apply(--layout-flex);
+      }
+      .top-buttons {
+        @apply(--layout-vertical);
+        @apply(--layout-center);
+        flex: none;
+      }
+      .top-buttons > paper-icon-button {
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        padding: 0px;
+      }
+      .top-buttons > paper-icon-button[icon=add] {
+        margin-bottom: 8px;
+      }
+      #vslider {
+        --vertical-slider-markers-color: var(--secondary-text-color);
+        --vertical-slider-bar-color: transparent;
+        --vertical-slider-active-color: transparent;
+        --vertical-slider-container-color: transparent;
+        --vertical-slider-secondary-color: transparent;
+        --vertical-slider-knob-color: var(--primary-color);
+        --vertical-slider-knob-start-color: var(--primary-color);
+        --vertical-slider-knob-start-border-color: var(--primary-color);
+        --vertical-slider-width: 8px;
+        height: 100%;
+      }
+      ::content #vslider .slider-markers.vertical-slider:after,
+      ::content #vslider .slider-markers.vertical-slider .slider-marker:after {
+        border-radius: 0;
+        height: 1px;
+      }
+      /* #vslider ::content .slider-markers.vertical-slider:after,
+      #vslider ::content .slider-markers > .slider-marker:not(:nth-child(2n+1)):after {
+        width: 50%;
+        margin-left: 25%;
+      } */ </style> <div> <div class="top-buttons"> <paper-icon-button background icon="add" on-tap="_onInButton" aria-label="<%= i18n.zoomIn %>"></paper-icon-button> <paper-icon-button background icon="remove" on-tap="_onOutButton" aria-label="<%= i18n.zoomOut %>"></paper-icon-button> </div> <div class="zoom-slider-container"> <vertical-slider id="vslider" step="1" snaps min="0" value="{{zoomIndex}}" on-immediate-value-changed="onSliderChangedRounded" aria-label="<%= i18n.zoom %>"></vertical-slider> </div> </div> </template> <script> Polymer({
+      is: "duma-zoom-slider",
+
+      properties: {
+        zoomIndex: {
+          type: Number,
+          value: 0
+        },
+        _zooms: {
+          type: Array,
+          value: []
+        }
+      },
+      _map: null,
+      _disableOnChange: false,
+
+      _onInButton: function(){
+        if(this.$.vslider.value < this.$.vslider.max){
+          this.$.vslider.value += 1;
+        }
+      },
+      _onOutButton: function(){
+        if(this.$.vslider.value > this.$.vslider.min){
+          this.$.vslider.value -= 1;
+        }
+      },
+      
+      onSliderChangedRounded: function(e){
+        if(!this._disableOnChange && this._map){
+          var dims = this._map.__getDims();
+          var next = this._zooms[e.detail.value];
+          var xTo = next === 1 ? dims[0] : this._map.zoomx;
+          var yTo = next === 1 ? dims[1] : this._map.zoomy;
+          this._map.do_zoom(xTo,yTo,next,this._map.width,this._map.height);
+        }
+      },
+
+      setSliderToFactor: function(factor){
+        this._disableOnChange = true;
+        for(var i = 0; i < this._zooms.length; i++){
+          if(this._zooms[i] < factor) continue;
+          this.$.vslider.value = i;
+          break;
+        }
+        this._disableOnChange = false;
+      },
+
+      setMap: function(mapElem){
+        this._map = mapElem;
+        this._zooms = mapElem._zooms;
+        this.$.vslider.max = this._zooms.length - 1;
+        this.$.vslider.maxMarkers = this._zooms.length;
+        
+        $(mapElem).on("zoom-info-changed",function(e){
+          this.setSliderToFactor(e.detail.value.factor);
+        }.bind(this));
+        this.setSliderToFactor(mapElem.zoomfactor);
+      }
+    }); </script> ​ </dom-module> 

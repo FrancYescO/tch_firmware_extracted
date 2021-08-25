@@ -1,0 +1,288 @@
+<link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!--
+Custom property | Description | Default
+----------------|-------------|----------
+`--rating-background-color'       | background colour for rating container (includes hover effect) | `--primary-text-color`
+--> <dom-module id="duma-rating"> <template> <style is="custom-style" include="duma-theme iron-flex"> <!-- 
+      
+      -->
+      :host {
+        display: block;
+        padding: 8px;
+      }
+      ::content .circle_wrapper{
+        position: relative;
+       }
+       
+      ::content .circle_wrapper .circle {
+        transition: stroke-opacity 150ms ease-in;
+        stroke: var(--rating-background-color, var(--primary-text-color));
+        stroke-opacity: 0.25;
+        fill: none;
+      }
+      ::content .circle_wrapper .circle-bg {
+        transition: fill-opacity 150ms ease-in;
+        fill: var(--rating-background-color, var(--primary-text-color));
+        fill-opacity: 0;
+      }
+      ::content .circle_wrapper:hover .circle {
+        stroke-opacity: 0;
+      }      
+      ::content .circle_wrapper:hover .circle-bg {
+        fill-opacity: 0.25;
+      }
+      ::content .circle_wrapper #arc {
+        fill: none;
+        stroke-linecap: round;        
+      }
+
+      ::content .label_wrapper {
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        position: absolute;
+        font-weight: bold;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-center-justified);
+      }
+
+      ::content .label {
+        font-size: 14px;
+        text-transform: uppercase;
+        @apply(--paper-font-body2);
+        transition: color 150ms ease-in-out;
+      }
+      ::content .circle_wrapper svg {
+        height: 100%;
+        width: 100%;
+        display: block;
+      }
+      ::content paper-tooltip {
+        @apply(--layout-vertical);
+      }
+      ::content paper-tooltip ::content > #tooltip > div {
+        @apply(--layout-horizontal);
+        padding: 4px 0;
+      }
+      ::content paper-tooltip ::content iron-icon {
+        flex-grow: 0;
+        margin-right: 8px;
+      }      
+      ::content paper-tooltip ::content label {
+        flex-grow: 1;
+        margin-right: 16px;
+        color: var(--secondary-text-color);
+        text-align: left;
+      } </style> <!-- local DOM HTML --> <div class="circle_wrapper" style$="width: [[size]]px; height: [[size]]px"> <svg viewbox$="0 0 [[size]] [[size]]"> <circle class="circle" cx$="[[centre]]" cy$="[[centre]]" r$="[[radius]]" style="stroke-width: [[thickness]];"/> <circle class="circle-bg" cx$="[[centre]]" cy$="[[centre]]" r$="[[bgradius]]"/> <path id="arc" style="stroke-width: [[thickness]];" stroke$="[[colour]]"/> </svg> <div class="label_wrapper" aria-label$="<%= i18n.score %>"> <span class="label" style="color: [[colour]];">[[rating]]</span> </div> <paper-tooltip position="left"> <div> <label>[[tooltipIcons.0]]</label> [[tooltip.line0]] </div> <div> <label>[[tooltipIcons.1]]</label> [[tooltip.line1]] </div> <div> <label>[[tooltipIcons.2]]</label> [[tooltip.line2]] </div> </paper-tooltip> </div> </template> <script> Polymer(
+    {
+      is: 'duma-rating',
+      properties:
+      {
+        animated:
+        {
+          type: Boolean,
+          value: false,
+        },
+        size:
+        {
+          type: Number,
+          value: 32,
+        },
+        thickness:
+        {
+          type: Number,
+          value: 3,
+        },
+        animationTime:
+        {
+          type: Number,
+          value: 750,
+        },
+        centre:
+        {
+          type: Number,
+          computed: "getCircleCentre(size)",
+        },
+        radius:
+        {
+          type: Number,
+          computed: "getRadius(centre, thickness)",
+        },     
+        bgradius:
+        {
+          type: Number,
+          computed: "getBgRadius(centre, thickness)",
+        }, 
+        thresholds:
+        {
+          type: Object,
+          value:
+          {
+            max: 5,
+
+            limits:
+            [
+              {
+                letter: "D",
+                limit: 1,
+                colour: "#FF0000",
+              },
+              {
+                letter: "C",
+                limit: 2,
+                colour: "#FFA500",
+              },
+              {
+                letter: "B",
+                limit: 3,
+                colour: "#FFFF00",
+              },
+              {
+                letter: "A",
+                limit: 4,
+                colour: "#008800",
+              },
+              {
+                letter: "A+",
+                limit: 5,
+                colour: "#00FF00",
+              }
+            ],
+          }
+        },
+        value:
+        {
+          type: Number,
+          value: null,
+          observer: "setRating"
+        },
+        rating:
+        {
+          type: String,
+          value: "-",
+          notify: true,
+          reflectToAttribute: true
+        },
+        colour:
+        {
+          type: String,
+          value: "#FFFFFF"
+        },
+        tooltip:
+        {
+          type: Object,
+          value: function ()
+          {
+            return {
+              line0: "",
+              line1: "",
+              line2: "",
+            };
+          },
+        },
+        tooltipIcons:
+        {
+          type: Object,
+          value:
+          {
+            0: "",
+            1: "",
+            2: "",
+          },
+        },
+      },
+
+      setRating: function (value)
+      {
+        var rating = this.getRating(value);
+        this.set('rating',rating[1].letter);
+        this.set('colour',rating[1].colour);
+
+        var angle = (rating[0] >= this.thresholds.limits.length - 1) ?
+                     this.getAngle(this.thresholds.max, this.thresholds.max) :
+                     this.getAngle(value || 0, this.thresholds.max);
+
+        if (this.animated)
+        {
+          var from = { property: 0 };
+          var to   = { property: angle };
+          var local = this; // So the animation can access this
+
+          jQuery(from).animate(to,
+          {
+            duration: this.animationTime,
+            easing: "swing",
+            step: function () { local.$.arc.setAttribute("d", local.describeArc(local, this.property)) },
+          });
+        }
+        else
+        {
+          this.$.arc.setAttribute("d", this.describeArc(this, angle));
+        }
+      },
+
+      reset: function ()
+      {
+        this.value = null;
+        this.rating = "-";
+        this.colour = "#FFFFFF";
+
+        this.$.arc.setAttribute("d", "");
+      },
+
+      getAngle(value, max)
+      {
+        return (Math.min(value, max) / max) * 360;
+      },
+
+      getRating(value)
+      {
+        if(!value && value != 0) return [0,{letter:"-",colour:"#FFFFFF"}]
+        var i;
+
+        for (i = this.thresholds.limits.length - 1; i > 0; i--)
+          if (value >= this.thresholds.limits[i].limit)
+            break;
+
+        return [i, this.thresholds.limits[i]];
+      },
+
+      getCircleCentre(size)
+      {
+        return (size / 2);
+      },
+
+      getRadius(centre, thickness)
+      {
+        return centre - thickness;
+      },    
+
+      getBgRadius(centre, thickness)
+      {
+        return centre - thickness/2;
+      },   
+
+      polarToCartesian(center, radius, angleInDegrees)
+      {
+        var angleInRadians = (angleInDegrees-90) * Math.PI / 180.0;
+
+        return {
+          x: center + (radius * Math.cos(angleInRadians)),
+          y: center + (radius * Math.sin(angleInRadians)),
+        };
+      },
+
+      describeArc(local, endAngle)
+      {
+        var start = local.polarToCartesian(local.centre, local.radius, endAngle);
+        var end   = local.polarToCartesian(local.centre, local.radius, 1);
+
+        var largeArcFlag = endAngle <= 180 ? "0" : "1";
+
+        return [
+          "M", start.x, start.y,
+          "A", local.radius, local.radius, 0, largeArcFlag, 0, end.x, end.y
+        ].join(" ");
+      }
+    }); </script> </dom-module> 

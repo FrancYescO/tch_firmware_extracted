@@ -1,0 +1,86 @@
+-- Automatically generated from Device:2.2
+-- using generator version 2.1
+local Multi_Ethernet_ = {
+  objectType = {
+    name = "#ROOT.Ethernet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- InterfaceNumberOfEntries
+      -- automatically created when #ROOT.Ethernet.Interface.{i}. is loaded
+      X_000E50_Eth4lanwanmode = {
+        access = "readWrite",
+        type = "boolean",
+        description = "if 1, switch the ETH4 from WAN into LAN mode",
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local ethernetBinding = {config = "ethernet", sectionname = "globals", option = "", default = ""}
+local commitApply = commitapply
+local isConfigChanged = false
+local process = require("tch.process")
+
+local function eth4lanwanmode_enabled()
+  local ret = 0
+  local fp = process.popen("ethctl", {"bcmsw", "phy-crossbar"} , "re")
+  if fp then
+    if fp:read("*a") == "" then                                                                  
+      ret = 1                        
+    end
+    for line in fp:lines() do
+       if line:match("13") then
+        ret = 1
+        break
+      end
+    end
+    fp:close()
+  else
+    ret = 1
+  end
+  return ret
+end
+
+Multi_Ethernet_.get = {
+  X_000E50_Eth4lanwanmode = function(mapping, param, key)
+    ethernetBinding.option = "eth4lanwanmode"
+    ethernetBinding.default = "0"
+    return getFromUci(ethernetBinding)
+  end
+}
+
+Multi_Ethernet_.set = {
+  X_000E50_Eth4lanwanmode = function(mapping, param, value, key)
+    ethernetBinding.option = "eth4lanwanmode"
+    setOnUci(ethernetBinding,value,commitApply)
+    isConfigChanged = true
+  end
+}
+
+Multi_Ethernet_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(ethernetBinding)
+  end
+  isConfigChanged = false
+end
+
+Multi_Ethernet_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(ethernetBinding)
+  end
+  isConfigChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Ethernet_, "#ROOT", { "Device", "rpc" })
+for _, dupli in ipairs(duplicates) do
+  if (eth4lanwanmode_enabled() == 1) then
+    dupli.objectType.parameters["X_000E50_Eth4lanwanmode"] = nil
+  end
+  register(dupli)
+end

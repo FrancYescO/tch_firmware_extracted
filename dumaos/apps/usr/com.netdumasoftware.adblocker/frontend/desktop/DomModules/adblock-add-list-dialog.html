@@ -1,0 +1,261 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tabs/paper-tabs.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tabs/paper-tab.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-textarea.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/file-upload/file-upload.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="adblock-add-list-dialog"> <template> <style include="duma-theme iron-flex"> file-upload#formFile {
+        --error-color: var(--primary-color);
+        --file-upload-button: {
+          margin-top: 12px;
+        };
+
+        --file-upload-commands: {
+          float: none;
+          text-align: center;
+          margin-bottom: 4px;
+        };
+        --file-upload-upload-border: {
+          display: block;
+        };
+        width: 100%;
+      }
+      ::content file-upload#formFile ::content .name span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+      }
+      ::content paper-dropdown-menu {
+        --paper-dropdown-menu: {
+          display: block;
+        };
+      } </style> <paper-dialog id="dialog" modal> <h2 dialog-label>[[addEdit]] <%= i18n.list %></h2> <paper-dialog-scrollable> <iron-pages selected="{{loading}}"> <div class="inner"> <div class="layout horizontal"> <paper-input class="flex-left" id="formName" minlength="1" maxlength="30" label="Name" error-message="<%= i18n.errorRequired %>" required></paper-input> <paper-dropdown-menu class="flex-right" label="Type"> <paper-listbox class="dropdown-content" selected="{{selected}}"> <paper-item><%= i18n.onlineList %></paper-item> <paper-item><%= i18n.file %></paper-item> <paper-item><%= i18n.domains %></paper-item> </paper-listbox> </paper-dropdown-menu> </div> <iron-pages selected="{{selected}}"> <!-- URL --> <div> <paper-input id="formURL" pattern="^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w\.-]+)+[\w\-\._~:/?#[\]@!\$&'\(\)\*\+,;=.]+$" error-message="<%= i18n.errorValidURL %>" label="<%= i18n.domainURL %>" required></paper-input> </div> <!-- File --> <div> <file-upload id="formFile" droppable="true" raised="true" drop-text="<%= i18n.dropListHere %>" error-text="<%= i18n.uploadError %>" file-data-name="uploadfile" target="/cgi-bin/domain_list.has" method="POST" manual-upload><%= i18n.uploadList %></file-upload> </div> <!-- Domains --> <div> <paper-textarea id="formDomains" pattern="^(?:http(s)?:\/\/)?[A-Za-z_.-]+(?:\.[\w\.-]+)+/?[^/#\n:]+$" error-message="<%= i18n.errorValidDomains %>" maxlength="1000" rows="10" max-rows="10" label="<%= i18n.domains %>" required></paper-textarea> </div> </iron-pages> <div class="layout vertical"> <paper-checkbox id="formTracking" checked="checked"><%= i18n.enableTracking %></paper-checkbox> <paper-checkbox id="formEditing" checked="checked"><%= i18n.enableEditing %></paper-checkbox> </div> </div> <!-- Cloud List --> <div class="inner"> <div class="layout vertical"> <paper-input class="flex-left" id="cloudFormName" minlength="1" maxlength="30" label="Name" error-message="<%= i18n.errorRequired %>" required></paper-input> <paper-checkbox id="cloudFormTracking" checked="checked"><%= i18n.enableTracking %></paper-checkbox> </div> </div> <div> <paper-spinner-lite active></paper-spinner-lite> </div> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <iron-pages selected="[[savingList]]"> <div></div> <div> <paper-spinner-lite active></paper-spinner-lite> </div> </iron-pages> <paper-button dialog-dismiss disabled="[[savingList]]" on-tap="Hide"><%= i18n.cancel %></paper-button> <paper-button autofocus id="addButton" disabled="[[savingList]]" on-tap="Submit">[[submitButtonText]]</paper-button> </div> </paper-dialog> </template> <script> Polymer(
+    {
+      is: 'adblock-add-list-dialog',
+      properties:
+      {
+        addEdit:
+        {
+          type: String,
+          value: "<%= i18n.add %>",
+        },
+        isWhitelist:
+        {
+          type: Boolean,
+          value: false,
+        },
+        selected:
+        {
+          type: Number,
+          value: 0,
+        },
+        errorMessage:
+        {
+          type: String,
+          value: "",
+        },
+        loading:
+        {
+          type: Number,
+          value: 2,
+        },
+        editing:
+        {
+          type: Boolean,
+          value: true,
+        },
+        submitButtonText:
+        {
+          type: String,
+          computed: "GetSubmitButtonText(editing)",
+        },
+        savingList:
+        {
+          type: Boolean,
+          value: false,
+        }
+      },
+      ready: function()
+      {
+        var fileUpload = $(this.$.formFile);
+        fileUpload.on("success", (response) => this.FinishedAddCallback());
+        fileUpload.on("error", (response) => this.FailedAddCallback());
+      },
+      GetSubmitButtonText: function(editing)
+      {
+        return (editing) ? "<%= i18n.update %>" : "<%= i18n.add %>";
+      },
+      Show: function()
+      {
+        if (this.editing)
+        {
+          this.ClearOptions();
+          this.editing = false;
+          this.editingListID = -1;
+        }
+        this.$.dialog.open();
+      },
+      Hide: function()
+      {
+        this.$.dialog.close();
+      },
+      Submit: function()
+      {
+        // Perform validation on all field for error messages
+        this.$.formName.validate();
+        this.$.cloudFormName.validate();
+
+        if (this.listPage == 0)
+        {
+          switch (this.selected)
+          {
+            // URL
+            case 0:
+              this.$.formURL.validate();
+              break;
+
+            // File
+            case 1:
+              break;
+
+            // Domain list
+            case 2:
+              this.$.formDomains.validate();
+              break;
+          }
+        }
+
+        // Check validity and build request
+        if ((this.listPage == 0 && this.$.formName.invalid) || (this.listPage == 1 && this.$.cloudFormName.invalid))
+          return;
+
+        var type;
+        var extraParams = [];
+
+        if (this.listPage == 0)
+        {
+          switch (this.selected)
+          {
+            // URL
+            case 0:
+              type = "url";
+              if (this.$.formURL.invalid)
+                return;
+
+              extraParams.push(this.$.formURL.value);
+              break;
+
+            // File
+            case 1:
+              type = "file";
+              break;
+
+            // Domain list
+            case 2:
+              type = "text"
+              if (this.$.formDomains.invalid)
+                return;
+
+              extraParams.push(this.$.formDomains.value);
+              break;
+          }
+        }
+
+        if (this.listPage == 0)
+        {
+          if (type == "file")
+          {
+            if (this.$.formFile.files.length == 1)
+            {
+              var params = {};
+              params["id"] = (this.editing) ? this.editingListID : -1;
+              params["whitelist"] = this.isWhitelist;
+              params["editable"] = this.$.formEditing.checked;
+              params["stats"] = this.$.formTracking.checked;
+              params["name"] = this.$.formName.value;
+
+              this.$.formFile.additional = params;
+              this.$.formFile.uploadFile(this.$.formFile.files[0]);
+            }
+          }
+          else
+          {
+            var params = [(this.editing) ? this.editingListID : -1, type, this.isWhitelist, this.$.formEditing.checked, this.$.formTracking.checked, this.$.formName.value];
+
+            var rpc = long_rpc_promise("com.netdumasoftware.adblocker", "create_list", params.concat(extraParams));
+            rpc.done(this.FinishedAddCallback.bind(this));
+            rpc.fail(this.FailedAddCallback.bind(this));
+          }
+        }
+        else
+        {
+          var rpc = long_rpc_promise("com.netdumasoftware.adblocker", "list_name", [this.editingListID, this.$.cloudFormName.value]);
+          var rpc2 = long_rpc_promise("com.netdumasoftware.adblocker", "list_stats", [this.editingListID, this.$.cloudFormTracking.checked]);
+          Q.all([rpc, rpc2]).fail(this.FailedAddCallback.bind(this)).done(this.FinishedAddCallback.bind(this));
+        }
+      },
+      FinishedAddCallback: function(data)
+      {
+        this.fire("reload-lists");
+        this.savingList = false;
+        this.Hide();
+        this.ClearOptions();
+        this.editingListID = -1;
+      },
+      FailedAddCallback: function(data)
+      {
+        this.savingList = false;
+        this.fire("error", "Error uploading list");
+        console.log(data);
+      },
+      ClearOptions: function()
+      {
+        // Reset fields
+        this.selected = 0;
+        this.loading = 0;
+        this.listPage = 0;
+        this.addEdit = "<%= i18n.add %>";
+        this.$.cloudFormName.value = this.$.formName.value = "";
+        this.$.formDomains.value = "";
+        this.$.formURL.value = "";
+        this.$.formEditing.checked = true;
+        this.$.formTracking.checked = true;
+      },
+      EditList: function(list)
+      {
+        if (list.id != this.editingListID)
+        {
+          this.editing = true;
+          this.editingListID = list.id;
+          this.$.cloudFormName.value = this.$.formName.value = list.name;
+          this.listPage = 0;
+          this.addEdit = "<%= i18n.edit %>";
+          if (list.type == "cloud") // Cloud list
+            this.listPage = 1;
+
+          switch (list.type)
+          {
+            case "url":
+              this.selected = 0;
+              this.$.formURL.value = list.url;
+              this.loading = this.listPage;
+              break;
+
+            case "file":
+              this.selected = 1;
+              this.loading = this.listPage;
+              break;
+
+            case "text":
+              this.selected = 2;
+              this.loading = 2;
+              this.$.addButton.disabled = true;
+              long_rpc_promise("com.netdumasoftware.adblocker", "get_list_text", [list.id]).done(function (data)
+              {
+                this.$.formDomains.value = data[0];
+                this.loading = this.listPage;
+                this.$.addButton.disabled = false;
+              }.bind(this));
+              break;
+          }
+
+          this.$.formTracking.checked = list.stats;
+        }
+
+        this.$.dialog.open();
+      },
+    }); </script> </dom-module> 

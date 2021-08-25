@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+USE_PROCD=1
+APP="bcm_spdsvc"
+config_load "$APP"
+
+start_service() {
+	local enabled
+	config_get_bool enabled global enabled 0
+	[ $enabled -eq 0 ] && return 0
+
+	local license
+	config_get license global license ''
+	[ -f "$license" ] || { logger -t "$APP" "Invalid Broadcom Speed Service license file specified"; return 0; }
+
+	cat "$license" > /proc/spdsvc/license
+
+	procd_open_instance
+	procd_set_param command "/usr/bin/$APP"
+	procd_set_param respawn
+	procd_close_instance
+}
+
+reload_service() {
+	procd_send_signal "$APP"
+}

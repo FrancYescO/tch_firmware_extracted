@@ -1,0 +1,94 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Device_Errors.{i}.',
+		access = 'readOnly',
+		numEntriesParameter = "DeviceErrorsNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			Severity = {
+				access = "readOnly",
+				type = "string"
+			},
+			Type = {
+				access = "readOnly",
+				type = "string"
+			},
+			State = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Uptime = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Session_ID = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PDP_Type = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Reject_Cause = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Reject_Cause_Message = {
+				 access = "readOnly",
+				 type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+function obj.getall(mapping, key, parentKey)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	key = tonumber(key)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.device", "errors", parentKey)
+	if data and data.errors and data.errors[key] then
+		local error_info = data.errors[key]
+		result.Severity = error_info.severity
+		result.Type = error_info.type
+		result.State = error_info.state
+		result.Uptime = error_info.uptime
+		if error_info.data then
+			result.Reject_Cause = error_info.data.reject_cause
+			result.PDP_Type = error_info.data.pdp_type
+			result.Session_ID = error_info.data.session_id
+			if error_info.data.reject_cause_message then
+				result.Reject_Cause_Message = error_info.data.reject_cause_message
+			end
+		end
+	end
+
+	return result
+end
+
+function obj.get(mapping, paramName, key, parentKey)
+	return obj.getall(mapping, key, parentKey)[paramName]
+end
+
+function obj.entries(_, parentKey)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.device", "errors", parentKey)
+	local errors_indexes = {}
+
+	if type(data.errors) == "table" then
+		for error_index in ipairs(data.errors) do
+			table.insert(errors_indexes, tostring(error_index))
+		end
+	end
+	return errors_indexes
+end
+
+register(obj)
+

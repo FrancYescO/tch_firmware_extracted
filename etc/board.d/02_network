@@ -1,0 +1,55 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+board_config_update
+mnemonic=`cat /proc/rip/0040 2>/dev/null`
+
+board=$(board_name)
+chip_id=$(sed -n '/SoC Name/s/.*: *//p' /proc/socinfo)
+
+case "$board" in
+brcm,brcm-v8A)
+	if [[ "$mnemonic" == "GCNT-K" ]]; then
+		ucidef_set_interface_lan "eth0 eth1 eth2 eth3 eth4 eth5"
+	else
+		ucidef_set_interface_lan "eth0 eth1 eth2 eth3"
+	fi
+	if [[ "$chip_id" != "BCM68580X" ]] && [[ "$chip_id" != "BCM68360" ]]; then
+		ucidef_add_switch "bcmsw"
+		ucidef_add_switch_attr "bcmsw" "enable" "false"
+	fi
+	;;
+brcm,bcm96846|\
+brcm,bcm96878)
+	ucidef_set_interface_lan "eth0 eth1 eth2 eth3"
+	if [[ "$chip_id" != "BCM68460" ]] && [[ "$chip_id" != "BCM68782G" ]]; then
+		ucidef_add_switch "bcmsw"
+		ucidef_add_switch_attr "bcmsw" "enable" "false"
+	fi
+	;;
+brcm,bcm963178|\
+brcm,bcm963158|\
+brcm,bcm963138|\
+brcm,bcm963268)
+	if [[ "$mnemonic" == "GBNT-4" ]] || [[ "$mnemonic" == "GCNT-F" ]]; then
+        	ucidef_set_interface_lan "eth0"
+	else
+        	ucidef_set_interface_lan "eth0 eth1 eth2 eth3"
+	fi
+	ucidef_add_switch "bcmsw"
+	ucidef_add_switch_attr "bcmsw" "enable" "false"
+	;;
+brcm,bcm947622)
+        ucidef_set_interface_lan "eth0"
+        ucidef_add_switch "bcmsw"
+        ucidef_add_switch_attr "bcmsw" "enable" "false"
+	;;
+*)
+	echo "Unsupported hardware. Network interfaces not intialized"
+	;;
+esac
+
+board_config_flush
+
+exit 0

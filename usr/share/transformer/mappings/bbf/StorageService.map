@@ -1,0 +1,555 @@
+-- Automatically generated from StorageService:1.0
+-- using generator version 2.1
+local Multi_Services_StorageService_i_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local lfs = require("lfs")
+local tostring, open = tostring, io.open
+local posix = require("tch.posix")
+local process = require("tch.process")
+
+
+Multi_Services_StorageService_i_.entries = function()
+    return {"storage"}
+end
+
+Multi_Services_StorageService_i_.get = {
+    Enable = "1",
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_StorageService_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_Capabilities_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.Capabilities.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      FTPCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      SFTPCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      HTTPCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      HTTPSCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      HTTPWritable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      SupportedNetworkProtocols = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "SMB",
+          "NFS",
+          "AFP",
+        },
+      },
+      SupportedFileSystemTypes = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "FAT16",
+          "FAT32",
+          "NTFS",
+          "HFS",
+          "HFS+",
+          "HSFJ",
+          "ext2",
+          "ext3",
+          "XFS",
+          "REISER",
+        },
+      },
+      SupportedRaidTypes = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "RAID0",
+          "RAID1",
+          "RAID2",
+          "RAID3",
+          "RAID4",
+          "RAID5",
+          "RAID6",
+          "RAID10",
+          "RAID0+1",
+          "RAID30",
+          "RAID50",
+          "RAID60",
+        },
+      },
+      VolumeEncryptionCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+Multi_Services_StorageService_i_Capabilities_.get = {
+    FTPCapable = "0",
+    SFTPCapable = "0",
+    HTTPCapable =  "1",
+    HTTPSCapable = "0",
+    HTTPWritable = "0",
+    SupportedNetworkProtocols = "SMB",
+    SupportedFileSystemTypes = "FAT16, FAT32, NTFS, HFS+, ext2, ext3",
+    SupportedRaidTypes = "",
+    VolumeEncryptionCapable = "0",
+}
+
+duplicates = duplicator(Multi_Services_StorageService_i_Capabilities_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_NetworkServer_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.NetworkServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      SMBEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local smb_binding = {config = "samba", sectionname = "@samba[0]", option = "enabled", extended = true, default=1}
+Multi_Services_StorageService_i_NetworkServer_.get = {
+    SMBEnable = function(mapping, param, key)
+        return uci_helper.get_from_uci(smb_binding)
+    end,
+}
+
+Multi_Services_StorageService_i_NetworkServer_.set = {
+    SMBEnable = function(mapping, param, value, key)
+        return uci_helper.set_on_uci(smb_binding, value, commitapply)
+    end,
+}
+
+Multi_Services_StorageService_i_NetworkServer_.commit = function()
+    uci_helper.commit(smb_binding)
+end
+
+Multi_Services_StorageService_i_NetworkServer_.revert = function()
+    uci_helper.revert(smb_binding)
+end
+
+duplicates = duplicator(Multi_Services_StorageService_i_NetworkServer_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_FTPServer_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.FTPServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+Multi_Services_StorageService_i_FTPServer_.get = {
+    Enable = "0",
+}
+
+Multi_Services_StorageService_i_FTPServer_.set = {
+    Enable = function(mapping, param, value, key)
+      return nil, "can not set FTPServer Enable"
+    end,
+}
+
+duplicates = duplicator(Multi_Services_StorageService_i_FTPServer_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local syspath = "/sys/bus/usb/devices/"
+local devicePattern = "^(%d+)-([%d%.]+)$" -- a USB device directory is of the form bus-port.port ...
+
+local function firstline(filename)
+    local fd, msg = open(filename)
+    if not fd then
+        -- you could return nil and and error message but that will abort
+        -- iterating over all parameters.
+        -- so here I opt to just return an empty string.
+        return ""
+    end
+    local result = fd:read("*l")
+    if result == nil then
+        result = ""
+    end
+    fd:close()
+    return result
+end
+
+local function getMountPoint(key)
+    local fp = io.open("/proc/mounts","r")
+    if fp == nil then
+        return ""
+    end
+
+    local mount
+    local line = fp:read("*a")
+    if line then
+       local pattern = key .. "%s+([^%s]*)%s"
+       local mount = string.match(line, pattern)
+    end
+    fp:close()
+    return mount or ""
+end
+
+local function getFileSystem(key)
+    local fp = io.open("/proc/mounts","r")
+    if fp == nil then
+        return ""
+    end
+
+    local fstype
+    local line = fp:read("*a")
+    if line then
+       local pattern = key .. "[^,]*%s+([^%s,]+)%s+rw"
+       local fstype = string.match(line, pattern)
+    end
+    fp:close()
+    return fstype or ""
+end
+
+local function getlogicdevs(parentkey)
+    local logicdev_entries = {}
+    local path = syspath .. parentkey .. "/"
+    local str = {path , "-name", "sd*"}
+    local fp = process.popen("/usr/bin/find", str)
+    if fp == nil then
+        return {}
+    end
+    local line = fp:read("*l")
+    if not line or line == "" then
+        fp:close()
+        return {}
+    end
+
+    local dev_list = {}
+    while true do
+        local dev
+        for w in string.gmatch(line, "[^/]+") do
+            dev = w
+        end
+        if dev then
+            dev_list[#dev_list+1] =  dev
+        end
+
+        line = fp:read("*l")
+        if not line or line == "" then break end
+    end
+
+    if #dev_list == 1 then
+        logicdev_entries[#logicdev_entries+1] = parentkey .. ":" .. dev_list[1]
+    else
+        for _, v in pairs(dev_list) do
+            local dev = string.match(v, "sd[a-z][0-9]+")
+            if dev then
+                logicdev_entries[#logicdev_entries+1] =  parentkey .. ":" .. dev
+            end
+        end
+    end
+    fp:close()
+    return logicdev_entries
+end
+
+local function getTotalSpace(dev)
+    local mount = getMountPoint(dev)
+    if mount ~= "" then
+        local statvfs_info = posix.statvfs(mount)
+        return statvfs_info.f_bsize * statvfs_info.f_blocks/(1024*1024)
+    end
+    return
+end
+
+local Multi_Services_StorageService_i_PhysicalMedium_i_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.PhysicalMedium.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "PhysicalMediumNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Model = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      FirmwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ConnectionType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "USB 1.1",
+          "USB 2.0",
+          "IEEE1394",
+          "IEEE1394b",
+          "IDE",
+          "EIDE",
+          "ATA/33",
+          "ATA/66",
+          "ATA/100",
+          "ATA/133",
+          "SATA/150",
+          "SATA/300",
+          "SCSI-1",
+          "Fast SCSI",
+          "Fast-Wide SCSI",
+          "Ultra SCSI",
+          "Ultra Wide SCSI",
+          "Ultra2 SCSI",
+          "Ultra2 Wide SCSI",
+          "Ultra3 SCSI",
+          "Ultra-320 SCSI",
+          "Ultra-640 SCSI",
+          "SSA",
+          "SSA-40",
+          "Fibre Channel",
+        },
+      },
+      Capacity = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+
+Multi_Services_StorageService_i_PhysicalMedium_i_.entries = function()
+    local entries = {}
+    for file in lfs.dir(syspath) do
+        if string.match(file, devicePattern) then
+           entries[#entries+1] = file
+        end
+    end
+    return entries
+end
+
+Multi_Services_StorageService_i_PhysicalMedium_i_.get = {
+    Vendor = function(mapping, param, key)
+        return firstline(syspath .. key .. "/" .. "manufacturer")
+    end,
+    Model = function(mapping, param, key)
+        return firstline(syspath .. key .. "/" .. "product")
+    end,
+    SerialNumber = function(mapping, param, key)
+        return firstline(syspath .. key .. "/" .. "serial")
+    end,
+    FirmwareVersion = function(mapping, param, key)
+        return firstline(syspath .. key .. "/" .. "version")
+    end,
+    ConnectionType = function(mapping, param, key)
+        return firstline(syspath .. key .. "/" .. "manufacturer")
+    end,
+    Capacity = function(mapping, param, key)
+      local volumns = {}
+      local logicdev_entries = getlogicdevs(key)
+      for _, v in pairs(logicdev_entries) do
+          local volumn = string.match(v, key .. ":" .. "(.*)")
+
+          if volumn then
+              volumns[#volumns + 1] = volumn
+          end
+      end
+
+      local size = 0
+      for _, v in pairs(volumns) do
+          local s = getTotalSpace(v)
+          if s then
+              size = size + s
+          end
+      end
+      return tostring(size)
+    end,
+}
+
+duplicates = duplicator(Multi_Services_StorageService_i_PhysicalMedium_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_LogicalVolume_i_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.LogicalVolume.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "LogicalVolumeNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    enableParameter = "Enable",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+        default = "",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Offline",
+          "Online",
+          "Error",
+        },
+        default = "Offline",
+      },
+      Enable = {
+        access = "readOnly",
+        type = "boolean",
+        default = "false",
+      },
+      PhysicalReference = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      FileSystem = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+        },
+      },
+      Capacity = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      UsedSpace = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+Multi_Services_StorageService_i_LogicalVolume_i_.entries = function()
+    local entries = {}
+    for file in lfs.dir(syspath) do
+        if string.match(file, devicePattern) then
+           local logicdevs = getlogicdevs(file)
+           for _, v in pairs(logicdevs) do
+               entries[#entries+1] = v
+           end
+        end
+    end
+    return entries
+end
+
+Multi_Services_StorageService_i_LogicalVolume_i_.get = {
+    Name = function(mapping, param, key)
+      local dev = string.match(key, ".*:(.*)")
+      if dev then
+          local mount = getMountPoint(dev)
+          if mount ~= "" then
+              return string.match(mount,".*/([^/]*)")
+          end
+      end
+      return ""
+    end,
+    Status = "Offline",
+    Enable = "1",
+    PhysicalReference = function(mapping, param, key)
+      local parentkey = string.match(key, "(.*):.*")
+      if parentkey then
+          if mapping.objectType.name:match('^Device%.') then
+            return resolve("Device.Services.StorageService.{i}.PhysicalMedium.{i}.", parentkey) or ""
+          end
+          return resolve("InternetGatewayDevice.Services.StorageService.{i}.PhysicalMedium.{i}.", parentkey) or ""
+      end
+      return ""
+    end,
+    FileSystem = function(mapping, param, key)
+      local dev = string.match(key, ".*:(.*)")
+      if dev then
+          return getFileSystem(dev)
+      end
+      return ""
+    end,
+    Capacity = function(mapping, param, key)
+      local dev = string.match(key, ".*:(.*)")
+      if dev then
+          local size = getTotalSpace(dev)
+          return size and tostring(size) or ""
+      end
+      return ""
+    end,
+    UsedSpace = function(mapping, param, key)
+      local dev = string.match(key, ".*:(.*)")
+      if dev then
+          local mount = getMountPoint(dev)
+          if mount ~= "" then
+             local statvfs_info = posix.statvfs(mount)
+             return tostring(statvfs_info.f_bsize * (statvfs_info.f_blocks-statvfs_info.f_bfree)/(1024*1024))
+          end
+      end
+      return ""
+    end,
+}
+
+duplicates = duplicator(Multi_Services_StorageService_i_LogicalVolume_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

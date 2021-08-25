@@ -1,0 +1,50 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-styles.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/time.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="time-selector"> <template> <style is="custom-style" include="duma-theme"> </style> <paper-dialog id="dialog" with-backdrop> <h4><%= i18n.routerTime %> - [[timedata]]</h4> <h4 dialog-label><%= i18n.timeZone %></h4> <paper-dialog-scrollable> <div class="inner"> <paper-listbox attr-for-selected="name" selected="{{selectedZone}}" aria-label="<%= i18n.timeZone %>"> <template is="dom-repeat" items="[[zones]]" as="zone"> <paper-item name="[[zone.id]]">[[zone.display]]</paper-item> </template> </paper-listbox> </div> </paper-dialog-scrollable> <div> <paper-checkbox checked="{{dst}}"><%= i18n.autoDST %></paper-checkbox> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button on-click="save"><%= i18n.save %></paper-button> </div> </paper-dialog> </template> <script> var tzPackage = "com.netdumasoftware.config";
+
+    Polymer({
+      is: "time-selector",
+
+      properties: {
+        zones: {
+          type: Array,
+          value: []
+        },
+        selectedZone: {
+          type: Number,
+          value: 18
+        },
+        timedata: {
+          type: String,
+          value: null
+        },
+        dst: {
+          type: Boolean,
+          value: true
+        }
+      },
+
+      ready: function(){
+        this.zones = duma.time.valid_time_zones || [];
+        duma.events.on("router-time-zones",function(e){
+          this.zones = e.detail.value;
+        }.bind(this))
+        duma.time.currentTimeLoop(function(time){
+          this.set('timedata', duma.time.toRouterTime(time * 1000));
+        }.bind(this),function(){
+          return this.$.dialog.opened;
+        }.bind(this));
+      },
+
+      open: function(){
+        this.selectedZone = duma.time.router_time_zone;
+        this.dst = duma.time.apply_dst;
+        this.$.dialog.open();
+      },
+      save: function(){
+        duma.time.setTimeZone(this.selectedZone,this.dst).done(function(){
+          this.$.dialog.close();
+        }.bind(this));
+      }
+    }); </script> </dom-module> 

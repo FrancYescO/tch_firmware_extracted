@@ -1,0 +1,229 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/storage.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="ping-history"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        @apply(--layout-flex-none);
+      }
+      .time-slider-wrapper {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex-wrap: nowrap;
+      }
+      .time-slider-wrapper > div {
+        display: flex;
+        justify-content: flex-start;
+      }
+      .time-slider-wrapper > *:first-child{
+        flex-grow: 2;
+      }
+      .date-display {
+        white-space: nowrap;
+      }
+      #timeSlider {
+        --paper-slider-knob-start-color: var(--primary-color);
+        --paper-slider-knob-start-border-color: var(--primary-color);
+        --paper-slider-pin-color: transparent;
+        --paper-slider-pin-start-color: transparent;
+        --paper-slider-font-color: var(--primary-text-color);
+        --paper-slider-pin-font-size: 14px;
+        --paper-slider-pin-white-space: nowrap;
+        margin: 0em 2em;
+      } </style> <div class="inner layout horizontal time-slider-wrapper"> <div> <paper-slider id="timeSlider" min="0" max="[[_sliderLen]]" keyboard-step="[[_getStep(_sliderLen)]]" immediate-value="{{sliderVal}}" disabled="[[!_enabled(_history,_sliderScale)]]" always-show-pin aria-label="<%= i18n.ariaSlider %>" aria-value-text-override="[[getAriaOverride(timeSelected,timeOptions)]]"></paper-slider> </div> <div> <paper-dropdown-menu dynamic-align disabled="[[!_enabled(_history,_sliderScale)]]" label="<%= i18n.dropdownLabel %>" aria-label="<%= i18n.dropdownLabel %>"> <paper-listbox class="dropdown-content" selected="{{timeSelected}}"> <template is="dom-repeat" items="[[timeOptions]]" as="time"> <paper-item time="[[time.t]]">[[time.text]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div>  </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-history",
+
+      properties: {
+        timeSelected: {
+          type: Number,
+          value: 2
+        },
+        timeOptions: {
+          type: Array,
+          notify: true,
+          value: [
+            { t: 3600, text: "<%= i18n.time_1hour %>" },
+            { t: 21600, text: "<%= i18n.time_6hour %>" },
+            { t: 86400, text: "<%= i18n.time_24hour %>" },
+            { t: 604800, text: "<%= i18n.time_1week %>" },
+            { t: 1209600, text: "<%= i18n.time_2week %>" },
+            { t: 2592000, text: "<%= i18n.time_1month %>" }
+          ]
+        },
+        sliderVal: {
+          type: Number,
+          value: 0,
+          observer: "_sliderChange"
+        },
+        _sliderLen: Number,
+        _history: {
+          type: Array,
+          value: []
+        },
+        _sliderScale: {
+          type: Number,
+          value: 1
+        },
+        pindisplay: {
+          type: String,
+          value: "<%= i18n.pinNow %>"
+        }
+      },
+
+      observers: [
+        "_refresh(_history,timeOptions,timeSelected)"
+      ],
+      ready: function () {
+        this._callback = null;
+        this.$.timeSlider.displayFunction = this._pinDisplay.bind(this);
+      },
+      attached: function(){
+        this.load();
+      },
+      load: function(){
+        var digitEx = new RegExp("\\d+");
+        var time_drop = duma.storage(packageId,"time_drop");
+        if(time_drop && time_drop.match(digitEx)){
+          this.timeSelected = parseInt(time_drop);
+        }else{
+          this.timeSelected = 2;
+        }
+      },
+      save: function(){
+        if($(this).closest("duma-panel").prop("loaded")){
+          duma.storage(packageId,"time_drop",this.timeSelected);
+        }
+      },
+      _sliderToUnix: function(sliderVal){
+        return Date.now() - ( ((this._sliderLen - sliderVal) * this._sliderScale) * 1000 );
+      },
+      _unixToDisplayDate: function(unixTime,multi=1){
+        var unixDate = new Date(unixTime * multi);
+        return unixDate.toLocaleDateString([], {day:'numeric', month: 'numeric'}) + " " + unixDate.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'})
+      },
+      _getStep: function(sliderLen){
+        /**
+         * This is a solution to allow the slider to be more easily utilised with the keyboard, as currently, using left or right arrows keys only moves a couple of seconds, on a slider that is a timespan for a week.
+         * This slider is barely used, and is very likely to be removed in the future, as such, we didn't want to waste time on a more elaborate solution such as a different step size per timespan etc..., and instead, just as 1/20th.
+         */
+        return sliderLen / 20;
+      },
+      _preLatestTime: 0,
+      _pinDisplay: function(value){
+        if(value === this._sliderLen) return "<%= i18n.pinNow %>";
+        if(this._preLatestTime === 0) return "<%= i18n.pinNoData %>";
+        return this._unixToDisplayDate(this._sliderToUnix(value));
+      },
+      getAriaOverride: function(type,timeSelected,timeOptions){
+        return function(val){
+          if(val >= this._sliderLen) return "<%= i18n.presentTime %>";
+          if(this._preLatestTime === 0) return "<%= i18n.pinNoData %>";
+          var unix = this._sliderToUnix(val);
+          return new Date(unix).toLocaleString([], {day: 'numeric', month: 'long', year: 'numeric', hour12: false, hour: '2-digit', minute:'2-digit'});
+        }.bind(this);
+      },
+      _sliderChange: function(sliderVal){
+        var slider_time = this._sliderToUnix(sliderVal);
+        if(this._sliderLen === sliderVal){
+          this._preLatestTime = Date.now();
+          this._call(null);
+          return;
+        }
+        var latest_time = 0;
+        var ret = [];
+        for(var k in this._history){
+          var ser = this._history[k];
+          var final = null;
+          for(var i = ser.short_snapshots.length - 1; i >= 0; i --){
+            var snap = ser.short_snapshots[i];
+            if(snap.time * 1000 > slider_time) continue;
+            final = snap.ping
+            if(snap.time > latest_time) latest_time = snap.time;
+            break;
+          }
+          if(final){
+            ret.push({
+              server: ser.server,
+              ping: final
+            });
+          }
+        }
+        if(latest_time !== this._preLatestTime){
+          this._call(ret);
+        }
+        this._preLatestTime = latest_time;
+      },
+
+      _refresh: function () {
+        var timeData = this.timeOptions[this.timeSelected];
+        if(this._sliderScale){
+          var len = (timeData.t / this._sliderScale)
+          this._sliderLen = len;
+          this.$.timeSlider.value = len;
+        }
+        var start_time = this._sliderToUnix(0);
+        for(var k in this._history){
+          var ser = this._history[k];
+          ser.short_snapshots = [];
+          for(var i = 0; i < ser.snapshots.length; i ++){
+            var snap = ser.snapshots[i];
+            if(snap.time * 1000 >= start_time){
+              ser.short_snapshots.push(snap);
+            }
+          }
+        }
+        this.save();
+      },
+      _enabled: function(history,sliderScale){
+        return history.length > 0 && sliderScale;
+      },
+
+      /**
+       * historyData - Array of objects:
+       * {
+       *  server: the server
+       *  snapshots: [
+       *    time: the time of the snapshot
+       *    ping: ping at the snapshot
+       *  ]
+       * } 
+       */
+      setHistory: function (servers, historyData, callback) {
+        var joint = [];
+        var i,s,t = 0;
+        forObject(historyData,function(ip,data){
+          var hist = {
+            server: null,
+            snapshots: []
+          };
+          forObject(servers,function(skey, serv){
+            if(serv.ip === ip){
+              hist.server = serv;
+            }
+          });
+          if(hist.server === null){
+            console.error('IP Address '+ ip +' cannot find a server');
+            return false;
+          }
+          forObject(data,function(time,ping){
+            if(time === "references") return;
+            hist.snapshots.push({
+              time: parseInt(time),
+              ping: ping
+            });
+          });
+          hist.snapshots.sort(function(a,b) {return a.time - b.time; });
+          joint.push(hist);
+        },true);
+        this._history = joint;
+        this._callback = callback;
+      },
+      _call: function(data){
+        if(this._callback){
+          this._callback(data);
+        }
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

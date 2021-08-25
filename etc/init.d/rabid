@@ -1,0 +1,45 @@
+#!/bin/sh /etc/rc.common
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2018 CUJO LLC. All rights reserved.
+
+# START is used by the caller script, but as this script is
+# sourced, there is no need to export it
+# shellcheck disable=SC2034
+START=98
+
+export CUJO_HOME=/opt/cujo
+# shellcheck source=../rabid-functions.sh
+. "$CUJO_HOME/lib/rabid-functions.sh"
+
+start() {
+    config_load rabid
+    config_get_bool enabled config enable 0
+    if [ "$enabled" == 0 ]; then
+        is_rabid_running >/dev/null && stop
+        return
+    fi
+
+    local module
+    for module in lunatik luadata luajson luabase64 luaconntrack nflua; do
+        insmod $module
+    done
+
+    wait_for_correct_date
+    is_rabid_running && exit 1
+
+    start_rabid
+}
+
+stop() {
+    stop_rabid
+
+    local module
+    for module in nflua luaconntrack luabase64 luajson luadata lunatik; do
+        rmmod $module
+    done
+}
+
+restart() {
+    stop
+    start
+}

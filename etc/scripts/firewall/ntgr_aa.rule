@@ -1,0 +1,68 @@
+#! /bin/sh
+
+# (C) 2017 NETDUMA SOFTWARE
+# Seems like net-wall deletes all user chains, so we need to reload everything
+
+#outfile=/tmp/debug
+outfile=/dev/null
+signal_nolock_file=/tmp/netwall-restart-dumaos
+
+restartaa(){
+  echo "autoadmin restart required because $1" | tee -a $outfile
+  ubus call com.netdumasoftware.autoadmin fw_restart "{}" >> $outfile 2>&1
+#  iptables -I INPUT 1 -p tcp --dport 22 -j ACCEPT
+  echo "autoadmin restart complete" | tee -a $outfile
+  exit 0
+}
+
+
+start(){
+  echo "net-wall start called" | tee -a $outfile
+
+  ubus call com.netdumasoftware.networkstate dirty "{}" 2>&1 | grep "true"
+  if [ $? -eq 0 ]; then
+    echo "networkstate dirty. Restarting DumaOS" | tee -a $outfile
+
+    # if net-wall reset everything reload so cleanup code gets no suprises
+    iptables -t mangle -L nd_prerouting_mangle 2>&1 || ubus call com.netdumasoftware.autoadmin fw_restart "{}" >> $outfile 2>&1
+
+    # Part of stopping DumaOS is the cleanup process which will perform a variety
+    # of calls to AA. These calls are typically guarded by locks to stop interference
+    # from net-wall. However when called from here net-wall holds the lock so we 
+    # need to signal to DumaOS that it does not need to worry about locking.
+    echo "1" > $signal_nolock_file
+    
+    # Autoadmin fw_restart is enough to check when net-wall is restarting and no need
+    # to restart the whole DumaOS which can cause problems when initiated by
+    # third party firewall like net-wall
+    # continue using guards when accessing AA
+    rm $signal_nolock_file
+
+    iptables -I INPUT 1 -p tcp --dport 22 -j ACCEPT
+    exit 0
+  else
+    echo "networkstate not dirty" | tee -a $outfile
+  fi
+
+
+  iptables -t mangle -L nd_prerouting_mangle || restartaa "nd_prerouting_mangle"
+  iptables -t mangle -L nd_forward_mangle || restartaa "nd_forward_mangle"
+  iptables -t mangle -L nd_postrouting_mangle || restartaa "nd_postrouting_mangle"
+  iptables -t mangle -L nd_input_mangle || restartaa "nd_input_mangle"
+  iptables -t mangle -L nd_output_mangle || restartaa "nd_output_mangle"
+  iptables -t nat -L nd_prerouting_rule || restartaa "nd_prerouting_rule"
+  iptables -t nat -L nd_postrouting_rule || restartaa "nd_postrouting_rule"
+  iptables -t filter -L nd_input_rule || restartaa "nd_input_rule"
+  iptables -t filter -L nd_forwarding_rule || restartaa "nd_forwarding_rule"
+  iptables -t filter -L nd_output_rule || restartaa "nd_output_rule"
+}
+
+case $1 in
+  "start")
+    start
+    ;;
+  "stop")
+    :;;
+  *)
+    :;;
+esac

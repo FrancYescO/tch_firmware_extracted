@@ -1,0 +1,89 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-device-selector"> <template> <array-selector id="devicesSelector" items="[[_devices]]" selected="{{value}}" multi="[[multiple]]"></array-selector> <template is="dom-if" if="[[multiple]]"> <template is="dom-repeat" items="[[_devices]]" as="device"> <paper-checkbox on-checked-changed="_onStateChange">[[device.name]]</paper-checkbox> </template> </template> <template is="dom-if" if="[[!multiple]]"> <paper-radio-group> <template is="dom-repeat" items="[[_devices]]" as="device"> <paper-radio-button name="[[device]]" on-checked-changed="_onStateChange"> [[device.name]] </paper-radio-button> </template> </paper-radio-group> </template> </template> <script> Polymer({
+      is: "duma-device-selector",
+
+      properties: {
+
+        multiple: {
+          type: Boolean,
+          value: false,
+          observer: "_onMultipleChange"
+        },
+
+        valid: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        value: {
+          type: Array,
+          notify: true
+        }
+      },
+
+      observers: [
+        "_isValid(value.splices, multiple)",
+        "_isValid(value, multiple)"
+      ],
+
+      ready: function () {
+        this.refreshDevices();
+      },
+
+      reset: function () {
+        var radios = Polymer.dom(this.root).querySelectorAll("paper-radio-button");
+        var checkboxes = Polymer.dom(this.root).querySelectorAll("paper-checkbox");
+
+        for (var i = 0; i < radios.length; i++) {
+          radios[i].checked = false;
+        }
+
+        for (var i = 0; i < checkboxes.length; i++) {
+          checkboxes[i].checked = false;
+        }
+        
+        this.$.devicesSelector.clearSelection();
+      },
+      
+      refreshDevices: function () {
+
+        get_devices().done(function (devices) {
+
+          var processedDevices = [];
+          for (var id in devices) {
+            if (devices.hasOwnProperty(id) && id > 0) {
+              devices[id].selected = false;
+              processedDevices.push(devices[id]);
+            }
+          }
+
+          this._devices = processedDevices;
+        }.bind(this));
+      },
+
+      _onMultipleChange: function () {
+        if (this.multiple) {
+          this.value = null;
+          this.$.devicesSelector.clearSelection();
+        }
+      },
+
+      _onStateChange: function (event) {
+        if (event.target.checked) {
+          this.$.devicesSelector.select(event.model.device);
+        } else if (this.multiple) {
+          this.$.devicesSelector.deselect(event.model.device);
+        }
+      },
+
+      _isValid: function () {
+        if (this.multiple) {
+          this.valid = this.value && this.value.length > 0;
+        } else {
+          this.valid = this.value ? true : false;
+        }
+      }
+    }); </script> </dom-module> 

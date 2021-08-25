@@ -1,0 +1,176 @@
+<!doctype html> <html lang="en"> <head> <title>DumaOS Setup</title> <meta http-equiv="cache-control" content="max-age=0"> <meta http-equiv="cache-control" content="no-cache"> <meta http-equiv="expires" content="0"> <meta http-equiv="expires" content="Tue, 01 Jan 1980 1:00:00 GMT"> <meta http-equiv="pragma" content="no-cache"> <script src="setup_util.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <%
+	require("libos")
+
+	local current_theme = os.config_get("DumaOS_Theme")
+	local platform_information = os.platform_information()
+
+	local password_regex = "^[a-zA-Z0-9_!£$&@?\\-~#%^\\*()\\+;<>='\\[\\]\\{\\},\\.|`]+$"
+
+	if os.execute("/dumaos/setup_done.sh") == 0 then
+%> <script> set_location("/desktop/index.html"); </script> </head> <% else %> <script src="/nd-js/browser-setup.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <link rel="stylesheet" href="/desktop/preloader.css?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/neon-animation/neon-animated-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/neon-animation/neon-animatable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/neon-animation/neon-animations.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <style is="custom-style" include="iron-flex iron-flex-alignment iron-positioning duma-theme"> html,
+			body {
+				height: 100%;
+			}
+			body {
+				background: var(--background-image) no-repeat center center;
+        background-position: 50% 50%;
+        background-size: cover;
+				background-color: var(--dark-color);   
+				color: var(--primary-text-color);
+			}
+      .loading.hidden {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity ease 150ms, visibility ease 150ms;
+      }
+      .loading {
+        display: block;
+        height: 100vh;
+        width: 100vw;
+        background-color: var(--primary-background-color);
+        background-size: cover;
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        z-index: 100;
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .loading .loader {
+        margin: 0 auto;
+        position: relative;
+        margin-top: -14px;
+        top: 50%;
+        text-align: center;
+      }
+
+      .loading + main {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 150ms ease, visibility 150ms ease;
+      }
+		
+			main {
+				height: 100%;
+        visibility: visible;
+        opacity: 1;				
+			}
+			header {
+				@apply(--layout-horizontal);
+				padding-bottom: 2em;
+			}
+			.logo:not(:last-child) {
+        padding-right: 2em;
+      }
+      .logo img {
+        display: block;
+      }
+      .logo.border {
+        padding-left: 2em;
+        border-left: thin solid var(--disabled-text-color);
+      }
+      .logo.netduma > img,
+      .logo.dumaos > img,
+      .logo.netgear > img {
+        height: 24px;
+        margin: 0;
+      }
+      .logo.dumaos > img {
+        width: 128px;
+      }      
+      .logo.netduma > img {
+        width: 148px;
+      }
+      .logo.netgear > img  {
+        width: 177px;
+      }
+      .logo.nighthawk > img {
+        height: 40px;
+      }
+			section  {
+				overflow-x: hidden;
+				@apply(--layout-vertical);
+				@apply(--layout-center-justified);
+				@apply(--layout-center);				
+				width: 100%;
+				height: 100%;
+				text-align: center;
+			}
+			neon-animated-pages {	
+				min-height: 30vh;
+				width: 40em;
+				margin: 0 16px;
+				@apply(--layout-vertical);
+				@apply(--layout-center-justified);
+			}
+			#slides {
+				min-height: 50vh;
+			}
+			section.hidden {
+				visibility: hidden;
+			}	
+			neon-animatable {}
+			neon-animatable > div {
+				padding: 1em;
+			}
+			paper-input  {
+				width: 100%;
+				text-align: initial;
+			}			
+			.row {
+				@apply(--layout-horizontal);
+				@apply(--layout-justified);
+				width: 100%;
+			}
+			.row.end {
+				@apply(--layout-end-justified);
+			}
+			.row.center {
+				@apply(--layout-center-justified);
+			}
+			.row paper-input {
+				width: calc(50% - 1em);
+			}
+			.actions {
+				margin-top: 2em;
+			}
+			.eula-container {
+				max-height: 20em;
+				padding: 1em;
+				background: var(--transparent-background-color);
+				overflow-x: hidden;
+				overflow-y: scroll;
+        text-align: left;
+			}
+			#time_zone_drop, #time_zone_dst, #wan_type_drop, #country_drop {
+				width: 100%;
+			}
+			.static-ips, .pppoe-entries {
+				max-width: 30vh;
+				margin-left: auto;
+				margin-right: auto;
+			}
+			.static-ips .row > label {
+				margin-bottom: 0.8em;
+				align-self: flex-end;
+			}
+			.static-ips > div {
+				align-items: end;
+			}
+			.pppoe-entries > paper-input {
+				width: 100%;
+			}
+			.collapsable {
+				height: auto;
+				max-height: 0;
+				transition: max-height 0.5s;
+				overflow: hidden;
+			}
+			.collapsable.open {
+				max-height: 20em;
+			}
+			.help-outside {
+				margin-right: -4em;
+				padding-top: 4px;
+			} </style>  <body id="setup-tour"> <div class="loading" id="page-loader"> <div class="loader"> <div class="preloader-wrapper small active"> <div class="spinner-layer"> <div class="circle-clipper left"> <div class="circle"></div> </div><div class="gap-patch"> <div class="circle"></div> </div><div class="circle-clipper right"> <div class="circle"></div> </div> </div> </div> </div> </div> <main> <section class="hidden"> <header class="logos"> <% if platform_information.vendor == "NETGEAR" then %> <div class="logo netgear"> <img src="netgear.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="nighthawk-logo" alt="Netgear Nighthawk"> </div> <div class="logo dumaos border"> <img src="dumaos.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo"> </div> <% elseif platform_information.vendor == "NETDUMA" then %> <div class="logo netduma"> <img src="netduma.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="netduma-logo"> </div> <div class="logo dumaos border"> <img src="dumaos.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo"> </div> <% end %> </header> <neon-animated-pages id="slides" selected="0" entry-animation="slide-from-right-animation" exit-animation="fade-out-animation"> <neon-animatable></neon-animatable> <neon-animatable> <div id="div_eula"> <div class="eula-container"> <%in /www/desktop/eula.html %> </div> <div class="actions"> <paper-button background id="button_accept">Agree</paper-button> <paper-button id="button_cancel">Cancel</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_eula_cancel"> Not accepting the EULA prevents access to the software. Please contact the retailer that you purchased this router from to understand your right to return.<br> <div class="actions"> <paper-button id="button_return">Return</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_welcome"> Welcome to DumaOS. Please click 'Start' to begin this short setup wizard.<br> <div class="actions"> <paper-button background id="button_start">Start</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_check_wan"> Checking for an Internet connection...<br> <paper-spinner-lite id="spinner"></paper-spinner-lite> </div> </neon-animatable> <neon-animatable> <div id="div_fail_wan"> Could not detect an Internet connection<br> <div class="actions"> <paper-button id="button_retry">Retry</paper-button> <paper-button background id="button_next">WAN Setup</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_found_wan"> Internet connection detected<br> <div class="actions"> <paper-button id="button_more_wan">More WAN options</paper-button> <paper-button background id="button_next">Next</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_wan_advanced"> Set up wan properties<br> <div> <paper-toggle-button id="ipv6_lan">IPV6 - LAN</paper-toggle-button> <paper-toggle-button id="ipv6_wan">IPV6 - WAN</paper-toggle-button> </div> <div class="row"> <paper-dropdown-menu id="wan_type_drop"> <paper-listbox id="wan_type_listbox" attr-for-selected="name" selected="dhcp" class="dropdown-content"> <paper-item name="dhcp">DHCP</paper-item> <paper-item name="static">Static</paper-item> <paper-item name="pppoe">PPPoE</paper-item> </paper-listbox> </paper-dropdown-menu> </div> <div class="row"> <neon-animated-pages id="wan_pages" selected="dhcp" attr-for-selected="name" entry-animation="slide-from-right-animation" exit-animation="fade-out-animation"> <neon-animatable name="dhcp"> <div class="row"> <paper-input label="Client Identifier ID" always-float-label id="dhcp_clientid"></paper-input> <paper-input label="Vendor Class ID" always-float-label id="dhcp_vendorid"></paper-input> </div> </neon-animatable> <neon-animatable name="static"> <div class="static-ips"> <div class="row"> <label class="ip-input-label">IP</label> <duma-ip-input id="ip"></duma-ip-input> </div> <div class="row"> <label class="ip-input-label">Subnet Mask</label> <duma-ip-input id="subnet_mask"></duma-ip-input> </div> <div class="row"> <label class="ip-input-label">Gateway</label> <duma-ip-input id="gateway"></duma-ip-input> </div> </div> </neon-animatable> <neon-animatable name="pppoe"> <div class="pppoe-entries"> <paper-input label="Username" always-float-label id="pppoe_username"></paper-input> <paper-input label="Password" always-float-label id="pppoe_password" type="password">Password</paper-input> <paper-input label="Service" always-float-label id="pppoe_service"></paper-input> </div> </neon-animatable> </neon-animated-pages> </div> <div class="actions"> <paper-button background id="button_submit">Submit</paper-button> <paper-button id="button_skip">Skip</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_speedtest"> We are detecting your bandwidth speeds.<br> Please wait.<br> <paper-spinner-lite id="spinner"></paper-spinner-lite> <div class="actions"> <paper-button id="button_cancel">Cancel</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_fail_speedtest"> We could not detect your speeds.<br> Please manually enter your maximum bandwidth speeds on the next page.<br> You can change these at any time in the future within the QoS feature.<br> <div class="actions"> <paper-button id="button_retry">Retry</paper-button> <paper-button background id="button_next">Next</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_bandwidth"> Please confirm your maximum bandwidth speeds.<br> <div class="row"> <paper-input auto-validate error-message="Must be between 1 - 1000Mbps" id="input_download" label="Download" type="number" min="1" max="1000"> <div suffix>Mbps</div> </paper-input> <paper-input auto-validate error-message="Must be between 1 - 1000Mbps" id="input_upload" label="Upload" type="number" min="1" max="1000"> <div suffix>Mbps</div> </paper-input> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button id="button_retry">Retry Speedtest</paper-button> <paper-button background id="button_next">Next</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_authentication"> What would you like your router administrator login details to be?<br> Please enter them below.<br> <div class="row"> <paper-input auto-validate error-message="Must be between 1 - 32 alphanumeric characters" id="input_username" label="Username" type="text" allowed-pattern="<%= password_regex %>" minlength="1" maxlength="32" required></paper-input> <paper-input auto-validate error-message="Must be between 8 - 64 alphanumeric characters" id="input_password" label="Password" type="text" minlength="8" maxlength="64" allowed-pattern="<%= password_regex %>" required></paper-input> </div> <div class="row end"> <paper-input auto-validate error-message="Passwords do not match" id="input_password_repeat" label="Re-enter password" type="text" required></paper-input> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button background id="button_submit">Submit</paper-button> </div> </div> </neon-animatable> <% if platform_information.model ~= "R1" then %> <neon-animatable> <div id="div_country"> <p><b>Select your region from the list.</b></p> <div class="row"> <paper-dropdown-menu id="country_drop" label="Select Region" error-message="Please select a region"> <paper-listbox id="country_listbox" attr-for-selected="name" class="dropdown-content"> <template id="country_items" is="dom-repeat" as="country"> <paper-item name="[[country.code]]">[[country.name]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="row"> <div> <p>It is your legal responsibility to ensure the correct region is selected. Failure to select the correct region may result in a breach of your region's networking regulations.</p> <p>If your region is unlisted or you are uncertain which region you belong to, please consult your local government for further information.</p> </div> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button background id="button_submit">Submit</paper-button> </div> </div> </neon-animatable> <% end %> <neon-animatable> <div id="div_wifi"> Here are your default WiFi details.<br> Please edit them if you wish, otherwise leave them how they are.<br> <div class="row"> <paper-input auto-validate error-message="Must be between 1 - 32 alphanumeric characters" id="input_ssid" label="SSID" type="text" allowed-pattern="<%= password_regex %>" minlength="1" maxlength="32" required></paper-input> <paper-input auto-validate error-message="Must be between 8 - 64 alphanumeric characters" id="input_password" label="Password" type="text" minlength="8" maxlength="64" allowed-pattern="<%= password_regex %>" required></paper-input> </div> <div class="row end"> <paper-input auto-validate error-message="Passwords do not match" id="input_password_repeat" label="Re-enter password" type="text" required></paper-input> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button background id="button_submit">Submit</paper-button> </div> </div> </neon-animatable> <neon-animatable> <div id="div_wait_wifi"> Setting up WiFi...<br> <paper-spinner-lite id="spinner"></paper-spinner-lite> </div> </neon-animatable> <neon-animatable> <div id="div_time_zone"> Please set your time zone.<br> <div class="row"> <paper-dropdown-menu id="time_zone_drop" label="Time Zone"> <paper-listbox id="time_zone_listbox" attr-for-selected="name" class="dropdown-content"> <template id="time_zone_items" is="dom-repeat" as="zone"> <paper-item name="[[zone.id]]">[[zone.display]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="row end"> <paper-checkbox id="time_zone_dst" checked="checked">Automatically Adjust for Daylight Saving Time</paper-checkbox> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button background id="button_submit">Submit</paper-button> </div> </div> </neon-animatable> <% if platform_information.model ~= "R1" then %> <neon-animatable> <div id="div_preferences"> <div class="row"> <paper-checkbox id="tele" checked="checked">Allow Netduma to collate technical and interaction data for DumaOS development</paper-checkbox> <paper-icon-button id="toggle_explain" icon="icons:help-outline" class="help-outside"></paper-icon-button> </div> <div id="explain" class="row collapsable"> <div> <p> Netduma collates information to understand how DumaOS is used in the real world. The technical and usage data provides insight that enhances how Netduma develops and debugs DumaOS. Netduma collects this data to improve the performance and stability of DumaOS, allowing for faster identification and resolution of issues, bugs and errors. </p> <p> If you'd like to opt-out of data collection, you can do so now or at any time by accessing the Option Menu > Router Admin > Preferences. All collated data is anonymous on a personal level - while DumaOS can identify your router's MAC address, Netduma are unable to match MAC addresses to individual users. </p> <div class="center"> <a href="https://netduma.com/privacy-policy/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" target="_blank">Privacy Policy</a> </div> </div> </div> <div class="actions"> <paper-button id="button_back">Back</paper-button> <paper-button background id="button_submit">Submit</paper-button> </div> </div> </neon-animatable> <% end %> <neon-animatable> <div id="div_done"> Welcome to DumaOS<br> Please follow the short welcome tour to learn more.<br> </div> </neon-animatable> </neon-animated-pages> </section> </main> </body> <script src="setup_main.js?cache=0"></script> <% end %> </html> 

@@ -1,0 +1,556 @@
+-- Manually generated
+local Multi_X_TELSTRA_DumaOS_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_DumaOS.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Configuration of the DumaOS.",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "0",
+        description = "Enables and disables the DumaOS service.",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Enabled",
+          "Disabled",
+        },
+        description = "DumaOS capability has been enabled or disabled by the ACS.",
+      },
+      FastPath = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "SOFTWARE",
+          "HARDWARE",
+        },
+        description = "Software or Hardware FastPath for QoS.",
+      },
+      DownstreamPlanRate = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Downstream subscriber plan rate in Kbps(0 means unknown).",
+      },
+      UpstreamPlanRate = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Upstream subscriber plan rate in Kbps(0 means unknown).",
+      },
+      AntiBufferbloatEnable = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Enabled_Always",
+          "Enabled_Trigger",
+          "Disabled",
+        },
+        -- User configurable in the GUI:
+        -- Anti-bufferbloat always enabled
+        -- Anti-bufferbloat enabled when high priority traffic is detected
+        -- Anti-bufferbloat always disabled
+        description = "User configurable Anti-bufferbloat.",
+      },
+      DownstreamThrottlingRate = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+        -- User configurable in the GUI.
+        description = "The users downstream throttling rate expressed as a percentage of their downstream plan rate. i.e. Downstream aggregate shaping rate = ThrottlingRate x DSPlanRate / 100",
+      },
+      UpstreamThrottlingRate = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+        -- User configurable in the GUI.
+        description = "The users upstream throttling rate expressed as a percentage of their upstream plan rate. i.e. Upstream aggregate shaping rate = ThrottlingRate x DSPlanRate / 100",
+      },
+    },
+  }
+}
+
+local log = require("tch.logger").new("dumaos_mapping", 6)
+local uci = mapper("ucihelper")
+local execute, open = os.execute, io.open
+local conn = mapper("ubus").connect()
+local set_on_uci = uci.set_on_uci
+local get_from_uci = uci.get_from_uci
+local dumaos_ubus = "com.netdumasoftware.qos"
+local binding = { config = "dumaos", sectionname = "tr69", option = "", default = "0" }
+local dumaos_status = { }
+local f_getall = false
+
+local transactions = {}
+
+local anti_bufferbloat_get_map = {
+  ["1"] = "Enabled_Always",
+  ["2"] = "Enabled_Trigger",
+  ["3"] = "Disabled"
+}
+
+local anti_bufferbloat_set_map = {
+  Enabled_Always = "1",
+  Enabled_Trigger = "2",
+  Disabled = "3"
+}
+
+local fastpath_set_map = {
+  HARDWARE = true,
+  SOFTWARE = false
+}
+
+local get_rpc_map = {
+  -- default index is number = 1
+  FastPath = { rpc = "get_acceleration" },
+  UpstreamPlanRate = { rpc = "get_bandwidth", idx = 1 },
+  DownstreamPlanRate = { rpc = "get_bandwidth", idx = 2 },
+  AntiBufferbloatEnable = { rpc = "auto_throttling" },
+  UpstreamThrottlingRate = { rpc = "get_link_throttle", idx = 1 },
+  DownstreamThrottlingRate = { rpc = "get_link_throttle", idx = 2 },
+}
+
+local set_rpc_map = {
+  -- default index is string as key = "1"
+  FastPath = { rpc = "set_acceleration" },
+  UpstreamPlanRate = { rpc = "set_bandwidth", idx = "1" },
+  DownstreamPlanRate = { rpc = "set_bandwidth", idx = "2" },
+  AntiBufferbloatEnable = { rpc = "auto_throttling" },
+  UpstreamThrottlingRate = { rpc = "set_link_throttle", idx = "1" },
+  DownstreamThrottlingRate = { rpc = "set_link_throttle", idx = "2" },
+}
+
+local function pathexists(path)
+  local file = open(path, "rb")
+  if file then
+    file:close()
+    return true
+  end
+  return false
+end
+
+local function get_param(param, raw)
+  if param == "Enable" then
+    binding.option = "dumaos_enabled"
+    return get_from_uci(binding)
+  elseif param == "Status" then
+    local f = open("/var/run/dumaos-status", "rb")
+    if f then
+      local value = f:read("*line")
+      f:close()
+      if value == "running" then
+        return "Enabled"
+      end
+    end
+    return "Disabled"
+  elseif param == "UpstreamPlanRate" then
+    binding.option = "dumaos_upstream_plan_rate"
+    return tostring(raw and (get_from_uci(binding) or 0) or math.floor((tonumber(get_from_uci(binding)) or 0) / 1000))
+  elseif param == "DownstreamPlanRate" then
+    binding.option = "dumaos_downstream_plan_rate"
+    return tostring(raw and (get_from_uci(binding) or 0) or math.floor((tonumber(get_from_uci(binding)) or 0) / 1000))
+  elseif get_rpc_map[param] and get_rpc_map[param]["rpc"] then
+    local get_proc_t = { proc = get_rpc_map[param]["rpc"] }
+    local data = conn:call(dumaos_ubus, "rpc", get_proc_t)
+    if data and data["result"] then
+      if raw then
+        return data["result"][1], data["result"][2]
+      else
+        local idx =  get_rpc_map[param]["idx"] or 1
+        if param == "FastPath" then
+          return data["result"][idx] and "HARDWARE" or "SOFTWARE"
+        end
+        if data["result"][idx] then
+          if param == "AntiBufferbloatEnable" then
+            return anti_bufferbloat_get_map[(data["result"][idx])]
+          else
+            return tostring(data["result"][idx])
+          end
+        end
+      end
+    end
+  end
+
+  return ""
+end
+
+local function set_param(param, v1, v2)
+  local set_proc_t = { proc = set_rpc_map[param]["rpc"] }
+  local idx =  set_rpc_map[param]["idx"] or "1"
+
+  if param == "AntiBufferbloatEnable" then
+    v1 = anti_bufferbloat_set_map[v1]
+  elseif param == "FastPath" then
+    v1 = fastpath_set_map[v1]
+  end
+  set_proc_t["1"] = v1
+
+  if v2 and v2 ~= "" then
+    set_proc_t["2"] = v2
+  end
+
+  local data = conn:call(dumaos_ubus, "rpc", set_proc_t)
+  if type(data) == "table" then
+    return true
+  else
+    return false
+  end
+
+end
+
+local function get_all()
+  f_getall = true
+  dumaos_status = { Status = "Disabled", FastPath = "Software", DownstreamPlanRate = "", UpstreamPlanRate = "", AntiBufferbloatEnable = "", DownstreamThrottlingRate = "", UpstreamThrottlingRate = "" }
+
+  dumaos_status["Enable"] = get_param("Enable")
+  dumaos_status["UpstreamPlanRate"] = get_param("UpstreamPlanRate", false)
+  dumaos_status["DownstreamPlanRate"] = get_param("DownstreamPlanRate", false)
+  dumaos_status["FastPath"] = get_param("FastPath")
+
+  if dumaos_status["Enable"] == "1" then
+    local link_throttle_1, link_throttle_2 = get_param("DownstreamThrottlingRate", true)
+    dumaos_status["Status"] = get_param("Status")
+    dumaos_status["AntiBufferbloatEnable"] = get_param("AntiBufferbloatEnable")
+    dumaos_status["UpstreamThrottlingRate"] = tonumber(link_throttle_1) and tostring(link_throttle_1 * 100) or "" -- %
+    dumaos_status["DownstreamThrottlingRate"] = tonumber(link_throttle_2) and tostring(link_throttle_2 * 100) or "" -- %
+  end
+  return dumaos_status
+end
+
+
+Multi_X_TELSTRA_DumaOS_.get = function(mapping, param, value)
+  if f_getall == true then
+    f_getall = false
+  else
+    get_all()
+  end
+  return dumaos_status[param] or ""
+end
+
+Multi_X_TELSTRA_DumaOS_.getall = function(mapping, key)
+  f_getall = true
+  return get_all()
+end
+
+Multi_X_TELSTRA_DumaOS_.set = function(mapping, param, value)
+  if param == "Enable" then
+    binding.option = "dumaos_enabled"
+    set_on_uci(binding,value,commitapply)
+    transactions[binding] = true
+    return true
+  elseif param == "UpstreamPlanRate" then
+    binding.option = "dumaos_upstream_plan_rate"
+    set_on_uci(binding, tostring((tonumber(value) or 0) * 1000), commitapply)
+    transactions[binding] = true
+    transactions["set_bandwidth"] = true
+    return true
+  elseif param == "DownstreamPlanRate" then
+    binding.option = "dumaos_downstream_plan_rate"
+    set_on_uci(binding, tostring((tonumber(value) or 0) * 1000), commitapply)
+    transactions[binding] = true
+    transactions["set_bandwidth"] = true
+    return true
+  else
+    binding.option = "dumaos_enabled"
+    if get_from_uci(binding) == "0" then
+      return nil, param .. " not configurable when dumaos is disabled"
+    end
+  end
+
+  if param == "AntiBufferbloatEnable" or param == "FastPath" then
+    return set_param(param, value)
+  else
+    local v1, v2, _
+    if param == "UpstreamThrottlingRate" then
+      v1 = tostring(value / 100)
+      _, v2 = get_param("DownstreamThrottlingRate", true)
+    elseif param == "DownstreamThrottlingRate" then
+      v1 = get_param("DownstreamThrottlingRate", true)
+      v2 = tostring(value / 100)
+    end
+    return set_param(param, v1, v2)
+  end
+  return true
+end
+
+Multi_X_TELSTRA_DumaOS_.commit = function()
+  for binding in pairs(transactions) do
+    if type(binding) == "table" then
+      uci.commit(binding)
+    end
+  end
+  if transactions["set_bandwidth"] then
+    local v1 = get_param("UpstreamPlanRate", true)
+    local v2 = get_param("DownstreamPlanRate", true)
+    set_param("UpstreamPlanRate", v1, v2)
+  end
+  transactions = {}
+end
+
+Multi_X_TELSTRA_DumaOS_.revert = function()
+  for binding in pairs(transactions) do
+    uci.revert(binding)
+  end
+  transactions = {}
+end
+
+local Multi_X_TELSTRA_DumaOS_APPLICATIONS_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_DumaOS.Applications.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "The application based bandwidth allocation rules configured on DumaOS",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        description = "Description of the bandwidth allocation rule.",
+      },
+      Weight = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+        description = "Weight configured for the bandwidth allocation rule for downstream.",
+      },
+    },
+  }
+}
+
+local Multi_X_TELSTRA_DumaOS_DEVICES_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_DumaOS.Devices.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "The device based bandwidth allocation rules configured on DumaOS",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        description = "Description of the bandwidth allocation rule.",
+      },
+      Weight = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "100",
+          },
+        },
+        description = "Weight configured for the bandwidth allocation rule for downstream.",
+      },
+    },
+  }
+}
+
+local app_weights = {}
+local dev_weights = {}
+local function app_dev_entries(device)
+  local rule_entries = {}
+  local data = conn:call(dumaos_ubus, "rpc", { proc = "get_bandwidth_dist_tree" })
+
+  if data and data["result"] and data["result"][2] then  -- index 2 : downstream; index 1 : upstream
+    local s =  data["result"][2]
+    if string.match(s, "devices") and device then
+      log:notice("Found device")
+      dev_weights = {}
+    elseif string.match(s, "applications") and device == false then
+      app_weights = {}
+      log:notice("Found applications")
+    else
+      return {}
+    end
+
+    -- convert string to table:
+    -- {"share_excess":true,"domain":"devices","children":[{"id":1,"normprop":0.5},{"id":2,"normprop":0.5}]}
+    -- {share_excess=true,domain=devices,children={{id=1,normprop=0.5},{id=2,normprop=0.5}}}
+    s = string.gsub(s, '\"', '')
+    s = string.gsub(s, ':', '=')
+    s = string.gsub(s, '%[{', "{{")
+    s = string.gsub(s, "%]}", '}}')
+    local t = loadstring("return " .. s)
+    local child = t()["children"]
+
+    if child then
+      for k, v in pairs(child) do
+        for i, j in pairs(v) do
+          if i == "id" then
+            rule_entries[#rule_entries+1] = tostring(j)
+          elseif i == "normprop" then
+            if device then
+              dev_weights[tostring(v["id"])] = tostring(j * 100)
+            else
+              app_weights[tostring(v["id"])] = tostring(j * 100)
+            end
+          end
+        end
+      end
+    end
+  end
+  return rule_entries
+end
+
+local function app_dev_get(device, param, key)
+  if param == "Name" then
+    return key
+  elseif param == "Weight" then
+    if device then
+      return dev_weights[key]
+    else
+      return app_weights[key]
+    end
+  end
+  return ""
+end
+
+Multi_X_TELSTRA_DumaOS_APPLICATIONS_.entries = function()
+  return app_dev_entries(false)
+end
+Multi_X_TELSTRA_DumaOS_APPLICATIONS_.get = function(mapping, param, key)
+  return app_dev_get(false, param, key)
+end
+
+Multi_X_TELSTRA_DumaOS_DEVICES_.entries = function()
+  return app_dev_entries(true)
+end
+Multi_X_TELSTRA_DumaOS_DEVICES_.get = function(mapping, param, key)
+  return app_dev_get(true, param, key)
+end
+
+local Multi_X_TELSTRA_DumaOS_Telemetry_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_DumaOS.Telemetry.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "The device based bandwidth allocation rules configured on DumaOS",
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        description = "The https endpoint in which the data will be POST to at the selected interval",
+      },
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Telemetry function enabled or disabled. When disabled the data should not be sent",
+      },
+      Frequency = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Frequency of collection with interval expressed in seconds",
+      },
+      Level = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Control the level of information sent in the post",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        description = "Username for Basic auth string. Base 64 encoded in POST",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        description = "Password for Basic auth string. Base 64 encoded in POST",
+      },
+    }
+  }
+}
+
+local dumaosBinding = { config = "dumaos", sectionname = "telemetry" }
+local BASE64_DIGITS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+local function encodeBase64(text)
+  local result = ""
+  for in_1, in_2, in_3 in text:gmatch("(.)(.?)(.?)") do
+    local value = in_1:byte() * 65536 + (in_2:byte() or 0) * 256 + (in_3:byte() or 0)
+    local out_1 = math.floor(value / 262144) % 64 + 1
+    local out_2 = math.floor(value / 4096) % 64 + 1
+    result = result .. BASE64_DIGITS:sub(out_1, out_1) .. BASE64_DIGITS:sub(out_2, out_2)
+    if in_2 ~= "" then
+      local out_3 = math.floor(value / 64) % 64 + 1
+      result = result .. BASE64_DIGITS:sub(out_3, out_3)
+      if in_3 ~= "" then
+        local out_4 = value % 64 + 1
+        result = result .. BASE64_DIGITS:sub(out_4, out_4)
+      else
+        result = result .. "="
+      end
+    else
+      result = result .. "=="
+    end
+  end
+  return result
+end
+
+local dumaosOption = {
+  URL = "url",
+  Enabled = "enabled",
+  Level = "debuglevel",
+  Frequency = "frequency",
+  Username = "username",
+  Password = "password"
+}
+
+local function getParam(mapping, param, key)
+  dumaosBinding.option = dumaosOption[param]
+  if param == "Password" then
+    return ""
+  end
+  return get_from_uci(dumaosBinding)
+end
+
+local function setParam(mapping, param, value, key)
+  dumaosBinding.option = dumaosOption[param]
+  if param == "Username" or param == "Password" then
+    value = encodeBase64(value)
+  end
+  set_on_uci(dumaosBinding, value, commitapply)
+  transactions[dumaosBinding.config] = true
+end
+
+local function commit()
+  for config in pairs(transactions) do
+    uci.commit({config = config})
+  end
+  transactions = {}
+end
+
+local function revert()
+  for config in pairs(transactions) do
+    uci.revert({config = config})
+  end
+  transactions = {}
+end
+
+Multi_X_TELSTRA_DumaOS_Telemetry_.get = getParam
+Multi_X_TELSTRA_DumaOS_Telemetry_.set = setParam
+Multi_X_TELSTRA_DumaOS_Telemetry_.commit = commit
+Multi_X_TELSTRA_DumaOS_Telemetry_.revert = revert
+
+local objects = { Multi_X_TELSTRA_DumaOS_, Multi_X_TELSTRA_DumaOS_Telemetry_, Multi_X_TELSTRA_DumaOS_APPLICATIONS_, Multi_X_TELSTRA_DumaOS_DEVICES_ }
+for _, object in ipairs(objects) do
+  register(object)
+end
