@@ -1,0 +1,188 @@
+-- Manually generated
+
+local Device_X_000E50_DNSRule_i_ = {
+  objectType = {
+    name = "Device.X_000E50_DNSRule.{i}.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "List all DNS rules and configure DNS rules",
+    parameters = {
+      OutPolicy = {
+        access = "readWrite",
+        type = "string",
+	pathRef = true,
+	targetParent = "Device.X_000E50_MWANPolicy.{i}.",
+        description = "MWAN policy to be set on outgoing connection"
+      },
+      DNSSet = {
+        access = "readWrite",
+        type = "string",
+	pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        description = "Name of the DNS set, associated with a logical network interface in network config."
+      },
+      Domain = {
+        access = "readWrite",
+        type = "string",
+        description = "Domain name to be matched by DNS set"
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "true",
+        description = "Enable or disable DNS rules"
+      }
+    }
+  }
+}
+
+local commitapply, mapper, register = commitapply, mapper, register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local generateKey = uciHelper.generate_key
+local network = require("transformer.shared.common.network")
+local dhcpBinding = { config = "dhcp" , extended = true }
+local networkBinding = { config = "network" }
+local configChanged
+
+local function getUciValue(key, option, default)
+  dhcpBinding.sectionname = key
+  dhcpBinding.option = option
+  dhcpBinding.default = default
+  return getFromUci(dhcpBinding)
+end
+
+local function setUciValue(key, option, value)
+  dhcpBinding.sectionname = key
+  dhcpBinding.option = option
+  setOnUci(dhcpBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_X_000E50_DNSRule_i_.entries = function()
+  local entries = {}
+  dhcpBinding.sectionname = "dnsrule"
+  forEachOnUci(dhcpBinding, function(s)
+    entries[#entries + 1]  = s[".name"]
+  end)
+  return entries
+end
+
+local function getDNSSet(key, dnsset)
+  local interfaceKey
+  dnsset = dnsset or getUciValue(key, "dnsset")
+  networkBinding.sectionname = "interface"
+  forEachOnUci(networkBinding, function(s)
+    if s.dnsset == dnsset then
+      interfaceKey = s[".name"]
+      return false
+    end
+  end)
+  return interfaceKey and resolve("Device.IP.Interface.{i}.", interfaceKey) or ""
+end
+
+Device_X_000E50_DNSRule_i_.get = {
+  OutPolicy = function(mapping, param, key)
+    local policy = getUciValue(key, "outpolicy")
+    return policy and resolve("Device.X_000E50_MWANPolicy.{i}.", policy) or ""
+  end,
+  Domain = function(mapping, param, key)
+    return getUciValue(key, "domain")
+  end,
+  DNSSet = function(mapping, param, key)
+    return getDNSSet(key)
+  end,
+  Enable = function(mapping, param, key)
+    return getUciValue(key, "enable", "1")
+  end,
+}
+
+Device_X_000E50_DNSRule_i_.getall = function(mapping, key)
+  dhcpBinding.sectionname = key
+  local allValues = uciHelper.getall_from_uci(dhcpBinding)
+  return {
+    OutPolicy = allValues.outpolicy and resolve("Device.X_000E50_MWANPolicy.{i}.", allValues.outpolicy) or "",
+    Domain = allValues.domain or "",
+    DNSSet = getDNSSet(key, allValues.dnsset),
+    Enable = allValues.enable or "1"
+  }
+end
+
+Device_X_000E50_DNSRule_i_.set = {
+  OutPolicy = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.X_000E50_MWANPolicy.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    setUciValue(key, "outpolicy", value)
+  end,
+  Enable = function(mapping, param, value, key)
+    setUciValue(key, "enable", value)
+  end,
+  DNSSet = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.IP.Interface.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    networkBinding.sectionname = value
+    networkBinding.option = "dnsset"
+    value = getFromUci(networkBinding)
+    setUciValue(key, "dnsset", value)
+  end,
+  Domain = function(mapping, param, value, key)
+    local valid, errMsg = network.domainValidation(value)
+    if not valid then
+      return nil, errMsg
+    end
+
+    local duplicate = false
+    dhcpBinding.sectionnname = "dnsrule"
+    forEachOnUci(dhcpBinding, function(s)
+      if s.domain == value then
+        duplicate = true
+        return false
+      end
+    end)
+
+    if duplicate then
+      return nil, "Duplicate value is not allowed"
+    end
+    setUciValue(key, "domain", value)
+  end
+}
+
+Device_X_000E50_DNSRule_i_.add = function(mapping)
+  local sectionName = network.getNewSection(dhcpBinding.config, "dnsrule")
+  setUciValue(sectionName, nil, "dnsrule")
+  configChanged = true
+  return sectionName
+end
+
+Device_X_000E50_DNSRule_i_.delete = function(mapping, key)
+  dhcpBinding.sectionname = key
+  dhcpBinding.option = nil
+  uciHelper.delete_on_uci(dhcpBinding, commitapply)
+  configChanged = true
+  return true
+end
+
+Device_X_000E50_DNSRule_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(dhcpBinding)
+    configChanged = false
+  end
+end
+
+Device_X_000E50_DNSRule_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(dhcpBinding)
+    configChanged = false
+  end
+end
+
+register(Device_X_000E50_DNSRule_i_)

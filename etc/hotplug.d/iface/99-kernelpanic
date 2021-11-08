@@ -1,0 +1,14 @@
+#!/bin/sh
+
+[ -e "/proc/prozone/panic" ] || exit 0
+. "$IPKG_INSTROOT/lib/functions.sh"
+
+ifname=$(uci -q get network.wan.ifname)
+[ -z "$ifname" ] && exit 0
+
+while [ ${ifname:0:1} = "@" ]; do
+  ifname=$(uci -q get network.${ifname#*@}.ifname)
+done
+device=$ifname
+
+[ "$ACTION" = "ifup" ] && [ "$DEVICE" = "$device" ] && sh /sbin/kernel-panic-handler
