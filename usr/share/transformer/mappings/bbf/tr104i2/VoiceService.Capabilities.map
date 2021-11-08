@@ -1,0 +1,267 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local tr104Helper = require("transformer.shared.tr104helper")
+local profileHelper = require("transformer.shared.profile_helper")
+local mmpbxBinding = { config = "mmpbx" }
+local numOfFxs, numOfDect, numOfSipdev = profileHelper.find_device_support()
+
+local Multi_Services_VoiceService_i_Capabilities_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.Capabilities.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            MaxLineCount = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum total number of CallControl.Line objects supported",
+            },
+            MaxExtensionCount = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum total number of CallControl.Extension objects supported",
+            },
+            MaxCallLogCount = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum total number of CallLog objects supported",
+            },
+            MaxSessionsPerLine = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum number of voice sessions supported for any given CallControl.Line object",
+            },
+            MaxSessionsPerExtension = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum number of voice sessions supported for any given CallControl.Extension object",
+            },
+            MaxSessionCount = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                description = "Maximum total number of voice sessions supported across all CallControl.Line objects",
+            },
+            NetworkConnectionModes = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                description = "Each item in this list is a supported network connection mode",
+            },
+            UserConnectionModes = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                description = "Each item in this list is a supported user connection mode",
+            },
+            ToneFileFormats = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                enumeration = {
+                    "G.711MuLaw",
+                    "G.711ALaw",
+                    "G.729",
+                    "MP3",
+                    "WAV",
+                    "AMR",
+                },
+                description = "Each item in this list is a supported tone file format",
+            },
+            RingFileFormats = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                enumeration = {
+                    "MIDI",
+                    "SMAF",
+                    "RTTTL",
+                    "MP3",
+                    "WAV",
+                    "AMR",
+                },
+                description = "Each item in this list is a supported ring file format",
+            },
+            FacilityActions = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                enumeration = {
+                    "AA_REGISTER",
+                    "AA_ERASE",
+                    "AA_INTERROGATE",
+                    "CA_ACTIVATE",
+                    "CCBS_ACTIVATE",
+                    "CCBS_DEACTIVATE",
+                    "CCBS_INTERROGATE",
+                    "CCNR_ACTIVATE",
+                    "CCNR_DEACTIVATE",
+                    "CCNR_INTERROGATE",
+                    "CFB_REGISTER",
+                    "CFB_ACTIVATE",
+                    "CFB_DEACTIVATE",
+                    "CFB_ERASE",
+                    "CFB_INTERROGATE",
+                    "CFNR_REGISTER",
+                    "CFNR_ACTIVATE",
+                    "CFNR_DEACTIVATE",
+                    "CFNR_ERASE",
+                    "CFNR_INTERROGATE",
+                    "CFNR_TIMER",
+                    "CFT_ACTIVATE",
+                    "CFT_DEACTIVATE",
+                    "CFT_INTERROGATE",
+                    "CFU_REGISTER",
+                    "CFU_ACTIVATE",
+                    "CFU_DEACTIVATE",
+                    "CFU_ERASE",
+                    "CFU_INTERROGATE",
+                    "CLIR_ACTIVATE",
+                    "CLIR_DEACTIVATE",
+                    "CLIR_INTERROGATE",
+                    "CP_INVOKE",
+                    "CW_ACTIVATE",
+                    "CW_DEACTIVATE",
+                    "CW_INVOKE",
+                    "DND_ACTIVATE",
+                    "DND_DEACTIVATE",
+                    "DND_INTERROGATE",
+                    "EXT_INVOKE",
+                    "LINE_INVOKE",
+                    "MAILBOX_INVOKE",
+                    "OCB_ACTIVATE",
+                    "OCB_DEACTIVATE",
+                    "OCB_INTERROGATE",
+                    "PSO_ACTIVATE",
+                    "PW_SET",
+                    "SCF_ACTIVATE",
+                    "SCF_DEACTIVATE",
+                    "SCF_INTERROGATE",
+                    "SCREJ_ACTIVATE",
+                    "SCREJ_DEACTIVATE",
+                    "SCREJ_INTERROGATE",
+                    "SR_ACTIVATE",
+                    "SR_DEACTIVATE",
+                    "SR_INTERROGATE",
+                },
+                description = "The facility actions supported by this VoiceService",
+            },
+            -- CodecNumberOfEntries
+            -- automatically created when VoiceService.{i}.Capabilities.Codec.{i}. is loaded
+        }
+    }
+}
+
+local facilityActions = {
+    {"CFBS", "register", "CFB_REGISTER"},
+    {"CFBS", "register_activate", "CFB_ACTIVATE"},
+    {"CFBS", "deactivate", "CFB_DEACTIVATE"},
+    {"CFBS", "deactivate_erase", "CFB_ERASE"},
+    {"CFBS", "interrogate", "CFB_INTERROGATE"},
+    {"CFNR", "register", "CFNR_REGISTER"},
+    {"CFNR", "register_activate", "CFNR_ACTIVATE, CFNR_TIMER"},
+    {"CFNR", "deactivate", "CFNR_DEACTIVATE"},
+    {"CFNR", "deactivate_erase", "CFNR_ERASE"},
+    {"CFNR", "interrogate", "CFNR_INTERROGATE"},
+    {"CFU", "register", "CFU_REGISTER"},
+    {"CFU", "register_activate", "CFU_ACTIVATE"},
+    {"CFU", "deactivate", "CFU_DEACTIVATE"},
+    {"CFU", "deactivate_erase", "CFU_ERASE"},
+    {"CFU", "interrogate", "CFU_INTERROGATE"},
+    {"CLIR", "activate", "CLIR_ACTIVATE"},
+    {"CLIR", "deactivate", "CLIR_DEACTIVATE"},
+    {"CLIR", "interrogate", "CLIR_INTERROGATE"},
+    {"CALL_WAITING", "activate", "CW_ACTIVATE"},
+    {"CALL_WAITING", "deactivate", "CW_DEACTIVATE"},
+}
+
+local toneFileFormats = {
+    {"PCMU", "G.711MuLaw"},
+    {"PCMA", "G.711ALaw"},
+}
+
+Multi_Services_VoiceService_i_Capabilities_.get = {
+    MaxLineCount = "30",
+    MaxExtensionCount = tostring(numOfFxs + numOfDect + numOfSipdev),
+    MaxCallLogCount = "-1",
+    MaxSessionsPerLine = "2",
+    MaxSessionsPerExtension = "2",
+    MaxSessionCount = "4",
+    NetworkConnectionModes = "SIP/2.0",
+    UserConnectionModes = function()
+        local connections = {}
+        local connectionModes = {
+            ["FXS"] = numOfFxs,
+            ["SIP/2.0"] = numOfSipdev,
+            ["DECT"] = numOfDect,
+        }
+        for param,numOfDev in pairs(connectionModes) do
+            if numOfDev > 0 then
+                connections[#connections+1] = param
+            end
+        end
+        return table.concat(connections,", ")
+    end,
+    ToneFileFormats = function()
+        local fileFormats = {}
+        mmpbxBinding.sectionname = "file"
+        uciHelper.foreach_on_uci(mmpbxBinding, function(s)
+            for _,v in ipairs(toneFileFormats) do
+                if v[1] == s.encoding then
+                    fileFormats[#fileFormats+1] = v[2]
+                end
+            end
+        end)
+        return table.concat(fileFormats,", ")
+    end,
+    RingFileFormats = "",
+    FacilityActions = function()
+        local facilities = {}
+        mmpbxBinding.sectionname = "scc_entry"
+        uciHelper.foreach_on_uci(mmpbxBinding, function(s)
+            for _,v in ipairs(facilityActions) do
+                if v[1] == s.service_type and v[2] == s.action then
+                    facilities[#facilities+1] = v[3]
+                end
+            end
+        end)
+        return table.concat(facilities,", ")
+    end,
+}
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_Capabilities_", Multi_Services_VoiceService_i_Capabilities_, register)
