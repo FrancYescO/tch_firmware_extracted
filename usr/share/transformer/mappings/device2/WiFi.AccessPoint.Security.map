@@ -1,0 +1,793 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_WiFi_AccessPoint_i_Security_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.Security.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Reset = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
+      ModesSupported = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "None",
+          "WEP-64",  -- "wep" mode is not supported
+          "WEP-128",
+          "WPA-Personal",
+          "WPA2-Personal",
+          "WPA-WPA2-Personal",
+          "WPA-Enterprise",
+          "WPA2-Enterprise",
+          "WPA-WPA2-Enterprise",
+	  "WPA3-Personal",
+	  "WPA3-Personal-Transition",
+	  "WPA3-Enterprise",
+        },
+      },
+      ModeEnabled = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "WEP-64",  -- "wep" mode is not supported
+          "WEP-128",
+          "WPA-Personal",
+          "WPA2-Personal",
+          "WPA-WPA2-Personal",
+          "WPA-Enterprise",
+          "WPA2-Enterprise",
+          "WPA-WPA2-Enterprise",
+	  "WPA3-Personal",
+          "WPA3-Personal-Transition",
+          "WPA3-Enterprise",
+        },
+      },
+      WEPKey = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string", -- Both ASCII(5 and 13 CS) and Hex(10 and 26 CS) is supported
+        min = "5",
+        max = "26",
+      },
+      PreSharedKey = {
+        access = "readWrite",
+        hidden = "true",
+        type = "hexBinary",
+        max = "32",
+      },
+      SAEPassphrase = {
+	access = "readWrite",
+        hidden = "true",
+        type = "string",
+        min = "8",
+        max = "63",
+      },
+      KeyPassphrase = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        min = "8",
+        max = "63",
+      },
+      RekeyingInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "80",
+            max = "846000",
+          },
+        },
+        default = "3600",
+      },
+      RadiusServerIPAddr = {
+        access = "readWrite",
+        type = "string",
+      },
+      SecondaryRadiusServerIPAddr  = {
+        access = "readWrite",
+        type = "string",
+      },
+      RadiusServerPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1812",
+      },
+      SecondaryRadiusServerPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "1812",
+      },
+      RadiusSecret = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      SecondaryRadiusSecret = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      X_TELUS_DefaultKeyPassphrase = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Indicates whether the WiFi radio is set to the factory default passphrase, 1 indicates passphrase is set to default value",
+      },
+    }
+  }
+}
+
+local inet = require 'tch.inet'
+local wifisecurity = require 'transformer.shared.custo.wifisecurity'
+local mapper, string, next, register = mapper, string, next, register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local conn = mapper("ubus").connect()
+local wirelessBinding = {config = "wireless"}
+local webBinding = {config = "web"}
+local multiAPBinding = {config="multiap"}
+local systemBinding = {config="system"}
+local gmatch, match = string.gmatch, string.match
+local concat, commitApply = table.concat, commitapply
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local isMultiapEnabled = bandSteerHelper.isMultiapEnabled
+local getCredSection = bandSteerHelper.getCredSection
+local envBinding = {config = "env"}
+local process = require("tch.process")
+local multiapControllerBinding = {config='multiap', sectionname='controller', option='enabled', default='0'}
+local multiapAgentBinding = {config='multiap', sectionname='agent', option='enabled', default='0'}
+local transactions = {}
+
+local supportedModesMap = {
+  ["none"]          = "None",
+  ["wep"]           = "WEP-128",
+  ["wpa2-psk"]      = "WPA2-Personal",
+  ["wpa-wpa2-psk"]  = "WPA-WPA2-Personal",
+  ["wpa2"]          = "WPA2-Enterprise",
+  ["wpa-wpa2"]      = "WPA-WPA2-Enterprise",
+  ["wpa3-psk"]      = "WPA3-Personal",
+  ["wpa2-wpa3-psk"] = "WPA3-Personal-Transition",
+  ["wpa3"]          = "WPA3-Enterprise"
+}
+
+local accessSecurityUciMap = {
+  ["None"] = "none",
+  ["WEP-128"] = "wep",
+  ["WPA2-Personal"] = "wpa2-psk",
+  ["WPA-WPA2-Personal"] = "wpa-wpa2-psk",
+  ["WPA2-Enterprise"] = "wpa2",
+  ["WPA-WPA2-Enterprise"] = "wpa-wpa2",
+  ["WPA3-Personal"] = "wpa3-psk",
+  ["WPA3-Personal-Transition"] = "wpa2-wpa3-psk",
+  ["WPA3-Enterprise"] = "wpa3",
+}
+
+local accessSecurityMap = {
+  ["ModeEnabled"] = "security_mode",
+  ["PreSharedKey"] = "wpa_psk_key",
+  ["KeyPassphrase"] = "wpa_psk_key",
+}
+
+-- Map table to set server(Y = 0/1)
+--   0 primary
+--   1 secondary
+local enterpriseMap = {
+  ["RadiusServerIPAddr"] = "0",
+  ["RadiusServerPort"] = "0",
+  ["RadiusSecret"] = "0",
+  ["SecondaryRadiusServerIPAddr"] = "1",
+  ["SecondaryRadiusServerPort"] = "1",
+  ["SecondaryRadiusSecret"] = "1",
+}
+
+local function getEnvUciValue(sectionName, paramName)
+  envBinding.sectionname = sectionName
+  envBinding.option = paramName
+  return getFromUci(envBinding)
+end
+
+local function getSupportedModesFromUbus(key)
+  local data = conn:call("wireless.accesspoint.security", "get", { name = key }) or {}
+  return data[key] and data[key].supported_modes or ""
+end
+
+local function getModesSupported(supportedModes, key)
+  if not supportedModes then
+    supportedModes = getSupportedModesFromUbus(key)
+  end
+  if supportedModes ~= "" then
+    local modes = {}
+    for mode in gmatch(supportedModes, "%S+") do
+      if (not string.match(supportedModesMap[mode] ,"Enterprise") and getFromUci(multiapAgentBinding) == "1" and getFromUci(multiapControllerBinding) == "1") or (getFromUci(multiapAgentBinding) == "0" or getFromUci(multiapControllerBinding) == "0") then
+        modes[#modes + 1] = supportedModesMap[mode]
+      end
+    end
+    return concat(modes, ",")
+  end
+  return ""
+end
+
+local function getDNS(fqdn)
+  local addr
+  local pipe = process.popen("dnsget", {fqdn})
+  for line in pipe:lines() do
+    addr = match(line,"%s+(%d+%.%d+%.%d+%.%d+)")
+  end
+  pipe:close()
+  return addr
+end
+
+local function getUciValue(sectionName, paramName)
+  wirelessBinding.sectionname = sectionName
+  if paramName then
+    wirelessBinding.option = paramName
+    return getFromUci(wirelessBinding)
+  end
+  return getAllFromUci(wirelessBinding)
+end
+
+local function getEnterpriseValues(key, param, server)
+  local value
+  local sectionName = key.."_".."auth"..server
+  if param == "RadiusServerIPAddr" or param == "SecondaryRadiusServerIPAddr" then
+    local fqdn = getUciValue(sectionName, "fqdn")
+    if fqdn ~= "" then
+      value = getDNS(fqdn)
+    else
+      value = getUciValue(sectionName,"ip")
+    end
+  elseif param == "RadiusServerPort" or param == "SecondaryRadiusServerPort" then
+    value = getUciValue(sectionName, "port") or "1812"
+  elseif param == "RadiusSecret" or param == "SecondaryRadiusSecret" then
+    value = getUciValue(sectionName, "secret")
+  end
+  return value
+end
+
+local function defaultPassphrase(key)
+  local wpaPskKey = getUciValue(key, "wpa_psk_key")
+  local defaultKey
+  if key == "ap0" or key == "ap2" or key == "ap5" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s0")
+  elseif key == "ap1" or key == "ap3" or key == "ap6" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s1")
+  elseif key == "ap4" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s3")
+  elseif key == "ap7" then
+    defaultKey = getEnvUciValue("var", "default_key_r0_s2")
+  end
+  return (defaultKey == wpaPskKey) and "1" or "0"
+end
+
+
+local function getIntervalValue(key, modeEnabled)
+  local value = ""
+  if modeEnabled ~= "none" and modeEnabled ~= "wep" then
+    value = getUciValue(key, "eap_reauth_period")
+  end
+  if value == "" then
+    local data = conn:call("wireless.accesspoint.security", "get",  { }) or {}
+    if data[key] and data[key]["eap_reauth_period"] then
+      value = data[key]["eap_reauth_period"]
+    end
+  end
+  return value ~= "" and tostring(value) or "3600"
+end
+
+local function getSAEPassphrase(key, modeName)
+  local sectionName = key.."_".."credential0"
+  return getUciValue(sectionName, "passphrase") or ""
+end
+
+local function getMultiAPValue(key, option, wirelessValue)
+  local returnVal = {}
+  if isMultiapEnabled(key) then
+    -- If MultiAP is Enabled, then get the values from MultiAP Config
+    local ifaceKey = getFromUci({ config = "wireless", sectionname = key, option = "iface"})
+    if ifaceKey then
+      local sectionName = getCredSection(ifaceKey)
+      if sectionName ~= "" then
+        returnVal = getAllFromUci({config = "multiap", sectionname = sectionName})
+        if option and returnVal[option] then
+          return returnVal[option]
+        end
+      end
+    end
+  else
+    -- If MultiAP is Disabled, then get the values from Wireless Config
+    return wirelessValue
+  end
+  return returnVal
+end
+
+Device_WiFi_AccessPoint_i_Security_.get = function(mapping, param, key)
+  local isEnterpriseMode = false
+  local uciSecurityValues = getUciValue(key)
+  local modeName = uciSecurityValues["security_mode"] and supportedModesMap[uciSecurityValues["security_mode"]]
+  local WKey = ""
+  if modeName then
+    isEnterpriseMode = match(modeName, "Enterprise") and true or false
+  end
+  if param == "Reset" then
+    return "0"
+  elseif param == "ModesSupported" then
+    return getModesSupported(uciSecurityValues["supported_security_modes"], key)
+  elseif param == "ModeEnabled" then
+    return supportedModesMap[getMultiAPValue(key, "security_mode", uciSecurityValues["security_mode"])] or ""
+  elseif param == "RekeyingInterval" then
+    return getIntervalValue(key, uciSecurityValues["security_mode"])
+  elseif param == "PreSharedKey" or param == "KeyPassphrase" then
+    return getMultiAPValue(key, "wpa_psk_key", uciSecurityValues[accessSecurityMap[param]]) or ""
+  elseif enterpriseMap[param] then
+    return (isEnterpriseMode and getEnterpriseValues(key, param, enterpriseMap[param]) or "" )
+  elseif param == "X_TELUS_DefaultKeyPassphrase" then
+    return defaultPassphrase(key)
+  elseif param == "WEPKey" then
+    if match(uciSecurityValues["supported_security_modes"], "wep") then
+       WKey = uciSecurityValues["wep_key"]
+    end
+    return WKey
+  elseif param == "SAEPassphrase" then
+    return getSAEPassphrase(key, modeName)
+  end
+end
+
+Device_WiFi_AccessPoint_i_Security_.getall = function(mapping, key)
+  local isEnterpriseMode = false
+  local primValues,ipAddrPrim,secValues,ipAddrSec
+  local uciSecurityValues = getUciValue(key)
+  local modeEnabled = uciSecurityValues["security_mode"] and uciSecurityValues["security_mode"]
+  local rekeyingInterval = getIntervalValue(key, modeEnabled)
+  local uciValue = getMultiAPValue(key, nil, uciSecurityValues) or ""
+  if modeEnabled and supportedModesMap[modeEnabled] then
+    isEnterpriseMode = match(supportedModesMap[modeEnabled],"Enterprise") and true or false
+  end
+
+  if isEnterpriseMode then
+    local sectionName = key.."_".."auth".."0"
+    primValues = getUciValue(sectionName)
+    if primValues.fqdn then
+      ipAddrPrim = getDNS(primValues["fqdn"])
+    else
+      ipAddrPrim = primValues["ip"]
+    end
+    sectionName = key.."_".."auth".."1"
+    secValues = getUciValue(sectionName)
+    if secValues.fqdn then
+      ipAddrSec = getDNS(secValues["fqdn"])
+    else
+      ipAddrSec = secValues["ip"]
+    end
+  end
+  local WKey = ""
+  if match(uciSecurityValues.supported_security_modes, "wep") then
+    WKey = uciSecurityValues["wep_key"]
+  end
+
+  return {
+    Reset = "0",
+    ModeEnabled = supportedModesMap[uciValue["security_mode"]] or "",
+    WEPKey = WKey or "",  -- "wep" mode is not supported. To be uncommented if "wep" mode support is requested.
+    PreSharedKey = uciValue["wpa_psk_key"] or "",
+    KeyPassphrase = uciValue["wpa_psk_key"] or "",
+    ModesSupported = getModesSupported(uciSecurityValues["supported_security_modes"], key),
+    RadiusServerIPAddr = isEnterpriseMode and ipAddrPrim or "",
+    RekeyingInterval = rekeyingInterval,
+    RadiusServerPort = isEnterpriseMode and primValues["port"] or "1812",
+    RadiusSecret = isEnterpriseMode and primValues["secret"] or "",
+    SecondaryRadiusServerIPAddr = isEnterpriseMode and ipAddrSec or "",
+    SecondaryRadiusServerPort = isEnterpriseMode and secValues["port"] or "1812",
+    SecondaryRadiusSecret = isEnterpriseMode and secValues["secret"] or "",
+    SAEPassphrase = getSAEPassphrase(key, supportedModesMap[modeEnabled]),
+  }
+end
+
+local setOnMutliAPConfig = {
+  ["security_mode"] = true,
+  ["wpa_psk_key"] = true,
+}
+
+local function setMultiAPConfig(sectionName, paramName, value)
+  local ifaceKey = getFromUci({ config = "wireless", sectionname = sectionName, option = "iface"})
+  if ifaceKey then
+    local sectionName = getCredSection(ifaceKey)
+    if sectionName ~= "" and paramName and value then
+      multiAPBinding.sectionname = sectionName
+      multiAPBinding.option = paramName
+      setOnUci(multiAPBinding, value, commitApply)
+      transactions[multiAPBinding.config] = true
+    end
+  end
+end
+
+local function setUciParam(sectionName, paramName, value)
+  if setOnMutliAPConfig[paramName] and isMultiapEnabled(sectionName) then
+    setMultiAPConfig(sectionName, paramName, value)
+  else
+    wirelessBinding.sectionname = sectionName
+    wirelessBinding.option = paramName
+    setOnUci(wirelessBinding, value, commitApply)
+    transactions[wirelessBinding.config] = true
+  end
+end
+
+--- @function setIntervalvalue will set the value for RekeyingInterval
+--- @if condition will check the security_mode and will not allow to set when mode is none/wep
+local function setIntervalvalue(key, option, value)
+  local uciValues = getUciValue(key)
+  if  uciValues["security_mode"] ~= "none" and  uciValues["security_mode"] ~= "wep" then
+    return setUciParam(key, "eap_reauth_period", value)
+  end
+  return nil, "Cannot set RekeyingInterval when securityMode is none"
+end
+
+local function setRadiusValue(ap, server, option, value)
+  local sectionName = ap.."_".."auth"..server
+  local section = getUciValue(sectionName)
+  if not section['.name'] then
+    return nil, "Section not present"
+  end
+  setUciParam(sectionName, option, value)
+end
+
+local function setRadiusIP(ap, server, ip)
+  local kind = inet.isValidIP(ip)
+  if kind == "IPv4" then
+    return setRadiusValue(ap, server, "ip", ip)
+  elseif kind == "IPv6" then
+    return nil, "only IPv4 values supported"
+  else
+    return nil, "invalid IP address"
+  end
+end
+
+local function setRadiusPort(ap, server, port)
+  if tonumber(port)>65535 then
+    return "port number out of range"
+  end
+  return setRadiusValue(ap, server, "port", port)
+end
+
+local function setRadiusSecret(ap, server, secret)
+  if #secret>64 then
+    return nil, "secret value too long"
+  end
+  return setRadiusValue(ap, server, "secret", secret)
+end
+
+local function setSecurityOption(ap, option, value)
+  local oldValue = getUciValue(ap, option)
+  if bandSteerHelper.isMultiapEnabled(ap) then
+    if value then
+      setUciParam(ap, option, value)
+      return true
+    end
+  elseif value and value ~= oldValue then
+    setUciParam(ap, option, value)
+    return true
+  else
+    return "Unsupported  value"
+  end
+end
+
+local function setPmfValue(key, modeAsPerUci)
+  local sectionName =  key.."_".."credential0"
+  if modeAsPerUci == "wpa3-psk" then
+    setUciParam(key, "pmf", "required")
+    setUciParam(sectionName, "state", "1")
+  elseif modeAsPerUci == "wpa2-wpa3-psk" then
+    setUciParam(key, "pmf", "enabled")
+    setUciParam(sectionName, "state", "1")
+  else
+    setUciParam(key, "pmf", "disabled")
+    setUciParam(sectionName, "state", "0")
+  end
+end
+
+local function setModeEnabled(value, key, commitapply, transactions)
+if bandSteerHelper.isMultiapEnabled(key) and value == "WPA3-Personal" then
+  return nil, value.." Mode is not supported when Easymesh is enabled"
+end
+  local supportedModes = getUciValue(key, "supported_security_modes")
+  local sectionName =  key.."_".."credential0"
+  local wpaPskKey = getUciValue(key, "wpa_psk_key")
+  if supportedModes == "" then
+    supportedModes = getSupportedModesFromUbus(key)
+  end
+  local modeAsPerUci = accessSecurityUciMap[value]
+  if supportedModes == "" then
+    local ret = setSecurityOption(key, "security_mode", modeAsPerUci, commitapply, transactions)
+    if ret then
+      setPmfValue(key, modeAsPerUci)
+    end
+    if value == "WPA3-Personal" then
+      local wpsVal = getFromUci({config = "wireless", sectionname = key, option = "wps_state"}) or "0"
+      setOnUci({ config = "system", sectionname = key , option = "last_state"}, wpsVal, commitapply)
+      setUciParam(key, "wps_state", "0")
+    else
+      local secMode = getFromUci({config = "wireless", sectionname = key, option = "security_mode"})
+      if secMode ~= value then
+        local wpsVal = getFromUci({config = "system", sectionname = key, option = "last_state"}) or "0"
+        setUciParam({ config = "wireless", sectionname = key , option = "wps_state"}, wpsVal, commitapply)
+      end
+    end
+    return ret
+  else
+    for mode in gmatch(supportedModes, "([^%s]+)") do
+      if mode == modeAsPerUci then
+        if value == "WPA3-Personal" or value == "WPA3-Personal-Transition" then
+          setUciParam(sectionName, "passphrase", wpaPskKey)
+        end
+        local ret = setSecurityOption(key, "security_mode", modeAsPerUci, commitapply, transactions)
+        if ret then
+          setPmfValue(key, modeAsPerUci)
+        end
+        if value == "WPA3-Personal" then
+          local wpsVal = getFromUci({config = "wireless", sectionname = key, option = "wps_state"}) or "0"
+          setOnUci({ config = "system", sectionname = key , option = "last_state"}, wpsVal, commitapply)
+          setUciParam(key, "wps_state", "0")
+        else
+          local secMode = getFromUci({config = "wireless", sectionname = key, option = "security_mode"})
+          if secMode ~= value then
+            local wpsVal = getFromUci({config = "system", sectionname = key, option = "last_state"}) or "0"
+            setOnUci({ config = "wireless", sectionname = key , option = "wps_state"}, wpsVal, commitapply)
+          end
+        end
+        return ret
+      end
+    end
+    return nil, value.." Mode is currently not supported"
+  end
+end
+
+local function web_set(sectionName, paramName, value)
+  webBinding.sectionname = sectionName
+  webBinding.option = paramName
+  setOnUci(webBinding, value, commitApply)
+  transactions[webBinding.config] = true
+end
+
+local function web_get(sectionName, paramName)
+  webBinding.sectionname = sectionName
+  webBinding.option = paramName
+  return getFromUci(webBinding)
+end
+
+local function system_set(bandsteerid)
+  wirelessBinding.sectionname = bandsteerid
+  wirelessBinding.option = "state"
+  local bandsteerState = getFromUci(wirelessBinding)
+  if bandsteerid and bandsteerState then
+    systemBinding.sectionname = bandsteerid
+    systemBinding.sectiontype = "wifi-bandsteer"
+    systemBinding.option = "bandsteer_last_state"
+    setOnUci(systemBinding, bandsteerState, commitApply)
+    transactions[systemBinding.config] = true
+    setOnUci(wirelessBinding, "0", commitApply)
+    transactions[wirelessBinding.config] = true
+  end
+end
+
+local function splitSSID(aps)
+  local bandsteerid = aps and getUciValue(aps, "bandsteer_id")
+  local intf = aps and getUciValue(aps, "iface")
+  local network = intf and getUciValue(intf, "network")
+  local guest_splitssid = web_get("guest", "splitssid")
+  local multiap_ap0, multiap_ap1
+  if network and network == "lan" then
+    if web_get("main", "splitssid") == "0" then
+      web_set("main", "splitssid", "1")
+      system_set(bandsteerid)
+    end
+    multiap_ap0 = "cred0"
+    multiap_ap1 = "cred1"
+  elseif network and string.match(network,"wlnet_b")  then
+    if guest_splitssid and guest_splitssid == "0" then
+      web_set("guest", "splitssid", "1")
+    end
+    multiap_ap0 = "cred3"
+    multiap_ap1 = "cred4"
+  end
+  multiAPBinding.sectionname = multiap_ap1
+  multiAPBinding.option = "state"
+  if bandSteerHelper.isMultiapEnabled(aps) and multiap_ap0 and multiap_ap1 and getFromUci(multiAPBinding) == "0" then
+    multiAPBinding.sectionname = multiap_ap0
+    multiAPBinding.option = "frequency_bands"
+    setOnUci(multiAPBinding, "radio_2G", commitApply)
+    multiAPBinding.sectionname = multiap_ap1
+    multiAPBinding.option = "state"
+    setOnUci(multiAPBinding, "1", commitApply)
+  end
+end
+
+local function setPassPhrase(value, key, param)
+  local uciSecurityValues = getUciValue(key, "security_mode")
+  local modeName = supportedModesMap[uciSecurityValues] or ""
+  local sectionName =  key.."_".."credential0"
+  if modeName == "WPA3-Personal" or modeName == "WPA3-Personal-Transition" then
+    splitSSID(key)
+    setUciParam(key, "wpa_psk_key", value)
+    setUciParam(sectionName, "passphrase", value)
+  else
+    if param == "KeyPassphrase" then
+      splitSSID(key)
+      setUciParam(key, "wpa_psk_key", value)
+    else
+      setUciParam(sectionName, "passphrase", value)
+    end
+  end
+  return true
+end
+
+Device_WiFi_AccessPoint_i_Security_.set = {
+  Reset = function(_, _, value, key)
+    if value == '1' then
+      if bandSteerHelper.isMultiapEnabled(key) then
+        return nil, "Cannot modify the value when easymesh is enabled"
+      end
+      local result,errmsg = wifisecurity.reset(key, commitApply)
+      if result then
+        transactions[wirelessBinding.config] = true
+      else
+        return nil, errmsg
+      end
+    end
+  end,
+  ModeEnabled = function(_, _, value, key)
+   if bandSteerHelper.isMultiapEnabled(key) then
+     wirelessBinding.sectionname = key
+     wirelessBinding.option = "iface"
+     local ifaceKey = getFromUci(wirelessBinding)
+     if ifaceKey then
+       local sectionName = getCredSection(ifaceKey)
+       if sectionName ~= "" then
+         multiAPBinding.sectionname = sectionName
+         multiAPBinding.option = "backhaul"
+         if getFromUci(multiAPBinding) == "1" then
+           return nil, "Cannot Modify the SecurityModes when backhaul is enabled"
+         end
+         setMultiAPConfig(sectionName, "security_mode", accessSecurityUciMap[value], commitapply)
+         multiAPBinding.option = "state"
+         local credState = getFromUci(multiAPBinding)
+         if credState then
+           setOnUci(multiAPBinding, "1", commitApply)
+         end
+       end
+     end
+    end
+    local success, err = setModeEnabled(value, key, commitapply, transactions)
+    if success then
+      splitSSID(key)
+    else
+      return nil, err
+    end
+  end,
+  PreSharedKey = function(_, _, value, key)
+    if bandSteerHelper.isMultiapEnabled(key) then
+      wirelessBinding.sectionname = key
+      wirelessBinding.option = "iface"
+      local ifaceKey = getFromUci(wirelessBinding)
+      if ifaceKey then
+        local sectionName = getCredSection(ifaceKey)
+        if sectionName ~= "" then
+          multiAPBinding.sectionname = sectionName
+          multiAPBinding.option = "backhaul"
+          if getFromUci(multiAPBinding) == "1" then
+            return nil, "Cannot Modify the PresharedKey when backhaul is enabled"
+          end
+          setMultiAPConfig(sectionName, "wpa_psk_key", value, commitapply)
+          multiAPBinding.option = "state"
+          local credState = getFromUci(multiAPBinding)
+          if credState then
+            setOnUci(multiAPBinding, "1", commitApply)
+          end
+        end
+      end
+    end
+    local success, err = setSecurityOption(key, "wpa_psk_key", value, commitapply, transactions)
+    if success then
+      splitSSID(key)
+    else
+      return nil, err
+    end
+  end,
+  KeyPassphrase = function(_, _, value, key)
+    if bandSteerHelper.isMultiapEnabled(key) then
+      wirelessBinding.sectionname = key
+      wirelessBinding.option = "iface"
+      local ifaceKey = getFromUci(wirelessBinding)
+      if ifaceKey then
+        local sectionName = getCredSection(ifaceKey)
+        if sectionName ~= "" then
+          multiAPBinding.sectionname = sectionName
+          multiAPBinding.option = "backhaul"
+          if getFromUci(multiAPBinding) == "1" then
+            return nil, "Cannot Modify the KeyPassphrase when backhaul is enabled"
+          end
+          setMultiAPConfig(sectionName, "wpa_psk_key", value, commitapply)
+          multiAPBinding.option = "state"
+          local credState = getFromUci(multiAPBinding)
+          if credState then
+            setOnUci(multiAPBinding, "1", commitApply)
+          end
+        end
+      end
+    end
+    local success, err = setPassPhrase(value, key, "KeyPassphrase")
+    if not success then
+      return nil, err
+    end
+  end,
+  SAEPassphrase = function(_, _, value, key)
+    return setPassPhrase(value, key, "SAEPassphrase")
+  end,
+  RadiusServerIPAddr = function(_, _, value, key)
+    return setRadiusIP(key, "0", value)
+  end,
+  RekeyingInterval = function(_, _, value, key)
+    return setIntervalvalue(key, "eap_reauth_period", value)
+  end,
+  SecondaryRadiusServerIPAddr = function(_, _, value, key)
+    return setRadiusIP(key, "1", value)
+  end,
+  RadiusServerPort = function(_, _, value, key)
+    return setRadiusPort(key, "0", value)
+  end,
+  SecondaryRadiusServerPort = function(_, _, value, key)
+    return setRadiusPort(key, "1", value)
+  end,
+  RadiusSecret = function(_, _, value, key)
+    return setRadiusSecret(key, "0", value)
+  end,
+  SecondaryRadiusSecret = function(_, _, value, key)
+    return setRadiusSecret(key, "1", value)
+  end,
+  WEPKey =  function(_, _, value, key)
+    if match(getUciValue(key).supported_security_modes, "wep") then
+      if #value ~= 5 and #value ~= 10 and #value ~= 13 and #value ~= 26 then
+        return nil, "Invalid length, a WEP key must be 5, 10, 13 or 26 characters long, length of 10 and 26 can only contain the letters A to F or digits"
+      end
+      if (#value == 10 or #value == 26) and (not value:match("^[%x]+$")) then
+        return nil, "A WEP key of length 10 or 26 can only contain the letters A to F or digits"
+      end
+    return setSecurityOption(key, "wep_key", value)
+    else
+        return nil, "WEP mode is not supported"
+    end
+  end
+}
+
+local function endTransaction(action)
+  for config in pairs(transactions) do
+    action({config = config})
+  end
+  transactions = {}
+end
+
+Device_WiFi_AccessPoint_i_Security_.commit = function()
+  return endTransaction(uciHelper.commit)
+end
+
+Device_WiFi_AccessPoint_i_Security_.revert = function()
+  return endTransaction(uciHelper.revert)
+end
+
+local function setUciEvent(mapping, action, config, sectionType, sectionName, option)
+  return { { key = sectionName, paramname = "ModeEnabled" } }
+end
+
+Device_WiFi_AccessPoint_i_Security_.add_watchers = function(mapping, param, key)
+  local uciEventSource = eventsource("uci")
+  uciEventSource.watch(mapping, { set = setUciEvent }, "wireless", "wifi-ap", key, "security_mode")
+end
+
+register(Device_WiFi_AccessPoint_i_Security_)

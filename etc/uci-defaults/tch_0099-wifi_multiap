@@ -1,0 +1,140 @@
+#!/bin/sh
+
+
+wireless_init_uci_env.sh
+
+# cred0 - Fronthaul
+# cred 1 - 5G Fronthaul . This will be in disabled state in config and will
+# be used only when there is a requirement for different SSID for 2G and 5G
+# cred 2 - Backhaul only
+
+# Set controller_credentials for FH taking in account TI SSID Postfix
+
+#Calculate TI SSID Postfix out of Wirelss MAC-Address as on Jira: NG-47046
+#wireless_postfix_TI.sh for now this is devitation from custo as received from CTS
+#instead of having another script merged it here itself
+#get mac adress
+macadress=`uci get env.rip.wifi_mac`
+
+#Example mac=C4:EA:1D:59:43:76 --> mac=C4:EA:d:c:b:a
+#we save the two last digits of the mac in a and so on for b,c and d
+a=`echo $macadress | awk '{print substr($macadress, 16,2)}'`
+b=`echo $macadress | awk '{print substr($macadress, 13,2)}'`
+c=`echo $macadress | awk '{print substr($macadress, 10,2)}'`
+d=`echo $macadress | awk '{print substr($macadress, 7,2)}'`
+
+#the 0x and than our variables compiles from hex to dec 0xf --> 15
+#(0x$b << 8) this means our compiled hex to dec number will be shift left for 8 bits
+decimal_ssid=$((0x$a | (0x$b << 8) | (0x$c << 16) | ( (0x$d & 15) << 24 ) ))
+#$(($decimal_ssid%100000000)) --> we want only a 8 digits number so we use modulo
+#printf "%.8d " $(($decimal_ssid%100000000)) --> and all together we want everytime that the number is 8 digits long, if it only 7 digits we need a 0 at the
+#beginning of our decimal number
+decimal_ssid=`printf "%.8d " $(($decimal_ssid%100000000))`
+uci set env.var.ssid_mac_postfix_r0=$decimal_ssid
+
+uci set multiap.cred0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+uci set multiap.cred1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set multiap.cred0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+uci set multiap.cred1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+# Set controller_credentials for BH
+uci set multiap.cred2.ssid="BH-$(uci get env.var.ssid_mac_postfix_r0)"
+uci set multiap.cred2.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+new_layout=`uci get env.var.em_new_ui_layout`
+if [ $new_layout == 1 ] ; then
+	uci set multiap.cred3=controller_credentials
+	uci set multiap.cred3.state="0"
+	uci set multiap.cred3.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+	uci set multiap.cred3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+	uci set multiap.cred3.security_mode="wpa2-psk"
+	uci set multiap.cred3.fronthaul="0"
+	uci set multiap.cred3.backhaul="0"
+	uci set multiap.cred4=controller_credentials
+	uci set multiap.cred4.state="0"
+	uci set multiap.cred4.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+	uci set multiap.cred4.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+	uci set multiap.cred4.security_mode="wpa2-psk"
+	uci set multiap.cred4.fronthaul="0"
+	uci set multiap.cred4.backhaul="0"
+	uci set multiap.cred4.frequency_bands="radio_5Gl,radio_5Gu"
+fi
+
+main_ssid_24=`uci get multiap.cred0.ssid`
+main_ssid_5=`uci get multiap.cred1.ssid`
+guest_ssid_24=`uci get multiap.cred3.ssid`
+guest_ssid_5=`uci get multiap.cred4.ssid`
+agentEnable=`uci get multiap.agent.enabled`
+contrlEnable=`uci get multiap.controller.enabled`
+
+if [ $agentEnable == "1" ] && [ $contrlEnable == "1" ] ; then
+  uci set wireless.bs0.state="0"
+  uci set system.bs0.last_state='0'
+  uci commit wireless
+  uci commit system
+  if [ $main_ssid_24 == $main_ssid_5 ]; then
+    uci set multiap.cred0.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+    uci set multiap.cred0.state='1'
+  else
+    uci set multiap.cred0.frequency_bands="radio_2G"
+    uci set multiap.cred1.state='1'
+  fi
+  if [ $guest_ssid_24 == $guest_ssid_5 ]; then
+    uci set multiap.cred3.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+    uci set multiap.cred3.state='0'
+  else
+    uci set multiap.cred3.frequency_bands="radio_2G"
+    uci set multiap.cred4.state='1'
+  fi
+else
+  # set frequency_bands based on the splitssid value
+mainsplitssid=`uci get web.main.splitssid`
+  if [ $mainsplitssid == "0" ]; then
+    uci set multiap.cred0.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+  else
+    uci set multiap.cred0.frequency_bands="radio_2G"
+  fi
+
+guestsplitssid=`uci get web.guest.splitssid`
+  if [ $guestsplitssid == "0" ]; then
+    uci set multiap.cred3.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+  else
+    uci set multiap.cred3.frequency_bands="radio_2G"
+  fi
+fi
+# Commit the changes
+
+uci commit multiap
+
+# check whether the multiap IPK installation script is available
+# if it is available execute the file
+if [ -f /lib/multiap/multiap-ipk-installer ]; then
+    chmod +x /lib/multiap/multiap-ipk-installer
+    /lib/multiap/multiap-ipk-installer
+fi
+
+if [ -f /etc/ipks/multiap_libplatform_1.0_arm_cortex-a9.ipk ]; then
+    opkg install /etc/ipks/multiap_libplatform_1.0_arm_cortex-a9.ipk --force-reinstall
+    rm /etc/ipks/multiap_libplatform_1.0_arm_cortex-a9.ipk
+fi
+
+if [ -f /etc/ipks/ieee1905_wt382_1.0_arm_cortex-a9.ipk ]; then
+    opkg install /etc/ipks/ieee1905_wt382_1.0_arm_cortex-a9.ipk --force-reinstall
+    rm /etc/ipks/ieee1905_wt382_1.0_arm_cortex-a9.ipk
+fi
+
+if [ -f /etc/ipks/multiap_agent_1.0.0_arm_cortex-a9.ipk ]; then
+    opkg install /etc/ipks/multiap_agent_1.0.0_arm_cortex-a9.ipk --force-reinstall
+    rm /etc/ipks/multiap_agent_1.0.0_arm_cortex-a9.ipk
+fi
+
+if [ -f /etc/ipks/mesh_wee_controller_1.0_arm_cortex-a9.ipk ]; then
+    opkg install /etc/ipks/mesh_wee_controller_1.0_arm_cortex-a9.ipk --force-reinstall
+    rm /etc/ipks/mesh_wee_controller_1.0_arm_cortex-a9.ipk
+fi
+
+if [ -f /etc/ipks/multiap_controller_1.0.0_arm_cortex-a9.ipk ]; then
+    opkg install /etc/ipks/multiap_controller_1.0.0_arm_cortex-a9.ipk --force-reinstall
+    rm /etc/ipks/multiap_controller_1.0.0_arm_cortex-a9.ipk
+fi
