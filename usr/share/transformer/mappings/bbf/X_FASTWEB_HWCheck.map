@@ -1,0 +1,147 @@
+-- Manually generated
+local Multi_HWCheck_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the status of the specific hardware",
+    parameters = {
+      Fxs1 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of Fxs1 Device",
+      },
+      Fxs2 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of Fxs2 Device",
+      },
+      xDSLPort = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of xDSL Port",
+      },
+      USB1 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of USB1 Port",
+      },
+      USB2 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of USB2 Port",
+      },
+      LANPort1 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of LAN Port1",
+      },
+      LANPort2 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of LAN Port2",
+      },
+      LANPort3 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of LAN Port3",
+      },
+      LANPort4 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of LAN Port4",
+      },
+      Radio1 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of WiFi-2.4GHz",
+      },
+      Radio2 = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of WiFi-5GHz",
+      },
+    }
+  }
+}
+
+local mapper, open = mapper, io.open
+local conn = mapper("ubus").connect()
+local process = require("tch.process")
+
+local function getFromUbus(data, option)
+  return conn:call(data, option, {})
+end
+
+local function LANPortData(ethType)
+  local fileData = open("/sys/class/net/"..ethType.."/operstate", "r")
+  local status = fileData and fileData:read()
+  fileData:close()
+  return status == "up" and "OK" or ""
+end
+
+Multi_HWCheck_.get = {
+  Fxs1 = function(mapping)
+    local ubusData = getFromUbus("mmpbx.device", "get")
+    return ubusData and ubusData["fxs_dev_0"] and ubusData["fxs_dev_0"]["deviceUsable"] and "OK" or ""
+  end,
+  Fxs2 = function(mapping)
+    local ubusData = getFromUbus("mmpbx.device", "get")
+    return ubusData and ubusData["fxs_dev_1"] and ubusData["fxs_dev_1"]["deviceUsable"] and "OK" or ""
+  end,
+  xDSLPort = function(mapping)
+    return getFromUbus("xdsl", "status") and "OK" or ""
+  end,
+  USB1 = function(mapping)
+    return process.popen("lsusb") and "OK" or ""
+  end,
+  USB2 = function(mapping)
+    return process.popen("lsusb") and "OK" or ""
+  end,
+  LANPort1 = function(mapping)
+    return LANPortData("eth0")
+  end,
+  LANPort2 = function(mapping)
+    return LANPortData("eth1")
+  end,
+  LANPort3 = function(mapping)
+    return LANPortData("eth2")
+  end,
+  LANPort4 = function(mapping)
+    return LANPortData("eth3")
+  end,
+  Radio1 = function(mapping)
+    local ubusData = getFromUbus("wireless.radio", "get")
+    return ubusData and ubusData["radio_2G"] and ubusData["radio_2G"]["oper_state"] == 1 and "OK" or ""
+  end,
+  Radio2 = function(mapping)
+    local ubusData = getFromUbus("wireless.radio", "get")
+    return ubusData and ubusData["radio_5G"] and ubusData["radio_5G"]["oper_state"] == 1 and "OK" or ""
+  end
+}
+
+Multi_HWCheck_.getall = function(mapping)
+  local mmpbxData = getFromUbus("mmpbx.device", "get")
+  local radioData = getFromUbus("wireless.radio", "get")
+  local usbData = process.popen("lsusb") and "OK" or ""
+  return {
+    Fxs1 = mmpbxData and mmpbxData["fxs_dev_0"] and mmpbxData["fxs_dev_0"]["deviceUsable"] and "OK" or "",
+    Fxs2 = mmpbxData and mmpbxData["fxs_dev_1"] and mmpbxData["fxs_dev_1"]["deviceUsable"] and "OK" or "",
+    xDSLPort = getFromUbus("xdsl", "status") and "OK" or "",
+    USB1 = usbData,
+    USB2 = usbData,
+    LANPort1 = LANPortData("eth0"),
+    LANPort2 = LANPortData("eth1"),
+    LANPort3 = LANPortData("eth2"),
+    LANPort4 = LANPortData("eth3"),
+    Radio1 = radioData and radioData["radio_2G"] and radioData["radio_2G"]["oper_state"] == 1 and "OK" or "",
+    Radio2 = radioData and radioData["radio_5G"] and radioData["radio_5G"]["oper_state"] == 1 and "OK" or ""
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_HWCheck_, "#ROOT", { "InternetGatewayDevice.X_FASTWEB_HWCheck.", "Device.X_FASTWEB_HWCheck." })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
