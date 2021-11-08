@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Disable console logging and set serial number to hostname
+uci set system.@system[0].conloglevel=1
+#uci set system.@system[0].hostname=$(echo -n $(uci get env.var.prod_friendly_name)_$(uci get env.var.local_wifi_mac |grep -o '..$'))
+uci set system.@system[0].hostname=$(echo -n $(uci get env.var.prod_friendly_name))
+uci set system.@system[0].log_prefix="$(uci get env.rip.factory_id)$(uci get env.rip.serial)"
+uci commit system
+
+# Debug trace for Libre Luci
+if uci -q get network.luci; then
+  if [ -z "$(uci -q get system.libre)" ]; then
+    uci set system.libre='libre'
+    uci set system.libre.debug='0'
+    uci set system.libre.timeout='30'
+    uci commit system
+  fi
+fi

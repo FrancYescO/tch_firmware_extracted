@@ -1,0 +1,218 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Calculate TI SSID Postfix out of Wirelss MAC-Address as on Jira: NG-47046
+#wireless_postfix_TI.sh for now this is devitation from custo as received from CTS
+#instead of having another script merged it here itself
+#get mac adress
+macadress=`uci get env.rip.wifi_mac`
+macadress2=`uci get env.rip.eth_mac`
+
+#Example mac=C4:EA:1D:59:43:76 --> mac=C4:EA:d:c:b:a
+#we save the two last digits of the mac in a and so on for b,c and d
+a=`echo $macadress | awk '{print substr($macadress, 16,2)}'`
+b=`echo $macadress | awk '{print substr($macadress, 13,2)}'`
+c=`echo $macadress | awk '{print substr($macadress, 10,2)}'`
+d=`echo $macadress | awk '{print substr($macadress, 7,2)}'`
+
+e=`echo $macadress2 | awk '{print substr($macadress2, 16,2)}'`
+f=`echo $macadress2 | awk '{print substr($macadress2, 13,2)}'`
+g=`echo $macadress2 | awk '{print substr($macadress2, 10,2)}'`
+h=`echo $macadress2 | awk '{print substr($macadress2, 7,2)}'`
+
+#the 0x and than our variables compiles from hex to dec 0xf --> 15
+#(0x$b << 8) this means our compiled hex to dec number will be shift left for 8 bits
+decimal_ssid=$((0x$a | (0x$b << 8) | (0x$c << 16) | ( (0x$d & 15) << 24 ) ))
+decimal_ssid2=$((0x$e | (0x$f << 8) | (0x$g << 16) | ( (0x$h & 15) << 24 ) ))
+#$(($decimal_ssid%100000000)) --> we want only a 8 digits number so we use modulo
+#printf "%.8d " $(($decimal_ssid%100000000)) --> and all together we want everytime that the number is 8 digits long, if it only 7 digits we need a 0 at the
+#beginning of our decimal number
+decimal_ssid=`printf "%.8d " $(($decimal_ssid%100000000))`
+decimal_ssid2=`printf "%.8d " $(($decimal_ssid2%100000000))`
+uci set env.var.ssid_mac_postfix_r0=$decimal_ssid
+uci set env.var.ssid_mac_postfix_r1=$decimal_ssid2
+
+#Update parameters
+
+# To make sure it is set to the correct vendor
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+# Is there a STA (endpoint) configured ?
+DUMMY_STA=`uci get wireless.wl0.mode`
+[ "$DUMMY_STA" == "sta" ] && uci set wireless.wl0_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+SUPPORTED=`uci get wireless.ap0.supported_security_modes`
+for security in $SUPPORTED
+do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+    uci set wireless.ap0_credential0=wifi-ap-credential
+    uci set wireless.ap0_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+  fi
+done
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G 2> /dev/null`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+
+  uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+  # Is there a STA (endpoint) configured ?
+  DUMMY_STA=`uci get wireless.wl1.mode`
+  [ "$DUMMY_STA" == "sta" ] && uci set wireless.wl1_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+  uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+  uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+  uci set wireless.ap1_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+  SUPPORTED=`uci get wireless.ap1.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap1_credential0=wifi-ap-credential
+      uci set wireless.ap1_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+    fi
+  done
+fi
+
+DUMMY=`uci get wireless.radio2 2> /dev/null`
+
+if [ "$?" == "0" ] ; then
+  RADIO_NUM=3
+
+  uci set wireless.radio2.type=`wireless_get_radio_type.sh radio2`
+
+  uci set wireless.wl2.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r2`
+
+  # Is there a STA (endpoint) configured ?
+  DUMMY_STA=`uci get wireless.wl2.mode`
+  [ "$DUMMY_STA" == "sta" ] && uci set wireless.wl2_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r2`
+
+  uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r2_s0`
+
+  uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r2_s0`
+
+  uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r2_s0`
+
+  uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r2_s0`
+
+  SUPPORTED=`uci get wireless.ap2.supported_security_modes 2> /dev/null`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap2_credential0=wifi-ap-credential
+      uci set wireless.ap2_credential0.passphrase=`uci get env.var.default_key_r2_s0`
+    fi
+  done
+else
+
+AP2_EXISTS=`uci get wireless.ap2 2> /dev/null`
+if [ "$AP2_EXISTS" = "wifi-ap" ] && [ "$RADIO_NUM" != "3" ]; then
+
+
+  #If not Triband config the BH AP information on the standard 5GHz   
+
+  uci set wireless.wl1_2.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r1`-BH
+
+  uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r1_s0`
+
+  SUPPORTED=`uci get wireless.ap2.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap2_credential0=wifi-ap-credential
+      uci set wireless.ap2_credential0.passphrase=`uci get env.var.default_key_r1_s0`
+    fi
+  done
+  
+fi
+
+fi
+
+
+
+# It is for GUEST_Radio_2G config
+guest_2G=`uci get wireless.ap3 2> /dev/null`
+
+if [ "$guest_2G" = "wifi-ap" ] && [ "$RADIO_NUM" != "3" ] ; then
+  uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap3.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+  uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+  SUPPORTED=`uci get wireless.ap3.supported_security_modes 2> /dev/null`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap3_credential0=wifi-ap-credential
+      uci set wireless.ap3_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+    fi
+  done
+fi
+
+# It is for GUEST_Radio_5G config
+guest_5G=`uci get wireless.ap4 2> /dev/null`
+
+if [ "$guest_5G" = "wifi-ap" ] && [ "$RADIO_NUM" != "3" ] ; then
+  uci set wireless.ap4.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap4.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap4.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  SUPPORTED=`uci get wireless.ap4.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap4_credential0=wifi-ap-credential
+      uci set wireless.ap4_credential0.passphrase=`uci get env.var.default_key_r1_s0`
+    fi
+  done
+fi
+
+uci commit wireless
+
+#to update the default security mode in env
+uci set env.var.default_security_mode_r0_s0=`uci get wireless.ap0.security_mode`
+uci set env.var.default_security_mode_r1_s0=`uci get wireless.ap1.security_mode`
+if [ "$RADIO_NUM" == "3" ] ; then
+  uci set env.var.default_security_mode_r2_s0=`uci get wireless.ap2.security_mode`
+fi 
+
+uci commit env
+
+#/*******************************************************************/
+#/*             datamodel ordering for wireless devices             */
+#/*******************************************************************/
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.wlandevices=ordering
+uci set dmordering.wlandevices.name='InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.'
+# devices that are instantiated under `InternetGatewayDevice.LANDevice`:
+uci add_list dmordering.wlandevices.order=wl0
+uci add_list dmordering.wlandevices.order=wl1_remote
+uci commit dmordering
+

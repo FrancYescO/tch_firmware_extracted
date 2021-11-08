@@ -1,0 +1,209 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_WiFi_AccessPoint_i_Security_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.Security.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ModeEnabled = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          -- "WEP-64",  -- "wep" mode is not supported
+          -- "WEP-128",
+          "WPA-Personal",
+          "WPA2-Personal",
+          "WPA-WPA2-Personal",
+          "WPA-Enterprise",
+          "WPA2-Enterprise",
+          "WPA-WPA2-Enterprise",
+	  "WPA3-Personal",
+          "WPA3-Personal-Transition",
+          "WPA3-Enterprise",
+        },
+      },
+      KeyPassphrase = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        min = "8",
+        max = "63",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local conn = mapper("ubus").connect()
+local wirelessBinding = {config = "wireless"}
+local gmatch = string.gmatch
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local setSecurityOption = bandSteerHelper.setSecurityOption
+local nwmodel = require "transformer.shared.models.device2.network"
+local model = nwmodel.load()
+local process = require("tch.process")
+local execute = process.execute
+
+local wirelessBackup = getAllFromUci(wirelessBinding)
+local transactions = {}
+
+local supportedModesMap = {
+  ["none"]          = "None",
+  ["wep"]           = "None",  -- "wep" mode is not supported
+  ["wpa2-psk"]      = "WPA2-Personal",
+  ["wpa-wpa2-psk"]  = "WPA-WPA2-Personal",
+  ["wpa2"]          = "WPA2-Enterprise",
+  ["wpa-wpa2"]      = "WPA-WPA2-Enterprise",
+  ["wpa3-psk"]      = "WPA3-Personal",
+  ["wpa2-wpa3-psk"] = "WPA3-Personal-Transition",
+  ["wpa3"]          = "WPA3-Enterprise"
+}
+
+local accessSecurityUciMap = {
+  ["None"] = "none",
+  -- ["WEP-64"] = "wep",  -- "wep" mode is not supported
+  ["WPA2-Personal"] = "wpa2-psk",
+  ["WPA-WPA2-Personal"] = "wpa-wpa2-psk",
+  ["WPA2-Enterprise"] = "wpa2",
+  ["WPA-WPA2-Enterprise"] = "wpa-wpa2",
+  ["WPA3-Personal"] = "wpa3-psk",
+  ["WPA3-Personal-Transition"] = "wpa2-wpa3-psk",
+  ["WPA3-Enterprise"] = "wpa3",
+}
+
+local function getSupportedModesFromUbus(key)
+  local data = conn:call("wireless.accesspoint.security", "get", { name = key }) or {}
+  return data[key] and data[key].supported_modes or ""
+end
+
+local function getUciValue(sectionName, paramName)
+  wirelessBinding.sectionname = sectionName
+  if paramName then
+    wirelessBinding.option = paramName
+    return getFromUci(wirelessBinding)
+  end
+  return getAllFromUci(wirelessBinding)
+end
+
+local function getAPForIface(key)
+  local ap
+  local iface = model:getUciKey(key)
+  wirelessBinding.sectionname = "wifi-ap"
+  uciHelper.foreach_on_uci(wirelessBinding, function(s)
+    if s.iface == iface then
+      ap = s['.name']
+      return false
+    end
+  end)
+  return ap
+end
+
+Device_WiFi_AccessPoint_i_Security_.get = {
+  ModeEnabled = function(mapping, param, key)
+    local uciSecurityValues = getUciValue(key)
+    local modeName = uciSecurityValues["security_mode"] and supportedModesMap[uciSecurityValues["security_mode"]]
+    return (modeName and modeName or "")
+  end,
+  KeyPassphrase = function(mapping, param, key)
+    local uciSecurityValues = getUciValue(key)
+    return uciSecurityValues["wpa_psk_key"] or ""
+  end
+}
+
+Device_WiFi_AccessPoint_i_Security_.getall = function(mapping, key)
+  local uciSecurityValues = getUciValue(key)
+  local modeEnabled = uciSecurityValues["security_mode"]
+
+  return {
+    ModeEnabled = modeEnabled and supportedModesMap[modeEnabled] or "",
+    KeyPassphrase = uciSecurityValues["wpa_psk_key"] or "",
+  }
+end
+
+local function setModeEnabled(value, key, commitapply, transaction)
+  local supportedModes = getUciValue(key, "supported_security_modes")
+  if supportedModes == "" then
+    supportedModes = getSupportedModesFromUbus(key)
+  end
+  local modeAsPerUci = accessSecurityUciMap[value]
+  if supportedModes == "" then
+    return setSecurityOption(key, "security_mode", modeAsPerUci, commitapply, transaction)
+  else
+    for mode in gmatch(supportedModes, "([^%s]+)") do
+      if mode == modeAsPerUci then
+        return setSecurityOption(key, "security_mode", modeAsPerUci, commitapply, transaction)
+      end
+    end
+    return nil, value.." Mode is currently not supported"
+  end
+end
+
+Device_WiFi_AccessPoint_i_Security_.set = {
+  ModeEnabled = function(_, _, value, key)
+    return setModeEnabled(value, key, commitapply, transactions)
+  end,
+  KeyPassphrase = function(_, _, value, key)
+    return setSecurityOption(key, "wpa_psk_key", value, commitapply, transactions)
+  end,
+}
+
+local function endTransaction(action)
+  for config in pairs(transactions) do
+    action({config = config})
+  end
+  transactions = {}
+end
+
+Device_WiFi_AccessPoint_i_Security_.commit = function()
+  return endTransaction(uciHelper.commit)
+end
+
+Device_WiFi_AccessPoint_i_Security_.revert = function()
+  return endTransaction(uciHelper.revert)
+end
+
+-- Compare the previous wireless Config with the updated value
+-- Update the local backup on value change
+local function isWirelessCfgChanged(ap, param,data)
+  wirelessBinding.sectionname = data.name
+  local interface = getUciValue(data.name, "network")
+  wirelessBinding.sectionname = ap
+  if interface == "guest"  then
+    execute("sleep", {"1"})
+  end
+  local latestValue = getAllFromUci(wirelessBinding)
+  if wirelessBackup[ap][param] and latestValue[param] and (wirelessBackup[ap][param] ~= latestValue[param]) then
+    -- To update the local backup with the latest Value
+    -- This will update the wirelessBackup value,
+    -- whenever wireless config value is changed
+    wirelessBackup[ap][param] = latestValue[param]
+    return true
+  end
+  return false
+end
+
+local function ubusEventCb(mapping, event, data)
+  local apv = getAPForIface(data.name)
+  if apv then
+    local events = {}
+    if isWirelessCfgChanged(apv, "wpa_psk_key", data) then
+      events[#events + 1] = { key = apv, paramname = "KeyPassphrase" }
+    end
+    if isWirelessCfgChanged(apv, "security_mode", data) then
+      events[#events + 1] = { key = apv, paramname = "ModeEnabled" }
+    end
+    return events
+  end
+end
+
+Device_WiFi_AccessPoint_i_Security_.add_watchers = function(mapping, param, key)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, ubusEventCb, "wireless.ssid")
+end
+
+register(Device_WiFi_AccessPoint_i_Security_)
