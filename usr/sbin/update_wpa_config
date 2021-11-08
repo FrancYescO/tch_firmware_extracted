@@ -1,0 +1,349 @@
+#!/usr/bin/env lua
+local require = require
+local pairs = pairs
+local open = io.open
+
+local authority = _G.arg[1] or "UCI"
+
+local uci = require 'uci'
+local lfs = require 'lfs'
+local cursor = uci.cursor()
+
+local logger = require("tch.logger")
+local posix = require("tch.posix")
+logger.init("update_wpa_config", 3, posix.LOG_PID + posix.LOG_CONS)
+
+local config = "wireless"
+local config_path = "/var/run/wpa_supplicant_config/"
+
+
+local known_options = {
+  ["ssid"] = "ssid",
+  ["security_mode"] = "key_mgmt",
+  ["wpa_psk_key"] = "psk",
+  ["state"] = "disabled",
+}
+
+local reverse_options = {}
+for uci_option, wpa_option in pairs(known_options) do
+  reverse_options[wpa_option] = uci_option
+end
+
+-- Translate our security modes to something wpa_supplicant can understand.
+local security_modes = {
+  ["none"] = "NONE",
+  ["wpa2-psk"] = "WPA-PSK WPA-PSK-SHA256",
+  ["wpa-wpa2-psk"] = "WPA-PSK",
+}
+
+local function handle_security_mode(value)
+  return security_modes[value] or "WPA-PSK" -- If we don't know the configured security mode, return WPA-PSK as default
+end
+
+local function reverse_boolean(value)
+  if value == "1" then
+    return "0"
+  end
+  return "1"
+end
+
+local handlers = {
+  ["security_mode"] = handle_security_mode,
+  ["state"] = reverse_boolean, -- We need to reverse the logic, since wpa_supplicant uses the 'disabled' field, where '1' means the network block is disabled.
+  __index = function()
+    return function(value)
+      return value
+    end
+  end,
+}
+setmetatable(handlers, handlers)
+
+local reversed_security_modes = {}
+for uci_mode, wpa_mode in pairs(security_modes) do
+  reversed_security_modes[wpa_mode] = uci_mode
+end
+
+local function handle_key_mgmt(value)
+  return reversed_security_modes[value] or "wpa-wpa2-psk" -- If we don't know the configured key_mgmt, return wpa-wpa2-psk as default
+end
+
+local reverse_handlers = {
+  ["key_mgmt"] = handle_key_mgmt,
+  ["disabled"] = reverse_boolean, -- We need to reverse the logic, since UCI uses the 'state' field, where '1' means the profile is enabled.
+  __index = function(_, key)
+    return function(value)
+      return value
+    end
+  end,
+}
+setmetatable(reverse_handlers, reverse_handlers)
+
+local current_endpoint_pattern
+local network_blocks
+
+local function configure_ep_profile_instance(section)
+  logger:debug("Entered configure_ep_profile_instance")
+  local name = section[".name"]
+  if not name:match(current_endpoint_pattern) then
+    -- Not a relevant profile for the current endpoint
+    return
+  end
+  local network_block = {id_str = name}
+  network_blocks[#network_blocks + 1]=network_block
+  for option_name, option_value in pairs(section) do
+    if known_options[option_name] then
+      -- We know how to get this into a network block
+      network_block[known_options[option_name]] = handlers[option_name](option_value)
+    end
+  end
+end
+
+local function get_env_var(variable_name, default)
+  local env_var = cursor:get("env","var",variable_name)
+  if not env_var or env_var == "" then
+    env_var = default
+  end
+  return env_var
+end
+
+local function print_general_config(wpa_config)
+  wpa_config:write("ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=root\n")
+  local manufacturer = get_env_var("company_name", "Technicolor")
+  wpa_config:write("manufacturer="..manufacturer.."\n")
+  local model_name = get_env_var("prod_friendly_name", "default_model_name")
+  wpa_config:write("model_name="..model_name.."\n")
+  local serial_number = get_env_var("serial", "CPXXXXXXXX")
+  wpa_config:write("serial_number="..serial_number.."\n")
+  wpa_config:write("update_config=1\n")
+  wpa_config:write("pmf=1\n")
+end
+
+local options_to_quote = {
+  ["ssid"] = true,
+  ["id_str"] = true,
+}
+
+local function quote(option, value)
+  return string.format("%s%s%s", options_to_quote[option] and '"' or "", value, options_to_quote[option] and '"' or "")
+end
+
+local function unquote(value)
+   return string.match(value, "^[%'%\"](.*)[%'%\"]$")
+end
+
+local function print_network_blocks(wpa_config, wet_mode)
+  for _, network_block in ipairs(network_blocks) do
+    wpa_config:write("network={\n")
+    if wet_mode ~= "wet" then
+      wpa_config:write("\tmulti_ap_backhaul_sta=1\n") -- hardcoded, as we're using MAP framework for extenders
+    end
+    wpa_config:write("\tscan_ssid=1\n") -- scan APs with probe request frames (to find hidden SSIDs)
+    for option, value in pairs(network_block) do
+      if option == "psk" and value and #value ~= 64 then
+        options_to_quote[option] = true
+      end
+      wpa_config:write(string.format("\t%s=%s\n", option, quote(option, value)))
+      if option == "psk" then
+        options_to_quote[option] = nil
+      end
+    end
+    wpa_config:write("}\n")
+  end
+end
+
+local function configure_ep_instance(section)
+  logger:debug("Entered configure_ep_instance")
+  if section["state"] ~= "1" then
+    -- endpoint instance is disabled, do nothing
+    logger:debug("endpoint %s is disabled", section[".name"] or "{unknown}")
+    return
+  end
+  network_blocks = {}
+  local name = section[".name"]
+  if not name then
+    logger:error("Can't parse this endpoint instance without a name")
+    return
+  end
+  local iface = section["iface"]
+  if not iface then
+    logger:error("Can't parse the %s endpoint instance without the mandatory interface name", name)
+    return
+  end
+  local wet_mode = section["mode"]
+  -- First parse all endpoint profiles that are relevant for the current endpoint
+  current_endpoint_pattern = "^" .. name .. "_"
+  cursor:foreach(config, "wifi-ep-profile", configure_ep_profile_instance)
+
+  -- Now sort the network blocks
+  table.sort(network_blocks, function(a,b)
+    return a.id_str < b.id_str
+  end)
+  
+  local config_location = config_path .. iface
+  local wpa_config = open(config_location, "w")
+  if not wpa_config then
+    logger:error("failed to open wpa_supplicant config file at %s", config_location)
+    return
+  end
+
+  -- Print the general wpa_supplicant config
+  print_general_config(wpa_config)
+
+  -- And finally print the configured network blocks
+  print_network_blocks(wpa_config, wet_mode)
+
+  wpa_config:close() 
+end
+
+local function find_ep_for_iface(iface)
+  local sectionname
+  cursor:foreach(config, "wifi-ep", function(section)
+    if section.iface == iface then
+      sectionname = section[".name"]
+      return false
+    end
+  end)
+  return sectionname
+end
+
+local function parse_wpa_config_file(iface)
+  local conf_file = io.open(config_path .. iface, "r")
+  if not conf_file then
+    logger:error("Unable to open wpa supplicant config for "..iface)
+  end
+  local network_block
+  local network_blocks = {}
+  for line in conf_file:lines() do
+    if not network_block then
+      -- We skip all general config, as it's currently hardcoded in the UCI -> WPA config conversion
+      if line:match("^network={") then
+        -- Start of a network block
+        network_block = {}
+      end
+    else
+      if line:match("^}") then
+        -- Network block finished
+        network_blocks[#network_blocks + 1] = network_block
+        network_block = nil
+      else
+        local option, value = line:match("^%s*([^=]+)=(.+)$")
+        if options_to_quote[option] or option == "psk" then
+          value = unquote(value) or value
+        end
+        network_block[option] = value
+      end
+    end
+  end
+  conf_file:close()
+  return network_blocks
+end
+
+local function merge_ep_profile(network_block, ep_section)
+  local profile_name = network_block.id_str
+  if not profile_name:match("^"..ep_section) then
+    logger:error("The id_str %s does not match our expected endpoint section name %s", profile_name, ep_section)
+    return
+  end
+  if not cursor:get(config, profile_name) then
+    logger:debug("The UCI section has disappeared, remake it")
+    cursor:set(config, profile_name, "wifi-ep-profile")
+    cursor:save(config)
+  end
+  network_block.id_str = nil -- Ignore the sectionname we added ourself
+  network_block.multi_ap_backhaul_sta = nil -- TODO why is this hardcoded?
+  if not network_block.disabled then
+    -- If the network block does not have a 'disabled' field, explicitly add one before the UCI conversion so we get our 'state' option
+    network_block.disabled = 0
+  end
+  for option, value in pairs(network_block) do
+    if reverse_options[option] then
+      if reverse_options[option] == "security_mode" then
+        -- Special treatment for security_mode because 2 different UCI modes translate to the same WPA mode.
+        local prev_value = cursor:get(config, profile_name, reverse_options[option])
+        if prev_value and value == handlers[reverse_options[option]](prev_value) then
+          -- No need to do anything
+        else
+          -- Security mode changed, overwrite it
+          cursor:set(config, profile_name, reverse_options[option], reverse_handlers[option](value))
+        end
+      else
+        cursor:set(config, profile_name, reverse_options[option], reverse_handlers[option](value))
+      end
+    end
+  end
+  cursor:save(config)
+end
+
+local function find_next_profile_name(ep_section)
+  local next_index = 0
+  -- The index search has been temporarily removed. Re-add it when easymesh can handle multiple profiles.
+  -- Because we only support one profile per endpoint, always return epX_profile0
+  return ep_section.."_profile"..next_index
+end
+
+local function add_ep_profile(network_block, ep_section)
+  logger:debug("Adding new endpoint profile for endpoint %s", ep_section)
+  local profile_name = find_next_profile_name(ep_section)
+  cursor:set(config, profile_name, "wifi-ep-profile")
+  cursor:save(config)
+  network_block.id_str = profile_name
+  merge_ep_profile(network_block, ep_section)
+end
+
+local function find_ep_profile_for_ssid(ssid, ep_section)
+  local sectionname
+  cursor:foreach(config, "wifi-ep-profile", function(section)
+    -- The SSID check has been temporarily removed. Re-add it when easymesh can handle multiple profiles.
+    -- Because it doesn't check on SSID, it should always match the first result, eg. epX_profile0
+    if section[".name"]:match("^"..ep_section) then
+      sectionname = section[".name"]
+      return false
+    end
+  end)
+  return sectionname
+end
+
+local function export_network_blocks_to_uci(network_blocks, ep_section)
+  for _,network_block in ipairs(network_blocks) do
+    if network_block.id_str then
+      -- Originally exported by UCI to WPA, merge back
+      logger:debug("Merging %s back to UCI", network_block.id_str)
+      merge_ep_profile(network_block, ep_section)
+    else
+      if network_block.ssid and find_ep_profile_for_ssid(network_block.ssid, ep_section) then
+        -- Found an endpoint profile with the same SSID, use it for merging
+        network_block.id_str = find_ep_profile_for_ssid(network_block.ssid, ep_section)
+        merge_ep_profile(network_block, ep_section)
+      else
+        -- New network block, needs new section in UCI
+        add_ep_profile(network_block, ep_section)
+      end
+    end
+  end
+  cursor:commit(config)
+end
+
+if lfs.attributes(config_path, "mode") ~= " directory" then
+  lfs.mkdir(config_path)
+end
+
+if authority == "UCI" then
+  logger:debug("Converting UCI values to WPA supplicant config files")
+  -- The information present in UCI is the authoritive source and the wpa supplicant config files need to be overwritten with this information.
+  for iface in lfs.dir(config_path) do
+    if iface ~= "." and iface ~= ".." then
+      os.remove(config_path .. iface)
+    end
+  end
+  cursor:foreach(config, "wifi-ep", configure_ep_instance)
+elseif authority == "config" then
+  logger:debug("Converting WPA supplicant config files to UCI")
+  -- The information present in the wpa supplicant config files is the authoritive source and the information in UCI needs to be overwritten.
+  for iface in lfs.dir(config_path) do
+    if iface ~= "." and iface ~= ".." then
+      local ep_section = find_ep_for_iface(iface)
+      local network_blocks = parse_wpa_config_file(iface)
+      export_network_blocks_to_uci(network_blocks, ep_section)
+    end
+  end
+end
