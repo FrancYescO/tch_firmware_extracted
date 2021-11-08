@@ -1,0 +1,45 @@
+local Device_GatewayInfo_ = {
+  objectType = {
+    name = "Device.GatewayInfo.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ManufacturerOUI = {
+        access = "readOnly",
+        type = "string",
+      },
+      ProductClass = {
+        access = "readOnly",
+        type = "string",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+--suboption numbering for fetching data
+local subOptionMap = {
+  ManufacturerOUI = "1",
+  SerialNumber    = "2",
+  ProductClass    = "3"
+}
+
+Device_GatewayInfo_.get  = function(mapping, param)
+  local subOption = {}
+  local file = io.open("/tmp/dhcpoption125.txt", "r")
+  if file then
+    for line in file:lines() do
+      local idx,val = string.match(line,"^([^=]*)=+(.*)")
+      subOption[idx] = val
+    end
+  end
+  local index = subOptionMap[param]
+  return index and subOption[index] or ""
+end
+
+register(Device_GatewayInfo_)
+
