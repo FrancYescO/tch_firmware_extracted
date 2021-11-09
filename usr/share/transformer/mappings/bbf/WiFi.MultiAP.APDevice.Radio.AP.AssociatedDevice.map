@@ -1,0 +1,209 @@
+-- Manually generated
+local Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_ = {
+  objectType = {
+    name = "#ROOT.APDevice.{i}.Radio.{i}.AP.{i}.AssociatedDevice.{i}.",
+    numEntriesParameter = "AssociatedDeviceNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17"
+      },
+      OperatingStandard = {
+        access = "readOnly",
+        type = "string"
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean"
+      },
+      AssociationTime = {
+        access = "readOnly",
+        type = "dateTime"
+      },
+      LastDataDownlinkRate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      LastDataUplinkRate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      X_000E50_IsBackHaulSta = {
+        access = "readOnly",
+        type = "boolean"
+      },
+      SignalStrength = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "255",
+          },
+        },
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+
+local paramsMap = {
+  OperatingStandard = "supported_standard",
+  AssociationTime = "since_assoc_time",
+  LastDataDownlinkRate = "dlmac_datarate",
+  LastDataUplinkRate = "ul_mac_rate",
+  SignalStrength = "rssi",
+  X_000E50_IsBackHaulSta = "station_type",
+}
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_.entries = function(mapping, parent, grand, great)
+  cacheData = conn:call("multiap.controller.station", "list", {}) or {}
+  local data = conn:call("multiap.controller.agent_info", "get", { almac = great }) or {}
+  local bssInfo = data[great] and data[great]["radio_info"] and data[great]["radio_info"][grand] and data[great]["radio_info"][grand]["bss_info"] and data[great]["radio_info"][grand]["bss_info"][parent] or {}
+  bssInfo = bssInfo["sta_list"] or {}
+  local entries = {}
+  for idx,mac in ipairs(bssInfo) do
+    if cacheData[mac] and cacheData[mac][paramsMap["SignalStrength"]] and cacheData[mac][paramsMap["SignalStrength"]] ~= "" and cacheData[mac][paramsMap["SignalStrength"]] ~= 0 then
+      entries[#entries + 1] = string.format("%s|%s_%s_%s", mac, parent, grand, great)
+    end
+  end
+  return entries
+end
+
+local function getUbusOption(_, param, key)
+  local key = splitKey(key)
+  return cacheData[key] and cacheData[key][paramsMap[param]] and tostring(cacheData[key][paramsMap[param]]) or ""
+end
+
+local function getAssociationDate(time)
+  local currTime = os.time()
+  time = currTime - (tonumber(time) or 0)
+  return os.date("%Y-%m-%dT%H:%M:%SZ", time) or ""
+end
+
+local function getStationType(sta_type)
+  return sta_type == "backhaul" and "true" or "false"
+end
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_.get = {
+  MACAddress = function(mapping, param, key)
+    local mac = splitKey(key)
+    return mac
+  end,
+  Active = "1",
+  OperatingStandard = getUbusOption,
+  AssociationTime = function(mapping, param, key)
+    local result = getUbusOption(_, param, key)
+    return getAssociationDate(result)
+  end,
+  LastDataDownlinkRate = getUbusOption,
+  LastDataUplinkRate = getUbusOption,
+  SignalStrength = getUbusOption,
+  X_000E50_IsBackHaulSta  = function(mapping, param, key)
+    local sta_type = getUbusOption(_, param, key)
+    return getStationType(sta_type)
+  end,
+}
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_.getall = function(mapping, key)
+  local mac = splitKey(key)
+  local data = cacheData[mac] or {}
+  return {
+    MACAddress = mac,
+    Active = "1",
+    OperatingStandard = tostring(data.supported_standard or ""),
+    AssociationTime = getAssociationDate(data.since_assoc_time or 0),
+    LastDataDownlinkRate = tostring(data.dlmac_datarate or ""),
+    LastDataUplinkRate = tostring(data.ul_mac_rate or ""),
+    SignalStrength = tostring(data.rssi or ""),
+    X_000E50_IsBackHaulSta = getStationType(data.station_type)
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_, "#ROOT", { "Device.WiFi.MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_Stats_ = {
+  objectType = {
+    name = "#ROOT.APDevice.{i}.Radio.{i}.AP.{i}.AssociatedDevice.{i}.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      RetransCount = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+    }
+  }
+}
+
+local paramMap = {
+  BytesSent = "txbytes",
+  BytesReceived = "rxbytes",
+  PacketsSent = "txpkts",
+  PacketsReceived = "rxpkts",
+  ErrorsSent = "txpkterrrors",
+  ErrorsReceived = "rxpkterrors",
+  RetransCount = "retransmission_cnt",
+}
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_Stats_.get = function(mapping, param, key)
+  local key = splitKey(key)
+  if paramMap[param] then
+    local result = cacheData[key] and cacheData[key][paramMap[param]] or "0"
+    return tostring(result)
+  end
+  return "0"
+end
+
+Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_Stats_.getall = function(mapping, key)
+  local key = splitKey(key)
+  local allValues = {}
+  local data = cacheData[key] or {}
+  for param, option in pairs(paramMap) do
+    allValues[param] = data[option] and tostring(data[option]) or "0"
+  end
+  return allValues
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_MultiAP_APDevice_i_Radio_i_AP_i_AssociatedDevice_i_Stats_, "#ROOT", { "Device.WiFi.MultiAP",  "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

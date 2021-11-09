@@ -1,0 +1,114 @@
+local Device_DeviceInfo_X_000E50_LibreModule_ = {
+  objectType = {
+    name = "Device.DeviceInfo.X_000E50_LibreModule.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Libre LS9x firmware version",
+    parameters = {
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Displays the software version of LS9x hardware connected",
+      },
+    }
+  }
+}
+
+local process = require("tch.process")
+
+local function getVersion()
+  local fp = process.popen("libre_luci", {"--server", "172.16.234.2", "--port", "7778", "--command", "firmware_version"} , "re")
+  local result
+  if fp then
+    result = fp:read("*l")
+  end
+  return result or ""
+end
+
+Device_DeviceInfo_X_000E50_LibreModule_.get = {
+  SoftwareVersion = getVersion
+}
+
+register(Device_DeviceInfo_X_000E50_LibreModule_)
+
+local Device_Services_X_000E50_LibreModule_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_LibreModule.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+register(Device_Services_X_000E50_LibreModule_)
+
+local Device_Services_X_000E50_LibreModule_WebGui_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_LibreModule.WebGui.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "WebGui Access to the LibreModule",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable the WebGui Access to the LibreModule"
+      }
+    }
+  }
+}
+
+local webgui_enabled
+Device_Services_X_000E50_LibreModule_WebGui_.get = {
+  Enable = function(mapping, param, key)
+    return webgui_enabled or "0" --no support for get from the luci command
+  end,
+}
+
+Device_Services_X_000E50_LibreModule_WebGui_.set = {
+  Enable = function(mapping, param, value, key)
+    webgui_enabled = value
+    local suffix = value == "1" and "enable" or "disable"
+    commitapply:newset("webgui_"..suffix)
+  end,
+}
+
+register(Device_Services_X_000E50_LibreModule_WebGui_)
+
+local Device_Services_X_000E50_LibreModule_Telnet_ = {
+  objectType = {
+    name = "Device.Services.X_000E50_LibreModule.Telnet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Telnet Access to the LibreModule",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable the Telnet Access to the LibreModule"
+      }
+    }
+  }
+}
+
+local telnet_enabled
+Device_Services_X_000E50_LibreModule_Telnet_.get = {
+  Enable = function(mapping, param, key)
+    return telnet_enabled or "0" --no support for get from the luci command
+  end,
+}
+
+Device_Services_X_000E50_LibreModule_Telnet_.set = {
+  Enable = function(mapping, param, value, key)
+    telnet_enabled = value
+    local suffix = value == "1" and "enable" or "disable"
+    commitapply:newset("telnet_"..suffix)
+  end,
+}
+
+register(Device_Services_X_000E50_LibreModule_Telnet_)

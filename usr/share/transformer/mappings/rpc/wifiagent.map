@@ -1,0 +1,34 @@
+local wifiagent_ = {
+  objectType = {
+    name = "rpc.wifiagent.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      OnBoardingStatus = {
+        description = "To get status of wifidoctoragent onboarding",
+          access = "readOnly",
+          type = "string",
+      }
+    },
+  }
+}
+
+local eventsource, onBoarding = eventsource, ""
+
+local function getOnBoardingStatus(mapping, event, data)
+  onBoarding = data["event"] or onBoarding
+end
+
+local function get()
+  return onBoarding
+end
+
+wifiagent_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, getOnBoardingStatus, "wifidoctoragent.onboarding")
+end
+
+wifiagent_.get = get
+
+register(wifiagent_)

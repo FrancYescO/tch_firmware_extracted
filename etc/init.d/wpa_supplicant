@@ -1,0 +1,92 @@
+#!/bin/sh /etc/rc.common
+
+START=23
+USE_PROCD=1
+EXTRA_COMMANDS="$EXTRA_COMMANDS reconfigure"
+EXTRA_HELP="reconfigure Forces the WPA supplicant config to be written back to UCI"
+unset args
+
+wifi_ep_parse() {
+  local ep="${1}"
+  local iface
+  local state
+  local mode
+
+  config_get iface "${ep}" iface
+  config_get state "${ep}" state
+  config_get mode "${ep}" mode
+
+  if [ "${state}" = "1" ]; then
+    # Cancel alls scans ongoing
+    wl -i ${iface} scanabort
+    wl -i ${iface} escanabort
+
+    # disable interface
+    wl -i ${iface} down
+
+    if [ "${mode}" = "wet" ]; then
+      wl -i ${iface} keep_ap_up 0
+      wl -i ${iface} apsta 1
+      wl -i ${iface} map 0
+      wl -i ${iface} dwds 0
+      wl -i ${iface} dwds_lb_filter 1
+      wl -i ${iface} roam_off 1
+      wl -i ${iface} mpc 0
+      wl -i ${iface} up
+      dhdctl -i ${iface} wet 1
+    else
+      wl -i ${iface} keep_ap_up 0
+      wl -i ${iface} apsta 1
+      wl -i ${iface} map 4
+      wl -i ${iface} dwds 1
+      wl -i ${iface} dwds_lb_filter 1
+      wl -i ${iface} roam_off 1
+      wl -i ${iface} mpc 0
+      wl -i ${iface} rrm 51
+      wl -i ${iface} up
+    fi
+
+    # start supplicant
+    if [ -z "${args}" ]; then
+      args="-Dnl80211 -i${iface} -b br-lan -c/var/run/wpa_supplicant_config/${iface}"
+    else
+      args="${args} -N -i${iface} -b br-lan -c/var/run/wpa_supplicant_config/${iface}"
+    fi
+  else
+    if [ "`wl -i ${iface} apsta`" = "1" ]; then
+      # disable apsta
+      wl -i ${iface} down
+      wl -i ${iface} apsta 0
+      wl -i ${iface} dwds 0
+      wl -i ${iface} dwds_lb_filter 0
+      wl -i ${iface} roam_off 0
+      wl -i ${iface} mpc 1
+      wl -i ${iface} rrm 0
+      wl -i ${iface} up
+    fi
+  fi
+}
+
+get_args() {
+  . /lib/functions.sh
+
+  config_load wireless
+  config_foreach wifi_ep_parse wifi-ep
+}
+
+start_service() {
+  /usr/sbin/update_wpa_config
+  get_args
+  procd_open_instance
+  procd_set_param command /usr/sbin/wpa_supplicant $args
+  procd_close_instance
+}
+
+reload_service() {
+  /usr/sbin/update_wpa_config
+  procd_send_signal wpa_supplicant
+}
+
+reconfigure() {
+  /usr/sbin/update_wpa_config config
+}
