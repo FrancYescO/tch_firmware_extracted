@@ -1,0 +1,29 @@
+local Device_WiFi_X_000E50_MultiAP_ = {
+  objectType = {
+    name = "Device.WiFi.X_000E50_MultiAP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Controller information to which the agent is connected",
+    parameters = {
+      ControllerSN = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Displays the serial number of the controller to which the agent is connected",
+      },
+    }
+  }
+}
+
+local commitapply, mapper = commitapply, mapper
+local conn = mapper("ubus").connect()
+
+Device_WiFi_X_000E50_MultiAP_.get = {
+  ControllerSN = function(mapping, param, key)
+    local data = conn:call("multiap.agent.info", "get",  {})
+    return data and data["controller_link_status"] and data["controller_link_status"] == "connected" and data["controller_serial"] or ""
+  end
+}
+
+register(Device_WiFi_X_000E50_MultiAP_)

@@ -1,0 +1,72 @@
+#!/bin/sh /etc/rc.common
+
+START=24
+USE_PROCD=1
+EXTRA_COMMANDS="$EXTRA_COMMANDS reconfigure"
+EXTRA_HELP="reconfigure Forces the WPA supplicant config to be written back to UCI"
+unset args
+
+wifi_ep_parse() {
+  local ep="${1}"
+  local iface
+  local state
+  local mode
+
+  config_get iface "${ep}" iface
+  config_get state "${ep}" state
+  config_get mode "${ep}" mode
+
+  if [ "${state}" != "1" ]; then
+    if [ "`wl -i ${iface} apsta`" = "1" ]; then
+        #disable apsta	
+        wl -i ${iface} down
+        wl -i ${iface} apsta 0
+        wl -i ${iface} dwds 0
+        wl -i ${iface} dwds_lb_filter 0
+        wl -i ${iface} roam_off 0
+        wl -i ${iface} mpc 1
+        wl -i ${iface} rrm 0
+        wl -i ${iface} up
+
+        # WAR NG-220241
+        if [ "${iface}" == "wl2" ]; then
+            ubus call wireless.radio.acs rescan '{"name":"radio2"}'
+        else
+            ubus call wireless.radio.acs rescan '{"name":"radio_5G"}'
+        fi
+        #!WAR
+    fi
+  elif [ "${mode}" = "wet" ]; then
+       wl -i ${iface} down
+       dhdctl -i ${iface} wet 1
+       wl -i ${iface} up
+  else
+       wl -i ${iface} down
+       dhdctl -i ${iface} wet 0
+       wl -i ${iface} up
+  fi
+}
+
+get_args() {
+  . /lib/functions.sh
+
+  config_load wireless
+  config_foreach wifi_ep_parse wifi-ep
+}
+
+start_service() {
+  get_args
+  procd_open_instance
+  procd_set_param command /usr/bin/wpa_supplicant_mgmt
+  procd_close_instance
+}
+
+reload_service()                                                         
+{
+	# reload all endpoints
+	ubus call wireless.endpoint reload
+} 
+
+reconfigure() {
+   /usr/sbin/update_wpa_config config
+}
