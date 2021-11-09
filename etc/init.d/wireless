@@ -1,0 +1,69 @@
+#!/bin/sh /etc/rc.common
+
+START=13
+
+BOARD_ID=$(cat /proc/nvram/boardid)
+WLAN_IMPL=`zcat /proc/config.gz | grep WLAN_IMPL | tail -c 3`
+WLAN_CONFIG_FILE="/etc/wlan/${BOARD_ID}.config"
+EXTRA_NVRAM_SETTING="/etc/wlan/apply_nvram_setting"
+if [ -f "$WLAN_CONFIG_FILE" ]; then
+    echo "$WLAN_CONFIG_FILE exists."
+    source $WLAN_CONFIG_FILE
+else
+    echo "$WLAN_CONFIG_FILE does not exist."
+fi
+
+nvram_load()
+{
+    rm -f /data/.kernel_nvram.setting # Always start from clean
+    NVM_FILE=$(find /etc/wlan/ -name '*_nvram.nvm' | head -n1)
+    [ -z "$NVM_FILE" ] && return
+    mkdir -p /mnt/nvram
+    mount -t tmpfs none /mnt/nvram
+    ln -s $NVM_FILE /mnt/nvram/nvram.nvm
+    nvram restore_mfg /data/.kernel_nvram.setting
+    nvram kernelset /data/.kernel_nvram.setting
+    setRadioMacAddress
+    applyTrimming
+    if [ -f "$EXTRA_NVRAM_SETTING" ]; then
+	echo "$EXTRA_NVRAM_SETTING exists, executing..."
+	source $EXTRA_NVRAM_SETTING
+    fi
+    nvram commit
+    umount /mnt/nvram
+    rm -rf /mnt/nvram
+}
+
+start()
+{
+    modprobe wfd 2>/dev/null
+    modprobe wlcsm 2>/dev/null
+    [ -e /usr/bin/nvram ] && nvram_load
+
+    modprobe hnd 2>/dev/null
+    modprobe emf 2>/dev/null
+    modprobe igs 2>/dev/null
+    if [ -e /data/.kernel_nvram.setting ]; then
+        insmod wl max_nic_radio=`getNicCount` 2>/dev/null
+    else
+        modprobe wl 2>/dev/null
+    fi
+    if [ $WLAN_IMPL -gt "32" ]; then
+        insmod dhd dhd_dpc_prio=-1 2>/dev/null
+    else
+        insmod dhd dhd_dpc_prio=5 2>/dev/null
+    fi
+
+    # Invoke the WAR  monitor script for NG-224394 for GBNT-3 Family of products(Tri-Radio)
+    # TODO: Update the logic to have the WAR script as generic for all applicable products
+    if [ "$(cat /proc/device-tree/model 2>/dev/null)" == "Broadcom BCM947622" ]; then
+        local OLD_PID=$(ps | grep mon_rxframe_rxfifo_ovrflow.sh | grep -v grep | cut -d ' ' -f2)
+        if [ $OLD_PID ]; then
+             echo "Warning: mon_rxframe_rxfifo_ovrflow.sh script is already running. Kill old script PID: $OLD_PID" > /dev/console
+             kill -9 $OLD_PID
+        fi
+        echo "Start mon_rxframe_rxfifo_ovrflow.sh monitor script" > /dev/console
+        mon_rxframe_rxfifo_ovrflow.sh &
+    fi
+
+}

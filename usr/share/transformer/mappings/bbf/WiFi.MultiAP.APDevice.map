@@ -1,0 +1,299 @@
+-- Manually generated
+local Multi_MultiAP_APDevice_i_ = {
+  objectType = {
+    name = "#ROOT.APDevice.{i}.",
+    numEntriesParameter = "APDeviceNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17",
+      },
+      X_000E50_IPAddress = {
+        access = "readOnly",
+        type = "string"
+      },
+      X_000E50_State = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      X_000E50_Manufacturer = {
+        access = "readOnly",
+        type = "string"
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      BackhaulLinkType = {
+        access = "readOnly",
+        type = "string"
+      },
+      X_000E50_Parent = {
+        access = "readOnly",
+        type = "string"
+      },
+      X_000E50_Neighbors = {
+        access = "readOnly",
+        type = "string"
+      },
+      ManufacturerOUI = {
+        access = "readOnly",
+        type = "string",
+        min = "6",
+        max = "6"
+      },
+      ProductClass = {
+        access = "readOnly",
+        type = "string",
+        max = "64"
+      },
+      X_000E50_DeviceName = {
+        access = "readOnly",
+        type = "string"
+      },
+      X_000E50_Phyrate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64"
+      },
+      LastContactTime = {
+        access = "readOnly",
+        type = "dateTime"
+      },
+      BackhaulMACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17"
+      },
+      BackhaulBytesSent = {
+        access = "readOnly",
+        type = "unsignedLong"
+      },
+      BackhaulBytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong"
+      },
+      BackhaulLinkUtilization = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "100",
+          },
+        },
+      },
+      BackhaulSignalStrength = {
+        access = "readOnly",
+        type = "int"
+      },
+      X_000E50_BackhaulLinkStatus = {
+        access = "readOnly",
+        description = "To display the Link status of backhaul",
+        type = "string"
+      }
+      -- RadioNumberOfEntries
+      -- automatically created when #ROOT.MultiAP.APDevice.{i}.Radio.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local tostring = tostring
+local host_data
+local concat = table.concat
+
+local paramMap = {
+  X_000E50_State = "status",
+  X_000E50_Parent = "parent",
+  X_000E50_Neighbors = "neighbors",
+  X_000E50_Manufacturer = "manufacturer_name",
+  SerialNumber = "serial_number",
+  ProductClass = "product_type",
+  ManufacturerOUI = "manufacturer-oui",
+  SoftwareVersion = "os_version",
+  LastContactTime = "time_since_query",
+  X_000E50_Phyrate = "phyrate",
+}
+
+local BackhaulParams = {
+  BackhaulLinkType = "interface_type",
+  BackhaulMACAddress = "interface_mac",
+  BackhaulBytesSent = "bytes_sent",
+  BackhaulBytesReceived = "bytes_recvd",
+  BackhaulLinkUtilization = "link_utilisation",
+  BackhaulSignalStrength = "rssi"
+}
+
+Multi_MultiAP_APDevice_i_.entries = function()
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  host_data = conn:call("hostmanager.device", "get", {}) or {}
+  for mac, info in pairs(cacheData) do
+    if info and info["status"] and info["status"] == "ONBOARDED" then
+      entries[#entries + 1] = mac
+    end
+  end
+  return entries
+end
+
+local function getIPAddress(key)
+  local interfaces = cacheData[key]["local_interfaces"] or {}
+    local ipaddr = {}
+    for _, mac in ipairs(interfaces) do
+      local hostData = conn:call("hostmanager.device", "get", { ["mac-address"] = mac }) or {}
+      for ip in pairs(hostData) do
+        for _, idx in pairs(hostData[ip]["ipv4"]) do
+          ipaddr[#ipaddr+1] = idx["address"] or ""
+        end
+      end
+    end
+    return concat(ipaddr,",")
+end
+
+local function getDhcpConfiguration(key, param)
+  for _, host in pairs(host_data) do
+    local mac = host["mac-address"]
+    local agent_mac = cacheData[key] and cacheData[key]["local_interfaces"]
+    for _, value in pairs(agent_mac or {}) do
+      if mac and mac == value then
+        for _, ipdata in pairs(host["ipv4"]) do
+          if ipdata["dhcp"] then
+            return ipdata["dhcp"][param] and ipdata["dhcp"][param] or ""
+          end
+        end
+      end
+    end
+  end
+  return ""
+end
+
+local function getLinkStatus(key)
+  local band = {
+    ["40"] = "-49 -63",
+    ["80"] = "-61 -68",
+    ["160"] = "-62 -70"
+  }
+  local bandwidth = ""
+  local interface_mac = cacheData[key] and cacheData[key]["backhaul_info"] and cacheData[key]["backhaul_info"]["interface_mac"] or ""
+  for _, data in pairs(cacheData) do
+    for _, bss in pairs(data.radio_info or {}) do
+      for mac, backhauldata in pairs(bss.bss_info or {}) do
+        if mac == interface_mac then
+          bandwidth = tostring(bss.bw) or ""
+          break
+        end
+      end
+    end
+  end
+  local radioinfo = cacheData[key] and cacheData[key]["radio_info"] or {}
+  if bandwidth == "" then
+    for _, radio in pairs(radioinfo) do
+      for _, bss in pairs(radio.bss_info or {}) do
+        bandwidth = bss.bss_type == "backhaul" and tostring(radio.bw) or ""
+        if bandwidth ~= "" then
+          break
+        end
+      end
+    end
+  end
+  local rssi = cacheData[key] and cacheData[key]["backhaul_info"] and cacheData[key]["backhaul_info"]["rssi"] or "0"
+  for bw, val in pairs(band) do
+    if bw == bandwidth then
+      local high, low = string.match(val, "(%-?%d+)%s(%-?%d+)")
+      if low and high then
+        low = tonumber(low)
+        high = tonumber(high)
+        if rssi > high then
+          return "Good"
+        elseif rssi >= low and rssi <= high then
+          return "Marginal"
+        elseif rssi < low then
+          return "Poor"
+        end
+      end
+    elseif bandwidth == "20" then
+      if rssi >= -51 then
+        return "Marginal"
+      elseif rssi < -51 then
+        return "Poor"
+      end
+    end
+  end
+  return ""
+end
+
+Multi_MultiAP_APDevice_i_.get = function(mapping, param, key)
+  if param == "MACAddress" then
+     return key
+  elseif param == "X_000E50_DeviceName" then
+    local agentMac = key:match("([^%:]+)$") or ""
+    return "agent_" .. agentMac
+  elseif param == "ManufacturerOUI" then
+     return getDhcpConfiguration(key, "manufacturer-oui") or ""
+  elseif param == "ProductClass" then
+     return getDhcpConfiguration(key, "product-class") or ""
+  elseif param == "X_000E50_BackhaulLinkStatus" then
+     return getLinkStatus(key)
+  elseif param == "BackhaulSignalStrength" then
+    return cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams["BackhaulLinkType"]]):match("^WiFi") and tostring((cacheData[key]["backhaul_info"][BackhaulParams[param]] + 110) * 2)  or ""
+  elseif param == "X_000E50_IPAddress" then
+    return getIPAddress(key) or ""
+  elseif param == "BackhaulLinkType" then
+     local type = cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams[param]]) or ""
+     return type:match("^WiFi") and "Wi-Fi" or type
+  elseif param:match("^Backhaul") then
+     return cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams[param]]) or ""
+  end
+  return cacheData[key] and type(cacheData[key][paramMap[param]]) == "table" and table.concat(cacheData[key][paramMap[param]], ",") or tostring(cacheData[key][paramMap[param]])  or ""
+end
+
+Multi_MultiAP_APDevice_i_.getall = function(mapping, key)
+  local allValues = {}
+  allValues.MACAddress = key
+  for param, option in pairs(paramMap) do
+    if param == "ManufacturerOUI" then
+      allValues[param] = getDhcpConfiguration(key, "manufacturer-oui") or ""
+    elseif param == "ProductClass" then
+      allValues[param] = getDhcpConfiguration(key, "product-class") or ""
+    elseif param == "X_000E50_BackhaulLinkStatus" then
+      allValues[param] = getLinkStatus(key)
+    elseif param == "X_000E50_DeviceName" then
+      local agentMac = key:match("([^%:]+)$") or ""
+      allValues[param] = "agent_" .. agentMac
+    elseif param == "X_000E50_IPAddress" then
+       allValues[param] = getIPAddress(key)
+    elseif param == "X_000E50_Neighbors" then
+       allValues[param] = cacheData[key] and type(cacheData[key][paramMap[param]]) == "table" and table.concat(cacheData[key][paramMap[param]], ",") or ""
+    else
+      allValues[param] = cacheData[key] and tostring(cacheData[key][option]) or ""
+    end
+  end
+  for param, option in pairs(BackhaulParams) do
+    if param == "BackhaulSignalStrength" then
+      allValues[param] = cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams["BackhaulLinkType"]]):match("^WiFi") and tostring((cacheData[key]["backhaul_info"][BackhaulParams[param]] + 110) * 2)  or ""
+    elseif param == "BackhaulLinkType" then
+      local type = cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][BackhaulParams[param]]) or ""
+      allValues[param] =  type:match("^WiFi") and "Wi-Fi" or type
+    else
+      allValues[param] = cacheData[key] and cacheData[key]["backhaul_info"] and tostring(cacheData[key]["backhaul_info"][option]) or ""
+    end
+  end
+  return allValues
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_APDevice_i_, "#ROOT", { "Device.WiFi.MultiAP",  "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
