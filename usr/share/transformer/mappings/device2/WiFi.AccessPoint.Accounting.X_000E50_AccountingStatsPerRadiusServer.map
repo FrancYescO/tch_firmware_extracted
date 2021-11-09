@@ -1,0 +1,98 @@
+local Device_WiFi_AccessPoint_i_Accounting_X_000E50_AccountingStatsPerRadiusServer_i_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.Accounting.X_000E50_AccountingStatsPerRadiusServer.{i}.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      RadiusSessionsSuccess = {
+        access = "readOnly",
+	type = "unsignedInt",
+	default = "0",
+        description = "The number of successful RADIUS accounting session starts per RADIUS server",
+      },
+      RadiusSessionsFailed = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of unsuccessful RADIUS accounting session starts per RADIUS server",
+      },
+      RadiusPacketsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of accounting packets send to RADIUS server",
+      },
+      RadiusPacketsReceived = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of accounting packets received from RADIUS server",
+      },
+      RadiusPacketsTimeout = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of accounting packets send to RADIUS server which have timed out",
+      },
+      RadiusPacketsThrottled = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of throttle events (accounting requests that have not been forwarded to AAA due to crossing the avg req/minute threshold)",
+      },
+      RadiusPacketsRetransmissions = {
+        access = "readOnly",
+        type = "unsignedInt",
+        default = "0",
+        description = "The number of retransmission events",
+      },
+    }
+  }
+}
+
+local mapper, string, next = mapper, string, next
+local conn = mapper("ubus").connect()
+local match = string.match
+local uciHelper = mapper("ucihelper")
+local wirelessBinding = {config = "wireless"}
+
+local statsMap = {
+  ["RadiusSessionsSuccess"] = "access_accepts",
+  ["RadiusSessionsFailed"] = "access_rejects",
+  ["RadiusPacketsSent"] = "requests",
+  ["RadiusPacketsReceived"] = "responses",
+  ["RadiusPacketsTimeout"] = "timeouts",
+  ["RadiusPacketsThrottled"] = "throttled",
+  ["RadiusPacketsRetransmissions"] = "retransmissions",
+}
+
+local function entriesAccountingStats(mapping, key)
+  local entries = {}
+  wirelessBinding.sectionname = "wifi-radius-server"
+  uciHelper.foreach_on_uci(wirelessBinding, function(s)
+    local section = s['.name']
+    if section:match(key .. "_acct") then
+      entries[#entries + 1] = section
+    end
+  end)
+  return entries
+end
+
+Device_WiFi_AccessPoint_i_Accounting_X_000E50_AccountingStatsPerRadiusServer_i_.entries = entriesAccountingStats
+Device_WiFi_AccessPoint_i_Accounting_X_000E50_AccountingStatsPerRadiusServer_i_.get = function(mapping, param, key)
+  local result = "0"
+  local ap, acct = key:match("(%S+)_(%S+)")
+  local radiusStats = conn:call("wireless.accesspoint.radius.stats", "get", { name = ap }) or {}
+  if next(radiusStats) then
+    local statsData = radiusStats[ap][acct] or {}
+    for statsKey, statsValue in pairs(statsData) do
+       if statsMap[param] == statsKey then
+         result = tostring(statsValue)
+       end
+    end
+  end
+  return result
+end
+
+register(Device_WiFi_AccessPoint_i_Accounting_X_000E50_AccountingStatsPerRadiusServer_i_)
