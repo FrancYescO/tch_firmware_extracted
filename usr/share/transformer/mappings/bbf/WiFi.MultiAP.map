@@ -1,0 +1,143 @@
+local Multi_MultiAP_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- APDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.MultiAP.APDevice.{i}. is loaded
+    X_000E50_ControllerEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_controller",
+	default = "0",
+      },
+    X_000E50_AgentEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_agent",
+	default = "0",
+      },
+    X_000E50_AgentStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Agent Onboarding status",
+      },
+    X_000E50_ControllerStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Controller Onboarding status",
+      },
+    }
+  }
+}
+
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local multiapBinding = { config = "multiap" }
+local transactions = {}
+local eventsource, multiapControllerStatus, multiapAgentStatus = eventsource, "", ""
+
+local controllerEvent = {
+  ["Booting"] = "[1/7] initializing",
+  ["Awaiting_platform_init"] = "[2/7] synchronizing",
+  ["Initializing"] = "[3/7] starting",
+  ["Running"] = "[4/7] up",
+  ["Connect"] = "[5/7] local agent onboarding in progress",
+  ["Onboarding"] = "[6/7] checking messages from local agent",
+  ["Onboarded"] = "[7/7] local agent onboarding success"
+}
+
+local agentEvent = {
+  ["Booting"] = "[1/6] initializing",
+  ["Awaiting_platform_init"] = "[2/6] synchronizing",
+  ["Initializing"] = "[3/6] starting",
+  ["Running"] = "[4/6] up",
+  ["Inprogress"] = "[5/6] onboarding in progress",
+  ["Success"] = "[6/6] onboarding success",
+  ["Failure"] = "[6/6] onboarding failure"
+}
+
+local function getControllerUbusEvent(mapping, event, data)
+  local ubusEvents = data["status"] or data["state"]
+  multiapControllerStatus = controllerEvent[ubusEvents] and controllerEvent[ubusEvents] or multiapControllerStatus
+end
+
+local function getAgentUbusEvent(mapping, event, data)
+  local ubusEvents = data["status"] or data["state"]
+  multiapAgentStatus = agentEvent[ubusEvents] and agentEvent[ubusEvents] or multiapAgentStatus
+end
+
+local function getUciParam(sectionName, option, default)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  multiapBinding.default = default
+  return getFromUci(multiapBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  setOnUci(multiapBinding, value, commitApply)
+  transactions["multiap"] = true
+end
+
+Multi_MultiAP_.get = {
+  X_000E50_ControllerEnabled = function(mapping, param)
+    return getUciParam("controller", "enabled", "0")
+  end,
+  X_000E50_AgentEnabled = function(mapping, param)
+    return getUciParam("agent", "enabled", "0")
+  end,
+  X_000E50_AgentStatus = function(mapping, param)
+    return multiapAgentStatus or ""
+  end,
+  X_000E50_ControllerStatus = function(mapping, param)
+    return multiapControllerStatus or ""
+  end
+}
+
+Multi_MultiAP_.set = {
+  X_000E50_ControllerEnabled = function(mapping, param, value)
+    setUciParam("controller", "enabled", value)
+  end,
+  X_000E50_AgentEnabled = function(mapping, param, value)
+    setUciParam("agent", "enabled", value)
+  end
+}
+
+Multi_MultiAP_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.revert = function()
+  for config in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, getControllerUbusEvent, "map_controller.state")
+  ubus_evsrc.watch_event(mapping, getControllerUbusEvent, "map_controller.agent")
+  ubus_evsrc.watch_event(mapping, getAgentUbusEvent, "map_agent.state")
+  ubus_evsrc.watch_event(mapping, getAgentUbusEvent, "map_agent.onboarding_event")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_, "#ROOT", { "Device.WiFi.MultiAP", "rpc.multiap", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

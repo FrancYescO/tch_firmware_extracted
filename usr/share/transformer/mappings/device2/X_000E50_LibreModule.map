@@ -1,0 +1,34 @@
+local Device_DeviceInfo_X_000E50_LibreModule_ = {
+  objectType = {
+    name = "Device.DeviceInfo.X_000E50_LibreModule.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Libre LS9x firmware version",
+    parameters = {
+      SoftwareVersion = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Displays the software version of LS9x hardware connected",
+      },
+    }
+  }
+}
+
+local process = require("tch.process")
+
+local function getVersion()
+  local fp = process.popen("libre_luci", {"--server", "172.16.234.2", "--port", "7778", "--command", "firmware_version"} , "re")
+  local result
+  if fp then
+    result = fp:read("*l")
+  end
+  return result or ""
+end
+
+Device_DeviceInfo_X_000E50_LibreModule_.get = {
+  SoftwareVersion = getVersion
+}
+
+register(Device_DeviceInfo_X_000E50_LibreModule_)

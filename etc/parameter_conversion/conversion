@@ -1,0 +1,288 @@
+debug_on
+
+copy_file /etc/config/button
+
+uci_set multiap.agent.enabled
+uci_set multiap.controller.enabled
+uci_section multiap.@controller_credentials
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_section cwmpd.cwmpd_config
+copy_dir /usr/share/transformer
+copy_dir /usr/lib/lua
+
+copy_file /etc/config/vopi_intfs
+
+uci_set ddns.myddns.enabled ddns.myddns_ipv4.enabled
+uci_set ddns.myddns.service_name ddns.myddns_ipv4.service_name
+uci_set ddns.myddns.domain ddns.myddns_ipv4.domain
+uci_set ddns.myddns.username ddns.myddns_ipv4.username
+uci_set ddns.myddns.password ddns.myddns_ipv4.password
+uci_set ddns.myddns.lookup_host ddns.myddns_ipv4.lookup_host
+uci_del ddns.myddns
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'dtdns.com') then n:set('ddns','myddns_ipv4','service_name', 'dyn.com') end n:commit('ddns')\"
+
+uci_set ddns.myddns_ipv6.enabled
+uci_set ddns.myddns_ipv6.service_name
+uci_set ddns.myddns_ipv6.domain
+uci_set ddns.myddns_ipv6.username
+uci_set ddns.myddns_ipv6.password
+uci_set ddns.myddns_ipv6.lookup_host
+
+uci_section dhcp.@dnsrule
+
+uci_set dhcp.dnsmasq.rebind_protection
+uci_set dhcp.odhcpd.leasefile
+uci_set dhcp.odhcpd.leasetrigger
+uci_set dhcp.lan.interface
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.dhcpv6
+uci_set dhcp.lan.ra
+uci_set dhcp.lan.ra_management
+uci_set dhcp.lan.ra_min_interval dhcp.lan.ra_mininterval
+uci_set dhcp.lan.ra_mininterval
+uci_set dhcp.lan.ra_max_interval dhcp.lan.ra_maxinterval
+uci_set dhcp.lan.ra_maxinterval
+uci_set dhcp.lan.ra_lifetime
+uci_set dhcp.lan.ra_hoplimit
+uci_set dhcp.lan.ra_max_mtu dhcp.lan.ra_mtu
+
+uci_set dhcp.lan.ra_mtu
+uci_set dhcp.lan.force
+uci_set dhcp.wan.interface
+uci_set dhcp.wan.ignore
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','wan','ignore') if (v == '1') then n:set('dhcp','wan','dhcpv4','disabled') else n:set('dhcp','wan','dhcpv4','server') end n:commit('dhcp')\"
+uci_section dhcp.@host id=name
+uci_set dhcp.lan.ignore
+uci_set dhcp.lan.dhcpv4
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ignore') if (v ~= nil) then if (v == '1') then n:set('dhcp','lan','dhcpv4','disabled') else n:set('dhcp','lan','dhcpv4','server') end end n:commit('dhcp')\"
+
+uci_section dhcp.@relay
+uci_section dhcp.@relaybackup
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convdhcprelay.lua
+
+copy_file /etc/config/dscp2pbit
+
+uci_set env.var.em_new_ui_layout
+
+uci_set ethernet.eth0.enable
+uci_set ethernet.eth1.enable
+uci_set ethernet.eth2.enable
+uci_set ethernet.eth3.enable
+
+uci_section firewall.@rule id=name
+uci_section firewall.@userrule id=name
+uci_section firewall.@userrule_v6 id=name
+uci_section firewall.@fwconfig
+uci_section firewall.@zone id=name
+uci_set firewall.defaultoutgoing.target
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_section firewall.@userredirect
+uci_section firewall.@pinholerule
+uci_set firewall.userredirects.enabled
+uci_set firewall.@dmzredirect[0].dest_ip firewall.dmzredirect.dest_ip
+uci_set firewall.dmzredirects.enabled
+uci_set firewall.dmzredirect.enabled
+uci_set firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirect.dest_ip
+uci_set firewall.dmzredirect.proto
+
+inline_sh_cmd lua /usr/lib/parameter_conversion/copy_firewall_helpers.lua
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+copy_file /etc/config/iqos
+
+
+uci_set minidlna.config.enabled dlnad.config.enabled
+uci_set minidlna.config.friendly_name dlnad.config.friendly_name
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+uci_set dlnad.config.dynamic
+
+uci_set dlnad.log.mud_logLevel
+uci_set dlnad.log.mvfs_logLevel
+uci_set dlnad.log.dlnad_logLevel
+
+inline_sh_cmd grep mmpbxbrcmdectdev %%OLDCONFIG%%/etc/config/mmpbx && sed -i 's/mmpbxbrcmdectdev/mmpbxdectdev/' %%OLDCONFIG%%/etc/config/mmpbx
+copy_file /etc/config/mmpbx
+inline_sh_cmd uci set mmpbx.global.country=''
+
+inline_sh_cmd [ -f %%OLDCONFIG%%/etc/config/mmpbxbrcmdectdev ] && mv %%OLDCONFIG%%/etc/config/mmpbxbrcmdectdev %%OLDCONFIG%%/etc/config/mmpbxdectdev && sed -i 's/mmpbxbrcmdectdev/mmpbxdectdev/' %%OLDCONFIG%%/etc/config/mmpbxdectdev
+copy_file /etc/config/mmpbxdectdev
+
+copy_file /etc/config/mmpbxbrcmfxsdev
+
+copy_file /etc/config/mmpbxinternalnet
+
+copy_file /etc/config/mmpbxrvsipnet
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convsippassword.lua
+
+copy_file /etc/config/mmpbxbrcmfxonet
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_section mobiled.@profile id=id
+uci_section mobiled.@sim
+uci_section mobiled.@device
+inline_sh_cmd lua /usr/lib/parameter_conversion/copy_mobiled_device_defaults.lua
+
+uci_set network.ppp.password
+uci_set network.ppp.username
+uci_set network.ppp.graceful_restart
+
+
+uci_set network.lan.dns
+uci_set network.lan.domain
+uci_set network.lan.gateway
+uci_set network.lan.netmask
+uci_set network.lan.ipaddr
+uci_set network.lan.ipv6
+uci_set network.wan.username
+uci_set network.wan.password
+uci_set network.wan.graceful_restart
+uci_set network.wan.ifname
+uci_set network.wan.proto
+
+inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','wan6','reqopts') if (v ~= nil) then n:set('network','wan6','defaultreqopts','0') else n:set('network','wan6','defaultreqopts','1') end n:commit('network')\"
+uci_set network.wwan.profile
+
+copy_file /etc/config/nslookupdiag
+
+copy_file /etc/config/parental
+
+copy_file /etc/config/portmirror
+
+copy_file /etc/config/power
+
+copy_file /etc/config/pppoerelayd
+
+copy_file /etc/config/printersharing
+
+copy_file /etc/config/qos
+
+uci_set samba.samba.name
+uci_set samba.samba.workgroup
+uci_set samba.samba.description
+uci_set samba.samba.enabled
+uci_set samba.samba.filesharing
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('printersharing','config','enabled') if (v == '1') then n:set('samba','printers','enabled','1') end n:commit('samba')\"
+
+uci_set samba.@samba[0].name samba.samba.name
+uci_set samba.@samba[0].workgroup samba.samba.workgroup
+uci_set samba.@samba[0].description samba.samba.description
+uci_set samba.@samba[0].enabled samba.samba.enabled
+uci_set samba.@samba[0].filesharing samba.samba.filesharing
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+uci_set system.@system[0].conloglevel
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+uci_set system.config.enable_usb3_support
+
+uci_set ngwfdd.config.enable
+
+uci_set tod.global.time_change_monfreq
+uci_set tod.global.enabled
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convtod.lua
+
+copy_file /etc/config/traceroute
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convpingtraceroute.lua
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+uci_set upnpd.config.datamodel_version
+
+copy_file /etc/config/user_friendly_name
+
+
+
+
+
+copy_web_users
+
+inline_sh_cmd convcmds copy_shadow_psw engineer
+
+copy_file /etc/config/wifidoctor_station_importance
+
+copy_file /etc/config/wifi-conductor
+copy_file /etc/config/mosquitto
+
+uci_section wireless.@wifi-device.-acs_rescan_period,acs_channel_monitor_period
+uci_section wireless.@wifi-iface
+uci_section wireless.@wifi-ap
+uci_section wireless.@wifi-ap-credential
+uci_section wireless.@wifi-radius-server
+uci_section wireless.@wifi-bandsteer
+uci_section wireless.@wifi-ep
+uci_section wireless.@wifi-ep-profile
+
+uci_set wifi_conductor.global.enabled
+copy_file /etc/station_db.json
+
+uci_set wifi_doctor_agent.config.uuid
+uci_set wifi_doctor_agent.config.enabled
+uci_set wifi_doctor_agent.as_config.url
+uci_set wifi_doctor_agent.as_config.passwd
+uci_section wifi_doctor_agent.@default_acs_channels
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/map_migration.lua
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/xtm
+
+copy_file /etc/config/gpon
+copy_file /etc/config/gponl3
+copy_file /etc/scratchpad
+
+copy_file /etc/config/datausage
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convshaping.lua
