@@ -1,0 +1,28 @@
+#!/bin/sh
+
+#Get the Firmware Timestamp
+timestamp=`uci get version.@version[0].timestamp`
+
+#Rename all JS files with timestamp
+echo "Changing JS files to timestamp"
+for file in /www/docroot/js/*.js
+do
+    #Check the file names do not already have the timestamp in case of reboot during execution
+    if echo $file |grep -v $timestamp; 
+    then 
+        mv -i "${file}" "${file/.js/_$timestamp.js}"
+    fi
+done
+
+#Change to /www/docroot
+cd /www/docroot
+
+#Step through all file referencing js/ altering the instance of .js to match the new timestamp names
+for path in "/www/cards/" "/www/snippets/" "/www/docroot/" "/www/docroot/modals/"
+do 
+  for file in `grep -ol "js/" $path*`
+  do 
+      #find line not already containing the timestamp in case of reboot during execution
+      sed -i -r "/$timestamp.js/ ! s/\.js/_$timestamp\.js/g" $file
+  done
+done   

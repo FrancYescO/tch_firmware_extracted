@@ -1,0 +1,32 @@
+#!/bin/sh
+
+ispconfig_dir=/etc/ispconfig/
+[ -d $ispconfig_dir ] || mkdir $ispconfig_dir
+
+#Copy ispconfig files from the old bank to this one
+inactive=$(cat /proc/banktable/inactive)
+inactive_dir=/overlay/$inactive/etc/ispconfig/
+
+ispconfig_file=$ispconfig_dir"tch_0000-ispconfig"
+
+if [ -d "$inactive_dir" ]; then
+  cp $inactive_dir* $ispconfig_dir
+fi 
+
+if [ -f $ispconfig_file ]; then
+    sed -i '/exit 0/'d $ispconfig_file
+    . $ispconfig_file
+fi
+
+STS=/usr/lib/cwmpd/transfers/exec_config.lua
+SCRIPT=/etc/ispconfig/ispconfig.sts
+if [ -f $STS -a -f $SCRIPT ]; then
+    DRYRUN=$(mktemp -d)
+    lua $STS --ispconfig --dryrun=$DRYRUN $SCRIPT /dev/null
+    if [ $? -eq 0 ]; then
+        lua $STS --ispconfig $SCRIPT /dev/null
+    fi
+    rm -rf $DRYRUN
+fi
+
+exit 0

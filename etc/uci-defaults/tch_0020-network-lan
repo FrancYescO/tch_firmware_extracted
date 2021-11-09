@@ -1,0 +1,61 @@
+#!/bin/sh
+
+tag=dslforum.org
+
+function generate_option_124() {
+	echo -n 0x7c:00000de9
+	local cnt=$((${#tag} + 1)) printf_format
+	while [ $cnt != 0 ]; do
+		printf_format="${printf_format}%02x"
+		cnt=$((cnt-1))
+	done
+	printf $printf_format ${#tag} $(echo $tag | sed -e "s/./ '&/g")
+}
+
+function generate_option_125() {
+	local oui=$(uci get env.var.oui)
+	local serial=$(uci get env.var.serial)
+	local class=$(uci get env.var.prod_number)
+	echo -n 0x7d:00000de9
+	local total_length=$((${#oui} + ${#serial} + ${#class} + 6))
+	local cnt=$((total_length+1)) printf_format printf_args="$total_length"
+	while [ $cnt != 0 ]; do
+		printf_format="${printf_format}%02x"
+		cnt=$((cnt-1))
+	done
+	printf_args="$printf_args 1 ${#oui} $(echo $oui | sed -e "s/./ '&/g")"
+	printf_args="$printf_args 2 ${#serial} $(echo $serial | sed -e "s/./ '&/g")"
+	printf_args="$printf_args 3 ${#class} $(echo $class | sed -e "s/./ '&/g")"
+	printf $printf_format $printf_args
+}
+
+uci set network.lan.ip6assign=64
+uci set network.lan.force_link=0
+uci set network.lan.neighlocktime=-1
+uci set network.lan.rpfilter=1
+uci set network.lan.ipv6=1
+
+uci set network.lan.ifname='eth0 eth1'
+uci set network.lan.proto='dhcp'
+uci set network.lan.ipaddr_bkup='192.168.1.2'
+uci set network.lan.netmask_bkup='255.255.255.0'
+uci set network.lan.stp='1'
+uci set network.lan.reqopts='1 3 6 15 33 42 51 121 125 249'
+uci set network.lan.vendorid="$tag"
+uci set network.lan.sendopts="$(generate_option_124) $(generate_option_125)"
+uci set network.lan.auto='1'
+
+uci set network.lan6=interface
+uci set network.lan6.proto='dhcpv6'
+uci set network.lan6.ifname='@lan'
+uci set network.lan6.reqprefix='no'
+uci set network.lan6.reqopts='23 24 31 56'
+uci set network.lan6.iface_464xlat='0'
+
+uci set network.@switch[0].jumbo=0
+
+uci set network.globals.ula_prefix='none'
+
+uci commit network
+
+exit 0
