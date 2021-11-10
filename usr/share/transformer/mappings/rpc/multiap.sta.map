@@ -1,0 +1,151 @@
+-- Manuall generated
+local multiap_sta = {
+  objectType = {
+    name = "rpc.multiap.sta.@.",
+    numEntriesParameter = "STANumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      mac = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_bss = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_agent_mac = {
+        access = "readOnly",
+        type = "string"
+      },
+      assoc_since = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      dl_mac_rate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      ul_mac_rate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rssi = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txbytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxbytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txpkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxpkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      txpkterrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      rxpkterrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      retransmission_cnt = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      supported_standard = {
+        access = "readOnly",
+        type = "string"
+      },
+      station_type = {
+        access = "readOnly",
+        type = "string"
+      },
+      FriendlyName = {
+        access = "readWrite",
+        type = "string",
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local wifiHelper = require("transformer.shared.wifi")
+local userFriendlyNameBinding = { config = "user_friendly_name" }
+local isConfigChanged = false
+
+local paramMap = {
+  assoc_bss = "associated_bssid_mac",
+  assoc_agent_mac = "associated_agent_mac",
+  assoc_since = "since_assoc_time",
+  dl_mac_rate = "dlmac_datarate",
+  ul_mac_rate = "ul_mac_rate",
+  rssi = "rssi",
+  txbytes = "txbytes",
+  rxbytes = "rxbytes",
+  txpkts = "txpkts",
+  rxpkts = "rxpkts",
+  txpkterrors = "txpkterrrors",
+  rxpkterrors = "rxpkterrors",
+  retransmission_cnt = "retransmission_cnt",
+  supported_standard = "supported_standard",
+  station_type = "station_type"
+}
+
+multiap_sta.entries = function()
+  local entries = {}
+  local data = conn:call("multiap.controller.station", "list", {}) or {}
+  for mac, info in pairs(data) do
+    if info["rssi"] and info["rssi"] ~= "" and info["rssi"] ~= 0 then
+      entries[#entries + 1] = mac
+    end
+  end
+  return entries
+end
+
+multiap_sta.get = function(mapping, param, key)
+  if param == "mac" then
+    return key
+  elseif param == "FriendlyName" then
+    return wifiHelper.getUserFriendlyName(key)
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.station", "list", {}) or {}
+    local result = data[key] and data[key][paramMap[param]] or ""
+    return tostring(result)
+  end
+end
+
+multiap_sta.set = {
+  FriendlyName = function(mapping, param, value, key)
+    wifiHelper.setUserFriendlyName(key, value, commitapply)
+    isConfigChanged = true
+  end,
+}
+
+multiap_sta.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(userFriendlyNameBinding)
+  end
+  isConfigChanged = false
+end
+
+multiap_sta.revert = function()
+  if isConfigChanged  then
+    uciHelper.revert(userFriendlyNameBinding)
+  end
+  isConfigChanged = false
+end
+
+
+register(multiap_sta)
