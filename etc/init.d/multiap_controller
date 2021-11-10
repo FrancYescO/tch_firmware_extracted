@@ -1,0 +1,300 @@
+#!/bin/sh /etc/rc.common
+
+#Start After the Hostapd so that Other Agents can start communication
+PROCD_DEBUG=1
+USE_PROCD=1
+START=95
+
+PID_FILE=/var/run/multiap_controller.pid
+RUNNING_FILE=/var/run/controllerd_running
+
+override=0
+
+get_if_data() {
+## get device name and mode for multiap configured wireless interfaces
+for i in $(echo $interfaces | tr "," "\n")
+do
+  if [ "$i" = "${1}" ]; then
+     config_get md ${1} mode
+     config_get dev ${1} device
+     modes="$modes${1}:$md,"
+     devs="$devs${1}:$dev,"
+  fi
+done
+}
+
+parse_wl_ap() {
+  local ap="$1"
+  config_get iface "$ap" iface
+
+  if [ "$iface" = "$2" ] ; then
+    apname=$ap
+  fi
+}
+
+update_controller_al_mac() {
+  ## Local ethernet interface mac will be used as a controller al mac
+  eth_mac=`uci get env.var.local_eth_mac`
+
+  ## Get the existing controller AL MAC
+  config_get al_mac controller macaddress
+
+  ## Update only when there is a mismatch
+  if [ "$al_mac" != "$eth_mac" ] ; then
+    uci_set "multiap" "controller" "macaddress" "$eth_mac"
+    uci commit
+  fi
+}
+
+update_1905_interface_list() {
+  # Get the interface list from bridge
+  br_if_list=$(echo `ls /sys/class/net/br-lan/brif` | sed 's/[ \t]+*/,/g')
+
+  # Get the bss list from UCI
+  bss_if_list=`uci get multiap.agent.bss_list`
+
+  #Merge the br interface list and bss interface list
+  if_list=`printf "$br_if_list,$bss_if_list"`
+
+  # Add the missing interfaces to uci_if_list from if_list
+  for iface in $(echo $if_list | tr "," "\n")
+  do
+    ## Skip wds interfaces
+    eval "echo \$iface | grep -q \"wds\""
+    if [ "$?" -eq "0" ]; then
+      continue
+    fi
+
+    #Removing any whitespace or tabs in uci list
+    uci_if_list=$(echo $uci_if_list| tr -d '[ \t\r\n\v\f]')
+
+    # Add Missing interfaces
+    eval "echo \$uci_if_list, | grep -q $iface,"
+    if [ "$?" -eq "1" ]; then
+      if [ -z "$uci_if_list" ] ; then
+        uci_if_list="$iface"
+      else
+        uci_if_list=`printf "$uci_if_list,$iface"`
+      fi
+    fi
+  done
+
+  # Add wds* as a special interface for once
+  eval "echo \$uci_if_list | grep -q wds*"
+  if [ "$?" -eq "1" ]; then
+    uci_if_list=`printf "$uci_if_list,wds*"`
+  fi
+
+  # Update the Final list of interface to UCI
+  uci set multiap.al_entity.interfaces=$uci_if_list
+  uci commit
+  interfaces="$uci_if_list"
+}
+
+update_supported_security_modes() {
+  #Loop to get the both 2.4G and 5G radios
+  for i in 0 1 2 3 4
+  do
+    AP=`uci get wireless.ap$i.iface`
+    if [ "$AP" == "wl1" ] || [ "$AP" == "wl0" ]; then
+       #Get the supported security modes and loop through them
+       SUPPORTED=`uci get wireless.ap$i.supported_security_modes`
+       for security in $SUPPORTED
+       do
+         if [ "$security" == "wpa2-psk" ] || [ "$security" == "none" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+           #Delete and add to get rid of duplicate entries
+           MULTIAP_SUPPORTED=`uci get multiap.controller.supported_security_modes`
+           if ! echo "$MULTIAP_SUPPORTED" | grep -q "$security"; then
+             uci set multiap.controller.supported_security_modes="$MULTIAP_SUPPORTED $security"
+             uci commit
+           fi
+         fi
+       done
+    fi
+  done
+}
+
+update_local_agent_al_mac() {
+  ## Update the local wifi interface mac as agent AL mac
+  wifi_mac=`uci get env.var.local_wifi_mac`
+
+  ## Get the existing agent AL MAC
+  config_get al_mac agent macaddress
+
+  ## Update agent AL mac only when it is null in config
+  if [ -z "$al_mac"] ; then
+    uci_set "multiap" "agent" "macaddress" "$wifi_mac"
+    uci commit
+  fi
+}
+
+setup_local_agent_config() {
+
+  ## Check if the local agent enabled or not.
+  config_get_bool map_agent_enabled agent enabled
+  [ $map_agent_enabled -eq 1 ] && [ $map_ctrl_enabled -eq 1 ]
+  if [ "$?" -eq "0" ]; then
+      ## Update local agent AL mac address
+      update_local_agent_al_mac
+
+      ## Add "lo" interface if both ctrller, agent is enabled
+      eval "echo \$interfaces | grep \"lo\" | grep -v \"grep\""
+      if [ "$?" -eq "1" ]; then
+          interfaces=`printf "lo,$interfaces"`
+          uci set multiap.al_entity.interfaces=$interfaces
+          uci commit
+      fi
+  else
+      ##Remove "lo" interface if only one map soln is present
+      interfaces=`echo $interfaces | sed 's/lo,//g'`
+      uci set multiap.al_entity.interfaces=$interfaces
+      uci commit
+  fi
+}
+
+add_or_remove_domain_name_entry_for_boosters() {
+  uci $1 dhcp.main.hostname='telstra.wifi'
+  uci commit dhcp
+  /etc/init.d/dnsmasq reload
+}
+
+start_service() {
+
+
+  ##dirty hack to run the firstboot script every time so the config and stuff will be okay so we can enable easymesch on the fly
+  #BOARD=`uci get env.rip.board_mnemonic`
+
+  #/rom/etc/boards/$BOARD/config/etc/uci-defaults/tch_0099-wifi_multiap
+  ## end of dirty hack; fix this after the poc into a proper method
+
+  ubus send map_controller.state '{ "status": "Booting" }'
+  config_load multiap
+
+  ## Check if multiap controller is enabled
+  config_get_bool map_ctrl_enabled controller enabled
+  if [ -z "$map_ctrl_enabled" ] || [ $map_ctrl_enabled -eq 0 ] ; then
+    add_or_remove_domain_name_entry_for_boosters "del_list"
+    return 0
+  fi
+
+  ## To avoid adding same value multiple times, check if it already exists
+  uci get dhcp.main.hostname | grep 'telstra.wifi'
+  if [ "$?" -eq "1" ]; then
+    add_or_remove_domain_name_entry_for_boosters "add_list"
+  fi
+
+  procd_open_instance
+  echo "Multiap Controller Start" > /dev/console
+
+  ## Update the controller AL MAC address
+  update_controller_al_mac
+
+  ## Add the system interfaces to 1905 interface list
+  update_1905_interface_list
+
+  ## Update the supported security modes to controller
+  update_supported_security_modes
+
+  # Setup a minimum required agent config required for controller
+  setup_local_agent_config
+
+  ## Get platform_int variables and set as env
+  config_get map_agent_bsslist agent bss_list
+
+  config_load wireless
+
+  ## Get device name and mode from wireless
+  config_foreach get_if_data wifi-iface 
+
+  ## Get box related info from env
+  config_load env
+  config_get model_name var prod_friendly_name
+  len=${#model_name}
+  if [ $len -ge 36 ]; then
+    config_get model_name var prod_name
+  fi
+  config_get model_name var prod_friendly_name
+  config_get manufacturer_name var company_name
+  config_get model_number var prod_number
+  config_get serial_number var serial
+  osversion=`uci get version.@version[0].version | cut -d- -f1`
+
+  echo $model_name $manufacturer_name $model_number $serial_number
+  echo $devs
+  echo $modes
+  echo $osversion
+
+  procd_set_param env MAP_CONTROLLER_ENABLED=$map_ctrl_enabled
+  procd_append_param env MAP_AGENT_ENABLED=$map_agent_enabled
+
+  procd_append_param env MAP_INTERFACES=$interfaces
+  procd_append_param env MAP_MODEL_NAME=$model_name
+  procd_append_param env MAP_MODEL_NUMBER=$model_number
+  procd_append_param env MAP_SERIAL_NUMBER=$serial_number
+  procd_append_param env MAP_MANUFACTURER_NAME=$manufacturer_name
+  procd_append_param env MAP_DEV_NAMES=$devs
+  procd_append_param env MAP_DEV_MODES=$modes
+  procd_append_param env MAP_OS_VERSION=$osversion
+
+  ##Optionally add load config
+  if [ -f /lib/multiap/multiap-controller-uci-to-procd-env ]; then
+     . /lib/multiap/multiap-controller-uci-to-procd-env
+  fi
+
+  ## Load Vendor extensions
+  if [ -f /lib/multiap/multiap-ctrl-ve-uci-to-procd-env ]; then
+     . /lib/multiap/multiap-ctrl-ve-uci-to-procd-env
+  fi
+
+  ## Optionally add conductor config 
+  if [ -f /lib/wifi-conductor/libwifi-conductor-uci-to-procd-env ]; then
+     . /lib/wifi-conductor/libwifi-conductor-uci-to-procd-env
+  fi
+
+  ## Optionally add wee config
+  if [ -f /lib/mesh-wee/mesh-wee-ctrl-uci-to-procd-env ]; then
+     . /lib/mesh-wee/mesh-wee-ctrl-uci-to-procd-env
+  fi
+
+  ## Add rule to process 1905 Multicast packets
+  ebtables -t broute -D BROUTING -p 0x893a -d 1:80:c2:0:0:13 -j  DROP
+  ebtables -t broute -I BROUTING 1 -p 0x893a -d 1:80:c2:0:0:13 -j  DROP
+
+  ebtables -t broute -D BROUTING -p 0x893a -d $map_controller_macaddress -j  DROP
+  ebtables -t broute -I BROUTING 1 -p 0x893a -d $map_controller_macaddress -j  DROP
+
+  #To be removed
+  if [ $override -eq 0 ] ; then
+    ubus send map_controller.state '{ "status": "Awaiting_platform_init" }'
+    echo "Multiap Controller Start after sleep" > /dev/console
+  fi
+
+  procd_set_param command /usr/bin/multiap_controller -m ubus
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-10} ${respawn_retry:-10}
+  procd_set_param limits core="unlimited"  # If you need to set ulimit for your process
+  procd_set_param pidfile /var/run/multiap_controller.pid # write a pid file on instance start and remote it on stop
+  procd_close_instance
+
+  if [ -f /etc/init.d/multiap_vendorextensions ]; then
+    /etc/init.d/multiap_vendorextensions start
+  fi
+}
+
+restart(){
+  add_or_remove_domain_name_entry_for_boosters "del_list"
+  trap '' TERM
+  stop "$@"
+  trap - TERM
+  override=1
+  rc_procd start_service "$@"
+  if eval "type service_started" 2>/dev/null >/dev/null; then
+    service_started
+  fi
+}
+
+stop_service(){
+  add_or_remove_domain_name_entry_for_boosters "del_list"
+  if [ -f /etc/init.d/multiap_vendorextensions ]; then
+    /etc/init.d/multiap_vendorextensions stop
+  fi
+}

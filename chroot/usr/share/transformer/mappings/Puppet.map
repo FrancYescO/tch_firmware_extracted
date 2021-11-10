@@ -1,0 +1,168 @@
+local async_execute = require("lasync").execute
+local dkjson = require("dkjson")
+local conn = mapper("ubus").connect()
+local process = require 'tch.process'
+local uciHelper = mapper("ucihelper")
+
+local Puppet_ = {
+  objectType = {
+    name = "Puppet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- Reboot after ten seconds.
+      Reboot = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      -- Send the reload signal to cwmpd after 3 seconds.
+      Reload = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      -- Turn rbi signature checking on or off.
+      SignatureCheck = {
+        access = "readWrite",
+        type = "boolean",
+        default = "true",
+      },
+      -- Trigger an XDE event by setting XDEValue on XDEPath
+      TriggerXDE = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      XDEPath = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      XDEValue = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      -- Trigger a ubus event identified by UbusEventID
+      -- and with UbusEventData as payload.
+      TriggerUbusEvent = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      UbusEventID = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      UbusEventData = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ACSPassword = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      ACSUsername = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+    }
+  }
+}
+local xdepath = ""
+local xdevalue = ""
+local ubusEventID = ""
+local ubusEventData = ""
+
+Puppet_.get = {
+  Reboot = "0",
+  Reload = "0",
+  SignatureCheck = function()
+    local res = process.execute("grep", {"-q", "-e", 'SKIP_SIGNATURE=0', "/usr/bin/sysupgrade-safe"})
+    if res == 0 then
+      return "1"
+    end
+    return "0"
+  end,
+  TriggerXDE = "0",
+  XDEPath = function()
+    return xdepath
+  end,
+  XDEValue = function()
+    return xdevalue
+  end,
+  TriggerUbusEvent = "0",
+  UbusEventID = function()
+    return ubusEventID
+  end,
+  UbusEventData = function()
+    return ubusEventData
+  end,
+  ACSPassword = function()
+    return uciHelper.get_from_uci({config = "cwmpd", sectionname = "cwmpd_config", option = "acs_pass" })
+  end,
+  ACSUsername = function()
+    return uciHelper.get_from_uci({config = "cwmpd", sectionname = "cwmpd_config", option = "acs_user" })
+  end, 
+}
+
+Puppet_.set = {
+  Reboot = function(mapping, paramname, paramvalue)
+    if paramvalue == "true" or paramvalue == "1" then
+      async_execute("sleep 10; reboot;")
+    end
+  end,
+  Reload = function(mapping, paramname, paramvalue)
+    if paramvalue == "true" or paramvalue == "1" then
+      async_execute("sleep 3; /etc/init.d/cwmpd reload;")
+    end
+  end,
+  SignatureCheck = function(mapping, paramname, paramvalue)
+    local skip = 0
+    if paramvalue == "false" or paramvalue == "0" then
+      skip = 1
+    end
+    process.execute("sed", {"-i" , 's|SKIP_SIGNATURE=[01]$|SKIP_SIGNATURE="..skip.."|g', "/usr/bin/sysupgrade-safe"})
+  end,
+  TriggerXDE = function(mapping, paramname, paramvalue)
+    if (paramvalue == "true" or paramvalue == "1") and
+       (xdepath ~= "" and xdevalue ~= "") then
+      local file = "/tmp/xde.lua"
+      local f, err = io.open(file, "w")
+      if not f then
+        return nil, err
+      end
+      f:write('local datamodel = require("datamodel")\n')
+      f:write('datamodel.set("'..xdepath..'", "'..xdevalue..'")\n')
+      f:close()
+      async_execute("sleep 3; lua "..file..";")
+    end
+  end,
+  XDEPath = function(mapping, paramname, paramvalue)
+    xdepath = paramvalue
+  end,
+  XDEValue = function(mapping, paramname, paramvalue)
+    xdevalue = paramvalue
+  end,
+  TriggerUbusEvent = function(mapping, paramname, paramvalue)
+    return conn:send(ubusEventID, ubusEventData)
+  end,
+  UbusEventID = function(mapping, paramname, paramvalue)
+    ubusEventID = paramvalue
+  end,
+  UbusEventData = function(mapping, paramname, paramvalue)
+    local data, _, err = dkjson.decode(paramvalue)
+    if err then
+      return nil, err
+    end
+    ubusEventData = data
+  end
+}
+
+register(Puppet_)
