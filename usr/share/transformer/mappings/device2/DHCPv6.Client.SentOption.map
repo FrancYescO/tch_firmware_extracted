@@ -1,0 +1,116 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_DHCPv6_Client_i_SentOption_i_ = {
+  objectType = {
+    name = "Device.DHCPv6.Client.{i}.SentOption.{i}.",
+    access = "readOnly", -- ReadWrite currently not supported
+    numEntriesParameter = "SentOptionNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- ReadWrite currently not supported. By default it will be enabled for all the options
+        type = "boolean",
+        default = "false",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Tag = {
+        access = "readOnly", -- ReadWrite currently not supported. By default it will be choosed from SupportedOptions
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+      },
+      Value = {
+        access = "readWrite",
+        type = "hexBinary",
+        min = "0",
+        max = "65535",
+        default = "",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local networkBinding = { config = "network" }
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+local commitapply = commitapply
+local configChanged
+
+local optionToTag = {
+  clientid = "1",
+  ifaceid = "18",
+  vendorclass = "16",
+  userclass = "15",
+}
+
+Device_DHCPv6_Client_i_SentOption_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  for sentOption in pairs(optionToTag) do
+    entries[#entries + 1] = parentKey .. "|" ..sentOption
+  end
+  return entries
+end
+
+local function getUciParam(sectionName, option)
+  networkBinding.sectionname = sectionName
+  networkBinding.option = option
+  return uciHelper.get_from_uci(networkBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  networkBinding.sectionname = sectionName
+  networkBinding.option = option
+  return uciHelper.set_on_uci(networkBinding, value, commitapply)
+end
+
+Device_DHCPv6_Client_i_SentOption_i_.get = {
+  Enable = "1",
+  Tag = function(mapping, param, key)
+    local _, tagName = splitKey(key)
+    return optionToTag[tagName]
+  end,
+  Value = function(mapping, param, key, parentKey)
+    local _, tagName = splitKey(key)
+    local result = getUciParam(parentKey, tagName)
+    return nwCommon.string2Hex(result)
+  end,
+}
+
+Device_DHCPv6_Client_i_SentOption_i_.set = {
+  Value = function(mapping, param, value, key, parentKey)
+    value = nwCommon.hex2String(value)
+    local _, tagName = splitKey(key)
+    setUciParam(parentKey, tagName, value)
+    configChanged = true
+  end
+}
+
+Device_DHCPv6_Client_i_SentOption_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(networkBinding)
+    configChanged = false
+  end
+end
+
+Device_DHCPv6_Client_i_SentOption_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+    configChanged = false
+  end
+end
+
+register(Device_DHCPv6_Client_i_SentOption_i_)
+
