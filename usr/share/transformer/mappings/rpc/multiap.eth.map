@@ -1,0 +1,44 @@
+-- Manuall generated
+local multiap_eth = {
+  objectType = {
+    name = "rpc.multiap.eth.@.",
+    numEntriesParameter = "ETHNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MacAddress = {
+        access = "readOnly",
+        type = "string"
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+local random = math.random
+local match = string.match
+
+multiap_eth.entries = function()
+  local entries = {}
+  local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+    for agentMAC, agentData in pairs(data) do
+      for clients, ethData in pairs(agentData) do
+        if clients == "eth_clients" then
+          for _, ethClient in pairs(ethData) do
+	    local key = random(1,100)
+            entries[#entries + 1] = ethClient .. "_" .. key
+          end
+        end
+      end
+    end
+  return entries
+end
+
+multiap_eth.get = function(mapping, param, key)
+  if param == "MacAddress" then
+    return match(key, '([^%s_]+)')
+  end
+end
+
+register(multiap_eth)
