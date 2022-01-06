@@ -1,0 +1,111 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_FaultMgmt_ExpeditedEvent_i_ = {
+  objectType = {
+    name = "#ROOT.FaultMgmt.ExpeditedEvent.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ExpeditedEventNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      EventTime = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      AlarmIdentifier = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      NotificationType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "NewAlarm",
+          "ChangedAlarm",
+          "ClearedAlarm",
+        },
+      },
+      ManagedObjectInstance = {
+        access = "readOnly",
+        type = "string",
+        max = "512",
+      },
+      EventType = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ProbableCause = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      SpecificProblem = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      PerceivedSeverity = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Cleared",
+          "Critical",
+          "Major",
+          "Minor",
+          "Warning",
+          "Indeterminate",
+        },
+      },
+      AdditionalText = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      AdditionalInformation = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+    }
+  }
+}
+
+local fault_helper = require 'transformer.shared.faultmgmthelper'
+local insert = table.insert
+
+fault_helper.SetElementList(Multi_FaultMgmt_ExpeditedEvent_i_, 'expedited')
+
+Multi_FaultMgmt_ExpeditedEvent_i_.entries = function(mapping, parentkey)
+  return mapping._alarm:getKeys(parentkey)
+end
+
+Multi_FaultMgmt_ExpeditedEvent_i_.getall = function(mapping, key)
+  return mapping._alarm.entries[key]
+end
+
+Multi_FaultMgmt_ExpeditedEvent_i_.get = function(mapping, param, key)
+  return mapping._alarm.entries[key][param]
+end
+
+local function expedited_event(mapping, event, msg)
+  local ret = {}
+  if not fault_helper.NeedNotification() then
+    return ret
+  end
+
+  if msg and msg.Key ~= nil then
+    for param,_ in pairs(mapping.objectType.parameters) do
+      insert(ret, {key = msg.Key, paramname = param})
+    end
+    return ret
+  end
+end
+
+Multi_FaultMgmt_ExpeditedEvent_i_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, expedited_event, "faultmgmt.expeditedevent")
+end
+
+fault_helper.register(Multi_FaultMgmt_ExpeditedEvent_i_, register)

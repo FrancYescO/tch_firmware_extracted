@@ -1,0 +1,85 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+
+EVENT_OBJECT="FaultMgmt.Event"
+EVENT_TYPE="DHCP client"
+MODULE_SOURCE="DHCP"
+
+total_causes_number=8
+
+probable_cause0="NO OFFER/ACK"
+probable_cause1="$probable_cause0"
+probable_cause2="$probable_cause0"
+probable_cause3="$probable_cause0"
+probable_cause4="$probable_cause0"
+probable_cause5="DHCPNAK"
+probable_cause6="$probable_cause5"
+probable_cause7="$probable_cause5"
+
+specific_problem0="No response was received from DHCP server"
+specific_problem1="$specific_problem0"
+specific_problem2="$specific_problem0"
+specific_problem3="$specific_problem0"
+specific_problem4="$specific_problem0"
+specific_problem5="Not specified"
+specific_problem6="Requested address has been allocated"
+specific_problem7="Requested address is invalid"
+
+error0="rebooting timeout"
+error1="selecting timeout"
+error2="requesting timeout"
+error3="lease timeout"
+error4="invalid renew timeout"
+error5="nack received"
+error6="duplicate IP"
+error7="invalid IP"
+
+additional_text="Interface=$INTERFACE, Version=IPv4"
+
+get_error_cause_id() {
+    local i=0
+    while [[ $i -lt ${total_causes_number} ]]; do
+        eval local errorMessage="\$error$i"
+        if [[ "$1" == "$errorMessage" ]]; then
+            echo $i
+            return
+        fi
+        i=$(($i+1))
+    done
+    echo 0
+}
+
+send_message() {
+    local errorCauseId=$(get_error_cause_id "$1")
+
+    json_init
+    json_add_string Source "$MODULE_SOURCE"
+    json_add_string EventType "$EVENT_TYPE"
+    json_add_string ProbableCause "$(eval "echo \$probable_cause${errorCauseId}")"
+    json_add_string SpecificProblem "$(eval "echo \$specific_problem${errorCauseId}")"
+    json_add_string AdditionalText "$additional_text"
+    json_add_string AdditionalInformation "$1"
+
+    ubus send $EVENT_OBJECT "$(json_dump)" 2>/dev/null
+}
+
+send_success() {
+    json_init
+    json_add_string Source "$MODULE_SOURCE"
+    json_add_string EventType "$EVENT_TYPE"
+    json_add_string ProbableCause "Request success"
+    json_add_string AdditionalText "$additional_text"
+    json_add_string AdditionalInformation "lease time is $1"
+
+    ubus send $EVENT_OBJECT "$(json_dump)" 2>/dev/null
+}
+
+case $1 in
+  deconfig|leasefail|nack)
+    send_message "$2"
+     ;;
+  renew|bound)
+    send_success "$2"
+     ;;
+esac

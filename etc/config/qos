@@ -1,0 +1,463 @@
+# Internal Classification Labels
+config label 'Normal'
+	option trafficid '1' 
+
+# Interactive trafficid value 0x9000 is referenced in ftp data helper rule for unboosted FTP flow.
+# Must not set dscp or pcp as the relevant rule should be classify rule.
+config label 'Interactive'
+	option trafficid '2' 
+
+config label 'Network_Control'
+	option trafficid '3' 
+
+config label 'Video_Data'
+	option trafficid '4' 
+
+config label 'Video_Sig'
+	option trafficid '5' 
+
+config label 'Management'
+	option dscp 'CS5'
+	option pcp '5'
+	option trafficid '6' 
+
+config label 'Voice_Data'
+	option dscp 'CS5'
+	option pcp '5'
+	option trafficid '7' 
+
+config label 'Voice_Sig'
+	option dscp 'CS5'
+	option pcp '5'
+	option trafficid '8' 
+
+config label 'Multicast'
+	option trafficid '9' 
+
+# Boost trafficid value 0xd000 is referenced in ftp signal rule for boosted FTP flow.
+# Must not set dscp or pcp as the relevant rule should be classify rule.
+config label 'Boost'
+	option trafficid '10'
+
+config label 'Guest_Data'
+	option tos '0x00'
+	option pcp '0'
+	option trafficid '11'
+
+# Boost_FTP trafficid value 0xe000 is referenced in ftp data helper rule for boosted FTP flow.
+config label 'Boost_FTP'
+	option trafficid '12'
+
+# This mark for ADB speedtest yaft, which data should use Data IP and go into Q5 which is Fastweb Q3.
+config label 'Data_SrcIP_Q5'
+	option trafficid '14'
+
+# This mark for tr143 is to recognize the tr143 flows so that it can be further marked to use data IP.
+config label 'Data_SrcIP'
+	option trafficid '15'
+
+# Private_Data without trafficid uses the default calss W_Q4, queue 4,
+# unless flow mark was set explicitly beforehand or afterwards.
+# The trafficid must not be set for Private_Data, otherwise this reclassify rule will overrule other rule's mark.
+config label 'Private_Data'
+	option tos '0x00'
+	option pcp '0'
+
+# Qos Class Definition (queue's)
+
+# TO_WAN
+# Won't use
+config class 'W_Q0'
+	option priority '0'
+
+# Won't use
+config class 'W_Q1'
+	option priority '1'
+
+# Won't use
+config class 'W_Q2'
+	option priority '2'
+
+# P5 lowest priority: For Home-spot data only
+# Default mbs must be set to non-zero value so that SAR queue
+# shaper could work with mbr and pbr settings in VDSL mode.
+config class 'W_Q3'
+	list trafficid '11'
+	option priority '3'
+	option min_bit_rate '33'
+	option max_burst_size '3000'
+
+# P4: For user private data
+config class 'W_Q4'
+	option priority '4'
+	option min_bit_rate '330'
+	option max_burst_size '3000'
+	list trafficid '1'
+
+# P3: For boost device only
+config class 'W_Q5'
+	list trafficid '10'
+	list trafficid '14'
+	option priority '5'
+	option max_burst_size '3000'
+
+# P2: For CPE originated management flow only
+config class 'W_Q6'
+	list trafficid '2'
+	list trafficid '3'
+	list trafficid '6'
+	list trafficid '12'
+	option priority '6'
+	option max_burst_size '3000'
+
+# P1 highest priority: For voip CPE originated flow only
+config class 'W_Q7'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '7'
+	option max_burst_size '3000'
+
+# TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '4'
+	list trafficid '5'
+	list trafficid '9'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '6'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '7'
+	list trafficid '8'
+	list trafficid '10'
+	option priority '3'
+
+config class 'L_Q4'
+    option priority '4'
+
+config class 'L_Q5'
+    option priority '5'
+
+config class 'L_Q6'
+    option priority '6'
+
+config class 'L_Q7'
+    option priority '7'
+
+# TO_WLAN (priorities are fixed for WMM queues)
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	list trafficid '4'
+	list trafficid '9'
+	list trafficid '10'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '5'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '6'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+# Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q4'
+	option policy 'sp'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3 L_Q4 L_Q5 L_Q6 L_Q7'
+	option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+# Fixed order, relates to hardcoded priorities
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+config interface 'lan'
+	option classgroup 'TO_LAN'
+
+config interface 'wan'
+	option classgroup 'TO_WAN'
+
+config device 'atm0'
+	option classgroup 'TO_WAN'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+
+config device 'veip0'
+	option classgroup 'TO_WAN'
+
+config device 'veip0_1'
+    option classgroup 'TO_WAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+config device 'wl1'
+	option classgroup 'TO_WLAN'
+
+
+# Rule type priority
+# L2classify < Host < Classify < Reclassify < ordered_rule
+# Boost rule order takes '5'
+
+# Classify/Reclassify get applied in the assending order as:
+#
+# - Reclassify after Classify.
+# - from lower to higher order value.
+# 1. Rules without source or destination interface.
+# 2. Rules with source interface but no destination interface.
+# 3. Rules with destination interface but no source interface.
+# 4. Rules with source interface AND destination interface.
+# 5. Rules with explicit order option.
+
+# Order 6 enforce rule to overrule boost rule which order is 5.
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'tcp'
+	option dstports '25,80,109,110,143,201,202,203,204,205,206,220,387'
+
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'udp'
+	option dstports '25,80,109,110,143,201,202,203,204,205,206,220,387'
+
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'tcp'
+	option dstports '443,993,995,1701,1935,3074,3478,3479,3480,3658,8080,37483'
+
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'udp'
+	option dstports '443,993,995,1701,1935,3074,3478,3479,3480,3658,8080,37483'
+
+# FTP is seperated from other Interactive flows because its singnal and data should be enqueued into different queues.
+# The following two rules ensure the signal always goes into queue 6, overruling boost rule.
+# Boost FTP data and normal FTP data will be handled later according to their different mark then.
+config rule
+	option order '7'
+	option target 'Boost_FTP'
+	list srcif 'lan'
+	option proto 'tcp'
+	option mark '0x0000d000/0x0000f800'
+	option dstports '21'
+
+config rule
+	option order '7'
+	option target 'Boost_FTP'
+	list srcif 'lan'
+	option proto 'udp'
+	option mark '0x0000d000/0x0000f800'
+	option dstports '21'
+
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'tcp'
+	option mark '!0x0000d000/0x0000f800'
+	option dstports '21'
+
+config rule
+	option order '6'
+	option target 'Interactive'
+	list srcif 'lan'
+	option proto 'udp'
+	option mark '!0x0000d000/0x0000f800'
+	option dstports '21'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option proto 'icmp'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option proto 'igmp'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+	option proto 'tcp'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123,500,4500'
+	option proto 'udp'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option proto 'esp'
+
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option proto 'ah'
+
+# VPN's
+config rule
+	option order '6'
+	option target 'Network_Control'
+	option proto 'gre'
+
+# Linked to rtsp helper (child connections will inherit the trafficid)
+# Keeps as it will benefit for wan to lan Video traffic at LAN/WLAN QoS schedule, which provides higher performance.
+config rule
+	option order '6'
+	option target 'Video_Sig'
+	option proto 'tcp'
+	option dstports '554'
+
+# Overrule inherited trafficid (helper match automatically implies reclassify)
+# Keeps as it will benefit for wan to lan Video traffic at LAN/WLAN QoS schedule, which provides higher performance.
+config rule
+	option order '6'
+	option target 'Video_Data'
+	option helper 'rtsp'
+  option reclassify 1
+
+# 0x9000 is Interactive flow in which FTP is not boosted, then enqueue FTP data into default queue 4 for private data.
+config rule
+	option order '6'
+	option target 'Normal'
+	option mark '0x00009000/0x0000f800'
+	option helper 'ftp'
+  option reclassify 1
+
+# 0xe000 is Boost_FTP flow in which FTP is boosted, then enqueue FTP data into queue 5 for boosted private data.
+config rule
+	option order '6'
+	option target 'Boost'
+	option mark '0x0000e000/0x0000f800'
+	option helper 'ftp'
+  option reclassify 1
+
+config rule
+	option order '6'
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option srcif 'loopback'
+	option proto 'tcp'
+
+config rule
+	option order '6'
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option srcif 'loopback'
+	option proto 'udp'
+
+# Multicast rules with higher order to get priority over standard rules that might overlap (i.e. dstports)
+# Keeps as it will benefit for wan to lan Multicast traffic at LAN/WLAN QoS schedule, which provides higher performance.
+config rule
+	option order '1' 
+	option target 'Multicast'
+	option dsthost '224.0.0.0/4'
+
+config rule
+	option order '1' 
+	option target 'Multicast'
+	option dsthost 'ff00::/8'
+
+config host
+	option target 'Management'
+	option path '/usr/sbin/odhcpc'
+	
+config host
+	option target 'Management'
+	option path '/usr/bin/cwmpd'
+
+config host
+	option target 'Data_SrcIP'
+	option path '/usr/bin/tr143_diag'
+
+# yaft is the ADB agent speedtest tool.
+config host
+	option target 'Data_SrcIP_Q5'
+	option path '/sbin/yaft'
+
+config host
+	option target 'Data_SrcIP_Q5'
+	option path '/bin/yaft'
+
+config rule
+	option target 'Private_Data'
+	list srcif 'loopback'
+	option dstports '123'
+	option proto udp
+
+config rule
+	option order '6'
+	option target 'Management'
+	list srcif 'loopback'
+	list dstif 'wan'
+	option srcports '23'
+	option proto tcp
+
+config rule
+	option order '6'
+	option target 'Management'
+	list srcif 'loopback'
+	list dstif 'mgmt'
+	option srcports '23'
+	option proto tcp
+
+# Guest_Data target contains tos overwriting, then will be automatically converted to reclassify, then will overrule other helper rules.
+config rule
+	option order '4'
+	option srcif 'Guest'
+	option target 'Guest_Data'
+
+# Private_Data target contains tos overwriting, then will be automatically converted to reclassify, then will overrule other helper rules.
+config rule
+	option order '4'
+	option srcif 'lan'
+	option target 'Private_Data'
+
+config rule
+	option order '6'
+	option target 'Voice_Data'
+	list srcif 'loopback'
+	list dscp 'CS6'
+

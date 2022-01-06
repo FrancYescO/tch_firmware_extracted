@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="DNSDiagnostics" version="2.0">
+    <object name="DNS.Diagnostics" access="readOnly" minEntries="1" maxEntries="1">
+        <parameter name="X_ADB_NSLookupNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Diagnostics.NSLookupDiagnostics." access="readOnly" minEntries="1" maxEntries="1" set="DNSDiagnostics.sh">
+        <parameter name="DiagnosticsState" access="readWrite" activeNotify="canDeny" localNotify="forceEnabled" store="no">
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Requested"/>
+                    <enumeration value="Complete"/>
+                    <enumeration value="Error_DNSServerNotResolved"/>
+                    <enumeration value="Error_Internal"/>
+                    <enumeration value="Error_Other"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <syntax>
+                <string>
+                    <size maxLength="256"></size>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="HostName" access="readWrite">
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServer" access="readWrite">
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Timeout" access="readWrite">
+            <syntax>
+                <unsignedInt>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="NumberOfRepetitions" access="readWrite">
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="10" step="1"/>
+                </unsignedInt>
+                <default value="1"/>
+            </syntax>
+        </parameter>
+        <parameter name="SuccessCount" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="ResultNumberOfEntries" access="readOnly" activeNotify="canDeny" store="no">
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_StartTime" access="readOnly">
+            <description>
+            After the test is requested, this parameter contains the absolute start time of the DNS lookup.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Reset" access="readOnly" set="ResetTest.sh" aliasOnGet="%s(false)" store="no">
+            <description>
+                When set {{true}} all optional paramaters are reset
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Diagnostics.NSLookupDiagnostics.Result.{i}." access="readOnly" numEntriesParameter="ResultNumberOfEntries" minEntries="0" maxEntries="unbounded" store="no">
+        <parameter name="Status" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <string>
+                    <enumeration value="Success"/>
+                    <enumeration value="Error_DNSServerNotAvailable"/>
+                    <enumeration value="Error_HostNameNotResolved"/>
+                    <enumeration value="Error_Timeout"/>
+                    <enumeration value="Error_Other"/>
+                </string>
+                <default value="Error_Other"/>
+            </syntax>
+        </parameter>
+        <parameter name="AnswerType" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Authoritative"/>
+                    <enumeration value="NonAuthoritative"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="HostNameReturned" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="IPAddresses" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <list maxItems="10"/>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServerIP" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="ResponseTime" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <unsignedInt>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Diagnostics.X_ADB_NSLookup.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" set="DNSDiagnostics.sh" del="DNSDiagnostics.sh" numEntriesParameter="X_ADB_NSLookupNumberOfEntries">
+        <description>This object defines access to an IP-layer NS Lookup test for the specified IP interface.
+        The purpose is to allow multiple NS lookup tests running concurrently.
+        Each instance has the same usage and behavior as described for {{object|#.NSLookupDiagnostics}}.
+        </description>
+        <parameter name="Alias" access="readWrite">
+            <description>A non-volatile handle used to reference this instance.
+            Alias provides a mechanism for an ACS to label this instance for future reference.
+            </description>
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="DiagnosticsState" access="readWrite" activeNotify="canDeny" localNotify="forceEnabled">
+            <description>See description for {{param|#.NSLookupDiagnostics.DiagnosticsState}}.</description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Requested"/>
+                    <enumeration value="Complete"/>
+                    <enumeration value="Error_DNSServerNotResolved"/>
+                    <enumeration value="Error_Internal"/>
+                    <enumeration value="Error_Other"/>
+                    <enumeration value="Error_OutOfMemory"/>
+                    <enumeration value="Error_CPUThresholdExceeded"/>
+                    <enumeration value="Error_TrafficThresholdExceeded"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="Interface" access="readWrite">
+            <description>See description for {{param|#.NSLookupDiagnostics.Interface}}.</description>
+            <syntax>
+                <string>
+                    <size maxLength="256"></size>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="HostName" access="readWrite">
+            <description>See description for {{param|#.NSLookupDiagnostics.HostName}}.</description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServer" access="readWrite">
+            <description>See description for {{param|#.NSLookupDiagnostics.DNSServer}}.</description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Timeout" access="readWrite">
+            <description>See description for {{param|#.NSLookupDiagnostics.Timeout}}.</description>
+            <syntax>
+                <unsignedInt>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="NumberOfRepetitions" access="readWrite">
+            <description>See description for {{param|#.NSLookupDiagnostics.NumberOfRepetitions}}.</description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="10" step="1"/>
+                </unsignedInt>
+                <default value="1"/>
+            </syntax>
+        </parameter>
+        <parameter name="WaitResults" access="readWrite">
+            <description>
+            When {{true}} the DNS test is performed synchronously with setting {{param|DiagnosticsState}} Requested.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="SuccessCount" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|#.NSLookupDiagnostics.SuccessCount}}.</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="ResultNumberOfEntries" access="readOnly" activeNotify="canDeny" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_StartTime" access="readOnly">
+            <description>
+            After the test is requested, this parameter contains the absolute start time of the DNS lookup.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="DNS.Diagnostics.X_ADB_NSLookup.{i}.Result.{i}." access="readOnly" numEntriesParameter="ResultNumberOfEntries" minEntries="0" maxEntries="unbounded">
+        <description>Results from the most recent invocation of the test, one instance per repetition.</description>
+        <parameter name="Status" access="readOnly" activeNotify="canDeny">
+            <syntax>
+                <string>
+                    <enumeration value="Success"/>
+                    <enumeration value="Error_DNSServerNotAvailable"/>
+                    <enumeration value="Error_HostNameNotResolved"/>
+                    <enumeration value="Error_Timeout"/>
+                    <enumeration value="Error_Other"/>
+                </string>
+                <default value="Error_Other"/>
+            </syntax>
+        </parameter>
+        <parameter name="AnswerType" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|##.NSLookupDiagnostics.Result.{i}.AnswerType}}.</description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Authoritative"/>
+                    <enumeration value="NonAuthoritative"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="HostNameReturned" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|##.NSLookupDiagnostics.Result.{i}.HostNameReturned}}.</description>
+            <syntax>
+                <string>
+                    <size maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="IPAddresses" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|##.NSLookupDiagnostics.Result.{i}.IPAddresses}}.</description>
+            <syntax>
+                <list maxItems="10"/>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="DNSServerIP" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|##.NSLookupDiagnostics.Result.{i}.DNSServerIP}}.</description>
+            <syntax>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="ResponseTime" access="readOnly" activeNotify="canDeny">
+            <description>See description for {{param|##.NSLookupDiagnostics.Result.{i}.ResponseTime}}.</description>
+            <syntax>
+                <unsignedInt>
+                    <units value="milliseconds"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

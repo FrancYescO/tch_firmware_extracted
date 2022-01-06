@@ -1,0 +1,175 @@
+<div id="widget_family_devices" class="panel panel-widget" ng-controller="widgetFamilyDevicesCtrl">
+  <div ng-if="enableSortableWidgets" as-sortable-item-handle class="panel-heading" fw-action-bottons="devices">
+   <h3 class="panel-title" translate>WIDGETS.FAMILY_DEVICES.TITLE</h3>
+  </div>
+  <div ng-if="!enableSortableWidgets" class="panel-heading">
+    <h3 class="panel-title" translate>WIDGETS.FAMILY_DEVICES.TITLE</h3>
+  </div>
+  <div ng-class="{'panel-body':true, 'loading-data':!isDataReadyFamily}">
+      <div class="row visible-xs">
+            <div class="mobile-form-separator widget">
+                <span class="icon clock"></span>
+                <div>
+                    <span translate="WIDGETS.FAMILY_DEVICES.ACTIVE_ROUTINES" translate-values="{routines_num: family_boost.length + family_stop.length}"></span>
+                    <span ng-if="family_boost.length > 0">
+                        <span translate>WIDGETS.FAMILY_DEVICES.BOOST_ON</span>
+                        <span class="autolist_el" ng-repeat="dev in family_boost"> 
+                            <span ng-show="$last && !$first" translate>WIDGETS.FAMILY_DEVICES.ACTIVE_ROUTINES_AND</span> 
+                            <span ng-show="!$last && !$first && family_boost.length > 2">, </span> 
+                            {{dev.name}}<span ng-show="$last">. </span>
+                        </span>
+                    </span>
+                    <span ng-if="family_stop.length > 0">
+                        <span translate>WIDGETS.FAMILY_DEVICES.STOP_ON</span>
+                        <span class="autolist_el" ng-repeat="dev in family_stop"> 
+                            <span ng-show="$last && !$first" translate>WIDGETS.FAMILY_DEVICES.ACTIVE_ROUTINES_AND</span> 
+                            <span ng-show="!$last && !$first && family_stop.length > 2">, </span> 
+                            {{dev.name}}<span ng-show="$last">. </span>
+                        </span>
+                    </span>
+                </div>
+            </div>
+      </div>
+      <div class="row hidden-xs">
+          <div class="col-sm-3">
+              <div class="summary">
+                  <div class="main">
+                      <var>{{family_online.length}}</var>
+                      <span translate>WIDGETS.FAMILY_DEVICES.ONLINE</span>
+                  </div>
+                  <div class="secondary">
+                      <var>{{family_offline.length}}</var>
+                      <span translate>WIDGETS.FAMILY_DEVICES.OFFLINE</span>
+                  </div>
+              </div>
+          </div>
+          <div class="col-sm-9">
+            <div class="row protected_devices">
+                <div class="col-sm-3" ng-repeat="dev in family_online">
+                    <div class="device">
+                        <div ng-class="{'icon-large':true, 'icon-{{dev.icon}}':true, active:true}"></div>
+                        <div class="name">{{dev.name}}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="row protected_devices">
+                <div class="col-sm-3" ng-repeat="dev in family_offline">
+                    <div class="device">
+                        <div ng-class="{'icon-large':true, 'icon-{{dev.icon}}':true}"></div>
+                        <div class="name">{{dev.name}}</div>
+                    </div>
+                </div>
+            </div>
+          </div>
+      </div>
+      <div class="row buttons-wrap hidden-xs">
+        <div class="button-container text-right col-xs-12">
+          <button type="submit" ng-click="openAddDevices()" class="btn btn-default" translate>WIDGETS.FAMILY_DEVICES.ADD</button>
+          <button type="submit" ng-click="openRemoveDevices()" class="btn btn-default" translate>WIDGETS.FAMILY_DEVICES.REMOVE</button>
+        </div>
+      </div>
+  </div>
+</div>
+
+<script type="text/ng-template" id="modal_add_family_device.html">
+  <form novalidate class="form-horizontal" name="frm_add_family_devices" ng-submit="frm_add_family_devices.$valid && ctrl.ok()">
+    <div class="modal-header">
+        <h3 class="modal-title" translate="">WIDGETS.FAMILY_DEVICES.MODAL_TITLE_ADD</h3>
+    </div>
+    <div class="modal-body">
+      
+        <div class="form-group">
+          <label class="col-sm-3 control-label" translate="">WIDGETS.FAMILY_DEVICES.MODAL_SEARCH_MODE</label>
+          <div class="col-sm-5">
+            <div class="btn-group dropdown" uib-dropdown>
+              <button type="button" class="btn dropdown-toggle" uib-dropdown-toggle>
+                <span translate="WIDGETS.FAMILY_DEVICES.MODAL_SEARCH_MODE_{{ctrl.mode}}"></span> <span class="caret"></span>
+              </button>
+              <ul class="dropdown-menu" uib-dropdown-menu role="menu"> 
+                <li role="menuitem"><a href="" ng-click="ctrl.mode = 'ONLINE'" translate>WIDGETS.FAMILY_DEVICES.MODAL_SEARCH_MODE_ONLINE</a></li>
+                <li role="menuitem"><a href="" ng-click="ctrl.mode = 'OFFLINE'" translate>WIDGETS.FAMILY_DEVICES.MODAL_SEARCH_MODE_OFFLINE</a></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <fieldset class="no-animate">
+          <div class="form-group">
+            <label class="col-sm-3 control-label" translate>WIDGETS.FAMILY_DEVICES.MODAL_DEVICE_LIST</label>
+            <div class="col-sm-9">
+
+              <div ng-if="!ctrl.isDataReady" ng-include="'views/partials/loader.html'"></div>
+            
+              <ul class="list" ng-if="ctrl.isDataReady && !!ctrl.devices[ctrl.mode].length">
+                  <li ng-repeat="item in ctrl.devices[ctrl.mode]">
+                    <div class="row">
+                      <div class="col-xs-1">
+                        <span ng-if="ctrl.mode == 'ONLINE'" class="icon icon-{{item.icon}}"></span>
+                        <span ng-if="ctrl.mode == 'OFFLINE'" class="icon icon-{{item.icon}}"></span>
+                      </div>
+                      <div class="col-xs-7">{{item.name}}</div>
+                      <div class="col-xs-1">
+                        <button type="button" class="btn btn-checkbox" ng-model="item.selected" uib-btn-checkbox=""></button>
+                      </div>
+                    </div>
+                  </li>
+              </ul>
+
+              <div ng-if="ctrl.isDataReady && !ctrl.devices[ctrl.mode].length">
+                <p translate="WIDGETS.FAMILY_DEVICES.MODAL_SEARCH_NO_RESULT"></p>
+              </div>
+
+            </div>
+          </div>
+        </fieldset>
+    </div>
+    <div class="modal-footer">
+      <div class="row">
+        <div class="col-sm-9 col-sm-offset-3 text-left">
+          <button class="btn btn-default" type="submit" ng-disabled="!(ctrl.devices[ctrl.mode] | filter:{selected:true}).length" translate="">FORMS.ADD</button>
+          <button class="btn btn-default" type="button" ng-click="ctrl.cancel()" translate="">FORMS.CANCEL</button>
+        </div>
+      </div>
+    </div>
+  </form>
+</script>
+
+<script type="text/ng-template" id="modal_remove_family_device.html">
+    <div class="modal-header">
+        <h3 class="modal-title" translate>WIDGETS.FAMILY_DEVICES.MODAL_TITLE_REMOVE</h3>
+    </div>
+    <div class="modal-body">
+      <form class="form-horizontal">
+        
+        <fieldset class="no-animate">
+          <div class="form-group">
+            <label class="col-sm-3 control-label" translate>WIDGETS.FAMILY_DEVICES.MODAL_DEVICE_LIST</label>
+            <div class="col-sm-9">
+
+              <div ng-if="!ctrl.isDataReady" ng-include="'views/partials/loader.html'"></div>
+            
+              <ul class="list" ng-if="ctrl.isDataReady">
+                  <li ng-repeat="item in ctrl.devices">
+                    <div class="row">
+                      <div class="col-xs-1"><span ng-class="{'icon':true, 'icon-{{item.icon}}':true, 'active': true}"></span></div>
+                      <div class="col-xs-7">{{item.name}}</div>
+                      <div class="col-xs-1">
+                        <button class="btn btn-checkbox" ng-model="item.selected" uib-btn-checkbox=""></button>
+                      </div>
+                    </div>
+                  </li>
+              </ul>
+            </div>
+          </div>
+        </fieldset>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <div class="row">
+        <div class="col-sm-9 col-sm-offset-3 text-left">
+          <button class="btn btn-default" ng-disabled="(ctrl.devices | filter:{selected:true}).length == 0" ng-click="ctrl.ok()" translate="">FORMS.REMOVE</button>
+          <button class="btn btn-default" type="button" ng-click="ctrl.cancel()" translate="">FORMS.CANCEL</button>
+        </div>
+      </div>
+    </div>
+</script>
