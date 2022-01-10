@@ -97,7 +97,7 @@ for file in glob.glob("*.rbi"):
 		continue
 	print("Binwalking %s..."%dec_filename)
 	path_to_push=''
-	for module in binwalk.scan(dec_filename, signature=True, extract=True, quiet=True):
+	for module in binwalk.scan('--preserve-symlinks', dec_filename, signature=True, extract=True, quiet=True):
 		for result in module.results:
 			if result.file.path in module.extractor.output:
 				if result.offset in module.extractor.output[result.file.path].extracted:
