@@ -1,0 +1,63 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+a=`uci get env.var.default_key_r0_s0`
+reducedDefKey=${a:0:10}
+
+# To make sure it is set to the correct vendor
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_2.4
+uci set wireless.wl0_1.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_2.4_2
+uci set wireless.wl0_2.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_2.4_3
+uci set wireless.wl0_3.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_2.4_4
+
+uci set wireless.ap0.wep_key=$reducedDefKey
+
+uci set wireless.ap0.wpa_psk_key=$reducedDefKey
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=$reducedDefKey
+
+# WIFI keys for 2.4G guest networks
+uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r0_s2`
+uci set wireless.ap4.wpa_psk_key=`uci get env.var.default_key_r0_s3`
+
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+  
+  uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_5
+  uci set wireless.wl1_1.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_5_2
+  uci set wireless.wl1_2.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_5_3
+  uci set wireless.wl1_3.ssid=`uci get env.var.ssid_prefix``uci get env.rip.serial | tail -c -5`_5_4
+  
+  uci set wireless.ap1.wep_key=$reducedDefKey
+  
+  uci set wireless.ap1.wpa_psk_key=$reducedDefKey
+  
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+  
+  uci set wireless.ap1_auth0.secret=$reducedDefKey
+
+# WIFI keys for 2.4G guest networks
+uci set wireless.ap5.wpa_psk_key=`uci get env.var.default_key_r1_s1`
+uci set wireless.ap6.wpa_psk_key=`uci get env.var.default_key_r1_s2`
+uci set wireless.ap7.wpa_psk_key=`uci get env.var.default_key_r1_s3`
+
+fi
+
+  
+
+uci commit wireless
+
+

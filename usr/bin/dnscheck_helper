@@ -1,0 +1,98 @@
+#!/usr/bin/env lua
+
+local logger = require 'transformer.logger'
+local open = io.open
+local match = string.match
+local popen = io.popen
+local log = logger.new("network.interface", 2)
+local DNS_CHECK_FILE = "/tmp/dnscheck"
+local DNS_SERVER_FILE = "/tmp/dnsserver"
+
+function writefile(filename, info)
+    local wfile=io.open(filename,"w+")
+    assert(wfile)
+    wfile:write(info)
+    wfile:close()
+end
+
+writefile(DNS_CHECK_FILE, "Requested")
+
+--- Helper script that performs the actual dnsget
+-- @param query The fqdn to resolve
+-- @param server The nameserver of sending dns request to
+-- @param v6 Whether dns query type is IPv6. 1:ipv6 , 0:ipv4.
+-- @param attempts:num - number of attempt to resovle a query.
+-- @param timeout:sec  - initial query timeout .
+-- Notice the resolve address is not been used, here just check whether can be resolve.
+local query = "www.google.com.mx"
+local attempts,timeout = 1,1
+local v6 = false
+
+local fd,msg = open(DNS_SERVER_FILE, "r")
+if not fd then
+  log:error("Failed Open " .. DNS_SERVER_FILE)
+end
+local server = fd:read("*a")
+fd:close()
+
+if type(attempts) ~= 'number' then
+    attempts=1
+end
+
+if type(timeout) ~= 'number' then
+    timeout=1
+end
+
+local cmd
+if server ~= nil then
+    cmd='dnsget -n ' .. server
+else
+    cmd='dnsget'
+end
+if v6 then
+    cmd=cmd .. ' -t AAAA'
+else
+    cmd=cmd .. ' -t A'
+end
+cmd=cmd .. ' -o timeout:' ..timeout.. ' -o attempts:' ..attempts.. ' ' .. query .. ' 2>/dev/null'
+
+log:error(" cmd is " .. cmd)
+local pipe = popen(cmd,'r')
+if pipe then
+    local resolvedhostname,resolvedaddressesv4,resolvedaddressesv6,addr,addr6
+    for line in pipe:lines() do
+        resolvedhostname = match(line,"([^%s]+)%.%s")
+        if resolvedhostname then
+            if v6 == false then
+                addr=match(line,"%s+(%d+%.%d+%.%d+%.%d+)")
+                if addr then
+                    if not resolvedaddressesv4 then
+                        resolvedaddressesv4 = {}
+                    end
+                    resolvedaddressesv4[#resolvedaddressesv4+1] = addr
+                end
+            else
+                addr6=match(line,"%s+(%x*:[%x:]*:%x*)")
+                if addr6 then
+                    if not resolvedaddressesv6 then
+                        resolvedaddressesv6 = {}
+                    end
+                    resolvedaddressesv6[#resolvedaddressesv6+1] = addr6
+                end
+            end
+        end
+    end
+    pipe:close()
+
+    if resolvedhostname and (resolvedaddressesv4 or resolvedaddressesv6) then
+        -- Success. resolvedhostname,resolvedaddressesv4,resolvedaddressesv6
+        writefile(DNS_CHECK_FILE, "Success")
+    else
+        -- unresolved , not an error
+        writefile(DNS_CHECK_FILE, "Failed")
+    end
+else
+    log:error(" Failed to run dnsget")
+    writefile(DNS_CHECK_FILE, "Failed")
+end
+
