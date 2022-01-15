@@ -1,0 +1,139 @@
+-- Manually generated
+local Device_DeviceInfo_NetworkProperties_ = {
+  objectType  = {
+    name = "Device.DeviceInfo.NetworkProperties.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      X_000E50_WanSyncStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "ADSL",
+          "VDSL",
+          "ETH_WAN",
+	  "MOBILE",
+	  "GFAST",
+	  "GPON",
+	  "FIBER",
+          "SFP",
+          "SENS",
+        },
+        default = "SENS",
+      },
+      X_BELGACOM_WanSyncStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "ADSL",
+          "VDSL",
+          "ETH_WAN",
+	  "MOBILE",
+          "GFAST",
+          "GPON",
+          "FIBER",
+          "SFP",
+          "SENS",
+        },
+        default = "SENS",
+        description = "WAN synchronous status",
+      },
+      X_BELGACOM_NetworkTopology = {
+        access = "readWrite",
+	type = "string",
+	enumeration = {
+          "TITAN",
+	  "Legacy",
+        },
+        default = "Legacy",
+        description = "Brings about the mode switch from Proximus 1IP mode which is referred to as 'TITAN' and 3IP mode referred to as 'Legacy' mode",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local luabcm = require('luabcm')
+local getFromUci = uciHelper.get_from_uci
+local wanSensingBinding = { config = "wansensing", sectionname = "global", option = "l2type" }
+local configChanged
+local networkBinding = { config = "network", sectionname = "globals", option = "mode", default = "Legacy" }
+local envBinding = { config = "env", sectionname = "var", option = "PXS_TV_MODE_REQ" }
+local match = string.match
+
+local valueMap = {
+  ["ADSL"] = "ADSL",
+  ["VDSL"] = "VDSL",
+  ["ETH"]  = "ETH_WAN",
+  ["MOBILE"] = "MOBILE",
+  ["GFAST"] = "GFAST",
+  ["GPON"] = "GPON",
+  ["FIBER"] = "FIBER",
+  ["SFP"]  = "SFP",
+  [""]     = "SENS",
+}
+
+Device_DeviceInfo_NetworkProperties_.get = {
+  X_000E50_WanSyncStatus = function(mapping, param)
+    return valueMap[getFromUci(wanSensingBinding)] or "SENS"
+  end,
+  X_BELGACOM_WanSyncStatus = function(mapping, param)
+    return valueMap[getFromUci(wanSensingBinding)] or "SENS"
+  end,
+  X_BELGACOM_NetworkTopology = function(mapping, param)
+    return getFromUci(networkBinding)
+  end
+}
+
+Device_DeviceInfo_NetworkProperties_.set = {
+  X_BELGACOM_NetworkTopology = function(mapping, param, value)
+    local mode = getFromUci(networkBinding)
+    local videoMode = getFromUci(envBinding)
+    local dslStatus = luabcm.getAdslMib(0)
+    dslStatus = dslStatus.Mode
+    if value == "TITAN" then
+      if videoMode == "Bridged" then
+        return nil, "The mode switch to TITAN is denied as Bridged TV mode has been detected."
+      elseif dslStatus:match("ADSL") then
+        return nil, "The mode switch to TITAN is denied as ADSL interface has been detected."
+      end
+    end
+    if value ~= mode then
+      uciHelper.set_on_uci(networkBinding, value, commitapply)
+      configChanged = true
+    end
+  end
+}
+
+Device_DeviceInfo_NetworkProperties_.commit = function()
+  if configChanged then
+    uciHelper.commit(networkBinding)
+    configChanged = false
+  end
+end
+
+Device_DeviceInfo_NetworkProperties_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+    configChanged = false
+  end
+end
+
+local function setUciEvent(mapping, action, config, sectionType, sectionName, option)
+  local events = {}
+  if mapping.objectType.parameters["X_000E50_WanSyncStatus"] then
+    events[#events + 1] = { key = "", paramname = "X_000E50_WanSyncStatus" }
+  end
+  if mapping.objectType.parameters["X_BELGACOM_WanSyncStatus"] then
+    events[#events + 1] = { key = "", paramname = "X_BELGACOM_WanSyncStatus" }
+  end
+  return events
+end
+
+Device_DeviceInfo_NetworkProperties_.add_watchers = function(mapping)
+  local uciEventSource = eventsource("uci")
+  uciEventSource.watch(mapping, { set = setUciEvent }, "wansensing", "wansensing", "global", "l2type")
+end
+
+register(Device_DeviceInfo_NetworkProperties_)

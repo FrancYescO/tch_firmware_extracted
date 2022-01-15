@@ -1,0 +1,119 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_AssociatedDevice_i_X_Stats_ = {
+    objectType = {
+        name = "InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.AssociatedDevice.{i}.#ROOT.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Retransmissions = {
+               access = "readOnly",
+               type = "unsignedInt",
+               description = "Show the retransmissions of this WiFi client",
+               range = {
+                 {
+                   min = "0",
+                   max = "100",
+                 },
+               },
+             },
+             SignalStrength = {
+                access = "readOnly",
+                type = "int",
+                description = "Show the signal strength of this WiFi client",
+                range = {
+                  {
+                   min = "-200",
+                   max = "0",
+                  },
+               },
+            },
+            BytesSent = {
+               access = "readOnly",
+               type = "unsignedLong",
+            },
+            BytesReceived = {
+               access = "readOnly",
+               type = "unsignedLong",
+            },
+            PacketsSent = {
+               access = "readOnly",
+               type = "unsignedLong",
+            },
+            PacketsReceived = {
+               access = "readOnly",
+               type = "unsignedLong",
+            },
+            ErrorsSent = {
+               access = "readOnly",
+               type = "unsignedInt",
+            },
+            RetransCount = {
+               access = "readOnly",
+               type = "unsignedInt",
+            },
+            FailedRetransCount = {
+               access = "readOnly",
+               type = "unsignedInt",
+            },
+            RetryCount = {
+               access = "readOnly",
+               type = "unsignedInt",
+            },
+            MultipleRetryCount = {
+               access = "readOnly",
+               type = "unsignedInt",
+            },
+        }
+    }
+}
+
+local wlanConfigCommon = require("transformer.shared.WLANConfigurationCommon")
+
+local function stationStats(key, parentKey, option)
+  local macAddress = key:match("_sta_([%da-fA-F:]+)$") or ""
+  return wlanConfigCommon.getStationDataFromIface(parentKey, macAddress, option) or "0"
+end
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_AssociatedDevice_i_X_Stats_.get = {
+  SignalStrength = function(mapping, param, key, parentKey)
+    local macAddress = key:match("_sta_([%da-fA-F:]+)$") or ""
+    return wlanConfigCommon.getStationDataFromIface(parentKey, macAddress, "rssi") or "0"
+  end,
+  Retransmissions = function(mapping, param, key, parentKey)
+    local macAddress = key:match("_sta_([%da-fA-F:]+)$") or ""
+    return wlanConfigCommon.getStationDataFromIface(parentKey, macAddress, "av_txbw_used") or "0"
+  end,
+  BytesSent = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "tx_bytes")
+  end,
+  BytesReceived = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "rx_bytes")
+  end,
+  PacketsSent = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "tx_packets")
+  end,
+  PacketsReceived = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "rx_packets")
+  end,
+  ErrorsSent = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "tx_noack_failures")
+  end,
+  RetransCount = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "tx_noack_failures")
+  end,
+  FailedRetransCount = function(mapping, param, key, parentKey)
+    return stationStats(key, parentKey, "rx_sec_failures")
+  end,
+  RetryCount = "0",
+  MultipleRetryCount = "0",
+}
+
+do
+  local duplicator = mapper("multiroot").duplicate
+  local duplicates = duplicator(InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_AssociatedDevice_i_X_Stats_, "#ROOT", {"X_Stats", "X_000E50_Stats"})
+  for _, dupli in ipairs(duplicates) do
+    register(dupli)
+  end
+end

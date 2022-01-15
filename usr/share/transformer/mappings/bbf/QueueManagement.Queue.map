@@ -1,0 +1,485 @@
+--Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local Multi_QueueManagement_Queue_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "QueueNumberOfEntries",
+    enableParameter = "QueueEnable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+--[[ TODO
+      QueueKey = {
+        access = "readOnly",
+        status = "obsoleted",
+        type = "unsignedInt",
+      },
+--]]
+      QueueEnable = {
+        access = "readOnly",
+        type = "boolean",
+        default = "false",
+      },
+      QueueStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error",
+        },
+        default = "Disabled",
+      },
+--[[ TODO
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+--]]
+      TrafficClasses = {
+        access = "readWrite",
+        list = true,
+        max = "256",
+        type = "unsignedInt",
+        default = "",
+      },
+      QueueInterface = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        max = "256",
+        default = "",
+      },
+--[[ TODO
+      QueueBufferLength = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+--]]
+      QueueWeight = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      QueuePrecedence = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+        default = "1",
+      },
+--[[ TODO
+      REDThreshold = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "100",
+          },
+        },
+        default = "0",
+      },
+      REDPercentage = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "100",
+          },
+        },
+        default = "0",
+      },
+      DropAlgorithm = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "RED",
+          "DT",
+          "WRED",
+          "BLUE",
+        },
+        default = "DT",
+      },
+--]]
+      SchedulerAlgorithm = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "WFQ",
+          "WRR",
+          "SP",
+        },
+        default = "SP",
+      },
+      ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      ShapingBurstSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      Enable = {
+        access = "readOnly",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+      default = "Disabled",
+      },
+      Interface = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+        default = "",
+      },
+--[[ TODO
+      AllInterfaces = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      HardwareAssisted = {
+        access = "readOnly",
+        type = "boolean",
+        default = "false",
+      },
+      BufferLength = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+--]]
+      Weight = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      Precedence = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+        default = "1",
+      },
+      X_0876FF_QueueName = {
+        access = "readOnly",
+        type = "string",
+	description = "Name of this QoS Queue"
+      },
+      X_000E50_QueueName = {
+        access = "readOnly",
+        type = "string",
+	description = "Name of this QoS Queue"
+      },
+    }
+  }
+}
+
+local mapper, resolve, string, table  = mapper, resolve, string, table
+local uciHelper = mapper("ucihelper")
+local qosBinding = { config = "qos" }
+local forEachOnUci = uciHelper.foreach_on_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local configChanged = false
+local findLanWanInterfaces = mapper("nwcommon").findLanWanInterfaces
+local wanconn = require("transformer.shared.wanconnection")
+local list = require("transformer.shared.common.list")
+local match = string.match
+local commitApply = commitapply
+local dmordering = require 'transformer.shared.models.dmordering'
+
+local function setUciValue(sectionName, option, value)
+  qosBinding.sectionname = sectionName
+  qosBinding.option = option
+  uciHelper.set_on_uci(qosBinding, value, commitApply)
+  configChanged = true
+end
+
+local function getUciValue(sectionName,paramName,default)
+  qosBinding.sectionname = sectionName
+  qosBinding.option = paramName
+  qosBinding.default = default
+  return uciHelper.get_from_uci(qosBinding)
+end
+
+local function setBandwidth(key, option, value)
+  setUciValue(key, option, value)
+  commitapply:newset("Device.X_FASTWEB_QOS.Queue")
+end
+
+local queueParamMap = {
+  Weight = "weight",
+  QueueWeight = "weight",
+  Precedence = "priority",
+  QueuePrecedence = "priority",
+  TrafficClasses = "trafficid",
+  SchedulerAlgorithm = "policy",
+  ShapingRate = "max_bit_rate",
+  ShapingBurstSize = "max_burst_size"
+}
+
+local lookUp = {
+  sp     = "SP",
+  wrr    = "WRR",
+  wfq    = "WFQ",
+  sp_wrr = "WRR",
+  sp_wfq = "WFQ",
+}
+
+Multi_QueueManagement_Queue_i_.entries = function(mapping)
+  qosBinding.sectionname = "class"
+  local queueEntry = {}
+  forEachOnUci(qosBinding,function(s)
+    queueEntry[#queueEntry + 1] = s[".name"]
+  end)
+  return dmordering.sort(queueEntry, "qos")
+end
+
+local function getSchedulerAlgorithm(mapping, param, key)
+  local weight = getUciValue(key, "weight")
+  qosBinding.sectionname = "classgroup"
+  qosBinding.option = nil
+  local SchedulerAlgo
+  forEachOnUci(qosBinding, function(s)
+    if weight ~= "" and s.classes and match(s.classes, key) then
+      SchedulerAlgo = s.policy
+      return false
+    end
+  end)
+  return lookUp[SchedulerAlgo] and lookUp[SchedulerAlgo] or "SP"
+end
+
+-- As Per spec if the interface is WAN,it indicates this entry applies to all WAN interfaces or if the interface is LAN,
+-- which indicates this entry applies to all LAN
+-- The path for QueueInteface param is resolved based on the existing lower layer design.
+local function interfaceToPath(mapping, interface)
+   local path = ""
+   if match(mapping.objectType.name, "^InternetGatewayDevice") then -- igd
+     local lanInterfaces = findLanWanInterfaces(false)
+     local isLan = false
+     for _,intf in pairs(lanInterfaces) do
+       if (interface == intf) then
+         isLan = true
+         break
+       end
+     end
+     if (isLan) then
+        path = resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', interface)
+     else
+        local key, status = wanconn.get_connection_key(interface)
+        if key and status then
+          if status.proto == "pppoe" or status.proto == "pppoa" then
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key)
+          else
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key)
+          end
+        end
+     end
+   else --device2
+     path = resolve("Device.IP.Interface.{i}.", interface)
+   end
+   return path or ""
+end
+
+-- Fetch the interface name if the classgroup section contains the classs
+-- using the interface name resolve the Interface path
+local function getQueueInterface(mapping, param, key)
+  local interface
+  qosBinding.sectionname = "interface"
+  forEachOnUci(qosBinding, function(s)
+    interface = s['.name']
+    local classgroup = s['classgroup']
+    if classgroup then
+      local classes = getUciValue(classgroup, "classes", "")
+      if match(classes,key) then
+        return false
+      end
+      interface = ""
+    end
+  end)
+  return interface and interfaceToPath(mapping, interface) or ""
+end
+
+
+Multi_QueueManagement_Queue_i_.get = {
+  QueueEnable = "1", -- always enabled, since there is no lower layer support available
+  Enable = "1", -- always enabled, since there is no lower layer support available
+  Status  = "Enabled", -- always enabled, since there is no lower layer support available
+  QueueStatus  = "Enabled", -- always enabled, since there is no lower layer support available
+  TrafficClasses = function(mapping, param, key)
+    local TrafficidList = getUciValue(key, queueParamMap[param], {})
+    local TrafficidStr = table.concat(TrafficidList, ',')
+    return TrafficidStr
+  end,
+  QueueWeight = function(mapping, param, key)
+    return getUciValue(key, queueParamMap[param], "0")
+  end,
+  Weight = function(mapping, param, key)
+    return getUciValue(key, queueParamMap[param], "0")
+  end,
+  QueuePrecedence  = function(mapping, param, key)
+    return getUciValue(key, queueParamMap[param], "0")
+  end,
+  Precedence = function(mapping, param, key)
+    local precedence = getUciValue(key, queueParamMap[param], "1")
+    return precedence ~= "0" and precedence or "1"
+  end,
+  SchedulerAlgorithm = getSchedulerAlgorithm,
+  QueueInterface = getQueueInterface,
+  Interface = getQueueInterface,
+  X_0876FF_QueueName = function(mapping, param, key)
+    return key
+  end,
+  X_000E50_QueueName = function(mapping, param, key)
+    return key
+  end,
+  UsMaxBW = function(mapping, param, key)
+    return getUciValue(key, "max_bit_rate", "0")
+  end,
+  UsMinBW = function(mapping, param, key)
+    return getUciValue(key, "min_bit_rate", "0")
+  end,
+  ShapingRate = function(mapping, param, key)
+    local maxBitRate = getUciValue(key, queueParamMap[param], "0")
+    return maxBitRate ~= "0" and tostring(maxBitRate * 1000) or "-1"
+  end,
+  ShapingBurstSize = function(mapping, param, key)
+    return getUciValue(key, queueParamMap[param], "0")
+  end
+}
+
+Multi_QueueManagement_Queue_i_.getall = function(mapping,key)
+  qosBinding.sectionname = key
+  qosBinding.option = nil
+  local qosValues = getAllFromUci(qosBinding)
+  return {
+    TrafficClasses = qosValues["trafficid"] and table.concat(qosValues["trafficid"], ',') or "",
+    QueueWeight = qosValues["weight"] and qosValues["weight"] or "0",
+    Weight = qosValues["weight"] and qosValues["weight"] or "0",
+    QueuePrecedence = qosValues["priority"] and qosValues["priority"] or "0",
+    Precedence = qosValues["priority"] ~= "0" and qosValues["priority"] or "1",
+    ShapingRate = qosValues["max_bit_rate"] and qosValues["max_bit_rate"] ~= "0" and
+                  tostring(qosValues["max_bit_rate"] * 1000) or "-1",
+    ShapingBurstSize = qosValues["max_burst_size"] and qosValues["max_burst_size"] or "0"
+  }
+end
+
+Multi_QueueManagement_Queue_i_.set = {
+  TrafficClasses = function(mapping, param, value, key)
+    local trafficTable = list.ensureList(value)
+    setUciValue(key, queueParamMap[param], trafficTable)
+  end,
+  QueueWeight = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end,
+  Weight = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end,
+  QueuePrecedence = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end,
+  Precedence = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end,
+  SchedulerAlgorithm = function(mapping, param, value, key)
+    qosBinding.sectionname = "classgroup"
+    forEachOnUci(qosBinding, function(s)
+      if match(s.classes,key) then
+        setUciValue(s[".name"], queueParamMap[param], string.lower(value))
+        return false
+      end
+    end)
+  end,
+  UsMaxBW = function(mapping, param, value, key)
+    setBandwidth(key, "max_bit_rate", value)
+  end,
+  UsMinBW = function(mapping, param, value, key)
+    setBandwidth(key, "min_bit_rate", value)
+  end,
+  ShapingRate = function(mapping, param, value, key)
+    if tonumber(value) > 0 and tonumber(value) <= 100 then
+      return nil, "ShapingRate cannot be <= 100 bits per second"
+    end
+    -- if ACS sets a value which is not a multiple of 1000, it will be rounded down to the closest multiple of 1000
+    local shapingRate = value ~= "-1" and value ~= "0" and math.floor(value / 1000) or "0"
+    setUciValue(key, queueParamMap[param], shapingRate)
+  end,
+  ShapingBurstSize = function(mapping, param, value, key)
+    setUciValue(key, queueParamMap[param], value)
+  end
+}
+
+Multi_QueueManagement_Queue_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(qosBinding)
+    configChanged = false
+  end
+end
+
+Multi_QueueManagement_Queue_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(qosBinding)
+    configChanged = false
+  end
+end
+
+local function getParamsFastweb()
+  return {
+    UsMaxBW = {
+      access = "readWrite",
+      type = "unsignedInt"
+    },
+    UsMinBW = {
+      access = "readWrite",
+      type = "unsignedInt"
+    }
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_QueueManagement_Queue_i_, "#ROOT",
+  {"InternetGatewayDevice.QueueManagement.Queue", "Device.QoS.Queue", "Device.X_FASTWEB_QOS.Queue"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match('^InternetGatewayDevice.') then
+    -- Remove device2-specific parameters from igd
+    dupli.objectType.parameters.Enable = nil
+    dupli.objectType.parameters.Status = nil
+    dupli.objectType.parameters.Weight = nil
+    dupli.objectType.parameters.Precedence = nil
+    dupli.objectType.parameters.Interface = nil
+  elseif dupli.objectType.name:match('^Device.X_FASTWEB_QOS.Queue') then
+    dupli.objectType.parameters = getParamsFastweb()
+  else
+    -- Remove igd-specific parameters from device2
+    dupli.objectType.parameters.QueueEnable = nil
+    dupli.objectType.parameters.QueueStatus = nil
+    dupli.objectType.parameters.QueueWeight = nil
+    dupli.objectType.parameters.QueuePrecedence =  nil
+    dupli.objectType.parameters.QueueInterface =  nil
+  end
+  register(dupli)
+end

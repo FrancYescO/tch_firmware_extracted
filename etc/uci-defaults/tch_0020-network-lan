@@ -1,0 +1,82 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+ucidef_set_interface_lan "eth0 eth1 eth2 eth3"
+
+uci set network.lan.ip6assign=64
+uci set network.lan.force_link=0
+#uci set network.lan.neighlocktime=-1
+
+uci set network.lan.ipv6='1'
+
+ucidef_set_switch "bcmsw" "1" "0"
+uci set network.bcmsw.qosimppauseenable=0
+uci set network.bcmsw.jumbo=0
+uci commit network
+
+#add config from CONFIG_WLAN_REMOTE_MGMT_ETH_INTERFACE
+# There is no QTN WRLS available on this platfrom so remove eth5 from bridge
+# uci set network.lan.ifname="`uci -q get \"network.lan.ifname\"` eth5"
+
+#NG-101421 Remove static DNS
+#uci add_list network.loopback.dns='151.99.0.100'
+#uci add_list network.loopback.dns='151.99.125.1'
+#uci add_list network.loopback.dns='2001:4b18:1050:916f::53:c001'
+#uci add_list network.loopback.dns='2001:4b18:1050:916f::53:c002'
+#uci set network.loopback.dns_metric='10'
+
+uci commit network
+
+#/*******************************************************************/
+#/		WirelessNetwork 2 on 2.4 GHz				*/
+#/*******************************************************************/
+uci set network.wlnet_b_24=interface
+uci set network.wlnet_b_24.proto=static
+uci set network.wlnet_b_24.ip6assign=64
+uci set network.wlnet_b_24.ipv6=1
+uci set network.wlnet_b_24.ip6hint=1
+
+uci set network.wlnet_b_24.netmask=255.255.255.128
+uci set network.wlnet_b_24.ipaddr=192.168.168.1
+
+uci set network.wlnet_b_24.ifname=wl0_1
+uci set network.wlnet_b_24.force_link=0
+
+
+#/*******************************************************************/
+#/      WirelessNetwork 2 on 5 GHz              */
+#/*******************************************************************/
+uci set network.wlnet_b_5=interface
+uci set network.wlnet_b_5.proto=static
+uci set network.wlnet_b_5.ip6assign=64
+uci set network.wlnet_b_5.ipv6=1
+uci set network.wlnet_b_5.ip6hint=2
+
+uci set network.wlnet_b_5.netmask=255.255.255.128
+uci set network.wlnet_b_5.ipaddr=192.168.168.129
+
+uci set network.wlnet_b_5.ifname=wl1_1
+uci set network.wlnet_b_5.force_link=0
+
+# Not needed because no QTN interface
+#uci set network.wlnet_b_5eth5=device
+#uci set network.wlnet_b_5eth5.type=8021q
+#uci set network.wlnet_b_5eth5.name=wl1_1
+#uci set network.wlnet_b_5eth5.enabled=1
+#uci set network.wlnet_b_5eth5.ifname=eth5
+#uci set network.wlnet_b_5eth5.vid=3
+#uci set network.wlnet_b_5eth5.ipv6='1'
+
+#Add Public IP interface for subnets
+uci set network.public_lan=interface
+uci set network.public_lan.ifname='@lan'
+uci set network.public_lan.proto='static'
+uci set network.public_lan.ipaddr='0.0.0.0'
+uci set network.public_lan.netmask='0.0.0.0'
+uci set network.public_lan.auto='1'
+
+uci set network.public_lan.disabled_info='proto=static,ip=0.0.0.0,mask=255.255.255.248'
+
+uci commit network
+exit 0

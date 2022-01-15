@@ -1,0 +1,109 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+#/*******************************************************************/
+#/		vlan device definition as				*/
+#/      eth4: wan
+#/*******************************************************************/
+uci set network.waneth4=device
+uci set network.waneth4.type=8021q
+uci set network.waneth4.name=waneth4
+uci set network.waneth4.macaddr=`uci get env.rip.eth_mac`
+uci set network.waneth4.ifname=eth4
+uci set network.waneth4.vid=835
+# to address NG-72728/NG-71196
+uci set network.waneth4.ipv6=0
+
+#/*******************************************************************/
+#/		vlan device definition as				*/
+#/      vdsl: wan
+#/*******************************************************************/
+uci set network.wanptm0=device
+uci set network.wanptm0.type=8021q
+uci set network.wanptm0.name=wanptm0
+uci set network.wanptm0.macaddr=`uci get env.rip.eth_mac`
+uci set network.wanptm0.ifname=ptm0
+uci set network.wanptm0.vid=835
+# to address NG-72728/NG-71196
+uci set network.wanptm0.ipv6=0
+
+uci set network.wan=interface
+uci set network.wan.auto='1'
+uci set network.wan.proto=pppoe
+uci set network.wan.demand=0
+uci set network.wan.ifname='<set by script>'
+uci set network.wan.keepalive=4,30
+uci set network.wan.username=`uci get env.var.serial`-`uci get env.var.oui`@00000.agcombo.unica
+uci set network.wan.password=alicenewag
+uci set network.wan.graceful_restart='1'
+uci set network.wan.macaddr=`uci get env.rip.eth_mac`
+
+uci set network.wan.ipv6='0'
+uci set network.wan.peerdns='1'
+uci set network.wan.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.config=config
+uci set network.config.wan_mode='pppoe'
+#to address NG-66145
+uci set network.wan.keepalive_adaptive=0
+
+#to address NG-60582
+uci set network.wan.dns_metric='0'
+
+uci set network.wwan=interface
+uci set network.wwan.auto='1'
+
+uci set network.wan6=interface
+uci set network.wan6.ifname='@wan'
+uci set network.wan6.proto='dhcpv6'
+uci set network.wan6.reqopts='12 21 22 23 24 25 31 56 64 67 82 83'
+uci set network.wan6.noslaaconly=1
+uci set network.wan6.iface_464xlat='0'
+uci set network.wan6.auto='0'
+
+#to address NG-60582
+uci set network.wan6.dns_metric='20'
+
+#############################################
+# Sfp module support two default management IP:
+# untag "192.168.2.1" and tag "192.168.10.1",
+# each of them could be used for telnet and
+# management.
+# For connect sfp module, board need match at least
+# one of the two management IP.
+# Now generic will add two interfaces "sfp" and "sfptag"
+# to match the two management IP.
+# "sfp"--> SFP untag IP "192.168.2.1"
+# "sfptag"--> SFP tag IP "192.168.10.1"
+############################################
+sfp=`uci get env.rip.sfp`
+
+if [ "$sfp" = "1" ] ; then
+        uci set network.sfp=interface
+        uci set network.sfp.proto='static'
+        uci set network.sfp.ifname='eth4'
+        uci set network.sfp.ipaddr='192.168.2.2'
+        uci set network.sfp.netmask='255.255.255.0'
+fi
+
+uci commit network
+
+#dmordering
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.IPInterface=ordering
+uci add_list dmordering.IPInterface.order='lan'
+uci add_list dmordering.IPInterface.order='wan'
+uci add_list dmordering.IPInterface.order='wwan'
+uci add_list dmordering.IPInterface.order='wlnet_b_24'
+uci add_list dmordering.IPInterface.order='wlnet_b_5'
+uci add_list dmordering.IPInterface.order='loopback'
+uci add_list dmordering.IPInterface.order='wan6'
+uci set dmordering.Nat_order=ordering
+uci set dmordering.Nat_order.name='Device.NAT.InterfaceSetting.{i}.'
+uci add_list dmordering.Nat_order.order='lan'
+uci add_list dmordering.Nat_order.order='wan'
+uci add_list dmordering.Nat_order.order='wwan'
+uci add_list dmordering.Nat_order.order='wlnet_b_24'
+uci add_list dmordering.Nat_order.order='wlnet_b_5'
+uci commit dmordering
+exit 0
