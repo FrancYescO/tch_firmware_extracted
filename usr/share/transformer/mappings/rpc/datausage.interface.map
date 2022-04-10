@@ -1,0 +1,113 @@
+local uci_helper = mapper("ucihelper")
+
+local datausage_interface = {
+	objectType = {
+		name = 'rpc.datausage.interface.@.',
+		access = 'readOnly',
+		numEntriesParameter = "interfaceNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			tx_bytes_per_second = {
+				access = "readOnly",
+				type = "string"
+			},
+			rx_bytes_per_second = {
+				access = "readOnly",
+				type = "string"
+			},
+			tx_bytes_average = {
+				access = "readOnly",
+				type = "string"
+			},
+			rx_bytes_average = {
+				access = "readOnly",
+				type = "string"
+			},
+			tx_bytes_total = {
+				access = "readOnly",
+				type = "string"
+			},
+			rx_bytes_total = {
+				access = "readOnly",
+				type = "string"
+			},
+			reset = {
+				access = "readWrite",
+				type = "boolean"
+			},
+			usage_limit_reached = {
+				access = "readOnly",
+				type = "boolean"
+			},
+			usage_threshold_reached = {
+				access = "readOnly",
+				type = "boolean"
+			},
+			usage_limit_level = {
+				access = "readOnly",
+				type = "string"
+			},
+			usage_threshold_level = {
+				access = "readOnly",
+				type = "string"
+			},
+			interface_alias = {
+				access = "readOnly",
+				type = "string"
+			},
+			interface = {
+				access = "readOnly",
+				type = "string"
+			},
+			enabled = {
+				access = "readOnly",
+				type = "boolean"
+			}
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return nil, "Failed to connect to UBUS"
+end
+
+local helper = require("mobiled.scripthelpers")
+
+function datausage_interface.getall(mapping, key)
+	local data = helper.getUbusData(conn, "datausage", "get", { interface = key })
+	if data and data.interface == "" then
+		data.enabled = '0'
+	else
+		data.enabled = '1'
+	end
+	return data
+end
+
+function datausage_interface.get(mapping, paramName, key)
+	return datausage_interface.getall(mapping, key)[paramName]
+end
+
+function datausage_interface.set(mapping, paramName, _, key)
+	if paramName == "reset" then
+		conn:call("datausage", "reset", { interface = key })
+		return true
+	end
+end
+
+function datausage_interface.entries(mapping)
+	local interfaces = {}
+	local function cb(t)
+		if t.interface then
+			table.insert(interfaces, { t['.name'], t.interface })
+		end
+	end
+	uci_helper.foreach_on_uci({
+		config = "datausage",
+		sectionname = "interface"
+	}, cb)
+	return interfaces
+end
+
+register(datausage_interface)
