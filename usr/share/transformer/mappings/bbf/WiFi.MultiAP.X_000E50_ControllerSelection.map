@@ -1,0 +1,156 @@
+--Manually generated
+
+local Multi_MultiAP_X_000E50_ControllerSelection_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    description = "Object to get/set controller selection options.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    Priority = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Sets the priority of the device during controller selection.",
+        range = {
+            {
+                min = "0",
+                max = "255"
+            },
+        },
+        default = "11",
+    },
+    Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or Disable multiap controller selection.",
+        default = "0",
+    },
+    StartTimeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Start timeout of multiap controller selection",
+        default = "17",
+    },
+    KillTimeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Kill timeout of multiap controller selection",
+        default = "10",
+    },
+    TopQueryInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Top query interval of multiap controller selection",
+        default = "5",
+    },
+    DiscoveryInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Discovery interval of multiap controller selection",
+        default = "5",
+    },
+    DiscoveryType = {
+        access = "readWrite",
+        type = "string",
+        description = "Discovery type of multiap controller selection",
+        enumeration = {
+          "TopologyDiscovery",
+          "APAutoconfigSearch",
+        },
+    },
+    TriggerCriteria = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Trigger criteria of multiap controller selection.",
+    },
+    SelectionCriteria = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Selection criteria of multiap controller.",
+    },
+    StopControllerCriteria = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Stop controller criteria of multiap controller.",
+    },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local multiapBinding = { config = "multiap" }
+local multiapControllerDisableBinding = { config = "multiap", sectionname = "controller", option = "enabled" }
+local configChanged = false
+local conn = mapper("ubus").connect()
+
+local paramOptionMap = {
+  Enabled = "enabled",
+  KillTimeout = "kill_timeout",
+  DiscoveryInterval = "discovery_interval",
+  TriggerCriteria = "emcs_trigger_criteria",
+  TopQueryInterval = "topology_query_interval",
+  StopControllerCriteria = "emcs_stopcontroller_criteria",
+  StartTimeout = "start_timeout",
+  DiscoveryType = "discovery_type",
+  SelectionCriteria = "emcs_selection_criteria",
+  Priority = "priority",
+}
+
+local paramDefaultMap = {
+  Enabled = "0",
+  KillTimeout = "10",
+  DiscoveryInterval = "5",
+  TopQueryInterval = "5",
+  StartTimeout = "17",
+  Priority = "11",
+}
+
+local function getUciParam(sectionName, option, default)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  multiapBinding.default = default
+  return uciHelper.get_from_uci(multiapBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  uciHelper.set_on_uci(multiapBinding, value, commitapply)
+  uciHelper.set_on_uci(multiapControllerDisableBinding, "0", commitapply)
+  configChanged = true
+end
+
+Multi_MultiAP_X_000E50_ControllerSelection_.get = function(mapping, param)
+  if paramOptionMap[param] then
+    return getUciParam("controller_selection", paramOptionMap[param], paramDefaultMap[param])
+  end
+  return ""
+end
+
+Multi_MultiAP_X_000E50_ControllerSelection_.set = function(mapping, param, value)
+  if paramOptionMap[param] then
+    setUciParam("controller_selection", paramOptionMap[param], value)
+  end
+end
+
+Multi_MultiAP_X_000E50_ControllerSelection_.commit = function()
+  if configChanged then
+    uciHelper.commit(multiapBinding)
+  end
+  configChanged = false
+end
+
+Multi_MultiAP_X_000E50_ControllerSelection_.revert = function()
+  if configChanged then
+    uciHelper.revert(multiapBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_X_000E50_ControllerSelection_, "#ROOT", { "Device.WiFi.MultiAP.X_000E50_ControllerSelection", "rpc.multiap.X_000E50_ControllerSelection", "InternetGatewayDevice.X_000E50_MultiAP.MultiAP.X_000E50_ControllerSelection" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

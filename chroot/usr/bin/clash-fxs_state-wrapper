@@ -1,0 +1,97 @@
+#!/usr/bin/env lua
+-- Functions made available from the CLI environment
+local print = print
+local ubus = require("ubus")
+local uloop = require("uloop")
+uloop.init()
+local ubus_conn = ubus.connect()
+
+if not ubus_conn then
+  return
+end
+
+local stateMapping = {
+  ["onHook"] = "OnHook",
+  ["offHook"] = "OffHook",
+  ["waitOnHook"] = "WaitOnHook",
+  ["error"] = "Error",
+}
+local noOfFxsDevice = -1
+local deviceCount = 0
+local status
+
+--section to read the total number of fxs devices that can be connected to DUT
+local file = io.open("/etc/slicstate", "r")
+if file then
+  local output = file:read("*a")
+  noOfFxsDevice = tonumber(output and output:match("fxsEpNumber%s+=%s+(%d+)") or -1)
+  file:close()
+end
+
+-- To get the fxs status
+-- Parameters:
+-- - device  : [string] fxs device name
+local function get_fxs_state(device)
+  local fxsState = ubus_conn:call("mmpbxbrcmfxs.state", "get", {["device"] = device}) or {}
+  if fxsState and fxsState[device] then
+    status = stateMapping[fxsState[device]["hookState"]] or "Error"
+  else
+    status = stateMapping["error"]
+  end
+end
+
+-- To Display the test result obtained via ubus event/call
+-- Parameters:
+-- - msg  : [table] the UBUS message
+local function test_result(msg)
+  local dev = msg["device"]
+  local port = dev:match("fxs_dev_(%d+)")
+  get_fxs_state(dev)
+  print("\n FXS port " .. port + 1 .. ":")
+  if type(msg) == "table" and msg["phoneConnected"] == "true" then
+    print("\t Phone: Connected")
+    print("\t Status: " .. status)
+    print("\t REN: " .. msg["REN"])
+  else
+    -- slic test is possible only in onHook state
+    -- this section is to handle the PhoneConnectivity false o/p from slic test
+    -- eventhough fxs is connected in offHook or WaitOnHook state
+    if status == "OffHook" or status == "WaitOnHook" then
+      print("\t Phone: Connected")
+      print("\t Status: " .. status)
+      print("\t REN: *" )  -- * is used to display the unknown REN value
+    else
+      print("\t Phone: Not Connected")
+    end
+  end
+  deviceCount = deviceCount + 1
+  -- need to break the uloop.run once execution completed
+  -- uloop.timer of 10ms is used to cancel the loop when multiple event or no event is captured
+  if deviceCount == noOfFxsDevice then
+    uloop.timer(function() uloop.cancel() end, 10)
+  end
+end
+
+-- Register event listener
+ubus_conn:listen({ ["mmbrcmfxs.debug.slic.test.event"] = test_result })
+
+for i = 0, noOfFxsDevice-1 do
+  get_fxs_state("fxs_dev_" .. i)
+  -- Slic Test is possible only when device is OnHook
+  if status == "OnHook" then
+    -- uloop.timer of 10ms is used to delay the successive receiving of ubus event
+    uloop.timer(function() ubus_conn:call("mmbrcmfxs.debug.slic.test", "set", {["device"] = "fxs_dev_" .. i,["cmdparms"]= "REN"})
+    end, 10)
+  elseif status == "Error" then
+    -- to cancel the uloop incase of error i.e mmpbx down
+    uloop.timer(function() uloop.cancel() end, 10)
+  else
+    local data = ubus_conn:call("mmbrcmfxs.debug.slic.test", "get", {["device"] = "fxs_dev_" .. i, ["cmdparms"] = "REN"})
+    if data then
+      test_result(data)
+    end
+  end
+end
+
+-- Idle loop
+xpcall(uloop.run, errhandler)
