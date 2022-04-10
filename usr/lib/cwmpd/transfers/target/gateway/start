@@ -1,0 +1,66 @@
+#!/bin/sh
+
+image_url="$1"
+script_dir="$2"
+uci_section="$3"
+
+export SSL_CLIENTCERT="$(uci -q get cwmpd.cwmpd_config.ssl_clientcert)"
+export SSL_CLIENTKEY="$(uci -q get cwmpd.cwmpd_config.ssl_clientkey)"
+
+reboot_on_failure=false
+delayed_switchover=false
+wait_for_switchover_file=/usr/lib/cwmpd/transfers/cwmp_waitforswitchover
+rm -f "$wait_for_switchover_file"
+
+if grep -Fq '"bank_2"' /proc/mtd || grep -Fq "bank_2" /proc/partitions; then
+	if notbooted="$(cat /proc/banktable/notbooted)" && [ -n "$notbooted" ]; then
+		uci set "$uci_section.bank=$(cat /proc/banktable/notbooted)"
+		uci commit
+	fi
+
+	"$script_dir/rollback.sh" record >&2
+	if uci -q get cwmpd.cwmpd_config.upgrade_switchovertype | grep -Fqx 1; then
+		delayed_switchover=true
+	fi
+else
+	reboot_on_failure=true
+fi
+
+if "$delayed_switchover" ; then
+  SWITCH=-s
+else
+  SWITCH=
+fi
+
+upgrade_failed=true
+if sysupgrade --no-reboot $SWITCH "$image_url" >&2; then
+  upgrade_failed=false
+fi
+if ! $upgrade_failed; then
+  if "$delayed_switchover"; then
+		touch "$wait_for_switchover_file"
+	else
+	  /usr/bin/lua "$script_dir/checkOngoingServices.lua" >&2
+	  reboot
+	  sleep 5000
+	fi
+fi
+
+error_message=0
+if "$upgrade_failed"; then
+	if [ -f /tmp/getimageerr ]; then
+		rm -rf /tmp/getimageerr
+		error_message='1,download upgrade image failed'
+	else
+		error_message='1,upgrade failed (not a valid signed rbi?)'
+	fi
+
+	if "$reboot_on_failure"; then
+		echo "Single bank board, rebooting system..."
+		reboot -f
+		sleep 5
+		echo b 2>/dev/null >/proc/sysrq-trigger
+	fi
+fi
+
+echo "$error_message"
