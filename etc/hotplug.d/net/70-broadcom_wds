@@ -1,0 +1,164 @@
+#!/bin/sh
+. /lib/functions/network.sh
+. /lib/functions.sh
+. /lib/network/config.sh
+
+get_network() {
+   local wl="$1"
+   if [ "$wl" = "$2" ]; then
+      config_get ntw "$wl" network
+      break
+   fi
+}
+
+get_mode() {
+   local wl="$1"
+   if [ "$wl" = "$2" ]; then
+      config_get mode "$wl" mode
+      break
+   fi
+}
+
+get_ifindex() {
+   ip link show dev $INTERFACE | sed -n -e 's/^\([0-9]\+\):.*/\1/p'
+}
+
+get_uptime() {
+   sed -e 's/^\([0-9]\+\).*/\1/' /proc/uptime
+}
+
+setup_backhaul_vlan() {
+    local xtra_vid=${1%% *}
+    local xtra_net=${1##* }
+
+    [ -n "${xtra_net}" -a -n "${xtra_vid}" ] || return 1
+
+    vconfig add "$INTERFACE" "$xtra_vid"
+    ip link set dev "$INTERFACE.$xtra_vid" name "${INTERFACE}-${xtra_net}"
+    echo 1 > /proc/sys/net/ipv6/conf/"${INTERFACE}-${xtra_net}"/disable_ipv6
+    ip link set dev "${INTERFACE}-${xtra_net}" up
+    setup_interface "${INTERFACE}-${xtra_net}" "$xtra_net"
+}
+
+setup_broadcom_wds() {
+    IFINDEX=$(get_ifindex)
+    [ -z "$IFINDEX" ] && return # interface got destroyed in the mean time
+    STARTTS=$(get_uptime)
+
+    SUBINDEX=$(echo "$INTERFACE" | sed 's/^[a-z]*[0-9]*_\([0-9]*\)_[0-9]*$/\1/')
+    #checking if wds is on a main interface
+    if [ "${SUBINDEX}" == "0" ]; then
+       INDEX=$(echo "$INTERFACE" | sed 's/^[a-z]*\([0-9]*\)_[0-9]*_[0-9]*$/\1/')
+    else
+       INDEX=$(echo "$INTERFACE" | sed 's/^[a-z]*\([0-9]*_[0-9]*\)_[0-9]*$/\1/')
+    fi
+    logger -t Hotplug broadcom_wds_script "interface = $INTERFACE Index = $INDEX subindex = $SUBINDEX"
+    wl_interface="wl$INDEX"
+
+    config_load wireless
+    ntw=""
+    config_foreach get_network wifi-iface $wl_interface
+    if [ -z ${ntw} ]; then 
+       logger -t Hotplug broadcom_wds_script "WDS bridge configuration not found. Skipping. Wl interface=$wl_interface"
+       return 0
+    fi
+
+    # wds interfaces are created and destroyed a couple of times, in quick succession
+    # wait 3 seconds, to be sure this instance is not a short lived one
+    while /bin/true; do
+       [ "$IFINDEX" == $(get_ifindex) ] || return # interface got destroyed in the mean time
+       NOWTS=$(get_uptime)
+       [ $((STARTTS + 3)) -le $NOWTS ] && break
+       sleep $((STARTTS + 3 - NOWTS))
+    done
+
+    setup_interface "$INTERFACE" "$ntw"
+    ifconfig $INTERFACE up
+    # Create QoS WDS interface
+    QOSRULE=$(uci get qos.$INTERFACE)
+    if [ ${QOSRULE} == "device" ]; then
+       logger -t  Hotplug broadcom_wds_script "QoS already configured on WDS interface $INTERFACE"
+    else
+       logger -t Hotplug broadcom_wds_script "Configure QoS WDS interface $INTERFACE"
+       uci set qos.$INTERFACE=device
+       uci set qos.$INTERFACE.classgroup='TO_WLAN'
+       uci set qos.$INTERFACE.enable='1'
+       uci commit
+       /etc/init.d/qos reload
+    fi
+
+    config_list_foreach global backhaul_vlan setup_backhaul_vlan
+}
+
+setup_broadcom_wl() {
+    config_load wireless
+    mode=""
+    config_foreach get_mode wifi-iface $INTERFACE
+    if [ "$mode" == "sta" ]; then
+       config_list_foreach global backhaul_vlan setup_backhaul_vlan
+    fi
+}
+
+get_backhaul_vlan() {
+    local xtra_vid=${1%% *}
+    local xtra_net=${1##* }
+
+    if [ -n "${xtra_net}" -a -n "${xtra_vid}" -a "$INTERFACE" == "br-${xtra_net}" ]; then
+       ntw=${xtra_net}
+       vid=${xtra_vid}
+    fi
+}
+
+add_backhaul_vlan_to_bridge() {
+    local wl=${1}
+    local mode_filter=${2}
+    local xtra_vid=${3}
+    local xtra_net=${4}
+
+    config_get mode "$wl" mode
+    if [ "$mode" == "$mode_filter" ]; then
+       INTERFACE="$wl" setup_backhaul_vlan "$xtra_vid $xtra_net"
+    fi
+}
+
+setup_bridge() {
+    config_load wireless
+    ntw=""; vid=""
+    config_list_foreach global backhaul_vlan get_backhaul_vlan
+    [ -n "$ntw" -a -n "$vid" ] || return 0
+
+    config_foreach add_backhaul_vlan_to_bridge wifi-iface "sta" "$vid" "$ntw"
+}
+
+remove_qos_wds_intf() {
+    #Remove QoS for WDS interface
+    QOSRULE=$(uci get qos.$INTERFACE)
+    if [ ${QOSRULE} == "device" ]; then
+        logger -t Hotplug broadcom_wds_script "Remove QoS WDS interface $INTERFACE"
+        uci delete qos.$INTERFACE
+        uci commit
+        /etc/init.d/qos reload
+    fi
+}
+
+
+case "${ACTION}" in
+    add|register)
+       if [ -z "${INTERFACE##wds*}" -a -n "${INTERFACE##*-*}" ]
+       then
+         setup_broadcom_wds
+       elif [ -z "${INTERFACE##wl*}" -a -n "${INTERFACE##*-*}" ]
+       then
+         setup_broadcom_wl
+       elif [ -z "${INTERFACE##br-*}" ]
+       then
+         setup_bridge
+       fi
+       ;;
+    remove)
+       if [ -z "${INTERFACE##wds*}" -a -n "${INTERFACE##*-*}" ]
+       then
+         remove_qos_wds_intf
+       fi
+       ;;
+esac

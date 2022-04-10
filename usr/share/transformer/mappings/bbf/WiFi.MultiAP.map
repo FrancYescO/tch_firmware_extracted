@@ -1,0 +1,226 @@
+local Multi_MultiAP_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- APDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.MultiAP.APDevice.{i}. is loaded
+    X_000E50_ControllerEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_controller",
+	default = "0",
+      },
+    X_000E50_AgentEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_agent",
+	default = "0",
+      },
+    X_000E50_Role = {
+        access = "readOnly",
+        type = "string",
+	description = "MultiAP Role",
+        enumeration = {
+          "Agent",
+          "Controller",
+          "ControllerOnly",
+        }
+      },
+    X_000E50_AgentStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Agent Onboarding status",
+      },
+    X_000E50_ControllerStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Controller Onboarding status",
+      },
+    X_000E50_MultiapStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "daemon running status",
+      },
+    X_000E50_ControllerSN = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Displays the serial number of the controller to which the agent is connected",
+      },
+    X_000E50_MultiapAgentStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Current status of Agent ",
+      },
+    }
+  }
+}
+
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local multiapBinding = { config = "multiap" }
+local transactions = {}
+local eventsource, multiapControllerStatus, multiapAgentStatus = eventsource, "", ""
+local process = require("tch.process")
+local conn = mapper("ubus").connect()
+local envBinding = {config = "env", sectionname = "var", option = "bridgemode"}
+
+local controllerEvent = {
+  ["Booting"] = "[1/7] initializing",
+  ["Awaiting_platform_init"] = "[2/7] synchronizing",
+  ["Initializing"] = "[3/7] starting",
+  ["Running"] = "[4/7] up",
+  ["Connect"] = "[5/7] local agent onboarding in progress",
+  ["Onboarding"] = "[6/7] checking messages from local agent",
+  ["Onboarded"] = "[7/7] local agent onboarding success",
+  ["Update"] = "[7/7] local agent onboarding success"
+}
+
+local agentEvent = {
+  ["Booting"] = "[1/6] initializing",
+  ["Awaiting_platform_init"] = "[2/6] synchronizing",
+  ["Initializing"] = "[3/6] starting",
+  ["Running"] = "[4/6] up",
+  ["Inprogress"] = "[5/6] onboarding in progress",
+  ["Success"] = "[6/6] onboarding success",
+  ["Failure"] = "[6/6] onboarding failure",
+  ["Controller_Not_Reachable"] = "Controller_Not_Reachable"
+}
+
+local function getControllerUbusEvent(mapping, event, data)
+  local ubusEvents = data["status"] or data["state"]
+  multiapControllerStatus = controllerEvent[ubusEvents] and controllerEvent[ubusEvents] or multiapControllerStatus
+end
+
+local function getAgentUbusEvent(mapping, event, data)
+  local ubusEvents = data["status"] or data["state"]
+  multiapAgentStatus = agentEvent[ubusEvents] and agentEvent[ubusEvents] or multiapAgentStatus
+end
+
+local function getUciParam(sectionName, option, default)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  multiapBinding.default = default
+  return getFromUci(multiapBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  setOnUci(multiapBinding, value, commitApply)
+  transactions["multiap"] = true
+end
+
+local function multiapRunStatus()
+  local controlStatus = process.popen("/etc/init.d/multiap_controller", {"status"})
+  local status
+  if controlStatus then
+    for line in controlStatus:lines() do
+      status = line
+    end
+    controlStatus:close()
+  end
+  return status and status or ""
+end
+
+Multi_MultiAP_.get = {
+  X_000E50_ControllerEnabled = function(mapping, param)
+    return getUciParam("controller", "enabled", "0")
+  end,
+  X_000E50_AgentEnabled = function(mapping, param)
+    return getUciParam("agent", "enabled", "0")
+  end,
+  X_000E50_Role = function(mapping, param)
+    local agentActive = conn:call("service", "list", { name = "multiap_agent" }) or {}
+    agentActive = agentActive["multiap_agent"] and agentActive["multiap_agent"]["instances"] and agentActive["multiap_agent"]["instances"]["instance1"] or {}
+    agentActive = agentActive.running and "1" or "0"
+    local controllerActive = conn:call("service", "list", { name = "multiap_controller" }) or {}
+    controllerActive = controllerActive["multiap_controller"] and controllerActive["multiap_controller"]["instances"] and controllerActive["multiap_controller"]["instances"]["instance1"] or {}
+    controllerActive = controllerActive.running and "1" or "0"
+    if agentActive == "1" then
+        return controllerActive == "1" and "Controller" or "Agent"
+    else
+      return controllerActive == "1" and "ControllerOnly" or ""
+    end
+    return ""
+  end,
+  X_000E50_AgentStatus = function(mapping, param)
+    return multiapAgentStatus or ""
+  end,
+  X_000E50_ControllerStatus = function(mapping, param)
+    return multiapControllerStatus or ""
+  end,
+  X_000E50_MultiapStatus = function(mapping, param)
+    return multiapRunStatus()
+  end,
+  X_000E50_ControllerSN = function(mapping, param)
+    local agentData = conn:call("multiap.agent.info", "get",  {})
+    local serialNumber = ""
+    if agentData then
+      for _, data in pairs(agentData) do
+        serialNumber = data["controller_link_status:"] and data["controller_link_status:"] == "Connected" and data["controller_serial:"] or ""
+      end
+    end
+    return serialNumber
+  end,
+  X_000E50_MultiapAgentStatus =  function(mapping, param)
+    local agentData = conn:call("multiap.agent.info", "get",  {}) or {}
+    local controllerLinkStatus
+    if agentData then
+      for _, data in pairs(agentData) do
+        controllerLinkStatus =  data["controller_link_status:"] and data["controller_link_status:"] or ""
+      end
+    end
+    return controllerLinkStatus or ""
+   end
+}
+
+Multi_MultiAP_.set = function(mapping, param, value)
+  local bridgeMode = getFromUci(envBinding)
+  if bridgeMode == "1" then
+    return nil, "Cannot modify the value when bridgemode is enabled"
+  end
+  if param == "X_000E50_ControllerEnabled" then
+    setUciParam("controller", "enabled", value)
+  elseif param == "X_000E50_AgentEnabled" then
+    setUciParam("agent", "enabled", value)
+  end
+end
+
+Multi_MultiAP_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.revert = function()
+  for config in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, getControllerUbusEvent, "map_controller.state")
+  ubus_evsrc.watch_event(mapping, getControllerUbusEvent, "map_controller.agent")
+  ubus_evsrc.watch_event(mapping, getAgentUbusEvent, "map_agent.state")
+  ubus_evsrc.watch_event(mapping, getAgentUbusEvent, "map_agent.onboarding_event")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_, "#ROOT", { "Device.WiFi.MultiAP", "rpc.multiap", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

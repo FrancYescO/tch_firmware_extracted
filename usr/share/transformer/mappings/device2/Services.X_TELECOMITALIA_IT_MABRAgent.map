@@ -1,0 +1,173 @@
+--manually generated
+local Multi_X_TELECOMITALIA_IT_MABRAgent_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      MABREnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      SessionNumber = {
+        access = "readOnly",
+        type = "string",
+      },
+      MulticastsBitrate = {
+        access = "readOnly",
+        type = "string",
+      },
+      Mcast_Frame = {
+        access = "readOnly",
+        type = "string",
+      },
+      MaxSession = {
+        access = "readOnly",
+        type = "string",
+      },
+      MinSession = {
+        access = "readOnly",
+        type = "string",
+      },
+      MaxBitRate = {
+        access = "readOnly",
+        type = "string",
+      },
+      MinBitRate = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper('ucihelper')
+local duplicator = mapper("multiroot").duplicate
+local isConfigChanged = false
+local envBinding = { config = "env", sectionname = "var", option = "unlockedstatus"}
+local systemBinding = { config = "system", sectionname = "mabr", option = "enabled"}
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local lower = string.lower
+local ubus = mapper("ubus").connect()
+
+local function getPID()
+  local nanocdn_service = ubus:call("service", "list", { name = "nanocdn" })
+  nanocdn_service = nanocdn_service["nanocdn"]                   
+  if not nanocdn_service or not nanocdn_service.instances then   
+    return "disabled"                                            
+  end                                                            
+  local cdnpid = nanocdn_service["instances"]["nanocdn-core"]    
+  cdnpid  = cdnpid["pid"]                                        
+  local corepid = nanocdn_service["instances"]["nanocdn-rr"]     
+  corepid  = corepid["pid"]                                      
+  return (cdnpid and corepid) and "running" or "disabled"
+end
+
+local function getMinMaxValue(value)
+  local minOrMax
+  local fd = io.open("/tmp/"..value)
+  if fd then
+    minOrMax = fd:read()
+    fd:close()
+  end
+ return minOrMax
+end
+
+local function getXMLValues()
+  local output = io.open("/tmp/nanocdnstatus.xml", "r")
+  local tableFormat = {}
+  if output then
+    for line in output:lines() do
+      local startTag = line:match('<(%S+)')
+      local remVal = line:gsub('<(%S+)', "")
+      for index, value in remVal:gmatch('%s(%S+)%=%"(%-?%d+)%"') do
+        local param = startTag..index
+        tableFormat[param] = value
+      end
+    end
+  end
+  return tableFormat
+end
+
+local mapParam = {
+   ["SessionNumber"] = "sessionsnumber",
+   ["MulticastsBitrate"] = "multicastsbitrate",
+   ["Mcast_Frame"] = "ctrl-channelmcast_frame",
+}
+
+local function getParamValue(mapping, paramname)
+   local enable = getFromUci(systemBinding)
+   if enable == "1" then
+     local tableFormat = getXMLValues()
+     if tableFormat[mapParam[paramname]] then
+       return tableFormat[mapParam[paramname]]
+     end
+   end
+   return "0"
+end
+
+Multi_X_TELECOMITALIA_IT_MABRAgent_.get = {
+  MABREnable = function()
+    return getFromUci(systemBinding)
+  end,
+  Status = function()
+    return getPID()
+  end,
+  SessionNumber = getParamValue,
+  MulticastsBitrate = getParamValue,
+  Mcast_Frame = getParamValue,
+  MinSession = function()
+    return getMinMaxValue("minSession") or "0"
+  end,
+  MaxSession = function()
+    return getMinMaxValue("maxSession") or "0"
+  end,
+  MinBitRate = function()
+    return getMinMaxValue("minBitRate") or "0"
+  end,
+  MaxBitRate = function()
+    return getMinMaxValue("maxBitRate") or "0"
+  end,
+}
+
+Multi_X_TELECOMITALIA_IT_MABRAgent_.set = {
+  MABREnable = function(mapping, param, value)
+    local unlockStatus = getFromUci(envBinding)
+    if unlockStatus == "1" then
+       return nil, "Cannot Enable/Disable the Agent"
+    end
+    local status = getPID()
+    if status == "running" and value == "1" then
+      return nil, "Agent is already running"
+    end
+    setOnUci(systemBinding, value, commitapply)
+    isConfigChanged = true
+  end
+}
+
+Multi_X_TELECOMITALIA_IT_MABRAgent_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(systemBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_X_TELECOMITALIA_IT_MABRAgent_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(systemBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicates = duplicator(Multi_X_TELECOMITALIA_IT_MABRAgent_, "#ROOT", { "rpc.X_TELECOMITALIA_IT_MABRAgent", "Device.Services.X_TELECOMITALIA_IT_MABRAgent" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
