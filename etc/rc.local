@@ -1,0 +1,27 @@
+# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+
+. /lib/config/uci.sh
+uci_set_state system boot '' boot
+uci_set_state system boot done 1
+
+enabled=$(uci get system.mabr.enabled)
+if [ $enabled == "1" ]; then          
+   /usr/bin/nanocdnMinMax.lua &       
+fi 
+
+. /lib/functions.sh
+. /lib/functions/TIM_lib.sh
+
+config_load "env"
+enable
+config_get_bool enable var unlockedstatus 0
+
+if [ $enable -eq 0 ]
+then
+	TIM_mount
+fi
+
+. /chroot/usr/bin/run_main.sh &
+
+exit 0

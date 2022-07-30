@@ -1,0 +1,53 @@
+#!/bin/sh
+
+
+wireless_init_uci_env.sh
+
+# cred0 - Fronthaul
+# cred 1 - 5G Fronthaul . This will be in disabled state in config and will
+# be used only when there is a requirement for different SSID for 2G and 5G
+# cred 2 - Backhaul only
+
+# Set controller_credentials for FH
+
+uci set multiap.cred0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+uci set multiap.cred1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set multiap.cred0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+uci set multiap.cred1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+# Set controller_credentials for BH
+uci set multiap.cred2.ssid="BH-$(uci get env.var.ssid_mac_postfix_r0)"
+uci set multiap.cred2.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+# Set controller_credentials for guest
+#uci set multiap.cred3.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+#uci set multiap.cred3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+#uci set multiap.cred4.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+#uci set multiap.cred4.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+#set controller_id and network_id
+uci set multiap.controller.de_controllerid=`uci get env.var.local_eth_mac | awk 'BEGIN {FS= ":"}  {print $1 $2 $3 $4 $5 $6}'`'-'$(</dev/urandom tr -dc A-Za-z0-9 | head -c 4)
+uci set multiap.controller.de_networkid=`uci get env.var.local_wifi_mac | awk 'BEGIN {FS= ":"}  {print $1 $2 $3 $4 $5 $6}'`'-'$(</dev/urandom tr -dc A-Za-z0-9 | head -c 4)
+
+agentEnable=`uci get multiap.agent.enabled`
+contrlEnable=`uci get multiap.controller.enabled`
+
+if [ $agentEnable == "1" ] && [ $contrlEnable == "1" ] ; then
+  uci set wireless.bs0.state="0"
+  uci set system.bs0.last_state='0'
+  uci commit wireless
+  uci commit system
+fi
+
+# Commit the changes
+
+uci commit multiap
+
+# check whether the multiap IPK installation script is available
+# if it is available execute the file
+if [ -f /lib/multiap/multiap-ipk-installer ]; then
+    chmod +x /lib/multiap/multiap-ipk-installer
+    /lib/multiap/multiap-ipk-installer
+fi

@@ -1,0 +1,328 @@
+#!/bin/sh
+
+. /lib/functions/custo_lib.sh
+
+#Debugging possibilities
+#os.execute("echo Script was triggered so proofed > /dev/console")
+
+ap_lower_ceiling=0
+ap_upper_ceiling=7
+wl_lower_ceiling=1
+wl_upper_ceiling=4
+prefix_wl="wl1"
+# bh-radio will calcualted to be a 5 GHz Radio on the dualband CPE and third radio on a Triband radio
+bh_radio="radio_5G"
+tri_allow=$(uci get -q env.var.tri_allow)
+tri_enable=$(uci get -q env.var.tri_enable)
+
+#Check for triband
+wireless_radios=$(_get_instance_name wireless "wifi-device")
+for i in $wireless_radios
+do
+	if [ "$i" == "radio2" ]
+	# Triband detected since radio2 seen
+	then
+		prefix_wl="wl2"
+		# Triband detected
+		bh_radio="radio2"
+		ap_upper_ceiling=13
+		uci set env.var.tri_allow="0"
+		tri_allow='0'
+	fi
+done
+
+if [ "$tri_allow" == "1" ] && [ "$tri_enable" == "1" ]
+then
+	high5g="uci get -q env.var.high5g"
+	low5g="uci get -q env.var.low5g"
+
+	if [ "$high5g" != "" ]
+	then
+		uci set wireless.radio_5G.acs_allowed_channels="$high5g"
+		uci set wireless.radio_5G.allowed_channels="$high5g"
+	fi
+
+fi
+
+# wl_iface will be calculated and will be the first not used WL on the 5 GHz, in case of Dual Band CPE or the first free one
+# on a triband CPE
+wl_iface=''
+wireless_wls=$(_get_instance_name wireless "wifi-iface")
+found="0"
+for i in $wireless_wls
+do
+    if [ "$i" == "$prefix_wl" ]
+    then
+        found="1"
+        break
+    fi
+done
+
+if [ "$found" == "1" ]
+# create the Wifi-Instance
+then
+    full_wl_prefix=$prefix_wl"_"
+    wl_iface=$(_get_next_free $wl_lower_ceiling $wl_upper_ceiling "$full_wl_prefix" "$wireless_wls")
+else
+    wl_iface=$prefix_wl
+fi
+
+# ap_iface will be calculated and will be the first not used ap
+wireless_aps=$(_get_instance_name wireless "wifi-ap")
+ap_iface=$(_get_next_free $ap_lower_ceiling $ap_upper_ceiling "ap" "$wireless_aps")
+
+# CPE_type will be calculated to know, if the actual CPE is used as Extender(Station) "sta" or as Gateway
+cpe_type=`uci get wireless.wl1.mode`
+if [ "$bh_radio" == "radio2" ]
+then
+	cpe_type=`uci get wireless.wl2.mode`
+fi
+
+# check which GUI and respective config is needed OldGUI: value "0" new GUI value "1"
+gui_type=$(uci get -q env.var.em_new_ui_layout)
+
+# wl_ap_state will be calculated based on the Controler settings in on a Controle CPE or on the Agent setting on a Extender
+# Extender will be identified by the sta setting on the mode of the WL1 Interface
+wl_ap_state="0"
+
+# CPE_function will be calulated, to identify, weather the CPE will be used as Controler, Agent or both(Agent and Controller)
+# posible values: Cont,Agent,ContAgent,none
+cpe_function="none"
+
+#multi_agent_enable="0"
+#multi_cont_enable="0"
+
+multiap_agent_enable=$(uci get -q multiap.agent.enabled)
+multiap_controller_enable=$(uci get -q multiap.controller.enabled)
+
+if [ "$multiap_agent_enable" == "1" ] && [ "$multiap_controller_enable" == "1" ]; then
+	cpe_function="ContAgent"
+	wl_ap_state="1"
+elif [ "$multiap_agent_enable" == "1" ] && [ "$multiap_controller_enable" == "0" ]; then
+	cpe_function="Agent"
+	wl_ap_state="1"
+elif [ "$multiap_agent_enable" == "0" ] && [ "$multiap_controller_enable" == "1" ]; then
+	cpe_function="Cont"
+	wl_ap_state="1"
+fi
+
+# since TCH Extenders require a backhaul Interface for pairing, even if easymesh is disabled, the backhaul interface will always been enabled, on the CPE_function
+if [ "$cpe_type" != "sta" ]; then
+	wl_ap_state="1"
+fi
+
+#Test
+#echo CPW-Function: $cpe_function
+#Test
+
+
+
+
+# adding the Backhaul Interface, in case no DEDICATED Backhaul Interface is defined
+
+# bh_if_exist will be calculated by checking, if a dedicated BAclhaul Interface is existing alreay or not
+# Value = 0 : a dedicated Interface is NOT existing; Value = 1 : the dedicated Interface is existing
+#bh_if_exist=0 no backhaul
+#bh_if_exist=1 backhaul
+#bh_if_exist=2 backhaul and fronthaul; One Interface is used as Front and BAckhaul, but not the recommanded config
+
+
+# the function will be called for the radio to be used, in case of DualBAnd a radio_5G ; in case of Triband radio2
+# the actual value is kept in the variable 'bh_radio' from before and will be used to call the function
+
+bh_if_exist_tmp=$(_check_backhaul_value "$bh_radio")
+bh_if_exist=$(echo $bh_if_exist_tmp | cut -d" " -f1)
+# bh_if_exist_instance:
+bh_if_exist_instance=""
+if [ "$bh_if_exist" != "0" ]
+then
+    bh_if_exist_instance=$(echo $bh_if_exist_tmp | cut -d" " -f2)
+fi
+
+#test
+#uci set env.var.bh_if_exist_man='testen'
+#uci set env.var.bh_if_exist=$bh_if_exist
+#uci set env.var.bh_if_exist_tmp="$bh_if_exist_tmp"
+#uci commit env
+#echo "$bh_if_exist_instance" >> /root/mylog1.txt
+#echo Test1
+#echo "$bh_if_exist_instance"
+#test
+
+
+if [ "$bh_radio" == "radio2" ] && [ "$bh_if_exist" == "2" ]
+then
+	#this section/if statement is only taken, if the backhaul is already existing with front and backhual flag set and only for triband
+	uci set wireless.$bh_if_exist_instance.fronthaul='0'
+	tmp_bh_list=`uci get -q multiap.agent.backhaul_list`
+	if [ "$tmp_bh_list" != "" ]
+	then
+		uci set multiap.agent.backhaul_list=`uci get multiap.agent.backhaul_list`,$bh_if_exist_instance
+	else
+		uci set multiap.agent.backhaul_list=$bh_if_exist_instance
+	fi
+	uci set multiap.agent.hidden_backhaul='1'
+	uci del_list web.main.intf="$bh_if_exist_instance"
+
+	#get related ap for bh_if_exist_instance
+	bh_ap=""
+	for i in $wireless_aps
+	do
+		tmp_option=$(uci get -q wireless.$i.iface)
+		if [ "$tmp_option" == "$bh_if_exist_instance" ]
+		then
+			bh_ap=$i
+		fi
+	done
+
+	found="0"
+	multiap_cred=$(_get_instance_name multiap "controller_credentials")
+	for i in $multiap_cred
+	do
+		temp_backhaul=`uci get -q multiap.$i.backhaul`
+		if [ "$temp_backhaul" == "1" ]; then
+		# Credential for Backhaul in multiap detected
+			found="1"
+			break
+		fi
+	done
+	if [ "$found" == "1" ]; then
+	# set the SSID to th evalue of the Multiap
+		uci set wireless.$bh_ap.wpa_psk_key=$(uci get multiap.$i.wpa_psk_key)
+		uci set wireless.$bh_if_exist_instance.ssid=$(uci get multiap.$i.ssid)
+	else
+	# set the SSID to dedicated Value
+		uci set wireless.$bh_ap.wpa_psk_key=`uci get env.var.default_key_r1_s3`
+		uci set wireless.$bh_if_exist_instance.ssid=BH_`uci get env.var.serial`
+	fi
+
+	uci set wireless.$bh_ap.wps_state='0'
+
+	# Dedicated Extender settings
+		if [ "$cpe_type" == "sta" ]; then
+			# GHG-11197-Part10
+			uci set multiap.wee_bhs.enabled='1'
+		fi
+else
+	if [ "$bh_if_exist" == "0" ] || [ "$bh_if_exist" == "2" ]; then
+
+		uci set wireless.$wl_iface=wifi-iface
+		uci set wireless.$wl_iface.device=$bh_radio
+		uci set wireless.$wl_iface.mode='ap'
+		uci set wireless.$wl_iface.state=$wl_ap_state
+		uci set wireless.$wl_iface.network='lan'
+		uci set wireless.$wl_iface.reliable_multicast='1'
+		uci set wireless.$wl_iface.backhaul='1'
+		uci set wireless.$wl_iface.ssid='<set by Multiap>'
+
+		uci set wireless.$ap_iface=wifi-ap
+		uci set wireless.$ap_iface.iface=$wl_iface
+		uci set wireless.$ap_iface.state=$wl_ap_state
+		uci set wireless.$ap_iface.public='0'
+		uci set wireless.$ap_iface.ap_isolation='0'
+		uci set wireless.$ap_iface.station_history='1'
+		uci set wireless.$ap_iface.max_assoc='0'
+		uci set wireless.$ap_iface.security_mode='wpa2-psk'
+		uci set wireless.$ap_iface.pmf='disabled'
+		uci set wireless.$ap_iface.pmksa_cache='1'
+		uci set wireless.$ap_iface.wps_state='0'
+		uci set wireless.$ap_iface.wsc_state='configured'
+		uci set wireless.$ap_iface.trace_modules=' '
+		uci set wireless.$ap_iface.trace_level='some'
+
+		uci set wireless.$ap_iface.wpa_psk_key='<set by Multiap>'
+		uci set wireless.$ap_iface.wps_credentialformat='passphrase'
+
+	# Define the Security Mode depending on the supported modes, with respect to wpa3, if the Platform supports it, it will also defined as supported
+	# for the Backhaul radio as well
+	# Therefore the supported modes of the main SSID on the respective radio will be checked, which would be normaly AP1 on the Gateways and the Extender
+
+	#test
+	#echo Text: WiFi Sec Modes
+	#Test
+
+		uci set wireless.$ap_iface.supported_security_modes="`uci get wireless.ap1.supported_security_modes`"
+
+	#test
+	echo Text: WiFi Sec Modes Teil2
+	#Test
+
+		SUPPORTED="`uci get wireless.ap1.supported_security_modes`"
+		for security in $SUPPORTED
+		do
+			if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+				wpa3_inst=$ap_iface"_credential0"
+				uci set wireless.$wpa3_inst=wifi-ap-credential
+				uci set wireless.$wpa3_inst.passphrase=`uci get env.var.default_key_r1_s0`
+			fi
+		done
+
+	# The SSID and the the used wpa key should be the one defined in Multiap for the Backhaul credentials
+	# In case a respective credential is not existing in multiap, "env.var.default_key_r1_s3" will be used
+	# Since the credentials can freely be used, but are only identified via the BAckhaul flag, all credentials in multiap
+	# need to be inspected to identify the respective instance.
+
+	#test
+	#echo Text: Creds
+	#Test
+
+	# in the cred sections the values for ssid are only available, in case a controler function is defined
+	# pure Extenders do not show this values.
+
+		found="0"
+		multiap_cred=$(_get_instance_name multiap "controller_credentials")
+		for i in $multiap_cred
+		do
+			temp_backhaul=`uci get -q multiap.$i.backhaul`
+			if [ "$temp_backhaul" == "1" ]; then
+			# Credential for Backhaul in multiap detected
+				found="1"
+				break
+			fi
+		done
+		if [ "$found" == "1" ]; then
+		# set the SSID to th evalue of the Multiap
+			uci set wireless.$ap_iface.wpa_psk_key=$(uci get multiap.$i.wpa_psk_key)
+			uci set wireless.$wl_iface.ssid=$(uci get multiap.$i.ssid)
+		else
+		# set the SSID to dedicated Value
+			uci set wireless.$ap_iface.wpa_psk_key=`uci get env.var.default_key_r1_s3`
+			uci set wireless.$wl_iface.ssid=BH_`uci get env.var.serial`
+		fi
+
+
+	#*****************************************************************************************
+	#               Modify Multiap / wireless due to additional BH-Interface
+	#*****************************************************************************************
+	#test
+	#echo Text: Multiap
+	#Test
+
+
+		# Modifiing the multiap config due to additional Backhaul Interface on Gateway or extender
+			uci set multiap.agent.bss_list=`uci get multiap.agent.bss_list`,$wl_iface
+			uci set multiap.agent.backhaul_list=$wl_iface
+			uci set multiap.agent.bh_list=$wl_iface
+		# hide the BH SSID
+			uci set multiap.agent.hidden_backhaul='1'
+
+
+		if [ "$bh_if_exist" == "2" ]; then
+			# Modify the extenders to support dedicated Backhaul Interface on Extender or gateway, assure never having fronthaul and Backhaul
+			uci set wireless.$bh_if_exist_instance.backhaul='0'
+			uci set multiap.agent.fronthaul_list=`uci get multiap.agent.fronthaul_list`,$bh_if_exist_instance
+
+		fi
+
+	# Dedicated Extender settings
+		if [ "$cpe_type" == "sta" ]; then
+			# GHG-11197-Part10
+			uci set multiap.wee_bhs.enabled='1'
+		fi
+
+	fi
+fi
+
+uci commit wireless
+uci commit multiap
+

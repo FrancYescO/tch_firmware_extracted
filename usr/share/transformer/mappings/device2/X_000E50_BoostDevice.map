@@ -1,0 +1,180 @@
+-- Manually generated
+local Device_X_000E50_BoostDevice_i_ = {
+  objectType = {
+    name = "Device.X_000E50_BoostDevice.{i}.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Shows which device is currently getting a 'boost' (eg. receives a higher QoS priority)",
+    parameters = {
+      MACAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "The MAC address of the currently boosted device",
+      },
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "The IP address of the currently boosted device",
+      },
+      EndTime = {
+       access = "readOnly",
+       type = "string",
+       description = "The schedule end time for the currently boosted device",
+      },
+    }
+  }
+}
+
+local commitapply, mapper, register, mapping = commitapply, mapper, register, mapping
+local uciHelper = require("transformer.mapper.ucihelper")
+local nwcommon = mapper("nwcommon")
+local network = require("transformer.shared.common.network")
+local conn = mapper("ubus").connect()
+local pairs, type, match = pairs, type, string.match
+local todBinding = { config = "tod" }
+local transactions = {}
+local modified = false
+local boosted = false
+local boosted_object
+local logger = require("transformer.logger")
+
+local function getUciValue(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  uciHelper.set_on_uci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+Device_X_000E50_BoostDevice_i_.entries = function(_, paramname)
+  local entries = {}
+  todBinding.sectionname = "action"
+  uciHelper.foreach_on_uci(todBinding, function(s)
+    if s["script"] == "boosttodscript" then
+      entries[#entries + 1] = s[".name"]
+    end
+  end)
+  return entries
+end
+
+-- return the IPv4 Address of the boosted device.
+local function getBoostedIPAddress(macAddr)
+  local boostDevice = conn:call("hostmanager.device", "get", { ["mac-address"] = macAddr })
+  if boostDevice then
+    local ipv4Address = {}
+    for _, device_data in pairs(boostDevice) do
+      if device_data.ipv4 then
+        ipv4Address = device_data.ipv4
+      end
+    end
+    for _, info in pairs(ipv4Address) do
+      if info.state == "connected" or info.state == "stale" then
+        return info.address or ""
+      end
+    end
+  end
+  return ""
+end
+
+Device_X_000E50_BoostDevice_i_.get = function(mapping, paramname, key)
+  local macAddr = getUciValue(todBinding, key, "object")
+  if paramname == "MACAddress" then
+    return getUciValue(todBinding, key, "object")
+  elseif paramname == "IPAddress" then
+    return getBoostedIPAddress(macAddr)
+  elseif paramname == "EndTime" then
+    local timer_Name = {}
+    timer_Name = getUciValue(todBinding, key, "timers")
+    local stopTime = timer_Name[1]
+    return getUciValue(todBinding, stopTime, "stop_time")
+  end
+end
+
+Device_X_000E50_BoostDevice_i_.add = function(mapping)
+  local sectionName = network.getNewSection(todBinding.config, "action")
+
+  local timers = network.getNewSection("todBinding.config", "timer")
+  local timername = {}
+  timername[1] = timers
+
+  todBinding.sectionname = timers
+  todBinding.option = nil
+  uciHelper.set_on_uci(todBinding, "timer", commitapply)
+  setUciValue(todBinding , timers, "stop_time", "Mon:00:01")
+  setUciValue(todBinding , timers, "start_time", "Mon:00:00")
+  setUciValue(todBinding , timers, "periodic", "0")
+
+  todBinding.sectionname = sectionName
+  todBinding.option = nil
+  uciHelper.set_on_uci(todBinding, "action", commitapply)
+  setUciValue(todBinding , sectionName, "timers", timername)
+  setUciValue(todBinding , sectionName, "script", "boosttodscript")
+  setUciValue(todBinding , sectionName, "enabled", "1")
+  transactions[todBinding.config] = true
+  return sectionName
+end
+
+Device_X_000E50_BoostDevice_i_.delete = function(mapping, key)
+  local getTimers = {}
+  getTimers = getUciValue(todBinding, key, "timers")
+  local timerSection = getTimers[1]
+  if timerSection then
+    uciHelper.delete_on_uci({config="tod", sectionname=timerSection}, commitapply)
+  end
+  todBinding.sectionname = key
+  todBinding.option = nil
+  uciHelper.delete_on_uci(todBinding, commitapply)
+  transactions[todBinding.config] = true
+  return true
+end
+
+Device_X_000E50_BoostDevice_i_.set = function(mapping, paramname, paramvalue, key)
+  if paramname == "MACAddress" then
+    local section
+    if not nwcommon.isMAC(paramvalue) then
+      return nil, "Illegal MAC for BoostDevice"
+    end
+    setUciValue(todBinding, key, "object", paramvalue)
+    modified = true
+    setUciValue(todBinding, key, "enabled", "1")
+
+    uciHelper.foreach_on_uci({config="qos", sectionname="rule"},function(s)
+      if s["srcmac"] ~= nil and s["target"] == "Boost" and s["order"] == "13" then
+        boosted = true
+        section = s[".name"]
+        return false
+      end
+    end)
+
+    if boosted  then
+      logger:debug("Update the MAC address of the boosted device")
+      boosted_object = { config = "qos", sectionname = section, option = "srcmac" }
+      uciHelper.set_on_uci(boosted_object, paramvalue, commitapply)
+    else
+      logger:debug("Nothing to be done, ToD script will be triggered")
+    end
+  end
+end
+
+Device_X_000E50_BoostDevice_i_.commit = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_X_000E50_BoostDevice_i_.revert = function()
+  for config in pairs(transactions) do
+    uciHelper.revert({config = config})
+  end
+  transactions = {}
+end
+
+register(Device_X_000E50_BoostDevice_i_)
