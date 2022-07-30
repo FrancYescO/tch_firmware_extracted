@@ -1,0 +1,53 @@
+local Device_Services_X_CLAROBRAZIL_Bridgedmode_ = {
+  objectType = {
+    name = "Device.Services.X_CLAROBRAZIL_Bridgedmode.",
+    description = "Clarobrazil specific BridgeMode",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "0",
+        description = "enabling and disabling bridge mode for Ethernet Port 0",
+      },
+    }
+  }
+}
+
+local binding = { config = "env", sectionname = "var", option = "CLB_bridge_mode_enable"}
+local uciHelper = mapper("ucihelper")
+local isEnvConfigChanged = false
+local commitapply = commitapply
+
+Device_Services_X_CLAROBRAZIL_Bridgedmode_.get = {
+  Enable = function()
+    local enabled = uciHelper.get_from_uci(binding)
+    return enabled ~= "" and enabled or "0"
+  end
+}
+
+Device_Services_X_CLAROBRAZIL_Bridgedmode_.set = {
+  Enable = function(mapping, param, value)
+    uciHelper.set_on_uci(binding, value, commitapply)
+    isEnvConfigChanged = true
+  end
+}
+
+Device_Services_X_CLAROBRAZIL_Bridgedmode_.commit = function()
+  if isEnvConfigChanged then
+    uciHelper.commit(binding)
+    commitapply:newset("bridgedMode.reboot")
+    isEnvConfigChanged = false
+  end
+end
+
+Device_Services_X_CLAROBRAZIL_Bridgedmode_.revert = function()
+  if isEnvConfigChanged then
+    uciHelper.revert(binding)
+    isEnvConfigChanged = false
+  end
+end
+
+register(Device_Services_X_CLAROBRAZIL_Bridgedmode_)

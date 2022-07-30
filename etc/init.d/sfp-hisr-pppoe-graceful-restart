@@ -1,0 +1,84 @@
+#!/bin/sh /etc/rc.common
+
+START=22
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+pppoe_graceful_restart=0
+wanauto=0
+wanintf="none"
+wanifname="none"
+sfpintf="none"
+sfpstatus=""
+
+scan_pppoe_interface() {
+	local config="$1"
+	local ifname
+
+	config_get proto "$config" proto
+	config_get graceful_restart "$config" graceful_restart
+	config_get auto "$config" auto
+	config_get ipaddr "$config" ipaddr
+	ifname=$(uci_get network "$config" ifname)
+
+	if [ $proto = "pppoe" ] && [ $graceful_restart = "1" ] ; then
+		if [ -z $auto ] || [ $auto = "1" ] ; then
+			pppoe_graceful_restart=$graceful_restart
+			wanauto=1
+			wanintf="$config"
+			wanifname="$ifname"
+		fi
+	fi
+
+	if [ "$ipaddr" = "169.0.0.2" -o "$ipaddr" = "192.168.10.2" -o "$ipaddr" = "192.168.2.2" ] ; then
+		sfpintf="$config"
+	fi
+}
+
+boot() {
+	[ -x /usr/sbin/pppd ] || exit 0
+	config_load network
+	config_foreach scan_pppoe_interface interface
+
+	[ $wanauto = 0 -o $pppoe_graceful_restart = 0 -o "$wanintf" = "none" -o "$sfpintf" = "none" ] && exit 0
+	[ -f "/etc/ppp/pppoesession_$wanifname" ] || exit 0
+
+	k=0
+	while [ $k -lt 10 ]
+	do
+		sfpstatus=$(cat /proc/ethernet/sfp_status | grep up)
+		if [ "$sfpstatus" != "" ] ; then
+			break
+		fi
+		sleep 0.5
+		let k++
+	done
+
+	[ "$sfpstatus" = "" ] && exit 0
+
+	j=0
+	while [ $j -lt 10 ]
+	do
+		state=$(sfp_get.sh --state | grep O5)
+		if [ "$state" != "" ] ; then
+			ifdown $wanintf
+			ifup $sfpintf
+			break
+		fi
+		sleep 1
+		let j++
+	done
+
+	i=0
+	while [ $i -lt 10 ]
+	do
+		stats=$(sfp_get.sh --omcirxstats)
+		if [ $stats -gt 100 -a $pppoe_graceful_restart = "1" ] ; then
+			ifup $wanintf
+			break
+		fi
+		sleep 1
+		let i++
+	done
+}
+

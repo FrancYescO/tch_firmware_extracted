@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="QoEDiagnostics" version="2.0">
+    <object name="IP.Diagnostics.">
+        <parameter name="X_ADB_WebDiagnosticsNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="IP.Diagnostics.X_ADB_WebDiagnostics." access="readOnly" minEntries="1" maxEntries="unbounded" set="WebDiagnostics.sh">
+        <description>
+        This object allows to configure and trigger single Web test
+        </description>
+        <parameter name="DiagnosticsState" access="readWrite" localNotify="forceEnabled">
+            <description>{{enum}}
+             If this parameter is set to {{enum|Requested}}, the CPE MUST initiate the corresponding diagnostic test.
+             To ensure the use of the proper test parameters (the writable parameters in this object), the test parameters MUST be set either prior to or at the same time as setting the {{param|DiagnosticsState}} to {{enum|Requested}}.
+
+             When all the scheduled tests are completed, the value of this parameter is set to {{enum|Completed}}.
+
+             When this diagnostic campaign is initiated by the ACS, the CPE MUST establish a new connection to the ACS to allow the ACS to view the results, indicating the Event code 8 DIAGNOSTICS COMPLETE in the Inform message.
+
+             The results for the individual test executions are maintained in newly created instances of {{object|.IP.Diagnostics.X_ADB_LANDiagnostics}} object.
+
+             Any single upload test execution is serialized with any other QoE diagnostics test that may happen concurrently, waiting for a maximum timeout and then terminating with {{enum|Error_Internal|.IP.Diagnostics.X_ADB_LANDiagnostics.{i}.DiagnosticsState}}.
+
+             After the diagnostic is complete, the value of all result parameters MUST be retained by the CPE until either this diagnostic is run again, or the CPE reboots.
+             A limited number of test results are saved in reboot-persistent storage, as configured by {{param|MaxStored}} parameter.
+             Periodic upload of the test results can be scheduled by configuring the {{object|Report}} object.
+
+             Modifying any of the writable parameters in this object except for this one MUST result in the value of this parameter being set to {{enum|None}}.
+
+             While the test campaign is in progress, modifying any of the writable parameters in this object except for this one MUST result in the test campaign being terminated and the value of this parameter being set to {{enum|None}}.
+
+             While the test campaign is in progress, setting this parameter to {{enum|Requested}} (and possibly modifying other writable parameters in this object) MUST result in the test campaign being terminated and then restarted using the current values of the test parameters.
+
+             The running test campaign can be stopped by setting this paramter to {{enum|None}}.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="None"/>
+                    <enumeration value="Requested"/>
+                    <enumeration value="Completed"/>
+                    <enumeration value="Error_NoURL"/>
+                    <enumeration value="Error_NoResponse"/>
+                </string>
+                <default value="None"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TestCode" access="readWrite">
+            <description>
+                A test code string that will be copied in the uploaded report files.
+            </description>
+            <syntax>
+                <string>
+                    <size maxLength="64"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Alias" access="readOnly" key="yes">
+            <description>Name of this object instance.</description>
+            <syntax>
+                <dataType ref="Alias"/>
+            </syntax>
+        </parameter>
+        <parameter name="HttpCode">
+            <description>Http code get from server</description>
+            <syntax>
+                <string>
+                    <size maxLength="64"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="StartTime" access="readOnly">
+            <description>
+                After the test is requested, this parameter contains the absolute start time of the IP ping.
+            </description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="URL" access="readWrite" excludeUser="CWMP" store="yes">
+            <description>
+                Web page address
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="ProtocolVersion" access="readWrite">
+            <description>
+                This value if other than any, force ip protocol version during test.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="Any"/>
+                    <enumeration value="IPv4"/>
+                    <enumeration value="IPv6"/>
+                </string>
+                <default value="Any"/>
+            </syntax>
+        </parameter>
+        <parameter name="LoadTime" access="readOnly" excludeUser="CWMP" store="no">
+            <description>
+                WEB Page full load time.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="TCPOpenTime" access="readOnly" excludeUser="CWMP" store="no">
+            <description>
+                TCP connection opening time.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="DnsTime" access="readOnly" excludeUser="CWMP" store="no">
+            <description>
+                DNS server responce time.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_Reset" access="readOnly" set="ResetTest.sh" aliasOnGet="%s(false)" store="no">
+            <description>
+                When set {{true}} all optional paramaters are reset
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="X_ADB_QoE.WebDiagnostics.">
+        <description>
+            This object allows to configure and trigger multiple Web test
+        </description>
+        <parameter name="URL" access="readWrite" excludeUser="CWMP" store="yes">
+            <description>
+            Web page address
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="256"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="ProtocolVersion" access="readWrite">
+            <description>
+                This value if other than any, force ip protocol version during test.
+            </description>
+            <syntax>
+                <string>
+                    <enumeration value="Any"/>
+                    <enumeration value="IPv4"/>
+                    <enumeration value="IPv6"/>
+                </string>
+                <default value="Any"/>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>

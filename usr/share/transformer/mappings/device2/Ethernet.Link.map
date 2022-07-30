@@ -1,0 +1,247 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_Ethernet_Link_i_ = {
+  objectType = {
+    name = "Device.Ethernet.Link.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "LinkNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- readwrite currently not supported since lowerlayer support is not available
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Down",
+          "Unknown",
+          "Dormant",
+          "NotPresent",
+          "LowerLayerDown",
+          "Error",
+        },
+        default = "Down",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max  = "64",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      LowerLayers = {
+        access = "readWrite",
+        list = true,
+        max = "1024",
+        type = "string",
+        pathRef = true,
+        default = "",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      LastChange = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      PriorityTagging = {
+        access = "readOnly",  -- readwrite currently not supported since lowerlayer support is not available
+        type = "boolean",
+        default = "false",
+      },
+      X_ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+    }
+  },
+  aliasDefault = "Name"
+}
+
+local nwmodel = require "transformer.shared.models.device2.network"
+local EthLink = nwmodel.register("EthLink", Device_Ethernet_Link_i_.objectType.name)
+local uciobject = require "transformer.shared.uciobject"
+local lowerlayer = require "transformer.shared.device2.lowerlayer"
+local posix = require("tch.posix")
+local getClockTime = posix.clock_gettime
+local model
+
+local nwCommon = mapper("nwcommon")
+local getIntfInfo = nwCommon.getIntfInfo
+local ucihelper = mapper("ucihelper")
+
+local lastStateChangeTime = {}
+local ethBinding = { config = "ethernet", sectionname = "", option = "", default = "" }
+local network = { config="network" }
+local transactions = {}
+
+Device_Ethernet_Link_i_.entries = function(mapping)
+  model = nwmodel.load()
+  return model:getKeys(EthLink)
+end
+
+Device_Ethernet_Link_i_.add = function()
+  model = nwmodel.load()
+  local ucikey = uciobject.create("network", "dev2_link", "link_dyn", {
+    dev2_dynamic = "1"
+  })
+  local key = "link:"..ucikey
+  model:add(EthLink, key)
+  nwmodel.invalidate()
+  return key
+end
+
+Device_Ethernet_Link_i_.delete = function(_, key)
+  uciobject.delete(key)
+end
+
+local function getEthEnable(key)
+  local ethStatus = getIntfInfo(model:getDevice(key), "carrier", "")
+  if ethStatus == "1" then
+    return "1"
+  end
+  return "0"
+end
+
+local function getEthStatus(key)
+  local ethStatus = getIntfInfo(model:getDevice(key), "carrier", "")
+  if ethStatus == "1" then
+    return "Up"
+  elseif ethStatus == "0" then
+    return "Down"
+  elseif ethStatus == "" then
+    return "NotPresent"
+  end
+  return "Unknown"
+end
+
+local function getEthLowerLayer(key)
+  return model:getLowerLayersResolved(key, resolve)
+end
+
+local function getLastChange(key, interface)
+  local intfName = interface or model:getName(key)
+  local lastChange = getClockTime(posix.CLOCK_MONOTONIC) - (lastStateChangeTime[intfName] or 0)
+  return tostring(lastChange)
+end
+
+Device_Ethernet_Link_i_.get = {
+  Enable = function(mapping, param, key)
+    return getEthEnable(key)
+  end,
+
+  Status = function(mapping, param, key)
+    return getEthStatus(key)
+  end,
+
+  Name = function(mapping, param, key)
+    return model:getName(key)
+  end,
+
+  MACAddress = function(mapping, param, key)
+    return getIntfInfo(model:getDevice(key), "address", "")
+  end,
+
+  LowerLayers = function(mapping, param, key)
+    return getEthLowerLayer(key)
+  end,
+
+  LastChange = function(mapping, param, key)
+    return getLastChange(key)
+  end,
+  PriorityTagging = "0",
+  X_ShapingRate = function(mapping, param, key)
+    local devName = model:getName(key)
+    return nwmodel.getShapingRate(devName, key)
+  end,
+}
+
+Device_Ethernet_Link_i_.getall = function(mapping, key)
+  local interface = model:getName(key)
+  local allValues = {
+    Enable = getEthEnable(key),
+    Status = getEthStatus(key),
+    Name = interface,
+    MACAddress = getIntfInfo(model:getDevice(key), "address", ""),
+    LowerLayers = getEthLowerLayer(key),
+    LastChange = getLastChange(key, interface),
+    X_ShapingRate = nwmodel.getShapingRate(interface, key),
+  }
+  return allValues
+end
+
+Device_Ethernet_Link_i_.set = {
+  X_ShapingRate = function(mapping, param, value, key)
+    local devName = model:getName(key)
+    local shapingRate, errMsg = nwmodel.setShapingRate(value, key, devName)
+    if not shapingRate then
+      return nil, errMsg
+    end
+    transactions[ethBinding] = true
+  end,
+
+  LowerLayers = function(_, _, value, key)
+    local lowerkey = tokey(value,
+      "Device.Ethernet.Interface.{i}.",
+      "Device.ATM.Link.{i}.",
+      "Device.PTM.Link.{i}."
+    )
+    if not lowerkey then
+      return nil, "invalid path"
+    end
+    network.sectionname = model:getUciKey(key)
+    network.option = "ifname"
+    ucihelper.set_on_uci(network, lowerkey, commitapply)
+    lowerlayer.propagate_options_for(network.sectionname, Device_Ethernet_Link_i_.objectType.name)
+    transactions[network] = true
+  end
+}
+
+Device_Ethernet_Link_i_.commit = function()
+  uciobject.commit()
+  lowerlayer.commit()
+  for binding in pairs(transactions) do
+    ucihelper.commit(binding)
+  end
+  transactions = {}
+end
+
+Device_Ethernet_Link_i_.revert = function()
+  uciobject.revert()
+  lowerlayer.revert()
+  for binding in pairs(transactions) do
+    ucihelper.revert(binding)
+  end
+  transactions = {}
+end
+
+local function ubusEventTriggered(mapping, action, data)
+  if data.action == "up" or data.action == "down" then
+    lastStateChangeTime[data.interface] = getClockTime(posix.CLOCK_MONOTONIC)
+  end
+end
+
+Device_Ethernet_Link_i_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, ubusEventTriggered, "network.link")
+end
+
+register(Device_Ethernet_Link_i_)

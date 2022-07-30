@@ -1,0 +1,95 @@
+local Telemanagement_WiFi_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_WiFi.",
+    access = "readOnly",
+    description = "To get wifi switchoff parameters Enable, Start, End, Frequency.",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+register(Telemanagement_WiFi_)
+
+local Telemanagement_Wifi_tod_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_WiFi.SwitchOff.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Start = {
+        access = "readWrite",
+        type = "string",
+      },
+      End = {
+        access = "readWrite",
+        type = "string",
+      },
+      Frequency = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Do not repeat",
+          "Weekends",
+          "Working days",
+          "Daily",
+          "",
+        },
+      },
+    }
+  }
+}
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(Telemanagement_Wifi_tod_, commitapply)
+local map = {
+  Enable = "enabled",
+  End = "stop",
+  Start = "start",
+  Frequency = "frequency",
+}
+
+local todname = "wifidisable"
+Telemanagement_Wifi_tod_.get = function(mapping, param, key)
+  if param == "Enable" then
+    local enable = tele.mgr:GetFWTimer(nil, todname, map[param])
+    return enable == "" and "0" or enable
+  end
+  if map[param] then
+    return tele.mgr:GetFWTimer(nil, todname, map[param])
+  end
+end
+
+Telemanagement_Wifi_tod_.set = function(mapping, param, paramvalue, key)
+  if param == "Frequency" and paramvalue == "" then
+    return true
+  end
+  if param == "Enable" then
+    tele.mgr:SetEcoAction(paramvalue)
+  elseif map[param] then
+    if param == "Start" or param == "End" then
+      if not tele:CheckTimeFormat(paramvalue) then
+        return nil, "The time format should be hh:00 or hh:30."
+      end
+    end
+    tele.mgr:SetFWTimer(nil, todname, map[param], paramvalue)
+  end
+  local timer = tele.mgr:GetFWTimerAll(nil, todname)
+  if timer and timer.frequency and timer.stop and timer.start then
+    tele.mgr:SetEcoTimer(timer.enabled, timer.start, timer.stop, timer.frequency)
+  end
+  return ture
+end
+
+Telemanagement_Wifi_tod_.commit = function()
+  tele:commit()
+end
+
+Telemanagement_Wifi_tod_.revert = function()
+   tele:revert()
+end
+register(Telemanagement_Wifi_tod_)
