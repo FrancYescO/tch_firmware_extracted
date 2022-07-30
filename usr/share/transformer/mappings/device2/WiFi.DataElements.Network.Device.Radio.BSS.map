@@ -1,0 +1,58 @@
+-- Manually generated
+local Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_ = {
+  objectType = {
+    name = "Device.WiFi.DataElements.Network.Device.{i}.Radio.{i}.BSS.{i}.",
+    numEntriesParameter = "BSSNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enabled = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      BSSID = {
+        access = "readOnly",
+        type = "string",
+        max = "17"
+      },
+      SSID = {
+        access = "readOnly",
+        type = "string"
+      },
+      -- BSSDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.DataElements.Network.Device.{i}.Radio.{i}.BSS.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_.entries = function(mapping, parent, grand)
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", { almac = grand }) or {}
+  cacheData = cacheData[grand] and cacheData[grand]["radio_info"] and cacheData[grand]["radio_info"][parent] and cacheData[grand]["radio_info"][parent]["bss_info"] or {}
+  for bssMac in pairs(cacheData) do
+    entries[#entries + 1] = bssMac
+  end
+  return entries
+end
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_.get = {
+  Enabled = function(mapping, param, key, parent, grand)
+    for _ in pairs(cacheData[key]) do
+      return "1"
+    end
+    return "0"
+  end,
+  BSSID = function(mapping, param, key, parent, grand)
+    return key
+  end,
+  SSID = function(mapping, param, key, parent, grand)
+    local result = cacheData[key] or {}
+    return result.ssid or ""
+  end
+}
+
+register(Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_)
