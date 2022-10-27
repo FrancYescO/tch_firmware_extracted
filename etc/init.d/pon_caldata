@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+START=99
+STOP=20
+
+BOSA_FILE=/etc/bosa.dat
+BOSA_CAL_RIP=/proc/rip/0141
+BOSA_RIP_TAR_FILE=/etc/bosa_cal.tar.gz
+
+start() {
+  if  [ -e "$BOSA_CAL_RIP" ]; then
+      if [ -e "$BOSA_RIP_TAR_FILE" ]; then
+          rm $BOSA_RIP_TAR_FILE
+      fi
+      dd if=$BOSA_CAL_RIP of=$BOSA_RIP_TAR_FILE
+      cd /etc
+      tar xvzf bosa_cal.tar.gz
+      if [ -e "$BOSA_FILE" ]; then
+         sed -i 's/9E 0x7F 0x02 0xBD 0xFF/9E 0x7F 0x02 0xBD 0x00/' $BOSA_FILE
+         echo `(echo "poni2c load_default")| consoled ` > /tmp/load_bosa_caldata.log
+      else
+         echo "Uncompression failure"
+      fi
+      rm $BOSA_RIP_TAR_FILE
+  else
+      echo "Bosa calibration RIP not exist, please check"
+  fi
+}
+
+stop() {
+      echo `(echo "poni2c reboot")| consoled ` > /dev/null
+}

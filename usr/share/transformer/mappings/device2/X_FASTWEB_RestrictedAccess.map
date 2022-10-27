@@ -1,0 +1,57 @@
+local Device_X_FASTWEB_RestrictedAccess_ = {
+  objectType = {
+    name = "Device.X_FASTWEB_RestrictedAccess.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Behaviour = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Allow access",
+          "Deny access",
+        },
+      },
+    }
+  }
+}
+
+local teleHelper = require("fwtelehelper")
+local tele = teleHelper.SetTeleMapping(Device_X_FASTWEB_RestrictedAccess_, commitapply)
+
+local mt = { __index = function() return "" end }
+
+local mode_map= setmetatable({
+  allow = "Allow access",
+  block = "Deny access",
+}, mt)
+
+local rev_mode_map = setmetatable({
+  ["Allow access"] = "allow",
+  ["Deny access"] = "block",
+}, mt)
+
+Device_X_FASTWEB_RestrictedAccess_.get = function(mapping, param, key)
+  if param == "Behaviour" then
+    return mode_map[tele.mgr:GetBlackListMode()]
+  end
+end
+
+Device_X_FASTWEB_RestrictedAccess_.set = function(mapping, param, value, key)
+  if param == "Behaviour" then
+    tele.mgr:SetBlackListMode(rev_mode_map[value])
+  else
+    return nil, "Not support the parameter!"
+  end
+end
+
+Device_X_FASTWEB_RestrictedAccess_.commit = function()
+  tele:commit()
+end
+
+Device_X_FASTWEB_RestrictedAccess_.revert = function()
+  tele:revert()
+end
+
+register(Device_X_FASTWEB_RestrictedAccess_)

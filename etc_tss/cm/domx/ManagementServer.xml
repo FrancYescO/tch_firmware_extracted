@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<datamodel name="ManagementServer" version="2.0">
+    <object name="ManagementServer.">
+        <parameter name="X_ADB_ConnectionRequestPort" access="readWrite" localNotify="forceEnabled">
+            <description>
+                The TCP Port on which the CPE is listening for Connection Requests.
+                When set, this parameter will update {{param|ConnectionRequestURL}} accordingly.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="2" maxInclusive="65524" step="1"/>
+                </unsignedInt>
+                <default value="7547"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ConnectionRequestPath" access="readWrite">
+            <description>
+                The path part of the Connection Request URL.
+                When set, this parameter will update {{param|ConnectionRequestURL}} accordingly.
+            </description>
+            <syntax>
+                <string>
+                    <size minLength="0" maxLength="128"/>
+                </string>
+                <default value="cpe"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ConnectionRequestRandomPath" access="readWrite">
+            <description>
+                If {{true}}, the CPE generates a random suffix appended to the connection request URL.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ConnectionRequestInterface" access="readWrite" localNotify="forceEnabled">
+            <description>
+                The IP interface on which the CPE is listening for Connection Requests
+                Setting this parameter, the {{param|ConnectionRequestURL}} is updated accordingly.
+            </description>
+            <syntax>
+                <string>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ConnectionRequestInterval" access="readWrite" localNotify="forceEnabled">
+            <description>
+                When {{param}} is greater than 0, the CPE restricts the number of Connection Requests that it accepts during the given period of time in {{units}}, in order to reduce the possibility of a denial of service attack.
+                After a successful Connection Request, any further attempt received within this period is rejected with HTTP status code 503 (Service Unavailable).
+                When this value is 0, there's not such limit.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_InformInterface" access="readWrite" localNotify="forceEnabled">
+            <description>
+                When specified, the CPE binds to the given interface for outgoing CWMP traffic. The ACS can be reached only through routing rules defined for the given IP interface.
+                When this parameter is {{empty}}, the CPE opens CWMP connections according to the normal routing rules, which is the standard behavior.
+            </description>
+            <syntax>
+                <string>
+                    <pathRef targetParent=".IP.Interface." refType="strong" targetType="row"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_IPv6Preferred" access="readWrite" localNotify="forceEnabled">
+            <description>
+                If {{true}}, the CPE will bind to the first enabled IPv6 address assigned to the IP Interface specified by {{param|X_ADB_ConnectionRequestInterface}}, if available.
+                Otherwise, IPv4 addresses will be used.
+            </description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TLSVersion" access="readWrite">
+            <description>
+                When the HTTPS protocol is used to connect to the ACS, this parameter indicates the TLS version to use for the security handshake.
+                {{enum}}
+                If {{enum|Auto}} is configured, then SSL3.0 support is disabled.
+            </description>
+            <syntax>
+                <list minItems="1" maxItems="4"/>
+                <string>
+                    <enumeration value="Auto"/>
+                    <enumeration value="SSL3.0" status="deprecated"/>
+                    <enumeration value="TLS1.0"/>
+                    <enumeration value="TLS1.1"/>
+                    <enumeration value="TLS1.2"/>
+                </string>
+                <default value="Auto"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TLSCheck" access="readWrite">
+            <description>
+                When the HTTPS protocol is used to connect to the ACS, this parameter indicates which validity checks must be performed on TLS certificate.
+            </description>
+            <syntax>
+                <list minItems="0" maxItems="6"/>
+                <string>
+                    <enumeration value="CertInvalid"/>
+                    <enumeration value="CertSignerNotFound"/>
+                    <enumeration value="CertRevoked"/>
+                    <enumeration value="CertExpired"/>
+                    <enumeration value="CertNotActivated"/>
+                    <enumeration value="CNMatch"/>
+                </string>
+                <default value="CertInvalid,CertSignerNotFound,CertRevoked,CertExpired,CertNotActivated,CNMatch"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_IdleTimeout" access="readWrite" localNotify="forceEnabled">
+            <description>
+            The maximum time in {{units}} the agent will wait for the next message from the ACS during a CWMP session.
+            When this time elapses, the agent closes the session.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" maxInclusive="3600" step="1"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="30"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DelaySecondsTimeWindow" access="readWrite">
+            <description>
+            The maximum time in {{units}} the CPE must attempt to perform a scheduled RPC after the configured delay seconds are expired.
+            When this time elapses, the CPE must consider the RPC to have failed and report this failure to the ACS.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="1" step="1"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="3600"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_ResolvedACSAddress" access="readOnly" store="no">
+            <description>
+            The IP addresses resolved from parameter {{param|URL}}.
+            </description>
+            <syntax>
+                <list/>
+                <dataType ref="IPAddress"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_DownloadIdleTimeout" access="readWrite">
+            <description>
+            The maximum time in {{units}} the agent will wait for an idle download session.
+            When this time elapses, the agent closes the download session with failure.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <units value="seconds"/>
+                    <range minInclusive="1" maxInclusive="3600" step="1"/>
+                </unsignedInt>
+                <default value="120"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_NotificationDelay" access="readWrite">
+            <description>
+            The time to wait in {{units}} after a change event before the corresponding Inform notification is sent to the ACS, in order to aggregate other possible events that may happen in this time interval.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <range minInclusive="2" maxInclusive="30" step="1"/>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="2"/>
+            </syntax>
+        </parameter>
+        <parameter name="X_ADB_TimeSynchWait" access="readWrite">
+            <description>
+            The maximum time in {{units}} the agent will wait for network time synchronization before sending Inform events.
+            The wait timer starts on WAN management connection ready.
+            If set to 0, the agent will wait for synchronization indefinitely.
+            This is applied only when network time service is enabled, see the {{object|.Time}} object.
+            </description>
+            <syntax>
+                <unsignedInt>
+                    <units value="seconds"/>
+                </unsignedInt>
+                <default value="30"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState." access="readOnly" minEntries="1" maxEntries="1">
+        <description>Parameters reporting the internal status of the CWMP agent.</description>
+        <parameter name="SessionInProgress" access="readOnly" activeNotify="canDeny" set="PostProvisioning.sh" store="no">
+            <description>The value of this parameter is {{true}} while a CWMP session is running, {{false}} otherwise.</description>
+            <syntax>
+                <boolean/>
+                <default value="false"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastInformTime" access="readOnly" activeNotify="canDeny">
+            <description>Date and time in UTC of the last Inform successfully sent to the ACS.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastCRInformTime" access="readOnly" activeNotify="canDeny">
+            <description>Date and time in UTC of the last CONNECTION REQUEST Inform successfully sent to the ACS.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastVCInformTime" access="readOnly" activeNotify="canDeny">
+            <description>Date and time in UTC of the last VALUE CHANGE Inform successfully sent to the ACS.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastPeriodicInformTime" access="readOnly" activeNotify="canDeny">
+            <description>Date and time in UTC of the last PERIODIC Inform successfully sent to the ACS.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="LastSessionEndTime" access="readOnly" activeNotify="canDeny">
+            <description>Date and time in UTC when the last session with the ACS has completed.</description>
+            <syntax>
+                <dateTime/>
+                <default value="0001-01-01T00:00:00Z"/>
+            </syntax>
+        </parameter>
+        <parameter name="ValueChangeNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="PostProvisioningNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+        <parameter name="DiagnosticsNumberOfEntries" access="readOnly" store="no">
+            <description>{{numentries}}</description>
+            <syntax>
+                <unsignedInt/>
+                <default value="0"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState.ValueChange.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="ValueChangeNumberOfEntries">
+        <description>
+            This table lists all parameters for which a VALUE CHANGE notification must be sent to the ACS.
+        </description>
+        <parameter name="Parameter" access="readOnly" activeNotify="canDeny">
+            <description>The full path of the parameter.</description>
+            <syntax>
+                <string>
+                    <pathRef targetType="parameter" refType="strong"/>
+                </string>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState.PostProvisioning.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="PostProvisioningNumberOfEntries" store="no">
+        <description>
+            This table lists all operations postponed at the end of the current CWMP session.
+        </description>
+        <parameter name="Parameter" access="readOnly" activeNotify="canDeny">
+            <description>The full path of the parameter to be set.</description>
+            <syntax>
+                <string>
+                    <pathRef targetType="parameter" refType="strong"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="Value" access="readOnly" activeNotify="canDeny">
+            <description>The value to set.</description>
+            <syntax>
+                <string/>
+            </syntax>
+        </parameter>
+        <parameter name="Priority" access="readOnly" activeNotify="canDeny">
+            <description>Priority class assigned to the entry. {{enum}}</description>
+            <syntax>
+                <string>
+                    <enumeration value="High"/>
+                    <enumeration value="Default"/>
+                    <enumeration value="Low"/>
+                </string>
+                <default value="Default"/>
+            </syntax>
+        </parameter>
+    </object>
+    <object name="ManagementServer.X_ADB_CWMPState.Diagnostics.{i}." access="readOnly" minEntries="0" maxEntries="unbounded" numEntriesParameter="DiagnosticsNumberOfEntries">
+        <description>
+            This table lists all diagnostics tasks for which a DIAGNOSTICS COMPLETE notification must be sent to the ACS.
+        </description>
+        <parameter name="Parameter" access="readOnly" activeNotify="canDeny">
+            <description>The full path of the DiagnosticsState parameter.</description>
+            <syntax>
+                <string>
+                    <pathRef targetType="parameter" refType="strong"/>
+                </string>
+            </syntax>
+        </parameter>
+        <parameter name="DiagnosticsState" access="readOnly" activeNotify="canDeny">
+            <description>The value of the DiagnosticsState parameter.</description>
+            <syntax>
+                <string/>
+                <default value="Requested"/>
+            </syntax>
+        </parameter>
+    </object>
+</datamodel>
