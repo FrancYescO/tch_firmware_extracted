@@ -1,0 +1,52 @@
+-- Manually generated
+local Device_WiFi_DataElements_Network_Device_i_ = {
+  objectType = {
+    name = "Device.WiFi.DataElements.Network.Device.{i}.",
+    numEntriesParameter = "DeviceNumberOfEntries",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      ID = {
+        access = "readOnly",
+        description = " A unique identifier for this particular device within the Wi-Fi network ",
+        type = "string",
+        max = "17"
+      }
+      -- DeviceNumberOfEntries
+      -- automatically created when Device.WiFi.DataElements.Network.Device.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local tostring = tostring
+local concat = table.concat
+
+Device_WiFi_DataElements_Network_Device_i_.entries = function()
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  for mac, info in pairs(cacheData) do
+    if info and info["status"] and info["status"] == "ONBOARDED" then
+      entries[#entries + 1] = mac
+    end
+  end
+  return entries
+end
+
+Device_WiFi_DataElements_Network_Device_i_.get = function(mapping, param, key)
+  if param == "ID" then
+     return key
+  end
+end
+
+Device_WiFi_DataElements_Network_Device_i_.getall = function(mapping, key)
+  local allValues = {}
+  if param == "ID" then
+    allValues[param] = key
+  end
+  return allValues
+end
+
+register(Device_WiFi_DataElements_Network_Device_i_)

@@ -1,0 +1,117 @@
+-- Manually generated
+local Device_WiFi_DataElements_Network_Device_i_Radio_i_ = {
+  objectType = {
+    name = "Device.WiFi.DataElements.Network.Device.{i}.Radio.{i}.",
+    numEntriesParameter = "RadioNumberOfEntries",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      ID = {
+        access = "readOnly",
+        description = "A unique identifier for this particular Radio within the identified Access Point as defined in [Section 3.1/DataElements-v1.0].",
+        type = "base64",
+        min = 6,
+        max = 6
+      },
+      Enabled = {
+        access = "readOnly",
+        description = "Indicates whether this radio is enabled or disabled.",
+        type = "boolean"
+      },
+      Noise = {
+        access = "readOnly",
+        description = "An indicator of the average radio noise plus interference power measured for the primary operating channel.",
+        type = "unsignedInt",
+        range = {
+          max = "255",
+        }
+      },
+      Utilization = {
+        access = "readOnly",
+        description = "(Total Channel Utililzation) The percentage of time (linearly scaled with 255 representing 100%) that the Access Point device sensed the medium was busy, as indicated by either the physical or virtual carier sense (CS) mechanism. This is essentially the amount of time spent transmiting (both successful and failed transmissions), receiving (both local and non-local transmissions), and processing noise.",
+        type = "unsignedInt",
+        range = {
+          min = "0",
+          max = "255",
+        }
+      },
+      Transmit = {
+        access = "readOnly",
+        description = "(Transmit Channel Utilization) The percentage of time (linearly scaled with 255 representing 100%) that the radio has spent on sending individually or group addressed transmissions (successful and failed).",
+        type = "unsignedInt",
+        range = {
+          min = "0",
+          max = "255",
+        }
+      },
+      ReceiveSelf = {
+        access = "readOnly",
+        description = "(Receive Local Channel Utilization) The percentage of time (linearly scaled with 255 representing 100%) that the radio has spent on receiving individually or group addressed local transmissions (i.e. transmissions from any STA associated with any BSS operating on this radio).",
+        type = "unsignedInt",
+        range = {
+          max = "255",
+        }
+      },
+      ReceiveOther = {
+        access = "readOnly",
+        description = "(Receive Non-Local Channel Utilization) The percentage of time (linearly scaled with 255 representing 100%) that the radio has spent on receiving individually or group addressed non-local transmissions (i.e. valid IEEE 802.11 PPDUs that are not associated with any BSS operatin gon this radio).",
+        type = "unsignedInt",
+        range = {
+          min = "0",
+          max = "255",
+        }
+      }
+      -- RadioNumberOfEntries
+      -- automatically created when Device.WiFi.DataElements.Network.Device.{i}.Radio.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local concat = table.concat
+
+local paramMap = {
+  Noise = "noise",
+  Utilization = "utilization",
+  Transmit = "transmit",
+  ReceiveSelf = "receive_self",
+  ReceiveOther = "receive_other",
+}
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", { almac = parentkey }) or {}
+  cacheData = cacheData[parentkey] and cacheData[parentkey]["radio_info"] or {}
+  for radioMac in pairs(cacheData) do
+    entries[#entries + 1] = radioMac
+  end
+  return entries
+end
+
+local function getUbusValue(key,param)
+  if param == "Enabled" then
+    return cacheData and cacheData[key] and cacheData[key]["bss_count"] > 0 and "1" or "0"
+  end
+  param = paramMap[param]
+  return cacheData and cacheData[key] and cacheData[key][param] and tostring(cacheData[key][param]) or "0"
+end
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_.get = function(mapping, param, key)
+  if param == "ID" then
+     return key
+  end
+  return getUbusValue(key,param)
+end
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_.getall = function(mapping, param, key)
+  local allValues = {}
+  if param == "ID" then
+    allValues[param] = key
+  end
+  allValues[param] =  getUbusValue(key,param)
+  return allValues
+end
+
+register(Device_WiFi_DataElements_Network_Device_i_Radio_i_)
