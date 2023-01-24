@@ -1,0 +1,181 @@
+#!/usr/bin/env lua
+
+local tonumber, assert, io, string =
+      tonumber, assert, io, string
+local format, match = string.format, string.match
+local logger = require 'transformer.logger'
+local cursor = require("uci").cursor()
+local common = require 'transformer.mapper.nwcommon'
+local ipdiag_helper = require 'transformer.shared.ipdiagnosticshelper'
+local process = require("tch.process")
+local ubus = require("ubus")
+-- UBUS connection
+local ubus_conn
+
+
+local log_config = {
+    level = 3,
+    stderr = false
+}
+-- get ping configuration from UCI
+local config = "ipping"
+
+local state = "Complete"
+local sent, recv = 0, 0
+local min, avg, max = 0, 0, 0
+local ipaddr_used
+local event_msg = {}
+
+-- command line argument = user name
+local user=arg[1]
+-- interface cannot be nil
+if user==nil then
+  logger:critical("You need to specify an user (igd,wwwconn,wwwping,...)")
+  return
+end
+
+
+local output
+
+local function ping(user)
+  -- get ping configuration from UCI
+  -- webui user's corresponding object does not have a parameter to change the count value, so by default it takes the value of 3 set in ipping config
+  local host = cursor:get(config, user, "host")
+  local count = cursor:get(config, user, "count")
+  -- IGD timeout is in milliseconds, ping uses seconds
+  local timeout = cursor:get(config, user, "timeout")
+  local interval = cursor:get(config, user, "interval")
+  local size = cursor:get(config, user, "size")
+  -- check if all required parameters are present
+  if not (host and count and timeout and size) then
+    state = "Error_Other"
+    return
+  end
+  count = tonumber(count)
+  timeout = math.floor(tonumber(timeout) / 1000)
+  interval = interval and math.floor(tonumber(interval) / 1000)
+  size = tonumber(size)
+  local ipType = cursor:get(config, user, "iptype") == "IPv6" and "-6" or "-4"
+  -- get logical interface and convert to physical
+  local iface = cursor:get(config, user, "interface")
+  iface, ipaddr_used = ipdiag_helper.get_physical_interface(iface, host, ipType)
+
+  if not iface then
+    state = "Error_Other"
+    return
+  end
+
+  if timeout < 1 then timeout = 1 end
+
+  -- do ping and capture output
+  local cmdline
+  if iface ~= "" then
+    logger:debug("resolved logical name to physical device: " .. iface)
+    if interval then
+      cmdline = {ipType, "-I", iface, "-c", count, "-s", size, "-W", timeout, "-i", interval, host}
+    else
+      cmdline = {ipType, "-I", iface, "-c", count, "-s", size, "-W", timeout, host}
+    end
+  else
+    if interval then
+      cmdline = {ipType, "-c", count, "-s", size, "-W", timeout, "-i", interval, host}
+    else
+      cmdline = {ipType, "-c", count, "-s", size, "-W", timeout, host}
+    end
+  end
+  local p = process.popen("ping", cmdline, "re")
+  if not p then
+    return
+  end
+  output = ipdiag_helper.copy_ping_or_traceroute_result(user, p, "/tmp/ping_"..user) or ""
+  p:close()
+  local fh2, msg2 = io.open("/tmp/ipping_full_"..user, "w")
+  assert(fh2, msg2)
+  for line in output:gmatch("[^\r\n]+") do
+    fh2:write(line, "\n")
+  end
+  fh2:close()
+
+  -- parse output
+  -- typical output of successful ping:
+  --    PING 192.168.1.2 (192.168.1.2): 56 data bytes
+  --
+  --    --- 192.168.1.2 ping statistics ---
+  --    3 packets transmitted, 3 packets received, 0% packet loss
+  --    round-trip min/avg/max = 0.436/0.571/0.821 ms
+  -- typical output of failed ping:
+  --    PING 192.168.1.5 (192.168.1.5): 56 data bytes
+  --
+  --    --- 192.168.1.5 ping statistics ---
+  --    3 packets transmitted, 0 packets received, 100% packet loss
+  -- typical output if the hostname could not be resolved:
+  --    ping: bad address 'foo.bar'
+  if match(output,"100%% packet loss") then
+    state = "Complete"
+  end
+  if match(output, "bad address") or match(output, "bad port") then
+    state = "Error_CannotResolveHostName"
+  elseif match(output, "sendto: Network is unreachable") or match(output, "sendto: Permission denied") then
+    -- IGD specifications do not have Error_NoRouteToHost, hence we need to distinguish Device2 and IGD for Error_NoRouteToHost
+    state = user == "igd" and "Error_Other" or "Error_NoRouteToHost"
+  else
+    sent, recv = match(output, "(%d+) packets transmitted, (%d+) packets received")
+    sent = tonumber(sent) or 0
+    recv = tonumber(recv) or 0
+    min, avg, max = match(output, "min/avg/max = (%d+)%.%d+/(%d+)%.%d+/(%d+)%.%d+ ms")
+    min = tonumber(min)
+    if min == 0 then
+      min = 1
+    end
+    min = min or 0
+    avg = tonumber(avg)
+    if avg == 0 then
+      avg = 1
+    end
+    avg = avg or 0
+    max = tonumber(max)
+    if max == 0 then
+      max = 1
+    end
+    max = max or 0
+  end
+  local info ={}
+  info["host"] = host
+  info["recvieved"] = recv
+  info["lost"] = sent - recv
+  info["min"] = min
+  info["average"] = avg
+  info["max"] = max
+  info["state"] = state
+  event_msg[user] = info
+  -- Publish the ping result on ubus
+  ubus_conn:send('ipping.ipping_'.. user, info)
+end
+
+logger.init(log_config.level, log_config.stderr)
+logger = logger.new("IPPing", log_config.level)
+
+--publish results in ubus
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end
+
+
+local err, err_msg = pcall(ping, user)
+if not err then
+  state = "Error_Internal"
+  logger:critical(err_msg)
+end
+local fh, msg = io.open("/tmp/ipping_"..user, "w")
+assert(fh, msg)
+fh:write(format('%d\n', recv))
+fh:write(format('%d\n', sent - recv))
+fh:write(format('%d\n', min))
+fh:write(format('%d\n', avg))
+fh:write(format('%d\n', max))
+fh:write(format('%s\n', ipaddr_used or ""))
+fh:close()
+
+-- write results to UCI
+cursor:set(config, user, "state",   state)
+cursor:commit("ipping")

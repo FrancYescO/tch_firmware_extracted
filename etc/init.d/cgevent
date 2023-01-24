@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+
+START=10
+USE_PROCD=1
+PROG=/usr/bin/cgevent
+PID_FILE=/var/run/cgevent.pid
+
+validate_cgevent_section() {
+  uci_validate_section cgevent cgevent "${1}" \
+    'enable:bool:1'
+}
+
+start_service() {
+  local enabled
+
+  validate_cgevent_section generic || {
+    echo "cgevent validation failed"
+    return 1
+  }
+  [ "${enable}" = "0" ] && return 1
+  procd_open_instance
+  procd_set_param command $PROG
+  procd_set_param pidfile "${PID_FILE}"
+  procd_close_instance
+}
+
+stop_service() {
+  if [ -r ${PID_FILE} ]; then
+    kill -KILL $(cat ${PID_FILE})
+    rm -f ${PID_FILE}
+  fi
+}
+
