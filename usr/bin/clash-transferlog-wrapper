@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# clash-transferlog-wrapper is designed for the CLI's (clash) transferlog command.
+# It may be used from a root shell, but this is not its main purpose.
+
+# Summary:
+#   The script has two options available:
+#   '-l'             : list log files.
+#   '-p <file name>' : write the specified file to stdout
+#
+#   These options must not be used in conjunction.
+
+# The wrapper will simply cat the one and only log file that exists
+# in `uci get system.all.path` (if any) to stdout.
+# Hence, `-p` is only intended for use with a redirection operator on a client.
+
+. /lib/functions.sh
+
+cmd="$1"
+logfile="$2"
+
+_find() {
+	local name="$1"
+
+	# default to '/root/log' for persistent logs
+	local path="/root/log/"
+
+	# find *.log files in the log path;
+	local files=$(find "$path" -maxdepth 1 -name "$name" 2> /dev/null)
+	
+	# check kernel_crash path if different from log path
+	for file in $files ; do
+		echo $(basename "${file}")
+	done
+}
+
+_findfile() {
+        local name="$1"
+	# default to '/root/log' for persistent logs
+	local path="/root/log/"
+
+	# find files listed via log -l in the configured path
+	file=$(find "$path" -maxdepth 1 -name "$name" 2> /dev/null)
+
+	echo "$file"
+}
+
+_list() {
+	# search for log files  with .log extension :
+	local extension="*.log*"
+
+	local file=$(_find "$extension")
+	if [ -z "$file" ]; then
+		echo "There are no log files"
+	else
+		# simply show the file name
+		echo $(basename "$file")
+	fi
+}
+
+_pipe() {
+	local file="$1"
+	file=$(_findfile "$file")
+	if [ ! -z "$file" ]; then
+		# simply cat (print) the file as binary data to the CLI; the client should pipe this data to a file
+		# additionally, suppress any errors
+		cat "$file" 2> /dev/null
+	fi
+}
+
+if [ "$cmd" = "-l" ]; then
+	_list
+elif [ "$cmd" = "-p" ]; then
+	_pipe "$logfile"
+else
+	echo "Must be used with '-l' or '-p <log file>'"
+fi
