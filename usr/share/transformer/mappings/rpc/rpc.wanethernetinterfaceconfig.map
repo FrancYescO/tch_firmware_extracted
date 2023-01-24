@@ -1,0 +1,174 @@
+-- Manually generated
+local rpc_WANEthernetInterfaceConfig_ = {
+  objectType = {
+    name = "rpc.wanethernetinterfaceconfig.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = 1,
+    parameters = {
+      ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        Description = "The maximum bit rate in kbps",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      ShapingBurstSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        Description = "Maximum burst size in bytes",
+      },
+    }
+  }
+}
+
+local ucihelper = mapper("ucihelper")
+local get_from_uci = ucihelper.get_from_uci
+local set_on_uci = ucihelper.set_on_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+local ethBinding = { config = "ethernet" }
+local commitapply = commitapply
+local configChanged
+
+local function getUciValue(section, option, default)
+  ethBinding.sectionname = section
+  ethBinding.option = option
+  ethBinding.default = default
+  return get_from_uci(ethBinding)
+end
+
+local function setUciValue(section, option, value)
+  ethBinding.sectionname = section
+  ethBinding.option = option
+  set_on_uci(ethBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getEthernetPort()
+  local port = ""
+  ethBinding.sectionname = "port"
+  ucihelper.foreach_on_uci(ethBinding, function(s)
+    if s['wan'] == '1' then
+      port = s['.name']
+      return false
+    end
+  end)
+  return port
+end
+
+local function shaping_set(section, option_value)
+  setUciValue(section, "max_bit_rate", option_value.max_bit_rate)
+  setUciValue(section, "max_burst_size", option_value.max_burst_size)
+  setUciValue(section, "rate", option_value.rate)
+  setUciValue(section, "ratio", option_value.ratio)
+end
+
+local function create_new_trafficdesc_section(new_td_name)
+  setUciValue(new_td_name, nil, "trafficdesc")
+end
+
+rpc_WANEthernetInterfaceConfig_.entries = function(mapping, parentKey)
+  return { "1" }
+end
+
+rpc_WANEthernetInterfaceConfig_.get = {
+  ShapingRate = function(mapping, param)
+    local devname = getEthernetPort()
+    local trafficdesc = getUciValue(devname, "td")
+    if trafficdesc ~= "" then
+      local value = getUciValue(trafficdesc, "max_bit_rate")
+      if value ~= "" then
+        value = tostring(tonumber(value))
+      else
+        value="-1"
+      end
+      return value
+    end
+    return "-1"
+  end,
+  ShapingBurstSize = function(mapping, param)
+    local devname = getEthernetPort()
+    local trafficdesc = getUciValue(devname, "td")
+    if trafficdesc ~= "" then
+      local value = getUciValue(trafficdesc, "max_burst_size")
+      if value == "" then
+        value="0"
+      end
+      return value
+    end
+    return "0"
+  end,
+}
+
+rpc_WANEthernetInterfaceConfig_.set = {
+  ShapingRate = function(mapping, param, value)
+    local devname = getEthernetPort()
+    value = tonumber(value)
+    if value then
+      local trafficdesc = getUciValue(devname, "td")
+      local new_td_name = "td" .. devname
+      if trafficdesc == "" and value == -1 then
+        return true
+      elseif trafficdesc == "" and (value > -1) and (value <= 100) then
+        setUciValue(devname, "td", new_td_name)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = value, max_burst_size = "2000", rate = "", ratio = "enabled" }
+        return shaping_set(devname, option_value)
+      elseif trafficdesc == "" and (value > 100) then
+        setUciValue(devname, "td", new_td_name)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = value/1000, max_burst_size = "2000", rate = "enabled", ratio = "" }
+        return shaping_set(devname, option_value)
+      elseif trafficdesc ~= "" and value == -1 then
+        local option_value = { max_bit_rate = "", max_burst_size = "", rate = "", ratio = "" }
+        return shaping_set(trafficdesc, option_value)
+      elseif trafficdesc ~= "" and (value > -1) and (value <= 100) then
+        local option_value = { max_bit_rate = value, max_burst_size = "", rate = "", ratio = "" }
+        return shaping_set(trafficdesc, option_value)
+      elseif trafficdesc ~= "" and (value > 100) then
+        local option_value = { max_bit_rate = value/1000, max_burst_size = "", rate = "enabled", ratio = "" }
+        return shaping_set(trafficdesc, option_value)
+      end
+    end
+    return nil,"Not supported"
+  end,
+  ShapingBurstSize = function(mapping, param, value)
+    local devname = getEthernetPort()
+    value = tonumber(value)
+    if value then
+      local trafficdesc = getUciValue(devname, "td")
+      local new_td_name = "td" .. devname
+      if trafficdesc == "" and (value == 0) then
+        return true
+      elseif trafficdesc == "" and (value > 0) then
+        setUciValue(devname, "td", new_td_name)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = "20000", max_burst_size = value, rate = "", ratio = "" }
+        return shaping_set(devname, option_value)
+      elseif trafficdesc ~= "" and (value >= 0) then
+        setUciValue(trafficdesc, "max_burst_size", value)
+      end
+    end
+    return nil,"Not supported"
+  end,
+}
+
+rpc_WANEthernetInterfaceConfig_.commit = function()
+  if configChanged then
+    commit(ethBinding)
+    configChanged = false
+  end
+end
+
+rpc_WANEthernetInterfaceConfig_.revert = function()
+  if configChanged then
+    revert(ethBinding)
+    configChanged = false
+  end
+end
+
+register(rpc_WANEthernetInterfaceConfig_)
