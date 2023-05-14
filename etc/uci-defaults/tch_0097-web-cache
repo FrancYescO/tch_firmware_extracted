@@ -1,0 +1,59 @@
+#!/bin/sh
+
+#Get the Firmware Timestamp
+timestamp=`uci get version.@version[0].timestamp`
+
+#Rename all JS files with timestamp
+echo "Changing JS files to timestamp"
+for file in /www/docroot/js/*.js
+do
+    #Check the file names do not already have the timestamp in case of reboot during execution
+    if echo $file |grep -v $timestamp; 
+    then 
+        mv -i "${file}" "${file/.js/_$timestamp.js}"
+    fi
+done
+
+#Rename all CSS files with timestamp
+echo "Changing CSS files to timestamp"
+for file in /www/docroot/css/*.css
+do
+    #Check the file names do not already have the timestamp in case of reboot during execution
+    if echo $file |grep -v $timestamp; 
+    then 
+        mv -i "${file}" "${file/.css/_$timestamp.css}"
+    fi
+done
+
+#Rename all PNG files with timestamp
+echo "Changing PNG files to timestamp"
+for file in /www/docroot/img/*.png /www/docroot/img/device-icons/*.png
+do
+    #Check the file names do not already have the timestamp in case of reboot during execution
+    if echo $file |grep -v $timestamp; 
+    then 
+        mv -i "${file}" "${file/.png/_$timestamp.png}"
+    fi
+done
+#Change to /www/docroot
+cd /www/docroot
+
+#Step through all file referencing js/ altering the instance of .js to match the new timestamp names
+for path in "/www/cards/" "/www/cards/snippets/" "/www/snippets/" "/www/docroot/" "/www/docroot/modals/"
+do 
+  for file in `grep -ol "js/" $path*`
+  do 
+      #find line not already containing the timestamp in case of reboot during execution
+      sed -i -r "/$timestamp.js/ ! s/\.js/_$timestamp\.js/g" $file
+  done
+  for file in `grep -ol "css/" $path*`
+  do 
+      #find line not already containing the timestamp in case of reboot during execution
+      sed -i -r "/$timestamp.css/ ! s/\.css/_$timestamp\.css/g" $file
+  done
+  for file in `grep -ol "img/" $path*`
+  do 
+      #find line not already containing the timestamp in case of reboot during execution
+      sed -i -r "/$timestamp.png/ ! s/\.png/_$timestamp\.png/g" $file
+  done
+done   
