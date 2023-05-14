@@ -1,0 +1,296 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local conn = require("transformer.mapper.ubus").connect()
+local tr104Helper = require("transformer.shared.tr104helper")
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.Stats.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_", Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_, register)
+
+local incomingCallStatistics = {
+    CallsReceived = "incomingCalls",
+    CallsConnected = "incomingCallsConnected",
+    CallsFailed = "incomingCallsFailed",
+    CallsDropped = "incomingDroppedCalls",
+    TotalCallTime = "incomingCallDuration"
+}
+
+local outgoingCallStatistics = {
+    CallsAttempted = "outgoingCalls",
+    CallsConnected = "outgoingCallsConnected",
+    CallsFailed = "outgoingCallsFailed",
+    CallsDropped = "outgoingDroppedCalls",
+    TotalCallTime = "outgoingCallDuration"
+}
+
+local rtpStatistics = {
+    PacketsReceived = "packetsReceived",
+    PacketsSent = "packetsSent",
+    PacketsLost = "packetsLost",
+    BytesSent = "bytesSent",
+    BytesReceived = "bytesReceived"
+}
+
+local dspStatistics = {
+    Overruns = "overRuns",
+    Underruns = "underRuns",
+}
+
+local function getDeviceStatistics(mapping, param, key, deviceStatistics)
+    local value = 0
+    local deviceData = conn:call("mmdbd.device.statistics", "get", {["device"]=key}) or {}
+    local deviceParamName = deviceStatistics[param]
+    if deviceData and deviceData[1] then
+        value = tostring(deviceData[1][deviceParamName] or "0")
+    end
+    return value
+end
+
+local function getAllDeviceStatistics(mapping, key, deviceStatistics, statisticsValue)
+    local deviceData = conn:call("mmdbd.device.statistics", "get", {["device"]=key} ) or {}
+    if deviceData and deviceData[1] then
+        for paramName, value in pairs(deviceStatistics) do
+            statisticsValue[paramName] = tostring(deviceData[1][value] or "0")
+        end
+    end
+    return statisticsValue
+end
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_IncomingCalls_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.Stats.IncomingCalls.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            CallsReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of received calls to the line"
+            },
+            CallsConnected = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of calls that successfully completed call setup signaling"
+            },
+            CallsFailed = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of calls that failed to successfully complete call setup signaling"
+            },
+            CallsDropped = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total calls that were successfully connected, but dropped unexpectedly while in progress without explicit user termination"
+            },
+            TotalCallTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Cumulative call duration in seconds"
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getIncomingCallStats(mapping, param, key)
+    return getDeviceStatistics(mapping, param, key, incomingCallStatistics)
+end
+
+local function getAllIncomingCallStats(mapping, key)
+    local callData = {
+        CallsReceived = "0",
+        CallsConnected = "0",
+        CallsFailed = "0",
+        CallsDropped = "0",
+        TotalCallTime = "0"
+    }
+    return getAllDeviceStatistics(mapping, key, incomingCallStatistics, callData)
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_IncomingCalls_.get = getIncomingCallStats
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_IncomingCalls_.getall = getAllIncomingCallStats
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_IncomingCalls_", Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_IncomingCalls_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_OutgoingCalls_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.Stats.OutgoingCalls.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            CallsAttempted = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of outgoing calls attempted from the line"
+            },
+            CallsConnected = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of calls that successfully completed call setup signaling"
+            },
+            CallsFailed = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of calls that failed to successfully complete call setup signaling"
+            },
+            CallsDropped = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total calls that were successfully connected, but dropped unexpectedly while in progress without explicit user termination"
+            },
+            TotalCallTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Cumulative call duration in seconds"
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getOutgoingCallStats(mapping, param, key)
+    return getDeviceStatistics(mapping, param, key, outgoingCallStatistics)
+end
+
+local function getAllOutgoingCallStats(mapping, key)
+    local callData = {
+        CallsAttempted = "0",
+        CallsConnected = "0",
+        CallsFailed = "0",
+        CallsDropped = "0",
+        TotalCallTime = "0"
+    }
+    return getAllDeviceStatistics(mapping, key, outgoingCallStatistics, callData)
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_OutgoingCalls_.get = getOutgoingCallStats
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_OutgoingCalls_.getall = getAllOutgoingCallStats
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_OutgoingCalls_", Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_OutgoingCalls_, register)
+
+--Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_RTP_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.Stats.RTP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            PacketsReceived = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Total number of RTP packets received"
+            },
+            PacketsSent = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Total number of RTP packets sent"
+            },
+            PacketsLost = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Total number of RTP packets that have been lost"
+            },
+            BytesSent = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Total number of bytes sent"
+            },
+            BytesReceived = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+                description = "Total number of bytes received"
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getRTPStats(mapping, param, key)
+    return getDeviceStatistics(mapping, param, key, rtpStatistics)
+end
+
+local function getAllRTPStats(mapping, key)
+    local rtpData = {
+        PacketsReceived = "0",
+        PacketsSent = "0",
+        PacketsLost = "0",
+        BytesSent = "0",
+        BytesReceived = "0"
+    }
+    return getAllDeviceStatistics(mapping, key, rtpStatistics, rtpData)
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_RTP_.get = getRTPStats
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_RTP_.getall = getAllRTPStats
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_RTP_", Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_RTP_, register)
+
+--Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_DSP_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.Stats.DSP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Overruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+                activeNotify = "canDeny",
+                description = "Total number of times the receive jitter buffer has overrun"
+            },
+            Underruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+                activeNotify = "canDeny",
+                description = "Total number of times the receive jitter buffer has underrun"
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getDSPStats(mapping, param, key)
+    return getDeviceStatistics(mapping, param, key, dspStatistics)
+end
+
+local function getAllDSPStats(mapping, key)
+    local dspData = {
+        Overruns = "0",
+        Underruns = "0",
+    }
+    return getAllDeviceStatistics(mapping, key, dspStatistics, dspData)
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_DSP_.get = getDSPStats
+Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_DSP_.getall = getAllDSPStats
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_DSP_", Multi_Services_VoiceService_i_CallControl_Extension_i_Stats_DSP_, register)
+
