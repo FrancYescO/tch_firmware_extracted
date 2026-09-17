@@ -1,0 +1,87 @@
+#!/bin/sh
+
+. "$IPKG_INSTROOT/lib/functions.sh"
+
+log() {
+	echo $@ | tee /dev/console | logger -t "kernel-crash-handler"
+}
+
+action="$(uci_get system @kernel_crash[0] action nocore)"
+path="$(uci_get system @kernel_crash[0] path /tmp)"
+wltrap="$(find $path -name "debug-*.tgz" | wc -l)"
+trapfile="debug-wltrap"
+
+clear_prozone=1
+filename="kernel_crash"
+
+tmpfile="$(mktemp)"
+cat "/proc/prozone/panic" > "$tmpfile"
+[ -s "$tmpfile" -o "$wltrap" != "0" ] || {
+        rm -f "$tmpfile"
+        exit 0
+}
+case "${action}" in
+	compress)
+		if [ -s "$tmpfile" ]; then
+			log "kernel panic info dumped to ${path}/${filename}.gz"
+			gzip -c "$tmpfile" > "${path}/${filename}.gz"
+		fi
+	;;
+	store)
+		if [ -s "$tmpfile" ]; then
+			log "kernel panic info dumped to ${path}/${filename}"
+			cp "$tmpfile" "${path}/${filename}"
+		fi
+	;;
+	upload)
+		url="$(uci_get system @kernel_crash[0] url)"
+		if [ -n "${url}" ]; then
+			version="$(uci_get version @version[0] version unknown)"
+			factory_id="$(uci_get env rip factory_id unknown)"
+			board="$(uci_get env rip board_mnemonic unknown)"
+			oid="$(uci_get version @version[0] oid unknown)"
+			serial="$(uci_get env rip serial unknown)"
+
+			# Insert the ngwfdd tag when uploading to Kibana
+			tag="$(uci_get ngwfdd config tag)"
+			capath="$(uci_get ngwfdd config capath)"
+			if [ -z "${capath}" ]; then
+				# Use default ca path if it is not set
+				capath="/etc/ssl/certs/"
+			fi
+
+			if [  "$wltrap" != "0" ]; then
+				tar -czvf "${path}"/"${trapfile}".tgz -C "${path}" $(ls "${path}"/debug-*.tgz | xargs -n 1 basename)
+				log "uploading ${trapfile}.tgz to ${url}"
+				if ! curl -m 360 -X POST -F "exe=kernel_panic" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@${path}/${trapfile}.tgz" ${tag:+-F tag="$tag"} "${url}" --capath "${capath}"; then
+					log "failed to upload ${trapfile}.tgz info"
+					rm -rf "${path}"/${trapfile}.tgz
+				else
+					log "${trapfile}.tgz got uploaded and wiping"
+					rm -rf "${path}"/debug*.tgz
+				fi
+			fi
+			if [ -s "$tmpfile" ]; then
+				log "uploading kernel panic info to ${url}"
+				if ! curl -m 360 -X POST -F "exe=kernel_panic" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@$tmpfile" ${tag:+-F tag="$tag"} "${url}" --capath "${capath}"; then
+					log "failed to upload kernel panic info"
+					clear_prozone=0
+				else
+					log "kernel panic info uploaded"
+				fi
+			fi
+		else
+			log "invalid kernel panic info upload url"
+		    clear_prozone=0
+		fi
+	;;
+	*)
+		log "unknown kernel panic info action"
+	;;
+esac
+
+if [ "$clear_prozone" = "1" -a -s "$tmpfile" ]; then
+	log "wiping kernel panic info from prozone"
+	echo 0 > "/proc/prozone/panic"
+fi
+rm -rf "$tmpfile"

@@ -1,0 +1,618 @@
+#!/usr/bin/env lua
+
+local logger = require("tch.logger")
+local posix  = require("tch.posix")
+local uloop  = require("uloop")
+local cURL   = require("cURL")
+local json   = require("dkjson")
+local ubus   = require("ubus")
+local dm     = require("datamodel")
+
+local format = string.format
+
+local registration_path         = "/generic_app/registration"
+local notification_path         = "/generic_app/notification"
+
+local ssl_verifypeer_dmpath     = "uci.generic_app.pnpserver.ssl_verifypeer"
+local loglevel_dmpath           = "uci.generic_app.pnpserver.log_level"
+local securetoken_dmpath        = "uci.generic_app.pnpserver.token"
+local pnpurl_dmpath             = "uci.generic_app.pnpserver.url"
+local registered_dmpath         = "uci.generic_app.pnpserver.registered"
+local genid_dmpath              = "uci.generic_app.pnpserver.gen_id"
+local opco_dmpath               = "uci.generic_app.pnpserver.opco"
+local newdevice_timeout_dmpath  = "uci.generic_app.pnpserver.newdevice_timeout"
+local retryinterval_dmpath      = "uci.generic_app.pnpserver.retryinterval"
+local connected_devices_dmpath  = "uci.generic_app.connected_devices."
+local paired_dmpath             = "sys.generic_app.PairingNumberOfEntries"
+
+local guestwifi_expired_evpath  = "wifitod"
+local pairing_evpath            = "generic_app.pairing"
+local devicechanged_evpath      = "hostmanager.devicechanged"
+
+local devicedb = {}
+
+local curl
+local genid
+local opco
+local registered = false
+local paired = false
+
+-- Datamodel get functions
+
+local function get_loglevel()
+  local data = dm.get(loglevel_dmpath)
+
+  if data then
+    loglevel = tonumber(data[1].value)
+  else
+    logger:error("Failed to retrieve log_level from uci")
+  end
+
+  return loglevel and loglevel or 3
+end
+
+local function get_sslverifypeer()
+  local data = dm.get(ssl_verifypeer_dmpath)
+  local boolean ssl_verifypeer = true
+
+  if data and data[1].value ~= '' then
+    ssl_verifypeer = tonumber(data[1].value) ~= 0
+  end
+
+  return ssl_verifypeer
+end
+
+local function get_securetoken()
+  local data = dm.get(securetoken_dmpath)
+  local securetoken
+
+  if data then
+    securetoken = data[1].value
+  else
+    logger:error("Failed to retrieve securetoken from uci")
+  end
+
+  return securetoken
+end
+
+local function get_pnpurl()
+  local data = dm.get(pnpurl_dmpath)
+  local url
+
+  if data then
+    url  = data[1].value
+  else
+    logger:error("Failed to retrieve pnp url from uci")
+  end
+
+  return url
+end
+
+local function get_genid()
+  local data = dm.get(genid_dmpath)
+  local url
+
+  if data then
+    url  = data[1].value
+  else
+    logger:error("Failed to retrieve pnp gen_id from uci")
+  end
+
+  return url
+end
+
+local function get_opco()
+  local data = dm.get(opco_dmpath)
+  local url
+
+  if data then
+    url  = data[1].value
+  else
+    logger:error("Failed to retrieve pnp opco from uci")
+  end
+
+  return url
+end
+
+local function get_newdevice_timeout()
+  local data = dm.get(newdevice_timeout_dmpath)
+  local timeout
+
+  if data then
+    timeout  = tonumber(data[1].value)
+  else
+    logger:error("Failed to retrieve new device timeout from uci")
+  end
+
+  return timeout
+end
+
+local function get_retryinterval()
+  local data = dm.get(retryinterval_dmpath)
+
+  if data then
+    retryinterval  = tonumber(data[1].value)
+  else
+    logger:error("Failed to retrieve retryinterval uci")
+  end
+
+  return retryinterval and retryinterval or 1
+end
+
+local function get_devicespaired()
+  local data = dm.get(paired_dmpath)
+  local boolean paired = false
+
+  if data then
+    paired = tonumber(data[1].value) > 0
+  else
+    logger:error("Failed to retrieve number of paired devices")
+  end
+
+  return paired
+end
+
+local function get_registered()
+  local data = dm.get(registered_dmpath)
+  local boolean registered = false
+
+  if data and data[1].value ~= '' then
+    registered = tonumber(data[1].value) ~= 0
+  else
+    logger:error("Failed to retrieve registered status")
+  end
+
+  return registered
+end
+
+local function get_connected_device_info(index, param)
+  local data = dm.get("uci.generic_app.connected_devices." .. index .. "." .. param)
+  local value
+
+  logger:error("uci.generic_app.connected_devices." .. index .. "." .. param)
+
+  if data then
+    value = data[1].value
+  else
+    logger:error("Failed to retrieve " .. param .. " from uci")
+  end
+
+  return value
+end
+
+local function load_connected_devices()
+
+  local data = dm.getPN("uci.generic_app.connected_devices.", true)
+
+  if not data then
+    logger:error("Failed to load connected_devices list from uci")
+    return
+  end
+
+  for _, param in ipairs(data) do
+
+    local index = string.match(param.path, ".([%d]+)%.$")
+    local macaddr = get_connected_device_info(index, "macaddr")
+    local state = get_connected_device_info(index, "state")
+    local timestamp = get_connected_device_info(index, "timestamp")
+
+    logger:debug("load_connected_devices: index=" .. index .. " macaddr=" .. macaddr .. " state=" .. state .. " timestamp=" .. timestamp)
+
+    -- Add device to device cache
+    devicedb[macaddr] = { state = state, timestamp = timestamp, index = index }
+
+  end
+end
+
+-- Datamodel set function
+
+local function set_registered(state)
+  local res  = dm.set(registered_dmpath, state and "1" or "0")
+  if res then
+    dm.apply()
+  else
+    logger:error("Persisting registerd state in uci failed")
+  end
+
+  registered = state
+end
+
+-- PNP communication functions
+
+function send_register_request(securetoken, url)
+
+  local headers = { "Accept: application/json",
+    "Content-Type: application/json",
+    "Accept-Charset: utf-8",
+    "Connection: keep-alive" }
+
+  local data = { gen_id = gen_id, opco = opco }
+
+  -- Prepare data and headers
+  jsonstr = json.encode(data)
+  table.insert(headers, "Secure-Token: " .. securetoken)
+
+  -- configure curl
+  curl:setopt_capath("/etc/ssl/certs")
+  curl:setopt_ssl_verifypeer(get_sslverifypeer() and 1 or 0)
+  curl:setopt_ssl_verifyhost(get_sslverifypeer() and 2 or 0)
+  curl:setopt_url(url .. registration_path)
+  curl:setopt_httpheader(headers)
+  curl:setopt_post(1)
+  curl:setopt_postfields(jsonstr)
+
+  -- launch request
+  local success, err = pcall(function () curl:perform() end)
+  if not success then
+    local _, errmsg = pcall(tostring, err)  -- to be really safe pcall() the tostring function
+    logger:error("send_register_request failed: %s", errmsg or "<no error msg>")
+  end
+end
+
+function send_guestwifi_expired(securetoken, url, ssid, timestamp)
+
+  local headers = { "Accept: application/json",
+    "Content-Type: application/json",
+    "Accept-Charset: utf-8",
+    "Connection: keep-alive" }
+
+  local data = { gen_id = gen_id, type = "wifi_expired", opco = opco }
+
+  -- Prepare data and headers
+  data.ssid = ssid
+  data.expired = timestamp
+  jsonstr = json.encode(data)
+  table.insert(headers, "Secure-Token: " .. securetoken)
+
+  -- configure curl
+  curl:setopt_ssl_verifypeer(get_sslverifypeer() and 1 or 0)
+  curl:setopt_ssl_verifyhost(get_sslverifypeer() and 2 or 0)
+  curl:setopt_capath("/etc/ssl/certs")
+  curl:setopt_url(url .. notification_path)
+  curl:setopt_httpheader(headers)
+  curl:setopt_post(1)
+  curl:setopt_postfields(jsonstr)
+
+  -- launch request
+  local success, err = pcall(function () curl:perform() end)
+  if not success then
+    local _, errmsg = pcall(tostring, err)  -- to be really safe pcall() the tostring function
+    logger:error("send_guestwifi_expired failed: %s", errmsg or "<no error msg>")
+  end
+end
+
+function send_new_device(securetoken, url, dev_id, hostname, devicetype, timestamp)
+
+  local headers = { "Accept: application/json",
+    "Content-Type: application/json",
+    "Accept-Charset: utf-8",
+    "Connection: keep-alive",
+    "Secure-Token: " .. securetoken }
+
+  local device = { dev_type = devicetype, dev_id = dev_id, hostname = hostname, timestamp = os.date("%Y-%m-%dT%H:%M:%S%z", timestamp)}
+  local data = { gen_id = gen_id, type = "new_device", opco = opco, devices = { device } }
+
+  -- Prepare data and headers
+  jsonstr = json.encode(data)
+  logger:debug("send_new_device - jsonstr = " .. jsonstr)
+
+  -- configure curl
+  curl:setopt_ssl_verifypeer(get_sslverifypeer() and 1 or 0)
+  curl:setopt_ssl_verifyhost(get_sslverifypeer() and 2 or 0)
+  curl:setopt_capath("/etc/ssl/certs")
+  curl:setopt_url(url .. notification_path)
+  curl:setopt_httpheader(headers)
+  curl:setopt_post(1)
+  curl:setopt_postfields(jsonstr)
+
+  -- launch request
+  local success, err = pcall(function () curl:perform() end)
+  if not success then
+    local _, errmsg = pcall(tostring, err)  -- to be really safe pcall() the tostring function
+    logger:error("send_new_device failed: %s", errmsg or "<no error msg>")
+  end
+end
+
+-- Helper functions
+
+local function wait_for_retry(retryinterval)
+  logger:info("Wait for " .. retryinterval .. " seconds before retrying")
+  os.execute("sleep " .. retryinterval)
+end
+
+local function register()
+  local securetoken = get_securetoken()
+  local retryinterval = get_retryinterval()
+  local url = get_pnpurl()
+  local retry_count = 0
+
+  while true do
+    send_register_request(securetoken, url)
+
+    -- Verify response code
+    local responsecode = curl:getinfo_response_code()
+    if responsecode == 200 or responsecode == 201 then
+      logger:info("Registration to PNP succes - responsecode " .. responsecode)
+      set_registered(true)
+      break
+    else
+      logger:info("Registration to PNP failed - responsecode " .. responsecode)
+    end
+
+    if retry_count == 3 then break end
+
+    wait_for_retry(retryinterval);
+    retry_count = retry_count + 1
+  end
+
+end
+
+local function is_newdevice(macaddr, state, timestamp)
+
+  local devicedata = devicedb[macaddr]
+  local timeout = get_newdevice_timeout()
+
+  logger:debug("is_newdevice? - macaddr=" .. macaddr .. " state=" .. state .. " timestamp=" .. timestamp)
+
+  if devicedata then
+    -- we are already connected
+    if devicedata.state == 'connected' then
+      return false
+    end
+
+    -- we have the device already in cache together with the previous disconnect time
+    logger:debug("is_newdevice? - known device - state=" .. devicedata.state .. " timestamp=" .. devicedata.timestamp)
+    -- check timestamp
+    if tonumber(timestamp) - tonumber(devicedata.timestamp) < timeout then
+      logger:debug("is_newdevice? - reconnected within timewindow - time since disconnect=" ..
+        tonumber(timestamp) - tonumber(devicedata.timestamp) .. " seconds - timewindow="
+        .. tonumber(timeout) .. " seconds")
+      return false
+    end
+  end
+
+  return true
+end
+
+local function update_device_db(macaddr, state, timestamp)
+
+  local deviceinfo = devicedb[macaddr]
+  local index
+
+  if not deviceinfo then
+    -- device is not yet stored in uci, add
+    logger:debug("update_device_db - device is not yet stored in uci, add to uci")
+
+    index  = dm.add(connected_devices_dmpath)
+    if index then
+      dm.apply()
+    else
+      logger:error("update_device_db - uci add failed for device")
+      return
+    end
+
+    devicedb[macaddr] = {}
+  else
+    logger:debug("update_device_db - index is " .. deviceinfo.index)
+    index = deviceinfo.index
+  end
+
+  -- update device in uci
+  local deviceinfo = { }
+  deviceinfo[connected_devices_dmpath .. index ..".macaddr"] = macaddr
+  deviceinfo[connected_devices_dmpath .. index ..".state"] = state
+  deviceinfo[connected_devices_dmpath .. index ..".timestamp"] = tostring(timestamp)
+
+  local res, errors  = dm.set(deviceinfo)
+  if res then
+    dm.apply()
+  else
+    for _, err in ipairs(errors) do
+      logger:error(err.errcode .. " " .. err.errmsg)
+    end
+    logger:error("Persisting device info in uci failed")
+  end
+
+  -- update device cache
+  devicedb[macaddr].index = index
+  devicedb[macaddr].state = state
+  devicedb[macaddr].timestamp = timestamp
+end
+
+-- Event handlers
+
+local function handle_pairing_handler(event)
+  if event and event.reason == "paired" then
+    paired = true
+    if not registered then
+      register()
+    end
+  end
+end
+
+local function handle_guestwifi_expired_handler(msg)
+  local data = msg
+  local retryinterval = get_retryinterval()
+  local securetoken = get_securetoken()
+  local url = get_pnpurl()
+  local retry_count = 0
+  local responsecode = 0
+
+  if paired and data and data.event == 'Guest_WiFi_expired' then
+
+    while true do
+      send_guestwifi_expired(securetoken, url, data.ssid, data.expired)
+
+      -- Verify response code
+      responsecode = curl:getinfo_response_code()
+
+      if responsecode == 200 or responsecode == 204 then
+        logger:info("Sending guestwifi expired event to PNP succesfully completed")
+        break
+      else
+        if responsecode == 401 then
+          -- registration to PNP lost, set register state to false
+          logger:info("registration to PNP lost, register again")
+          set_registered(false)
+          -- register again
+          register()
+          -- registration failed after retrying three times, stop with registration and sending event
+          if not registered then
+            logger:info("registration to PNP lost, re-register failed, unable to deliver wifi expired event")
+            break;
+          end
+        else -- delivery of guestwifi expired event failed
+          logger:info("Sending guestwifi expired event to PNP failed - responsecode " .. responsecode)
+
+          -- if we already tried to deliverd three times stop with it
+          if retry_count == 3 then
+            logger:info("send event: maximum number of retries reached: failed to send guestwifi expired event")
+            break;
+          end
+
+          -- retry, sleep a number of seconds before retrying
+          logger:info("send event: Sleep " .. retryinterval .. " seconds before retrying guestwifi expired event")
+          os.execute("sleep " .. retryinterval)
+          retry_count = retry_count + 1
+        end
+      end
+    end
+  end
+end
+
+local function handle_devicechanged_handler(msg)
+  local data = msg
+  local retry_count = 0
+  local responsecode = 0
+
+  if not paired or not data.state then
+    return
+  end
+
+  local timestamp = data.connected_time or data.disconnected_time or os.time()
+
+  local newdevice = is_newdevice(data["mac-address"], data.state, timestamp)
+
+  if data.state == 'connected' and newdevice then
+    local retryinterval = get_retryinterval()
+    local securetoken = get_securetoken()
+    local url = get_pnpurl()
+    local devicetype = data.technology == 'wireless' and 'wifi' or 'lan-device'
+
+    while true do
+      send_new_device(securetoken, url, data["mac-address"], data.hostname, devicetype, timestamp)
+
+      -- Verify response code
+      responsecode = curl:getinfo_response_code()
+
+      if responsecode == 200 or responsecode == 204 then
+        logger:info("Sending newdevice event to PNP succesfully completed")
+        break
+      else
+        if responsecode == 401 then
+          -- registration to PNP lost, set register state to false
+          logger:info("registration to PNP lost, register again")
+          set_registered(false)
+          -- register again
+          register()
+          -- registration failed after retrying three times, stop with registration and sending event
+          if not registered then
+            logger:info("registration to PNP lost, re-register failed, unable to deliver wifi expired event")
+            return
+          end
+        else
+          -- delivery of new device event failed
+          logger:info("Sending newdevice event to PNP failed - responsecode " .. responsecode)
+          -- if we already tried to deliver the event three times stop with it
+          if retry_count == 3 then
+            logger:info("send event: maximum number of retries reached: failed to send newdevice event")
+            return
+          end
+        end
+
+        -- retry, sleep a number of seconds before retrying
+        logger:info("send event: Sleep " .. retryinterval .. " seconds before retrying newdevice event")
+        os.execute("sleep " .. retryinterval)
+        retry_count = retry_count + 1
+      end
+    end
+  end
+
+  if data.state == 'disconnected' and newdevice then
+      -- if we receive a disconnect event and we have not seen the device connect previously we ignore it.
+      -- we can not assume it was already connected because sometimes for some reason hostmanager fires a
+      -- disconnect event just before connecting a new device
+      return
+  end
+
+  update_device_db(data["mac-address"], data.state, timestamp)
+end
+
+-- Handlers for the events
+
+local ubus_events = {}
+ubus_events[guestwifi_expired_evpath] = handle_guestwifi_expired_handler
+ubus_events[pairing_evpath] = handle_pairing_handler
+ubus_events[devicechanged_evpath] = handle_devicechanged_handler
+
+-- Register an event listener with ubus
+
+local function monitor_ubus_event(event)
+  local handler = ubus_events[event]
+  if nil == handler then
+    return
+  end
+  ubus_conn:listen({ [event] = handler })
+end
+
+-- Main code
+
+local function main()
+
+  -- Initialization
+  logger.init("generic_pnpd", get_loglevel(), posix.LOG_PID + posix.LOG_CONS)
+  logger:info("generic_pnpd started")
+
+  uloop.init()
+  curl = cURL.easy_init()
+  ubus_conn = ubus.connect()
+
+  -- Retrieve gen_id and opco
+  gen_id = get_genid()
+  opco = get_opco()
+
+  -- Retrieve connected devices from persistency
+  load_connected_devices()
+
+  -- Check if already registered, if not registered and devices are paired => register
+  registered = get_registered()
+  logger:info("Registered: " .. tostring(registered))
+
+  paired = get_devicespaired()
+
+  if not registered and paired then
+    register()
+  end
+
+  -- Install event handlers for ubus
+  monitor_ubus_event(guestwifi_expired_evpath)
+  monitor_ubus_event(pairing_evpath)
+  monitor_ubus_event(devicechanged_evpath)
+
+  -- Start event loop
+  uloop.run()
+
+end
+
+-- Guard against unexpected crashes
+
+while true do
+  local rc, err = pcall(main)
+  if not rc then
+    local _, errmsg = pcall(tostring, err)  -- to be really safe pcall() the tostring function
+    logger:critical("error occurred: err=%s", errmsg or "<no error msg>")
+  else
+    logger:info("generic_pnpd terminated")
+    break
+  end
+end

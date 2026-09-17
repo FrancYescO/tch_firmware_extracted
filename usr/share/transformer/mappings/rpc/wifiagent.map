@@ -1,0 +1,96 @@
+local wifiagent_ = {
+  objectType = {
+    name = "rpc.wifiagent.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      OnBoardingStatus = {
+        description = "To get status of wifidoctoragent onboarding",
+          access = "readOnly",
+          type = "string",
+      }
+    },
+  }
+}
+
+local uci = require('uci')
+local cursor = uci.cursor()
+local uci_helper = mapper("ucihelper")
+local eventsource, onBoarding = eventsource, ""
+local mapper = mapper
+local connect = require('ubus').connect()
+local ubus = mapper("ubus").connect()
+
+local serial_id = uci_helper.get_from_uci({config = "env", sectionname = "var", option = "serial"})
+local gateway_serial_id
+local onboardingStatus
+local function getOnBoardingStatus(mapping, event, data)
+  local onboarded_status = "0"
+  local flagOnboarded = cursor:get("ledfw", "onboarding", "status")
+  if data["event"] == "error" or data["successcount"] then
+    local onboarded_with_fhcd = "0"
+    local peers_connected = {}
+    local get_fhcd = ubus:call("fhcd", "dump", {}) or {}
+    local file = io.open("/tmp/dhcpoption125.txt", "r")
+    if file then
+      for line in file:lines() do
+          local idx,val = string.match(line,"^([^=]*)=+(.*)")
+          if (idx == "2") then
+            gateway_serial_id = val
+          end
+      end
+      file:close()
+    end
+
+    -- finds the peers connected
+    for _,node_data in pairs(get_fhcd.nodes) do
+      if (node_data and node_data.nodeinfo and node_data.nodeinfo.serial and serial_id and node_data.nodeinfo.serial == serial_id) then
+        for i in pairs(node_data.peers) do
+          peers_connected[#peers_connected + 1] = node_data.peers[i].peer_id
+        end
+      end
+    end
+
+    -- match peers with node id of gateway
+    if data["event"] == "error" or ((not flagOnboarded or flagOnboarded == "0") and onboardingStatus ~= "1") then
+      for node_name,node_data in pairs(get_fhcd.nodes) do
+        if (node_data and node_data.nodeinfo and node_data.nodeinfo.serial and gateway_serial_id and node_data.nodeinfo.serial == gateway_serial_id) then
+          for _,peer_name in pairs(peers_connected or {}) do
+            if peer_name == node_name then
+              if data["event"] == "error" then
+                onboarded_with_fhcd = "1"
+              elseif data["successcount"] then
+                onboardingStatus = "1"
+              end
+              break
+            end
+          end
+        end
+      end
+    end
+    data["event"] = onboarded_with_fhcd == "1" and "success" or "error"
+  end
+  if data["event"] == "success" or onboardingStatus == "1" then
+    onboarded_status = "1"
+  else
+    onboarded_status = "0"
+  end
+  cursor:set("ledfw", "onboarding", "status", onboarded_status)
+  cursor:commit("ledfw")
+  onBoarding = data["event"] or onBoarding
+end
+
+local function get()
+  return onBoarding
+end
+
+wifiagent_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, getOnBoardingStatus, "wifidoctoragent.onboarding")
+  ubus_evsrc.watch_event(mapping, getOnBoardingStatus, "nslookupdiag.nslookupdiag_igd")
+end
+
+wifiagent_.get = get
+
+register(wifiagent_)
