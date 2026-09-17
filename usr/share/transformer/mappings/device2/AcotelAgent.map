@@ -1,0 +1,69 @@
+local Device_Services_X_TELECOMITALIA_IT_AcotelAgent_ = {
+  objectType = {
+    name = "Device.Services.X_TELECOMITALIA_IT_AcotelAgent.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local systemBinding = { config = "system", sectionname = "acotel", option = "enabled"}
+local envBinding = { config = "env", sectionname = "var", option = "unlockedstatus"}
+local commitapply, mapper, register = commitapply, mapper, register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local configChanged
+
+Device_Services_X_TELECOMITALIA_IT_AcotelAgent_.get = {
+  Enabled = function()
+    return getFromUci(systemBinding)
+  end,
+  Status = function()
+    local agentpid
+    local fd = io.open("/tmp/acotel/agent.pid")
+    if fd then
+      agentpid = fd:read()
+      fd:close()
+    end
+    return agentpid and "UP" or "Down"
+  end
+}
+
+
+Device_Services_X_TELECOMITALIA_IT_AcotelAgent_.set = {
+  Enabled = function(_, _, value)
+    local unlockStatus = getFromUci(envBinding)
+    if unlockStatus == "1" then
+      return nil, "Cannot Enable/Disable the Agent"
+    end
+    setOnUci(systemBinding, value, commitapply)
+    configChanged = true
+  end,
+}
+
+Device_Services_X_TELECOMITALIA_IT_AcotelAgent_.commit = function()
+  if configChanged then
+    uciHelper.commit(systemBinding)
+    configChanged = false
+  end
+end
+
+Device_Services_X_TELECOMITALIA_IT_AcotelAgent_.revert = function()
+  if configChanged then
+    uciHelper.revert(systemBinding)
+    configChanged = false
+  end
+end
+
+register(Device_Services_X_TELECOMITALIA_IT_AcotelAgent_)

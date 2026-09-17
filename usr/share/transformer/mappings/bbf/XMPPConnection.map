@@ -1,0 +1,306 @@
+local uci_helper = mapper("ucihelper")
+local lfs = require("lfs")
+local posix = require("tch.posix")
+local clock_gettime = posix.clock_gettime
+local CLOCK_MONOTONIC = posix.CLOCK_MONOTONIC
+
+local Multi_XMPP_ = {
+  objectType = {
+    name = "#ROOT.XMPP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = { }
+  }
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_XMPP_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_XMPP_Connection_i_ = {
+  objectType = {
+    name = "#ROOT.XMPP.Connection.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ConnectionNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+      },
+      Password = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      Domain = {
+        access = "readWrite",
+        type = "string",
+      },
+      Resource = {
+        access = "readWrite",
+        type = "string",
+      },
+      JabberID = {
+        access = "readOnly",
+        type = "string",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      LastChangeDate = {
+        access = "readOnly",
+        type = "string",
+      },
+      ServerConnectAlgorithm = {
+        access = "readWrite",
+        type = "string",
+      },
+      KeepAliveInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ServerConnectAttempts = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ServerRetryInitialInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ServerRetryIntervalMultiplier = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ServerRetryMaxInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      UseTLS = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      TLSEstablished = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local xmppOption = {
+  ["Enable"] = "xmpp_enable",
+  ["Username"] = "xmpp_user",
+  ["Password"] = "xmpp_pass",
+  ["Domain"] = "xmpp_domain",
+  ["Resource"] = "xmpp_resource",
+  ["KeepAliveInterval"] = "xmpp_keepalive",
+  ["ServerConnectAttempts"] = "xmpp_connectattempts",
+  ["ServerRetryInitialInterval"] = "xmpp_retry_init_interval",
+  ["ServerRetryIntervalMultiplier"] = "xmpp_retry_interval_mult",
+  ["ServerRetryMaxInterval"] = "xmpp_retry_max_interval",
+  ["UseTLS"] = "xmpp_usetls",
+  ["JabberID"] = "xmpp_jabberid",
+  ["Status"] = "xmpp_status",
+  ["LastChangeDate"] = "xmpp_lastchangedate",
+  ["ServerConnectAlgorithm"] = "xmpp_connectalgorithm",
+  ["TLSEstablished"] = "xmpp_tlsestablished",
+}
+
+local xmppBinding = {config = "cwmpd", sectionname = "cwmpd_config"}
+
+local function entriesXMPPConnection(mapping)
+  return { "1" }
+end
+
+local function getLastChangeDate(parameter)
+  local lastchangedate_timedate
+  xmppBinding.option = xmppOption[parameter]
+  local lastchangedate  = tonumber(uci_helper.get_from_uci(xmppBinding))
+
+  if lastchangedate then
+    local current_mono_time = clock_gettime(CLOCK_MONOTONIC)
+    local current_real_time = clock_gettime(posix.CLOCK_REALTIME)
+    local lastchangedate_real_time = current_real_time - (current_mono_time - lastchangedate)
+    lastchangedate_timedate = os.date("%c", lastchangedate_real_time)
+  end
+  return lastchangedate_timedate or ""
+end
+
+local function getXMPPConnection(mapping, parameter, parentkey)
+
+  if parameter == "LastChangeDate" then
+    return getLastChangeDate(parameter)
+  end
+
+  xmppBinding.option = xmppOption[parameter]
+  return uci_helper.get_from_uci(xmppBinding)
+end
+
+local function setXMPPConnection(mapping, parameter, value, parentkey)
+
+  xmppBinding.option = xmppOption[parameter]
+  uci_helper.set_on_uci(xmppBinding, value, commitapply)
+  uci_helper.commit(xmppBinding)
+end
+
+Multi_XMPP_Connection_i_.entries=entriesXMPPConnection
+Multi_XMPP_Connection_i_.get=getXMPPConnection
+Multi_XMPP_Connection_i_.set=setXMPPConnection
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_XMPP_Connection_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+-- //////////////////////////////////////////////////////////////
+
+local Multi_XMPP_Connection_i_Stats_ = {
+  objectType = {
+    name = "#ROOT.XMPP.Connection.{i}.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ReceivedMessages = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      TransmittedMessages = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ReceivedErrorMessages = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      TransmittedErrorMessages = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+Multi_XMPP_Connection_i_Stats_.get = {
+  ReceivedMessages = function()
+    return "N/A"
+  end,
+  TransmittedMessages = function()
+    return "N/A"
+  end,
+  ReceivedErrorMessages = function()
+    return "N/A"
+  end,
+  TransmittedErrorMessages = function()
+    return "N/A"
+  end,
+}
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_XMPP_Connection_i_Stats_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+-- //////////////////////////////////////////////////////////////
+
+local Multi_XMPP_Connection_i_Server_i_ = {
+  objectType = {
+    name = "#ROOT.XMPP.Connection.{i}.Server.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ServerNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Priority = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      Weight = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ServerAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      Port = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local xmppServerOption = {
+  ["ServerAddress"] = "xmpp_server",
+  ["Port"] = "xmpp_port",
+}
+
+local function entriesXMPPConnectionServer(mapping)
+  return { "1" }
+end
+
+local function getXMPPConnectionServer(mapping, parameter, parentkey)
+
+  if parameter == "Enable" or parameter == "Priority" or parameter == "Weight" then
+    return "1"
+  end
+
+  xmppBinding.option = xmppServerOption[parameter]
+  return uci_helper.get_from_uci(xmppBinding)
+end
+
+local function setXMPPConnectionServer(mapping, parameter, value, parentkey)
+
+  xmppBinding.option = xmppServerOption[parameter]
+
+  if xmppBinding.option == nil then
+    return
+  end
+
+  uci_helper.set_on_uci(xmppBinding, value, commitapply)
+  uci_helper.commit(xmppBinding)
+end
+
+local function ubus_xmpp_cb(mapping, event, data)
+  if data.jabberid then
+    return { { key = "1", paramname = "JabberID" } }
+  elseif data.status and data.timestamp then
+    return { { key = "1", paramname = "Status" }, { key = "1", paramname = "LastChangeDate" } }
+  elseif data.tlsestablished then
+    return { { key = "1", paramname = "TLSEstablished" } }
+  end
+end
+
+Multi_XMPP_Connection_i_.add_watchers = function(mapping)
+  local eventSource = eventsource
+  local ubusEventsrc = eventSource("ubus")
+  ubusEventsrc.watch_event(mapping, ubus_xmpp_cb, "cwmpd.xmpp")
+end
+
+Multi_XMPP_Connection_i_Server_i_.entries=entriesXMPPConnectionServer
+Multi_XMPP_Connection_i_Server_i_.get=getXMPPConnectionServer
+Multi_XMPP_Connection_i_Server_i_.set=setXMPPConnectionServer
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_XMPP_Connection_i_Server_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

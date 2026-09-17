@@ -1,0 +1,38 @@
+local datausage = {
+	objectType = {
+		name = 'rpc.datausage.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			enabled = {
+				access = "readWrite",
+				type = "boolean"
+			}
+		}
+	}
+}
+
+local uciHelper = mapper("ucihelper")
+
+local datausage_binding = {config="datausage", sectionname="global", option="enabled"}
+
+function datausage.get()
+	local enabled = uciHelper.get_from_uci(datausage_binding)
+	return enabled ~= "" and enabled or "1"
+end
+
+function datausage.set(mapping, param, value)
+	uciHelper.set_on_uci(datausage_binding, value, commitapply)
+	commitapply:newset("rpc.datausage.enabled")
+end
+
+function datausage.commit()
+	uciHelper.commit({config = "datausage"})
+end
+
+function datausage.revert()
+	uciHelper.revert({config = "datausage"})
+end
+
+register(datausage)

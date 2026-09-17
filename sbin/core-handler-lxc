@@ -1,0 +1,69 @@
+
+pid_namespace() {
+  readlink /proc/$1/ns/pid
+}
+
+container_pid_ns() {
+  local lxc=$1
+  lxc-attach -n $lxc -- readlink /proc/self/ns/pid
+}
+
+crashed_in_container() {
+  local root_ns=$(pid_namespace self)
+  local pid_ns=$(pid_namespace $pid)
+  
+  [ "$root_ns" != "$pid_ns" ]
+}
+
+lxc_instance_add() {
+  _ALL_CONTAINERS="$_ALL_CONTAINERS $1"
+}
+
+list_containers() {
+  _ALL_CONTAINERS=""
+  config_foreach lxc_instance_add lxc_instance
+  echo $_ALL_CONTAINERS
+}
+
+find_container() {
+  local pid_ns=$1
+  for container in $(list_containers); do
+    local ns=$(container_pid_ns $container)
+    if [ "$ns" = "$pid_ns" ]; then
+      echo $container
+      break
+    fi
+  done
+}
+
+handle_crash_in_container() {
+  local coredump_action
+  local coredump_reboot
+  
+  config_load lxc
+  
+  local lxc=$(find_container $(pid_namespace $pid))
+  if [ -z $lxc ]; then
+    log "crash in unknown container, using global coredump settings"
+    return 0
+  fi
+  
+  
+  config_get coredump_action $lxc coredump_action _default_
+  config_get coredump_reboot $lxc coredump_reboot _default_
+  
+  if [ "$coredump_action" != "_default_" ]; then
+    action=$coredump_action
+    action_option="lxc.$lxc.action"
+  fi
+  if [ "$coredump_reboot" != "_default_" ]; then
+    reboot=$coredump_reboot
+    action_option="lxc.$lxc.reboot"
+  fi
+  
+  log "process in container $lxc crashed, coredump action=$action reboot=$reboot"
+}
+
+if crashed_in_container ; then
+  handle_crash_in_container
+fi
