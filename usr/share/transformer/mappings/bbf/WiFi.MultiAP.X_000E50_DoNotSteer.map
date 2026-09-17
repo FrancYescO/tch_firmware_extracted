@@ -1,0 +1,197 @@
+-- Manually generated
+
+local Multi_MultiAP_X_000E50_DoNotSteer_i_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "This object contains the stations that must not be subject to Easymesh steering logic (both bandsteering and client steering)",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables the DoNotSteer Functionality"
+      }
+    }
+  }
+}
+
+local weeBinding = { config = "wee", sectionname = "donotsteer" }
+local uciHelper = mapper('ucihelper')
+local isConfigChanged = false
+local getFromUci = uciHelper.get_from_uci
+local generateKey = uciHelper.generate_key
+local setOnUci = uciHelper.set_on_uci
+local commitApply = commitapply
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+
+local key2Mac = {}
+local mac2Key = {}
+local key2Data = {}
+
+Multi_MultiAP_X_000E50_DoNotSteer_i_.get = {
+  Enabled = function()
+    weeBinding.option = "enabled"
+    return getFromUci(weeBinding)
+  end
+}
+
+Multi_MultiAP_X_000E50_DoNotSteer_i_.set = {
+  Enabled = function(mapping, param, value)
+    weeBinding.option = "enabled"
+    uciHelper.set_on_uci(weeBinding, value, commitapply)
+    isConfigChanged = true
+  end
+}
+
+Multi_MultiAP_X_000E50_DoNotSteer_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit({ config = "wee" })
+    isConfigChanged = false
+  end
+end
+
+Multi_MultiAP_X_000E50_DoNotSteer_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert({ config = "wee" })
+    isConfigChanged = false
+  end
+end
+
+-- Manually generated
+local Multi_MultiAP_X_000E50_DoNotSteer_List_i_ = {
+  objectType = {
+    name = "#ROOT.",
+    access = "readWrite",
+    description = "Wifi accesspoint mac addresses",
+    numEntriesParameter = "MACAddressesNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "Lists the devices for DoNotSteer Functionality",
+      }
+    }
+  }
+}
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.entries = function(mapping)
+  local parentKey = "donotsteer"
+  local entries = {}
+  weeBinding.option = "donotsteer_list"
+  local macAddresses = getFromUci(weeBinding)
+  if type(macAddresses) == "table" then
+    local _key
+    for index, mac in ipairs(macAddresses) do
+      local updatedMAC = mac and parentKey and mac .. parentKey
+      if updatedMAC and not mac2Key[updatedMAC] then
+        _key = generateKey()
+        local baseKey = _key and parentKey and _key .. parentKey
+        if baseKey then
+          entries[#entries + 1] = _key
+          key2Mac[baseKey] = mac
+          mac2Key[updatedMAC] = _key
+          key2Data[baseKey] = index .. "|" .. parentKey
+        end
+      elseif updatedMAC then
+        entries[#entries + 1] = mac2Key[updatedMAC]
+      end
+    end
+  end
+  return entries
+end
+
+local function setMacAddress(value, key)
+  local  parentKey = "donotsteer"
+  local baseKey = key .. parentKey
+  local index, section = splitKey(key2Data[baseKey])
+  index = tonumber(index)
+  weeBinding.option = "donotsteer_list"
+  local macAddresses = getFromUci(weeBinding)
+  macAddresses[index] = value
+  key2Mac[baseKey] = value
+  table.remove(mac2Key, index)
+  mac2Key[value .. parentKey] = key
+  setOnUci(weeBinding, macAddresses, commitApply)
+  isConfigChanged = true
+end
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.get = {
+  MACAddress = function(mapping, param, key)
+    local parentKey = "donotsteer"
+    local macAddress = key2Mac[key .. parentKey]
+    return macAddress ~= "00:00:00:00:00:00" and macAddress ~= "null" and macAddress or ""
+  end,
+}
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.set = {
+  MACAddress = function(mapping, param, value, key)
+    if nwCommon.isMAC(value) then
+      setMacAddress(value, key)
+    else
+      return nil,string.format("%s is not a valid MAC Address",value)
+    end
+  end,
+}
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.add = function(mapping)
+  local parentKey = "donotsteer"
+  weeBinding.option = "donotsteer_list"
+  weeBinding.default = {}
+  local macAddresses = getFromUci(weeBinding)
+  local dummyMac = "00:00:00:00:00:00"
+  local index = #macAddresses + 1
+  macAddresses[index] = dummyMac
+  local newKey = generateKey()
+  local updatedNewKey = newKey and parentKey and newKey .. parentKey
+  key2Mac[updatedNewKey] = dummyMac
+  mac2Key[dummyMac .. parentKey] = newKey
+  key2Data[updatedNewKey] = index .. "|" .. parentKey
+  setOnUci(weeBinding, macAddresses, commitApply)
+  isConfigChanged = true
+  return newKey
+end
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.delete = function(mapping, key)
+  local parentKey = "donotsteer"
+  weeBinding.option = "donotsteer_list"
+  weeBinding.default = {}
+  local macAddresses = getFromUci(weeBinding)
+  local baseKey = key and parentKey and key .. parentKey
+  local index = splitKey(key2Data[baseKey])
+  table.remove(macAddresses, index)
+  mac2Key[key2Mac[baseKey] .. parentKey] = nil
+  key2Mac[baseKey] = nil
+  setOnUci(weeBinding, macAddresses, commitApply)
+  isConfigChanged = true
+  return true
+end
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit({ config = "wee" })
+    isConfigChanged = false
+  end
+end
+
+Multi_MultiAP_X_000E50_DoNotSteer_List_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert({ config = "wee" })
+    isConfigChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_X_000E50_DoNotSteer_i_, "#ROOT", { "Device.WiFi.MultiAP.X_000E50_DoNotSteer", "InternetGatewayDevice.X_000E50_MultiAP.X_000E50_DoNotSteer" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+duplicates = duplicator(Multi_MultiAP_X_000E50_DoNotSteer_List_i_, "#ROOT", { "Device.WiFi.MultiAP.X_000E50_DoNotSteer.List.{i}", "InternetGatewayDevice.X_000E50_MultiAP.X_000E50_DoNotSteer.List.{i}" })
+for _, dupli in ipairs(duplicates) do
+  register (dupli)
+end

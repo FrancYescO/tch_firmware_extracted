@@ -1,0 +1,199 @@
+local Device_WiFi_X_000E50_Bandsteer_i_ = {
+  objectType = {
+    name = "Device.WiFi.X_000E50_Bandsteer.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "BandsteerNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Parameters associated with the WiFi Bandsteering",
+    parameters = {
+      State = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Indicates the administrative state of the Bandsteer-interface",
+      },
+      APReference = {
+        access = "readOnly",
+        type = "string",
+        description = "Indicates the AP's which use a specifc bandsteer configuration",
+        pathRef = true,
+        targetParent = "Device.WiFi.AccessPoint.{i}.",
+        default = "",
+      },
+      MacAclDeauthEnable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Indicates whether MAC ACL is used or not for force steering a client",
+      },
+      MaxGracefulRoamTime = {
+        access = "readWrite",
+        type = "int",
+        description = "Indicates the maximum time (in seconds) to wait for an 802.11v BTM roaming action to complete",
+        range = {
+          {
+            min = "0",
+          },
+        },
+      },
+      StaAclTimeOut = {
+        access = "readWrite",
+        type = "int",
+        description = "Indicates the time (in seconds) to wait after a roam action before clearing the ACL.",
+        range = {
+          {
+            min = "0",
+          },
+        },
+      },
+      RssiThreshold = {
+        access = "readWrite",
+        type = "int",
+        description = "Indicates the threshold [dBm] at which the 2.4GHz interface decides to steer a 5GHz capable STA to the target interface",
+        range = {
+          {
+             min = "-90",
+             max = "-10",
+          },
+        },
+      },
+      Rssi5gThreshold = {
+        access = "readWrite",
+        type = "int",
+        description = "Indicates the threshold [dBm] at which the 5GHz interface reports to steer a 2.4GHz capable STA to the target interface",
+        range = {
+          {
+             min = "-90",
+             max = "-10",
+          },
+        },
+      }
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local nwWifi = require("transformer.shared.wifi")
+local binding = {config = "wireless"}
+local configChanged = false
+local concat = table.concat
+
+local function getUciValue(key, option, default)
+  binding.sectionname = key
+  binding.option = option
+  binding.default = default
+  return uci_helper.get_from_uci(binding)
+end
+
+local function setUciValue(key, option, value)
+  binding.sectionname = key
+  binding.option = option
+  uci_helper.set_on_uci(binding, value, commitapply)
+  configChanged = true
+end
+
+local wifi_ap = {}
+local function getApRef(key)
+  binding.sectionname = "wifi-ap"
+  local ap = {}
+  uci_helper.foreach_on_uci(binding, function(s)
+    if s.bandsteer_id == key then
+      wifi_ap[#wifi_ap + 1] = s['.name']
+      ap[#ap + 1] = resolve("Device.WiFi.AccessPoint.{i}.", s['.name'])
+    end
+  end)
+  return concat(ap, ",")
+end
+
+local paramMap = {
+  State = "state",
+  MacAclDeauthEnable = "macacl_deauth_enabled",
+  MaxGracefulRoamTime = "max_graceful_roam_time",
+  StaAclTimeOut = "sta_acl_to",
+  RssiThreshold = "rssi_threshold",
+  Rssi5gThreshold = "rssi_5g_threshold",
+}
+
+Device_WiFi_X_000E50_Bandsteer_i_.entries = function(mapping)
+  local entries = {}
+  binding.sectionname = "wifi-bandsteer"
+   uci_helper.foreach_on_uci(binding, function(s)
+      entries[#entries+1] = s['.name']
+   end)
+  return entries
+end
+
+Device_WiFi_X_000E50_Bandsteer_i_.get = {
+  State = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "1")
+  end,
+  APReference = function(mapping, param, key)
+    return getApRef(key)
+  end,
+  MacAclDeauthEnable = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "1")
+  end,
+  MaxGracefulRoamTime = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "6")
+  end,
+  StaAclTimeOut = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "115")
+  end,
+  RssiThreshold = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "-40")
+  end,
+  Rssi5gThreshold = function(mapping, param, key)
+    return getUciValue(key, paramMap[param], "-80")
+  end,
+}
+
+Device_WiFi_X_000E50_Bandsteer_i_.getall = function(mapping,key)
+  binding.sectionname = key
+  local allValues = uci_helper.getall_from_uci(binding) or {}
+  return {
+     State = allValues.state or "1",
+     APReference = getApRef(key),
+     MacAclDeauthEnable = allValues.macacl_deauth_enabled or "1",
+     MaxGracefulRoamTime = allValues.max_graceful_roam_time or "6",
+     StaAclTimeOut = allValues.sta_acl_to or "115",
+     RssiThreshold = allValues.rssi_threshold or "-40",
+     Rssi5gThreshold = allValues.rssi_5g_threshold or "-80",
+  }
+end
+
+Device_WiFi_X_000E50_Bandsteer_i_.set = {
+  State = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+    nwWifi.splitSSID("bandsteer", wifi_ap[1] or "ap0")
+  end,
+  MacAclDeauthEnable = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+  end,
+  MaxGracefulRoamTime = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+  end,
+  StaAclTimeOut = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+  end,
+  RssiThreshold = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+  end,
+  Rssi5gThreshold = function(mapping, param, value, key)
+    setUciValue(key, paramMap[param], value)
+  end,
+}
+
+Device_WiFi_X_000E50_Bandsteer_i_.commit = function()
+  if configChanged then
+    uci_helper.commit(binding)
+    configChanged = false
+  end
+end
+
+Device_WiFi_X_000E50_Bandsteer_i_.revert = function()
+  if configChanged then
+    uci_helper.revert(binding)
+    configChanged = false
+  end
+end
+
+register(Device_WiFi_X_000E50_Bandsteer_i_)

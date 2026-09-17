@@ -1,0 +1,125 @@
+#!/usr/bin/env lua
+
+local tonumber, tostring, assert =
+      tonumber, tostring, assert
+local format = string.format
+local logger = require('transformer.logger')
+local cursor = require("uci").cursor()
+local luabcm = require('luabcm')
+local ubus = require("ubus")
+-- UBUS connection
+local ubusConn
+
+-- logging configuration
+local log_config = {
+    level = 3,
+    stderr = false
+}
+logger.init(log_config.level,log_config.stderr)
+local atmpinglog = logger.new("ATMPing", log_config.level)
+
+-- command line argument = atm interface name
+local interface=arg[1]
+-- interface cannot be nil
+if interface==nil then
+  atmpinglog:critical("You need to specify an interface")
+  return
+end
+
+-- uci config
+local config = "wanatmf5loopback"
+
+-- state of the command
+local state = "Complete"
+
+local function store_state(interface,state)
+  -- only update if uci config already exists
+  if cursor:get(config,interface,"state") then
+    -- set state
+    cursor:set(config,interface,"state",state)
+    cursor:save(config)
+    cursor:load(config)
+    cursor:commit(config)
+  end
+end
+
+-- get portmask, vpi and vci from xtm
+local function get_interface_details(interface)
+  local vpi=cursor:get("xtm",interface,"vpi")
+  local vci=cursor:get("xtm",interface,"vci")
+  local path=cursor:get("xtm",interface,"path")
+  local portmask=1
+  if path=="interleaved" then
+    portmask=2
+  end
+  return portmask,vpi,vci
+end
+
+local function atmping(interface)
+  -- remove old results
+  os.remove("/tmp/atmping_" .. interface)
+  -- get interface details from xtm
+  local portmask,vpi,vci = get_interface_details(interface)
+  -- get ping configuration from UCI
+  local count = cursor:get(config,interface,"count")
+  -- IGD timeout is in milliseconds
+  local timeout = cursor:get(config,interface,"timeout")
+  local user = cursor:get(config,interface,"user")
+
+  -- check if all required parameters are present
+  if not (count and timeout and vpi and vci and portmask) then
+    state="Error_Other"
+    atmpinglog:critical("Invalid parameters")
+    return
+  end
+  -- convert to numbers
+  count = tonumber(count)
+  timeout = tonumber(timeout)
+  portmask = tonumber(portmask)
+  vpi = tonumber(vpi)
+  vci = tonumber(vci)
+  -- call sendoam function
+  local success,failure,minrsptime,maxrsptime,avgrsptime=luabcm.sendoam(portmask,vpi,vci,"f5end",count,timeout)
+  -- store results in tmp file
+  local fh, msg = io.open("/tmp/atmping_" .. interface, "w")
+  assert(fh, msg)
+  fh:write(format('%d\n', tonumber(success)))
+  fh:write(format('%d\n', tonumber(failure)))
+  fh:write(format('%d\n', tonumber(minrsptime)))
+  fh:write(format('%d\n', tonumber(maxrsptime)))
+  fh:write(format('%d\n', tonumber(avgrsptime)))
+  fh:close()
+
+  local info ={}
+  info["interface"] = interface
+  info["success"] = success
+  info["failure"] = failure
+  info["minrsptime"] = minrsptime
+  info["maxrsptime"] = maxrsptime
+  info["avgrsptime"] = avgrsptime
+  info["state"] = state
+
+  -- Publish the ping result on ubus
+  local event = 'atmping.atmloopback'
+  if user then
+    event = event .. "_" .. user
+  end
+  ubusConn:send(event, info)
+end
+
+--publish results in ubus
+if not ubusConn then
+  ubusConn = ubus.connect()
+end
+
+-- main
+-- launch command
+atmpinglog:info("launching the atmping command")
+local err, msg = pcall(atmping,interface)
+if not err then
+  state = "Error_Internal"
+  atmpinglog:critical(msg)
+  os.remove("/tmp/atmping_" .. interface)
+end
+-- store final state
+store_state(interface,state)
