@@ -1,0 +1,34 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+include /lib/upgrade
+
+v "Performing system upgrade..."
+if type 'platform_do_upgrade' >/dev/null 2>/dev/null; then
+	platform_do_upgrade "$IMAGE"
+else
+	default_do_upgrade "$IMAGE"
+fi
+
+if [ -n "$UPGRADE_BACKUP" ] && type 'platform_copy_config' >/dev/null 2>/dev/null; then
+	platform_copy_config
+fi
+
+ubus send fwupgrade '{ "state": "done" }'
+
+v "Upgrade completed"
+sleep 1
+
+[ $REBOOT -eq 1 ] || return 0
+
+[ -f /lib/functions/reboot_reason.sh ] && {
+	. /lib/functions/reboot_reason.sh
+	set_reboot_reason UPGRADE
+}
+
+v "Rebooting system..."
+umount -a
+reboot -f
+sleep 5
+echo b 2>/dev/null >/proc/sysrq-trigger

@@ -1,0 +1,260 @@
+local register, mapper, commitapply = register, mapper, commitapply
+local duplicate = mapper("multiroot").duplicate
+
+-- Manually generated
+local Device_HPNA_ = {
+  objectType = {
+    name = "Device.HPNA.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- InterfaceNumberOfEntries
+      -- Automatically generated when Device.HPNA.Interface.{i}. is loaded
+    }
+  }
+}
+
+register(Device_HPNA_)
+
+local Multi_LANDevice_i_LANHPNAInterfaceConfig_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables or disables the interface",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Down",
+          "Unknown",
+          "Dormant",
+          "NotPresent",
+          "LowerLayerDown",
+          "Error",
+        },
+        description = "The current operational state of the interface",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "The MAC Address of the interface",
+      },
+      IsMaster = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether this interface is the HPNA network master",
+      },
+      MaxBitRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The maximum HPNA PHY bit rate (expressed in Mbps) of this interface",
+      },
+      PossibleSpectralModes = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "A",
+          "B",
+          "C",
+          "D",
+        },
+        description = "The spectral modes possible for this interface",
+      },
+      SpectralMode = {
+        access = "readOnly",    -- Only RO supported as of now
+        type = "string",
+        enumeration = {
+          "A",
+          "B",
+          "C",
+          "D",
+        },
+        description = "Spectral mode for which the HPNA protocol is active",
+      },
+      MTU = {
+        access = "readOnly",    -- Only RO supported as of now
+        type = "unsignedInt",
+        description = "Maximum Transmission Unit for this HPNA interface",
+      },
+      NoiseMargin = {
+        access = "readOnly",
+        type = "int",
+        description = "Current signal to noise ratio margin",
+      },
+      MinMulticastRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Minimum Multicast packet rate",
+      },
+      NegMulticastRate = {
+        access = "readOnly",
+        type = "int",
+        description = "Negative Multicast packet rate",
+      },
+      NodeID = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The Node ID of this node",
+      },
+      -- X_0876FF_NodeNumberOfEntries
+      -- Automatically generated when InternetGatewayDevice.LANDevice.{i}.LANHPNAInterfaceConfig.{i}.Node.{i}. is loaded
+    }
+  },
+  configChanged = false,
+}
+
+local conn = mapper("ubus").connect()
+
+local uciHelper = mapper("ucihelper")
+local setOnUci = uciHelper.set_on_uci
+local getFromUci = uciHelper.get_from_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+
+local hpnaBinding = { config = "hpna" }
+local ethernetBinding = { config = "ethernet", option = "speed", default = "0" }
+local networkBinding = { config = "network", option = "ifname", state = false }
+
+local hpnaInfo = {}
+local match, pairs, tostring = string.match, pairs, tostring
+
+local SPECTRALMODETABLE = {
+  ["A"] = { minRange = 4, maxRange = 20 },
+  ["B"] = { minRange = 12, maxRange = 28 },
+  ["C"] = { minRange = 36, maxRange = 52 },
+  ["D"] = { minRange = 4, maxRange = 36 },
+}
+
+local function getUciValue(section, option, default)
+  hpnaBinding.sectionname = section
+  hpnaBinding.option = option
+  hpnaBinding.default = default
+  return getFromUci(hpnaBinding)
+end
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  local interfaces = {}
+  if parentKey then
+    networkBinding.sectionname = parentKey
+    local ifnames = getFromUci(networkBinding)
+   if type(ifnames) == "table" then
+     for _, interface in pairs(ifnames) do
+       interfaces[interface] = true
+     end
+   else
+     for interface in ifnames:gmatch("%w+") do
+       interfaces[interface] = true
+     end
+   end
+  end
+  hpnaBinding.sectionname = "interface"
+  uciHelper.foreach_on_uci(hpnaBinding, function(s)
+    if parentKey and interfaces[s.ifname] or not parentKey then
+      entries[#entries + 1] = s[".name"]
+    end
+  end)
+  local devices = conn:call("hpna", "get", {}) or {}
+  hpnaInfo = {}
+  for _, info in pairs(devices) do
+    hpnaInfo = info
+    break
+  end
+  return entries
+end
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_.get = {
+  Enable = function(mapping, param, key)
+    return getUciValue(key, "enabled", "0")
+  end,
+
+  Status = function(mapping, param, key)
+    local enable = getUciValue(key, "enabled", "0")
+    return enable == "1" and "Up" or "Down"
+  end,
+
+  MACAddress = function(mapping, param, key)
+    return getUciValue(key, "operatingmac")
+  end,
+
+  IsMaster = "1", -- Hardcoded the value since this is HPNA network master
+
+  MaxBitRate = function(mapping, param, key)
+    local ifname = getUciValue(key, "ifname")
+    ethernetBinding.sectionname = ifname
+    return getFromUci(ethernetBinding)
+  end,
+
+  PossibleSpectralModes = "A,B,C,D", -- Hardcoded the possible modes since no information available
+
+  SpectralMode = function(mapping, param, key)
+    local mode = {}
+    local hwconfig = hpnaInfo.hwconfig or ""
+    local rangeMin, rangeMax = match(hwconfig, "%S+%s+(%d+)-(%d+)%s+%S+")
+    rangeMin = rangeMin and tonumber(rangeMin) or -1
+    rangeMax = rangeMax and tonumber(rangeMax) or -1
+    for i, v in pairs(SPECTRALMODETABLE) do
+      if (v.minRange <= rangeMin and rangeMin <= v.maxRange)
+        or (v.minRange <= rangeMax and rangeMax <= v.maxRange) then
+        mode[#mode + 1] = i
+      end
+    end
+    return table.concat(mode, ",")
+  end,
+
+  MTU = function(mapping, param, key)
+    local mtu = hpnaInfo.mtu or 0
+    return tostring(mtu)
+  end,
+
+  NoiseMargin = "N/A",
+
+  MinMulticastRate = "N/A",
+
+  NegMulticastRate = "N/A",
+
+  NodeID = "N/A",
+}
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_.set = {
+  Enable = function(mapping, param, value, key)
+    hpnaBinding.sectionname = key
+    hpnaBinding.option = "enabled"
+    setOnUci(hpnaBinding, value, commitapply)
+    mapping.configChanged = true
+  end,
+}
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_.commit = function(mapping)
+  if mapping.configChanged then
+    commit(hpnaBinding)
+  end
+  mapping.configChanged = false
+end
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_.revert = function(mapping)
+  if mapping.configChanged then
+    revert(hpnaBinding)
+  end
+  mapping.configChanged = false
+end
+
+local duplicates = duplicate(Multi_LANDevice_i_LANHPNAInterfaceConfig_i_, "#ROOT", {"InternetGatewayDevice.LANDevice.{i}.LANHPNAInterfaceConfig", "Device.HPNA.Interface"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match("^Device") then
+    dupli.objectType.numEntriesParameter = "InterfaceNumberOfEntries"
+  else
+    dupli.objectType.numEntriesParameter = "LANHPNAInterfaceConfigNumberOfEntries"
+  end
+  register(dupli)
+end

@@ -1,0 +1,66 @@
+local uciHelper = mapper("ucihelper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local transactions = {}
+
+local mmpbx_mmpbxrvsipnet = {
+    objectType = {
+        name = "rpc.mmpbx.mmpbxrvsipnet.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            dtmf_relay = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "auto",
+                    "rfc2833",
+                    "sipinfo",
+                    "disabled",
+                },
+                default = "auto",
+            },
+            MaxSessions = {
+                 access  = "readWrite",
+                 type    = "unsignedInt",
+                 default = "0",
+            }
+        }
+    }
+}
+
+local dtmfSetMap = setmetatable({
+    rfc2833  = "RFC2833",
+    sipinfo  = "SIPInfo",
+    disabled = "InBand",
+    auto     = "RFC2833",
+}, { __index = function() return "" end })
+
+mmpbx_mmpbxrvsipnet.get = {
+    dtmf_relay  = voiceHelper.getDtmfMethod,
+    MaxSessions = voiceHelper.getMaxSessions
+}
+
+mmpbx_mmpbxrvsipnet.set = {
+    dtmf_relay = function(mapping, paramname, paramvalue, key)
+        voiceHelper.setDtmfMethod(dtmfSetMap[paramvalue], transactions, commitapply)
+    end,
+    MaxSessions = function(mapping, paramName, paramValue, key)
+        return voiceHelper.setMaxSessions(paramValue, transactions, commitapply)
+    end
+}
+mmpbx_mmpbxrvsipnet.commit = function()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+mmpbx_mmpbxrvsipnet.revert = function()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+register(mmpbx_mmpbxrvsipnet)
