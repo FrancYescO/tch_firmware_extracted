@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+
+# create S99 init script in /etc/rc.d/
+START=95
+STOP=05
+USE_PROCD=1
+
+FSEVENT_BIN=/usr/bin/fseventd
+FSEVENT_PID_FILE=/var/run/fsevent.pid
+
+_log(){
+	logger -t fseventd "$1"
+}
+
+start_service(){
+	if [ -x $FSEVENT_BIN ]; then
+		_log "start fseventd."
+                procd_open_instance
+                procd_set_param command $FSEVENT_BIN -d
+                procd_set_param pidfile ${FSEVENT_PID_FILE}
+                procd_close_instance
+		_log "fseventd is started."
+	else
+		_log "fseventd not present."
+	fi
+}
+
+stop_service(){
+	service_stop $FSEVENT_BIN
+	_log "fseventd stopped."
+}

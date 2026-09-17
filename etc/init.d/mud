@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+. $IPKG_INSTROOT/lib/functions/mud_config.sh
+
+USE_PROCD=1
+START=97
+STOP=03
+DLNA_PID_FILE=/var/run/dlnad.pid
+MVFS_PID_FILE=/var/run/mvfs.pid
+MUD_PID_FILE=/var/run/mud.pid
+FILE_TYPE=/etc/mud/mud_file_type_config.ini
+MUD_BIN=/usr/bin/mud
+MNT_PATH=/mnt/usb
+CONF_FILE=/var/etc/mud.conf
+MOUNTD_PID_FILE=/var/run/mountd.pid
+
+_log(){
+	logger -t mud "$1"
+}
+
+start_service(){
+        if [ -f $MUD_PID_FILE ]; then
+                return 1
+        fi
+
+	if [ ! -d $MNT_PATH ]; then
+		mkdir -p "${MNT_PATH}"
+		chmod 777 "$(dirname ${MNT_PATH})"
+	fi
+
+	if [ ! -f $MOUNTD_PID_FILE ]; then
+               rm -rf ${MNT_PATH}/USB*
+        fi
+
+        local loglevel
+        config_load dlnad
+        config_get loglevel log mud_logLevel
+        if [ -f $MVFS_PID_FILE ]; then
+	  if [ -x $MUD_BIN ]; then
+		_log "mud start."
+                local args=" -d -t "${FILE_TYPE}""
+		[ ! -z $loglevel ] && args=$args" -l $loglevel"
+                procd_open_instance
+                procd_set_param command $MUD_BIN $args
+                procd_set_param pidfile $MUD_PID_FILE
+                procd_close_instance
+	  else
+		_log "mud not present."
+          fi
+        fi
+}
+
+stop_service(){
+	  service_stop $MUD_BIN
+          if [ -f $MUD_PID_FILE ]; then
+                rm -f $MUD_PID_FILE
+          fi
+	  if [ -f $CONF_FILE ]; then
+		rm -f $CONF_FILE
+	  fi
+	  _log "mud stopped."
+}
+
+reload_service(){
+	update_mud_config
+	_log "reloading mud"
+	service_reload $MUD_BIN
+}

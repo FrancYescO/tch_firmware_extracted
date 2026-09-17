@@ -1,0 +1,647 @@
+local lfs = require("lfs")
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local mapper = mapper
+local conn = mapper("ubus").connect()
+local tr104Helper = require("transformer.shared.tr104helper")
+local lineHelper = require("transformer.shared.line_helper")
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.Stats.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            IncomingCallsReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of received incoming calls"
+            },
+            IncomingCallsAnswered = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming calls answered by the local user"
+            },
+            IncomingCallsConnected = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming calls that successfully completed call setup signaling"
+            },
+            IncomingCallsFailed = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming calls that failed to successfully complete call setup signaling"
+            },
+            OutgoingCallsAttempted = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outgoing calls attempted"
+            },
+            OutgoingCallsAnswered = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outgoing calls answered by the called party"
+            },
+            OutgoingCallsConnected= {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outgoing calls that successfully completed call setup signaling"
+            },
+            OutgoingCallsFailed = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outgoing calls that failed to successfully complete call setup signaling"
+            },
+            CallsDropped = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total calls that were successfully connected, but dropped unexpectedly while in progress without explicit user termination"
+            },
+            TotalCallTime = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Cumulative call duration in seconds"
+            },
+            PacketsSent = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of RTP packets sent for this line"
+            },
+            PacketsReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of RTP packets received for this line"
+            },
+            BytesSent = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of RTP payload bytes sent for this line"
+            },
+            BytesReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of RTP payload bytes received for this line"
+            },
+            PacketsLost = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of RTP packets that have been lost for this line"
+            },
+            ReceivePacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current receive packet loss rate in percent"
+            },
+            FarEndPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current far end receive packet lost rate in percent"
+            },
+            ReceiveInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current receive interarrival jitter in microseconds"
+            },
+            FarEndInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current Interarrival jitter in microseconds as reported from the far-end device via RTCP."
+            },
+            RoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current round trip delay in microseconds"
+            },
+            AverageReceiveInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average receive interarrival jitter in microseconds since the beginning of the current call"
+            },
+            AverageFarEndInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "verage far-end interarrival jitter in microseconds since the beginning of the current call"
+            },
+            AverageRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average round trip delay in microseconds since the beginning of the current call"
+            },
+            Overruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of times the receive jitter buffer has overrun for this line"
+            },
+            Underruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total number of times the receive jitter buffer has underrun for this line"
+            },
+            ResetStatistics = {
+                access = "readWrite",
+                type = "boolean",
+                description = "When set to one, resets the statistics for this voice line. Always False when read"
+            },
+            ServerDownTime = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "The number of seconds the CPE is unable to maintain a connection to the server"
+            },
+            X_000E50_CurrCallAvgRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average RTCP round-trip delay for the current call",
+            },
+            X_000E50_CurrCallInboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average inbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallInboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum inbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallInboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Inbound RTP packet loss count for the current call"
+            },
+            X_000E50_CurrCallInboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Inbound RTP packet loss percentage for the current call",
+            },
+            X_000E50_CurrCallInboundSumFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of inbound RTCP fraction loss for the current call",
+            },
+            X_000E50_CurrCallInboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of inbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallInboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of inbound RTCP fraction loss for the current call",
+            },
+            X_000E50_CurrCallInboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of inbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallInboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming RTCP packet Count for the current call",
+            },
+            X_000E50_CurrCallInboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming RTCP-XR packet Count for the current call",
+            },
+            X_000E50_CurrCallMaxRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum RTCP one-way delay for the current call",
+            },
+            X_000E50_CurrCallMaxRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum RTCP round-trip delay for the current call",
+            },
+            X_000E50_CurrCallOutboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average outbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallOutboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum outbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallOutboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Outbound RTP packet loss count for the current call",
+            },
+            X_000E50_CurrCallOutboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Outbound RTP packet loss percentage for the current call",
+            },
+            X_000E50_CurrCallOutboundSumFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Ratio between total number of packets expected and lost during a time interval of the curent outbound call",
+            },
+            X_000E50_CurrCallOutboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of outbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallOutboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of outbound RTCP fraction loss for the current call",
+            },
+            X_000E50_CurrCallOutboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of outbound RTCP inter-arrival jitter for the current call",
+            },
+            X_000E50_CurrCallOutboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outbound RTCP packet Count for the current call",
+            },
+            X_000E50_CurrCallOutboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outbound RTCP-XR packet Count for the current call",
+            },
+            X_000E50_CurrCallSumRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of RTCP one-way delay for the current call",
+            },
+            X_000E50_CurrCallSumRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of RTCP round-trip delay for the current call",
+            },
+            X_000E50_CurrCallSumSqrRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of RTCP one-way delay for the current call",
+            },
+            X_000E50_CurrCalllSumSqrRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of RTCP round-trip delay for the current call",
+            },
+            X_000E50_CurrCallConnectTimeStamp = {
+                access = "readOnly",
+                type = "dateTime",
+                description = "The call connection timestamp for current call",
+            },
+            X_000E50_CurrCallDuration = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Call duration for the current call",
+            },
+            X_000E50_CurrCallRemoteIP = {
+                access = "readOnly",
+                type = "string",
+                description = "The far-end host address and IP for the current call",
+            },
+            X_000E50_CurrCallNumber = {
+                access = "readOnly",
+                type = "string",
+                description = "The phone number associated with the remote end of the current call",
+            },
+            X_000E50_CurrCallCID = {
+                access = "readOnly",
+                type = "string",
+                description = "Caller ID name from the current inbound call. Blank for outbound calls",
+            },
+            X_000E50_CurrCallCodecInUse = {
+                access = "readOnly",
+                type = "string",
+                description = "The type of codec in use for the current call",
+            },
+            X_000E50_LastCallAvgRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average RTCP round-trip delay for the last completed call",
+            },
+            X_000E50_LastCallInboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average inbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallInboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum inbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallInboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Inbound RTP packet loss count for the last completed call",
+            },
+            X_000E50_LastCallInboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Inbound RTP packet loss percentage for the last completed call",
+            },
+            X_000E50_LastCallInboundSumFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of inbound RTCP fraction loss for the last completed call",
+            },
+            X_000E50_LastCallInboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of inbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallInboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of inbound RTCP fraction loss for the last completed call",
+            },
+            X_000E50_LastCallInboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of inbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallInboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming RTCP packet Count for the last completed call",
+            },
+            X_000E50_LastCallInboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total incoming RTCP-XR packet Count for the last completed call",
+            },
+            X_000E50_LastCallMaxRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum RTCP one-way delay for the last completed call",
+            },
+            X_000E50_LastCallMaxRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum RTCP round-trip delay for the last completed call",
+            },
+            X_000E50_LastCallOutboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Average outbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallOutboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Maximum outbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallOutboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Outbound RTP packet loss count for the last completed call",
+            },
+            X_000E50_LastCallOutboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Outbound RTP packet loss percentage for the last completed call",
+            },
+            X_000E50_LastCallOutboundSumFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Ratio between total number of packets expected and lost during a time interval of the last outbound call",
+            },
+            X_000E50_LastCallOutboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of outbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallOutboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of outbound RTCP fraction loss for the last completed call",
+            },
+            X_000E50_LastCallOutboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of outbound RTCP inter-arrival jitter for the last completed call",
+            },
+            X_000E50_LastCallOutboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outbound RTCP packet Count for the last completed call",
+            },
+            X_000E50_LastCallOutboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Total outbound RTCP-XR packet Count for the last completed call",
+            },
+            X_000E50_LastCallSumRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of RTCP one-way delay for the last completed call",
+            },
+            X_000E50_LastCallSumRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of RTCP round-trip delay for the last completed call",
+            },
+            X_000E50_LastCallSumSqrRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of RTCP one-way delay for the last completed call",
+            },
+            X_000E50_LastCalllSumSqrRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Sum of square of RTCP round-trip delay for the last completed call",
+            },
+            X_000E50_LastCallConnectTimeStamp = {
+                access = "readOnly",
+                type = "dateTime",
+                description = "The call connection timestamp for last completed call",
+            },
+            X_000E50_LastCallDuration = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Call duration for last completed call",
+            },
+            X_000E50_LastCallRemoteIP = {
+                access = "readOnly",
+                type = "string",
+                description = "The far-end host address and IP for last completed call",
+            },
+            X_000E50_LastCallNumber = {
+                access = "readOnly",
+                type = "string",
+                description = "The phone number associated with the remote end of the last call",
+            },
+            X_000E50_LastCallCID = {
+                access = "readOnly",
+                type = "string",
+                description = "Caller ID name from the last inbound call. Blank for outbound calls",
+            },
+            X_000E50_LastCallCodecInUse = {
+                access = "readOnly",
+                type = "string",
+                description = "The type of codec used for the last completed call",
+            },
+            X_000E50_AccumAvgRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated average RTCP round-trip delay",
+            },
+            X_000E50_AccumInboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated average of inbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumInboundCallCount = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated count of inbound calls",
+            },
+            X_000E50_AccumInboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated maximum inbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumInboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated inbound RTP packet loss",
+            },
+            X_000E50_AccumInboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated inbound RTP packet loss percentage",
+            },
+            X_000E50_AccumInboundSumFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of inbound RTCP fraction loss",
+            },
+            X_000E50_AccumInboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of inbound interarrival jitter",
+            },
+            X_000E50_AccumInboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of inbound RTCP fraction loss",
+            },
+            X_000E50_AccumInboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of inbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumInboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated total inbound RTCP packet count",
+            },
+            X_000E50_AccumInboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated total inbound RTCP-XR packet count",
+            },
+            X_000E50_AccumMaxRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated maximum RTCP one-way delay",
+            },
+            X_000E50_AccumMaxRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated maximum RTCP round-trip delay",
+            },
+            X_000E50_AccumOutboundAvgInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated average of outbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumOutboundCallCount = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated count of outbound calls",
+            },
+            X_000E50_AccumOutboundMaxInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated maximum outbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumOutboundRTPPacketLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated outbound RTP packet loss",
+            },
+            X_000E50_AccumOutboundRTPPacketLossRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated outbound RTP packet loss percentage",
+            },
+            X_000E50_AccumOutboundSumFractionLoss= {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Ratio between total number of accumulated outbound packets expected and lost during a time interval",
+            },
+            X_000E50_AccumOutboundSumInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of outbound inter-arrival jitter",
+            },
+            X_000E50_AccumOutboundSumSqrFractionLoss = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of outbound fraction loss",
+            },
+            X_000E50_AccumOutboundSumSqrInterarrivalJitter = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of outbound RTCP inter-arrival jitter",
+            },
+            X_000E50_AccumOutboundTotalRTCPPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated total outbound RTCP packet count",
+            },
+            X_000E50_AccumOutboundTotalRTCPXrPackets = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated total inbound RTCP-XR packet count",
+            },
+            X_000E50_AccumSumRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum RTCP one-way delay",
+            },
+            X_000E50_AccumSumRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum RTCP round-trip delay",
+            },
+            X_000E50_AccumSumSqrRTCPOneWayDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of RTCP one-way delay",
+            },
+            X_000E50_AccumSumSqrRTCPRoundTripDelay = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Accumulated sum of square of RTCP round-trip delay",
+            },
+        }
+    }
+}
+
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_.get = lineHelper.statsGet
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_.getall = lineHelper.statsGetAll
+Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_.set = function(mapping, param, value, key, parentKey)
+    local uri = lineHelper.getParamStats("uri", key, parentKey)
+    if uri == "" then
+        return nil, "Invalid parameter"
+    end
+    if param == "ResetStatistics" then
+        conn:call("mmdbd.call.statistics", "reset", {["profile"]=uri})
+        conn:call("mmdbd.callnumber.statistics", "reset", {["profile"]=uri})
+        conn:call("mmdbd.calllog", "delete", {["profile"]=uri})
+	return true
+    end
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_", Multi_Services_VoiceService_i_VoiceProfile_i_Line_i_Stats_, register)
