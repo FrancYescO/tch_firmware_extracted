@@ -1,0 +1,129 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+uci set network.wan=interface
+uci set network.wan.auto='0'
+
+uci set network.wan6=interface
+uci set network.wan6.ifname=@wan
+uci set network.wan6.proto=dhcpv6
+uci set network.wan6.reqopts='23 24 25'
+uci set network.wan6.reqaddress='try'
+uci set network.wan6.reqprefix='auto'
+uci set network.wan6.noslaaconly=1
+uci set network.wan6.iface_464xlat=0
+uci set network.wan6.ipv6='1'
+uci set network.wan6.defaultroute='1'
+
+uci set network.wwan=interface
+uci set network.wwan.metric='5'
+uci set network.wwan.auto='0'
+
+#/*******************************************************************/
+#/*               Dummy interfaces needed for WANsensing            */
+#/*******************************************************************/
+uci set network.dummy=interface
+uci set network.dummy.auto='0'
+
+#/*******************************************************************/
+#/*                             ADSL Interfaces                     */
+#/*******************************************************************/
+#ADSL PPPoA ATM 0*100
+uci set network.adsl=interface
+uci set network.adsl.macaddr=`uci get env.rip.eth_mac`
+uci set network.adsl.auto='0'
+uci set network.adsl.defaultroute='1'
+uci set network.adsl.proto='pppoa'
+uci set network.adsl.ifname='atm_wan'
+uci set network.adsl.vpi='0'
+uci set network.adsl.vci='100'
+uci set network.adsl.encaps='vc'
+uci set network.adsl.username='vfnz_pro'
+uci set network.adsl.password='VUtH2RM3'
+uci set network.adsl.ipv6='1'
+uci set network.adsl.initboot='1'
+uci set network.adsl.keepalive_adaptive='1'
+uci set network.adsl.keepalive='5,120'
+
+
+#/*******************************************************************/
+#/*                             VDSL Interfaces                     */
+#/*******************************************************************/
+#VDSL DATA DHCP PTM 10
+uci set network.vdsl=interface
+uci set network.vdsl.macaddr=`uci get env.rip.eth_mac`
+uci set network.vdsl.auto='0'
+uci set network.vdsl.defaultroute='1'
+uci set network.vdsl.proto='dhcp'
+uci set network.vdsl.ifname='vlanptm0'
+uci set network.vdsl.reqopts='1 3 6 43 51 54 58 59'
+uci set network.vdsl.sendopts=43:4,`uci get env.var.serial`
+uci set network.vdsl.vendorinfolenfix='1'
+uci set network.vdsl.ipv6='1'
+uci set network.vdsl.initboot='1'
+
+#/*******************************************************************/
+#/*                             FTTH Interfaces                     */
+#/*******************************************************************/
+#FTTH DATA DHCP VLAN10
+uci set network.ewan=interface
+uci set network.ewan.macaddr=`uci get env.rip.eth_mac`
+uci set network.ewan.auto='0'
+uci set network.ewan.defaultroute='1'
+uci set network.ewan.proto='dhcp'
+uci set network.ewan.ifname='vlanwan'
+uci set network.ewan.reqopts='1 3 6 43 51 54 58 59'
+uci set network.ewan.sendopts=43:4,`uci get env.var.serial`
+uci set network.ewan.vendorinfolenfix='1'
+uci set network.ewan.ipv6='1'
+uci set network.ewan.initboot='1'
+
+#/*******************************************************************/
+#/*                     VLAN definition section                     */
+#/*******************************************************************/
+#VLAN 10 VDSL Data
+uci set network.vlanptm0=device
+uci set network.vlanptm0.type='8021q'
+uci set network.vlanptm0.ifname='ptm0'
+uci set network.vlanptm0.name='vlanptm0'
+uci set network.vlanptm0.vid='10'
+uci set network.vlanptm0.ipv6='1'
+uci set network.vlanptm0.macaddr=`uci get env.rip.eth_mac`
+
+#VLAN 10 FTTH Data
+uci set network.vlanwan=device
+uci set network.vlanwan.type='8021q'
+uci set network.vlanwan.ifname='eth4'
+uci set network.vlanwan.name='vlanwan'
+uci set network.vlanwan.vid='10'
+uci set network.vlanwan.ipv6='1'
+uci set network.vlanwan.macaddr=`uci get env.rip.eth_mac`
+#/***********************************************************/
+#/* Configure Simple devices For ipv6                       */
+#/***********************************************************/
+
+#atm_wan
+uci set network.atm_wan=device
+uci set network.atm_wan.name='atm_wan'
+uci set network.atm_wan.ipv6='1'
+
+uci commit network
+
+#************************************************************
+# config for fixed indexing in IFD.WANDevice
+#************************************************************
+
+# make sure ptm0 always shows up
+touch /etc/config/xtm
+uci set xtm.ptm0_placeholder=ptmdevice_placeholder
+uci set xtm.ptm0_placeholder.uciname=ptm0
+uci commit xtm
+
+# put wan on the ACTIVE WANDevice
+touch /etc/config/wanconfig
+uci set wanconfig.active=activedevice
+uci add_list wanconfig.active.interface=wan
+uci commit wanconfig
+
+exit 0

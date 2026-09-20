@@ -1,0 +1,159 @@
+local rpc_user_ = {
+  objectType = {
+    name = "rpc.user.@.",
+    access = "readOnly",
+    numEntriesParameter = "UserNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      pwcrypt = {
+        access = "readWrite",
+        type = "string",
+      },
+      reset_password = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Resets the password to default one",
+      },
+    }
+  }
+}
+
+local register, commitapply = register, commitapply
+local scp = require 'transformer.shared.setClashPassword'
+local uciHelper = mapper("ucihelper")
+local commit, revert = uciHelper.commit, uciHelper.revert
+local webBinding = { config = "web" }
+local uciDefaultsBinding = { config = "uci-defaults" }
+local pwcrypts = {}
+local configChanged
+
+local function getFromUci(binding, option)
+  binding.option = option
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setOnUci(binding, option, value)
+  binding.option = option
+  uciHelper.set_on_uci(binding, value, commitapply)
+  configChanged = true
+end
+
+--- Get GUI users
+-- @param users users list
+local function getGuiUsers(users)
+  webBinding.sectionname = "user"
+  uciHelper.foreach_on_uci(webBinding, function(s)
+    local user = s['name']
+    if user then
+      users[#users+1] = user
+    end
+  end)
+end
+
+--- Get Clash users and remove duplicate entries
+-- @param users users list
+local function getClashUsers(users)
+  local usersC = scp.listClashUsers()
+  for clashUser in pairs(usersC) do
+    local dupli
+    for _, user in pairs(users) do
+      if user == clashUser then
+        dupli = true
+      end
+    end
+    if not dupli then
+      users[#users+1] = user
+    end
+  end
+end
+
+--- Reads default values from uci-defaults and restores it to web config
+-- @param option option to be restored
+local function restoreOptionsFromUci(option)
+  local defaultValue = getFromUci(uciDefaultsBinding, option)
+  if defaultValue ~= "" then
+    setOnUci(webBinding, option, defaultValue)
+  end
+end
+
+--- resets the GUI and CLI passwords
+-- @param section sectionname for the corresponding user
+-- @param user username
+local function reset(section, user)
+  webBinding.sectionname = section
+  uciDefaultsBinding.sectionname = section
+  restoreOptionsFromUci("srp_salt")
+  restoreOptionsFromUci("srp_verifier")
+  if scp.isClashUser(user) then
+    local defaultValue = getFromUci(uciDefaultsBinding, "hash_pwd")
+    if defaultValue ~= "" then
+      pwcrypts[user] = defaultValue
+    end
+  end
+end
+
+-- In current implementation, GUI and clash users are listed,
+-- pwcrypt is only relevant for CLI users
+rpc_user_.entries = function()
+  local users = {}
+  getGuiUsers(users)
+  getClashUsers(users)
+  return users
+end
+
+rpc_user_.get = {
+  pwcrypt = "", -- do not expose any password data
+  reset_password = "0", -- always returns "0"
+}
+
+rpc_user_.set = {
+  pwcrypt = function (mapping, param, value, key)
+    -- key is user name, value the crypted password
+    -- Store crypted password if value valid; effective update happens in commit()
+    -- pwcrypt is only relevant for CLI users
+    if scp.isClashUser(key) then
+      local ok, msg = scp.validateCredentials(key, value, true)
+      if not ok then
+        return ok, msg
+      else
+        pwcrypts[key] = value
+      end
+    else
+      return nil, "Error setting pwcrypt! Not a clash user"
+    end
+  end,
+  reset_password = function (mapping, param, value, key)
+    if value == "1" then
+      webBinding.sectionname = "user"
+      uciHelper.foreach_on_uci(webBinding, function(s)
+        if s.name == key then
+          reset(s['.name'], key)
+          return false
+        end
+      end)
+    end
+  end,
+}
+
+rpc_user_.commit = function ()
+  for user, pwc in pairs(pwcrypts) do
+    scp.setCryptedPassword(user, pwc)
+  end
+  if configChanged then
+    commit(webBinding)
+  end
+  configChanged = false
+  pwcrypts = {}
+end
+
+rpc_user_.revert = function ()
+  if configChanged then
+    revert(webBinding)
+  end
+  configChanged = false
+  pwcrypts = {}
+end
+
+register(rpc_user_)

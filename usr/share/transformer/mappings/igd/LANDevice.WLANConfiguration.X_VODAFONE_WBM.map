@@ -1,0 +1,57 @@
+--- Manually generated
+
+local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.X_VODAFONE_WBM.",
+    access = "readOnly",
+    description = "Vodafone Web Based Management related parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      UseCommonSSID = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable common ssid feature for Main WiFi accesspoints"
+      },
+    },
+  },
+}
+
+local uciHelper = mapper("ucihelper")
+local wlanConfCommon = require("transformer.shared.WLANConfigurationCommon")
+local wbmMethods = wlanConfCommon.WBMMethods(commitapply)
+local wirelessBinding = { config = "wireless" }
+
+local function getFromUci(sectionname, option, default)
+  wirelessBinding.sectionname = sectionname
+  wirelessBinding.option = option
+  wirelessBinding.default = default
+  return uciHelper.get_from_uci(wirelessBinding)
+end
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_.get = {
+  UseCommonSSID = function(mapping, param, key)
+    local ap = wlanConfCommon.getAPFromIface(key)
+    local groupID = getFromUci(ap, "group_id", "off")
+    if groupID == "off" then
+      return "0"
+    end
+    return "1"
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_.set = {
+  UseCommonSSID = function(mapping, param, value, key)
+    local ap = wlanConfCommon.getAPFromIface(key)
+    local groupID = getFromUci(ap, "group_id")
+    if (groupID == "off" and value == "0") or (groupID == "ap_group0" and value == "1") then
+      return true
+    end
+    wbmMethods.setWBM(ap, value, key)
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_.commit = wbmMethods.commit
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_.revert = wbmMethods.revert
+
+register(InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_VODAFONE_WBM_)

@@ -1,0 +1,35 @@
+local policyrouting_ = {
+  objectType = {
+    name = 'rpc.policyrouting.',
+    access = 'readOnly',
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      command = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+
+local cmd
+policyrouting_.get = {
+  command = function()
+    return cmd or ""
+  end,
+}
+
+policyrouting_.set = {
+  command = function(mapping,param,value)
+    local f = io.open("/tmp/policyrouting.txt","w")
+    if f then
+      f:write(value)
+      f:close()
+      cmd = value
+      commitapply:newset("policyrouting")
+    end
+  end,
+}
+
+register(policyrouting_)
