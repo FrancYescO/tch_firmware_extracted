@@ -1,0 +1,196 @@
+<!-- 
+  (C) NETDUMA Software
+  Kian Cross <kian.cross@netdma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/chart.html"> <dom-module id="duma-chart"> <template> <style include="duma-theme"> :host {
+        display: block;
+        min-height: 128px;
+        padding: 0 16px 16px;
+        box-sizing: border-box;
+        width: 100%;
+        position: relative;
+        @apply(--layout-flex);
+      }
+
+      :host canvas {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+      } </style> <canvas id="chart" width="{{width}}" height="{{height}}"></canvas> </template> <script> Polymer({
+      is: "duma-chart",
+
+      properties: {
+
+        type: String,
+        data: Object,
+
+        options: {
+          type: Object,
+          observer: "_updateOptions"
+        },
+
+        width: {
+          type: Number,
+          value: 400
+        },
+
+        height: {
+          type: Number,
+          value: 400
+        },
+
+        chart: Object
+      },
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      listeners: {
+        "chart.click": "_click",
+        "iron-resize": "_resize"
+      },
+
+      attached: function () {
+        Chart.defaults.global.maintainAspectRatio = false;
+        Chart.defaults.global.responsive = true;
+        
+        Chart.defaults.global.defaultFontColor = "<%= theme.PRIMARY_TEXT_COLOR %>";
+        Chart.defaults.global.defaultFontFamily = "'Roboto', 'Noto', sans-serif";
+        Chart.defaults.global.defaultFontSize = 12;
+        Chart.defaults.global.defaultFontStyle = 400; 
+        
+        Chart.defaults.global.title.fontSize = 16;
+        Chart.defaults.global.title.fontStyle = 400;
+        Chart.defaults.global.title.padding = 8;
+        
+        Chart.defaults.global.tooltips.bodySpacing = 0;
+        Chart.defaults.global.tooltips.titleFontColor = "<%= theme.PRIMARY_TEXT_COLOR %>";
+        Chart.defaults.global.tooltips.bodyFontColor = "<%= theme.SECONDARY_TEXT_COLOR %>";
+        Chart.defaults.global.tooltips.caretSize = 6;
+        Chart.defaults.global.tooltips.cornerRadius = 2;
+        Chart.defaults.global.tooltips.titleSpacing = 0;
+        Chart.defaults.global.tooltips.titleMarginBottom = 10;
+        Chart.defaults.global.tooltips.yPadding = 12;
+        Chart.defaults.global.tooltips.xPadding = 8;
+        Chart.defaults.global.tooltips.footerSpacing = 0;
+        Chart.defaults.global.tooltips.footerMarginTop = 0;
+        Chart.defaults.global.tooltips.backgroundColor = "<%= theme.PRIMARY_BACKGROUND_COLOR %>";
+
+        Chart.defaults.pie.legend.position = "left";
+        Chart.defaults.doughnut.cutoutPercentage = "75";
+        Chart.defaults.global.legend.labels.fontSize = 12;
+        Chart.defaults.global.legend.labels.boxWidth = 16; 
+        //Chart.defaults.global.legend.display = false;
+        Chart.defaults.global.scaleLineColor = "#fff";
+        
+        Chart.defaults.scale.gridLines.display = true;
+        Chart.defaults.scale.gridLines.drawBorder = true;
+        Chart.defaults.scale.gridLines.color = "<%= theme.DIVIDER_COLOR %>";
+        Chart.defaults.scale.gridLines.zeroLineColor = "rgba(255, 255, 255, 0)";
+
+        Chart.defaults.bar.scales.xAxes[0].gridLines.display = false;
+        
+        Chart.defaults.horizontalBar.scales.yAxes[0].gridLines.display = false;
+        
+        Chart.defaults.global.elements.point.radius = 4;
+        
+        Chart.defaults.line.fill = false;    
+          
+        this._createChart(this.type, this.data, this.options);
+      },	        
+
+      observers: [
+        "_updateCaller(type, data.*)"
+      ],
+
+      _updateCaller: function (type, data) {
+        this._updateChart(type, data.base);
+      },
+
+      _resize: function () {
+        if (this.chart) {
+          this.chart.resize();
+        }
+      },
+
+      _click: function (e) {
+        var element;
+        try {
+          element = this.chart.getElementAtEvent(e);
+        } catch (e) {
+          return;
+        }
+
+        if (element.length > 0) {
+          element = element[0]
+          var label = this.chart.data.labels[element._index];
+          var value = this.chart.data.datasets[element._datasetIndex].data[element._index];
+          this.fire("chartClick", {
+            label: label,
+            value: value,
+            datasetIndex: element._datasetIndex,
+            index: element._index
+          });
+        } 
+      },
+
+      _createChart: function (type, data, options) {
+        if (this.chart) {
+          this.chart.destroy();
+        }
+        this.chart = new Chart(this.$$("#chart"), {
+          type: type,
+          data: data,
+          options: options
+        });
+      },
+
+      _updateChart: function (type, data) {
+        var options = this.options;
+        if (this.chart) {
+          if (this.chart.config.type !== type) {
+            this._createChart(type, data, options);
+          } else {
+
+            var datasetsMetaData = [];
+            for (var i = 0; i <  this.chart.data.datasets.length; i++) {
+              datasetsMetaData.push(this.chart.data.datasets[i]._meta);
+            }
+
+            for (var i = 0; i < datasetsMetaData.length && i < data.datasets.length; i++) {
+              data.datasets[i]._meta = datasetsMetaData[i];
+            }
+          
+            for (var key in data) {
+              if (data.hasOwnProperty(key)) {
+                this.chart.data[key] = data[key];
+              }
+            }
+            
+            for (var key in this.chart.data) {
+              if (this.chart.data.hasOwnProperty(key)) {
+                if (!data.hasOwnProperty(key)) {
+                  delete this.chart.data[key];
+                }
+              }
+            }
+
+            this.chart.update();
+          }
+        }
+      },
+
+      _updateOptions: function () {
+        if (this.chart) {
+          this.redraw();
+        }
+      },
+
+      update: function () {
+        this._updateChart(this.type, this.data, this.options);
+      },
+
+      redraw: function () {
+        this._createChart(this.type, this.data, this.options);
+      }
+    }); </script> </dom-module> 
