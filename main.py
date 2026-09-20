@@ -48,7 +48,7 @@ def decrypt( file ):
 			osck=osck_list[board_name]
 		else:
 			print("No OSCK for board: "+board_name)
-			exit(1)
+			return None
 		payloadstart = struct.unpack_from(">H", globalheader, 0x2A)[0]
 		datafile.seek(payloadstart)
 		data = datafile.read()
