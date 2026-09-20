@@ -1,0 +1,109 @@
+#!/bin/sh
+
+LOGFILE=/var/log/lpc.log
+
+#To avoid migration when RTFD: the idea is only migration the dir will be set on .sh script, when RTFD, it will not exist.
+if [[ ! -f /overlay/legacy_conversion ]]; then
+	echo "No legacy conversion needed" >$LOGFILE
+	return 0
+fi
+
+userini=/overlay/$(readlink /overlay/config-bank-lastboot| awk -F"/" '{print $3}')/dl/user.ini
+echo "user.ini=$userini" >>$LOGFILE
+[ -f $userini ] || echo "$userini not present" >>$LOGFILE
+/usr/bin/lua /usr/lib/lua/tch/configmigration/main.lua "$userini" 2>>$LOGFILE
+
+# UCI default script only accept shell script (not lua)...
+/usr/bin/lua <<EOT >>$LOGFILE
+require("lsqlite3")
+
+local function insertTransferCompleteMsg( db, connection_key, url)
+	-- Insert message in order to trigger TransferComplete message
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","State","0");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","SubState","0");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","FileType","1 Firmware Upgrade Image");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","URL","' .. url .. '");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","Username","");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","Password","");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","DelaySeconds","");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","TimeStamp","0");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","FaultCode","0");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","FaultString","");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","StartTime","0001-01-01T00:00:00Z");')
+	db:exec('INSERT INTO "tidkv" VALUES("transfer","' .. connection_key .. '","CompleteTime","0001-01-01T00:00:00Z");')
+end
+
+-- To avoid sending '0 BOOTSTRAP' two times, 'BootStrapped' value should be updated in the database.
+local function insertRunTimeVarMsg(db, connection_key, bootstrapped)
+	db:exec('INSERT INTO "tidkv" VALUES("runtimevar","","BootStrapped","' .. bootstrapped .. '");')
+end
+
+local function printDatabaseContent( db )
+	db:exec('select * from tidkv', function (ud, ncols, values, names)
+		print(unpack(values))
+		return sqlite3.OK
+		end
+	)
+end
+
+local ck_file=io.open("/proc/banktable/legacy_upgrade/key", "r")
+if ck_file ~= nil then
+
+	db = sqlite3.open('/etc/cwmpd.db') --create or open an existing db
+
+	-- Check if database exist, if not, create the table holding cwmpd information
+	table_found=false
+	db:exec([[select * from sqlite_master where name='tidkv' and type='table';]],
+		function(...)
+			table_found=true
+			return 0
+		end
+	)
+	if not table_found then
+		db:exec('CREATE TABLE tidkv (type TEXT NOT NULL,  id TEXT NOT NULL,  key TEXT NOT NULL,  value TEXT,  PRIMARY KEY (type, id, key));')
+		db:exec('PRAGMA user_version=1;')
+	end
+
+	-- Get Information from RAW storage (see NG-16973)
+	connkey = ck_file:read("*all")
+	ck_file:close()
+
+	-- Get URL from RAW storage (needed by CWMPd even if doesn't do anything with it)
+	local url_file=io.open("/proc/banktable/legacy_upgrade/url", "r")
+	url=url_file:read("*all")
+	url_file:close()
+
+	-- Trigger TransferComplete message to close TR-069 connection
+	insertTransferCompleteMsg( db, connkey, url)
+
+    -- Update the runtimevar in the database with BootStrapped value.
+	local cursor = require("uci").cursor()
+	local bootstrap = cursor:get("cwmpd", "cwmpd_config", "bootstrap")
+    if (bootstrap == "enabled") then
+        insertRunTimeVarMsg (db, connkey, cursor:get("cwmpd", "cwmpd_config", "acs_url"))
+    end
+
+	db:close()
+    -- cursor:delete("cwmpd", "cwmpd_config", "bootstrap")
+	cursor:commit("cwmpd")
+
+end
+
+EOT
+
+# Only run for legacy to homeware upgrade, simulate homeware to homeware upgrade
+# The behaviour should always line up with /usr/lib/cwmpd/transfers/upgrade.sh
+if [ -f /proc/banktable/legacy_upgrade/key ]; then
+  CONFIG=cwmp_transfer
+  touch /etc/config/$CONFIG
+  id=$(uci add $CONFIG transfer)
+  uci rename $CONFIG.$id=$id
+  uci set $CONFIG.$id.started="yes"
+  uci set $CONFIG.$id.id=$(cat /proc/banktable/legacy_upgrade/key | hexdump -v -e '/1 "%02X"')
+  uci commit $CONFIG
+fi
+
+rm /overlay/legacy_conversion
+if [ -x /usr/lib/cwmpd/transfers/rollback_check.sh ]; then
+	/usr/lib/cwmpd/transfers/rollback_check.sh
+fi

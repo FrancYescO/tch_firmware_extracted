@@ -1,0 +1,81 @@
+local Multi_Services_X_000E50_Internet_ = {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_Internet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      WANConnection = {
+        access = "readOnly",
+        type = "string",
+      },
+      DMZEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+
+local ucihelper = mapper("ucihelper")
+local wanconn = require("transformer.shared.wanconnection")
+local resolve = resolve
+local commitapply = commitapply
+
+local uciswitch = require('transformer.shared.uciswitch')
+local switcher = uciswitch.switcher('/etc/dmzcontrol/enable', commitapply)
+
+local cwmpd = { config = "cwmpd", sectionname = "cwmpd_config", option = "interface", default = "wan" }
+local function get_cwmpd_interface()
+	return ucihelper.get_from_uci(cwmpd)
+end
+
+Multi_Services_X_000E50_Internet_.get = {
+    WANConnection = function(mapping, paramname, key)
+        local if_cwmp = get_cwmpd_interface()
+        if mapping.objectType.name:match('^Device%.') then
+            return resolve('Device.IP.Interface.{i}.', if_cwmp) or ""
+        end
+        local connkey, status, bridge_key = wanconn.get_connection_key(if_cwmp)
+        connkey = connkey or bridge_key
+        if connkey and status then
+            if status.proto == "pppoe" or status.proto == "pppoa" then
+                return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", connkey) or ""
+            else
+                return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", connkey) or ""
+            end
+        end
+        return ""
+    end,
+    DMZEnable = function(mapping, paramname, key)
+      return switcher:isEnabled() and "1" or "0"
+    end,
+}
+
+Multi_Services_X_000E50_Internet_.set = {
+    DMZEnable = function(_, _, value)
+      local enable = value=="1"
+      if enable == switcher:isEnabled() then
+        return --nothing to do
+      end
+      if not switcher:enable(enable) then
+        return nil, "failed to switch"
+      end
+      commitapply:newset("rpc.network.dmz.enabled")
+    end,
+}
+
+Multi_Services_X_000E50_Internet_.commit = function()
+    switcher:commit()
+end
+
+Multi_Services_X_000E50_Internet_.revert = function()
+    switcher:revert()
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_Internet_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

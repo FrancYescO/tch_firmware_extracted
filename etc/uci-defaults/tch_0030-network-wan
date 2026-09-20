@@ -1,0 +1,312 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+# /etc/config/network
+
+uci set network.wan=interface
+uci set network.wan.auto='0'
+uci set network.wan.proto='dhcp'
+uci set network.wan.reqopts='1 3 6 15 33 42 51 121 125 249'
+uci set network.wan.release='1'
+uci set network.wan.iface6rd='6rd'
+uci set network.wan.mtu6rd='1480'
+uci set network.wan.vendorid='LongLeaseTime'
+uci set network.wan.ip4table='main'
+n=`uci get env.var.prod_number`'-CP'`uci get env.rip.serial`'-'`uci get version.@version[0].version | cut -c 1-17`
+uci set network.wan.hostname="$n"
+uci set network.wan.dns_metric='0'
+
+uci set network.wan6=interface
+uci set network.wan6.ifname='@wan'
+uci set network.wan6.proto='dhcpv6'
+uci set network.wan6.reqopts='23 25'
+uci set network.wan6.noslaaconly='1'
+uci set network.wan6.dns_metric='1'
+uci set network.wan6.auto='0'
+
+uci set network.wwan=interface
+uci set network.wwan.auto='1'
+uci set network.wwan.metric='10'
+
+uci set network.iptv=interface
+uci set network.iptv.auto='0'
+uci set network.iptv.proto='dhcp'
+uci set network.iptv.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.iptv.release='1'
+uci set network.iptv.iface6rd='0'
+uci set network.iptv.vendorid='IPTV_RGW_PRIV'
+uci set network.iptv.ip4table='iptv'
+uci set network.iptv.dnsset='iptv'
+
+uci set network.voip=interface
+uci set network.voip.auto='0'
+uci set network.voip.proto='dhcp'
+uci set network.voip.ip4table='voip'
+uci set network.voip.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.voip.release='1'
+uci set network.voip.iface6rd='0'
+uci set network.voip.vendorid='tel-002-'
+uci set network.voip.dnsset='voip'
+
+uci set network.mgmt=interface
+uci set network.mgmt.auto='0'
+uci set network.mgmt.proto='dhcp'
+uci set network.mgmt.initboot='1'
+uci set network.mgmt.ip4table='mgmt'
+uci set network.mgmt.reqopts='1 3 6 15 33 42 43 51 121 249'
+uci set network.mgmt.release='1'
+uci set network.mgmt.iface6rd='0'
+uci set network.mgmt.dnsset='mgmt'
+
+uci set network.gre=interface
+uci set network.gre.peeraddr='213.64.234.83'
+uci set network.gre.mtu='1578'
+uci set network.gre.df='1'
+uci set network.gre.zone='wan'
+uci set network.gre.tunlink='wan'
+uci set network.gre.ttl='100'
+uci set network.gre.proto='gretap'
+uci set network.gre.network='hotspot'
+
+uci set network.phy_eth4=device
+uci set network.phy_eth4.name='eth4'
+uci set network.phy_eth4.mtu='1500'
+
+uci set network.phy_ptm0=device
+uci set network.phy_ptm0.name='ptm0'
+uci set network.phy_ptm0.mtu='1500'
+
+uci set network.vlan_data=device
+uci set network.vlan_data.ifname='eth4'
+uci set network.vlan_data.name='phy_eth4'
+
+uci set network.phy_atm=device
+uci set network.phy_atm.name='atm_wan'
+uci set network.phy_atm.mtu='1500'
+
+uci set network.vlan_iptv=device
+uci set network.vlan_iptv.type='8021q'
+uci set network.vlan_iptv.ifname='eth4'
+uci set network.vlan_iptv.name='vlan_iptv'
+uci set network.vlan_iptv.vid='845'
+uci set network.vlan_iptv.macaddr=`uci get env.var.local_wifi_mac`
+uci set network.vlan_iptv.mtu='1500'
+
+uci set network.vlan_voip=device
+uci set network.vlan_voip.type='8021q'
+uci set network.vlan_voip.ifname='eth4'
+uci set network.vlan_voip.name='vlan_voip'
+uci set network.vlan_voip.vid='855'
+uci set network.vlan_voip.macaddr=`uci get env.rip.wifi_mac`
+uci set network.vlan_voip.mtu='1500'
+
+uci set network.vlan_mgmt=device
+uci set network.vlan_mgmt.type='8021q'
+uci set network.vlan_mgmt.ifname='eth4'
+uci set network.vlan_mgmt.name='vlan_mgmt'
+uci set network.vlan_mgmt.vid='294'
+uci set network.vlan_mgmt.macaddr=`uci get env.var.local_eth_mac`
+uci set network.vlan_mgmt.mtu='1500'
+
+uci commit network
+
+# /etc/config/mwan
+# mwan requires globals section
+uci set mwan.globals=globals
+
+uci set mwan.main_only=policy
+uci set mwan.main_only.interface='wan'
+
+uci set mwan.iptv_only=policy
+uci set mwan.iptv_only.interface='iptv'
+
+uci set mwan.voip_only=policy
+uci set mwan.voip_only.interface='voip'
+
+uci set mwan.mgmt_only=policy
+uci set mwan.mgmt_only.interface='mgmt'
+
+uci set mwan.verimatrixse='rule'
+uci set mwan.verimatrixse.src='lan'
+uci set mwan.verimatrixse.dest_ip='213.64.59.0/24'
+uci set mwan.verimatrixse.policy='main_only'
+
+uci set mwan.tobenamed1='rule'
+uci set mwan.tobenamed1.src='lan'
+uci set mwan.tobenamed1.dest_ip='194.22.194.0/24'
+uci set mwan.tobenamed1.policy='main_only'
+
+uci set mwan.tobenamed2='rule'
+uci set mwan.tobenamed2.src='lan'
+uci set mwan.tobenamed2.dest_ip='194.197.185.0/25'
+uci set mwan.tobenamed2.policy='main_only'
+
+uci set mwan.igloo1='rule'
+uci set mwan.igloo1.src='lan'
+uci set mwan.igloo1.dest_ip='194.236.188.109'
+uci set mwan.igloo1.policy='main_only'
+
+uci set mwan.igloo2='rule'
+uci set mwan.igloo2.src='lan'
+uci set mwan.igloo2.dest_ip='194.236.188.129'
+uci set mwan.igloo2.policy='main_only'
+
+uci set mwan.igloo3='rule'
+uci set mwan.igloo3.src='lan'
+uci set mwan.igloo3.dest_ip='194.236.188.130'
+uci set mwan.igloo3.policy='main_only'
+
+uci set mwan.igloo4='rule'
+uci set mwan.igloo4.src='lan'
+uci set mwan.igloo4.dest_ip='194.236.188.131'
+uci set mwan.igloo4.policy='main_only'
+
+uci set mwan.igloo5='rule'
+uci set mwan.igloo5.src='lan'
+uci set mwan.igloo5.dest_ip='194.236.188.135'
+uci set mwan.igloo5.policy='main_only'
+
+uci set mwan.igloo6='rule'
+uci set mwan.igloo6.src='lan'
+uci set mwan.igloo6.dest_ip='194.236.188.136'
+uci set mwan.igloo6.policy='main_only'
+
+uci set mwan.iptvprodlog='rule'
+uci set mwan.iptvprodlog.src='lan'
+uci set mwan.iptvprodlog.dest_ip='194.23.0.76'
+uci set mwan.iptvprodlog.policy='main_only'
+
+uci set mwan.iptvstats='rule'
+uci set mwan.iptvstats.src='lan'
+uci set mwan.iptvstats.dest_ip='194.23.0.77'
+uci set mwan.iptvstats.policy='main_only'
+
+uci set mwan.tobenamed3='rule'
+uci set mwan.tobenamed3.src='lan'
+uci set mwan.tobenamed3.dest_ip='194.23.1.64/26'
+uci set mwan.tobenamed3.policy='main_only'
+
+uci set mwan.tobenamed4='rule'
+uci set mwan.tobenamed4.src='lan'
+uci set mwan.tobenamed4.dest_ip='195.67.199.0/24'
+uci set mwan.tobenamed4.policy='main_only'
+
+uci set mwan.tobenamed5='rule'
+uci set mwan.tobenamed5.src='lan'
+uci set mwan.tobenamed5.dest_ip='81.236.58.43'
+uci set mwan.tobenamed5.policy='main_only'
+
+uci set mwan.tobenamed6='rule'
+uci set mwan.tobenamed6.src='lan'
+uci set mwan.tobenamed6.dest_ip='81.236.58.45'
+uci set mwan.tobenamed6.policy='main_only'
+
+uci set mwan.iptvsearchprod='rule'
+uci set mwan.iptvsearchprod.src='lan'
+uci set mwan.iptvsearchprod.dest_ip='81.236.58.18'
+uci set mwan.iptvsearchprod.policy='main_only'
+
+uci set mwan.iptvsearchpilot='rule'
+uci set mwan.iptvsearchpilot.src='lan'
+uci set mwan.iptvsearchpilot.dest_ip='81.236.58.19'
+uci set mwan.iptvsearchpilot.policy='main_only'
+
+uci set mwan.iptvloginpilot='rule'
+uci set mwan.iptvloginpilot.src='lan'
+uci set mwan.iptvloginpilot.dest_ip='81.236.63.56'
+uci set mwan.iptvloginpilot.policy='main_only'
+
+uci set mwan.iptvloginprod='rule'
+uci set mwan.iptvloginprod.src='lan'
+uci set mwan.iptvloginprod.dest_ip='81.236.63.36'
+uci set mwan.iptvloginprod.policy='main_only'
+
+uci set mwan.iptvapipilot='rule'
+uci set mwan.iptvapipilot.src='lan'
+uci set mwan.iptvapipilot.dest_ip='81.236.63.100'
+uci set mwan.iptvapipilot.policy='main_only'
+
+uci set mwan.iptvapiprod='rule'
+uci set mwan.iptvapiprod.src='lan'
+uci set mwan.iptvapiprod.dest_ip='81.236.63.98'
+uci set mwan.iptvapiprod.policy='main_only'
+
+
+
+uci set mwan.acsreffileserv='rule'
+uci set mwan.acsreffileserv.dest_ip='10.54.3.204/32'
+uci set mwan.acsreffileserv.policy='main_only'
+
+uci set mwan.acsrefloadb='rule'
+uci set mwan.acsrefloadb.dest_ip='10.54.3.210/32'
+uci set mwan.acsrefloadb.policy='main_only'
+
+uci set mwan.acsprodloadb='rule'
+uci set mwan.acsprodloadb.dest_ip='192.168.21.0/24'
+uci set mwan.acsprodloadb.policy='main_only'
+
+uci set mwan.tobenamed7='rule'
+uci set mwan.tobenamed7.dest_ip='192.168.8.0/25'
+uci set mwan.tobenamed7.policy='main_only'
+
+uci set mwan.teliainternal1='rule'
+uci set mwan.teliainternal1.dest_ip='131.116.21.0/25'
+uci set mwan.teliainternal1.policy='main_only'
+
+uci set mwan.teliainternal2='rule'
+uci set mwan.teliainternal2.dest_ip='131.116.22.224/27'
+uci set mwan.teliainternal2.policy='main_only'
+
+uci set mwan.remoteassist='rule'
+uci set mwan.remoteassist.dest_ip='131.116.67.224/26'
+uci set mwan.remoteassist.policy='main_only'
+
+
+
+uci set mwan.hostapdhost='host'
+uci set mwan.hostapdhost.path='/usr/sbin/hostapd'
+uci set mwan.hostapdhost.policy='main_only'
+
+uci set mwan.dhcpmgmthost='host'
+uci set mwan.dhcpmgmthost.arg='odhcpc-vlan_mgmt'
+uci set mwan.dhcpmgmthost.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpmgmthost.policy='mgmt_only'
+
+uci set mwan.dhcpiptvhost='host'
+uci set mwan.dhcpiptvhost.arg='odhcpc-vlan_iptv'
+uci set mwan.dhcpiptvhost.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpiptvhost.policy='iptv_only'
+
+uci set mwan.dhcpvoiphost='host'
+uci set mwan.dhcpvoiphost.arg='odhcpc-vlan_voip'
+uci set mwan.dhcpvoiphost.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpvoiphost.policy='voip_only'
+
+uci set mwan.dhcpmgmthostatm='host'
+uci set mwan.dhcpmgmthostatm.arg='odhcpc-atm_mgmt'
+uci set mwan.dhcpmgmthostatm.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpmgmthostatm.policy='mgmt_only'
+
+uci set mwan.dhcpiptvhostatm='host'
+uci set mwan.dhcpiptvhostatm.arg='odhcpc-atm_iptv'
+uci set mwan.dhcpiptvhostatm.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpiptvhostatm.policy='iptv_only'
+
+uci set mwan.dhcpvoiphostatm='host'
+uci set mwan.dhcpvoiphostatm.arg='odhcpc-atm_voip'
+uci set mwan.dhcpvoiphostatm.path='/usr/sbin/odhcpc'
+uci set mwan.dhcpvoiphostatm.policy='voip_only'
+
+uci set mwan.cwmpdhost='host'
+uci set mwan.cwmpdhost.path='/usr/bin/cwmpd'
+uci set mwan.cwmpdhost.policy='main_only'
+
+uci set mwan.dropbearhost='host'
+uci set mwan.dropbearhost.arg='mgmt'
+uci set mwan.dropbearhost.path='/usr/sbin/dropbear'
+uci set mwan.dropbearhost.policy='main_only'
+
+uci commit mwan
+
+exit 0

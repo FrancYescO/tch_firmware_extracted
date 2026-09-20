@@ -1,0 +1,228 @@
+debug_on
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'dyndns.com') then n:set('ddns','myddns_ipv4','service_name','dyn.com') end n:commit('ddns')\"
+
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.ignore
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('dhcp','lan','ignore') if (v == '1') then n:set('dhcp','lan','dhcpv4','disabled') else n:set('dhcp','lan','dhcpv4','server') end n:commit('dhcp')\"
+
+uci_set dhcp.Guest1_private.start
+uci_set dhcp.Guest1_private.leasetime
+uci_set dhcp.Guest1_private.limit
+
+uci_set dhcp.Guest1_5GHz_private.start
+uci_set dhcp.Guest1_5GHz_private.leasetime
+uci_set dhcp.Guest1_5GHz_private.limit
+
+uci_section firewall.@userrule
+uci_section firewall.@userrule_v6
+uci_section firewall.@fwconfig
+uci_section firewall.@userredirect
+
+uci_set firewall.@rule[16].enabled firewall.@rule[19].enabled
+uci_section firewall.@zone id=name
+
+uci_section dhcp.@host id=name
+
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_set firewall.userredirects.enabled
+uci_set firewall.defaultoutgoing.target
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') u=o:get('firewall','laxrules','enabled') v=o:get('firewall','highrules','enabled') if (u == '1') then n:set('firewall','fwconfig','level','lax') elseif (v == '1') then n:set('firewall','fwconfig','level','high') else n:set('firewall','fwconfig','level','normal') end n:commit('firewall')\"
+
+uci_set ipsec.l2tp.enabled
+uci_set ipsec.l2tp.pre_shared_key
+
+uci_set l2tpipsecserver.global.enable
+
+uci_section l2tpipsecserver.@l2tp_user
+
+uci_set minidlna.config.enabled dlnad.config.enabled
+uci_set minidlna.config.friendly_name dlnad.config.friendly_name
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+
+uci_set mmpbx.global.enabled
+uci_set mmpbxrvsipnet.sip_net.cac
+uci_set mmpbxrvsipnet.sip_net.primary_proxy
+uci_set mmpbxrvsipnet.sip_net.primary_registrar
+
+uci_section mmpbx.@profile
+uci_section mmpbx.@incoming_map
+uci_section mmpbx.@outgoing_map
+uci_section mmpbx.@service
+
+
+uci_section mmpbxbrcmdectdev.@base
+uci_section mmpbxbrcmdectdev.@device
+uci_section mmpbxrvsipnet.@profile
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+copy_file /etc/griffinnvs.bin
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_set network.lan.ipaddr
+uci_set network.lan.netmask
+uci_set network.lan.ipv6
+uci_set network.lan.ifname
+
+uci_set network.Guest1.ipv6
+uci_set network.Guest1.netmask
+uci_set network.Guest1.ipaddr
+
+uci_set network.Guest1_5GHz.ipv6
+uci_set network.Guest1_5GHz.netmask
+uci_set network.Guest1_5GHz.ipaddr
+
+uci_set network.vlan_eth3.vid
+
+uci_set network.phy_eth3.mtu
+
+uci_set network.wan.ifname
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','wan','ifname') if (v ~= 'eth4' and v ~= 'atm_wan' and v ~= 'ptm0') then n:set('network','wan','type','bridge') end n:commit('network')\"
+
+uci_set network.vlan_iptv.vid
+uci_set network.vlan_voip.vid
+uci_set network.vlan_mgmt.vid
+
+inline_sh_cmd uci delete network.@switch_vlan[1]
+inline_sh_cmd uci delete network.@switch_vlan[0]
+
+uci_section network.@switch_vlan id=vlan
+
+uci_set osgi.config.enabled
+
+uci_set parental.general.enable
+uci_set parental.general.exclude
+
+uci_section parental.@URLfilter
+
+uci_section tod.@host
+
+uci_set samba.@samba[0].name samba.samba.name
+uci_set samba.@samba[0].workgroup samba.samba.workgroup
+uci_set samba.@samba[0].description samba.samba.description
+uci_set samba.@samba[0].enabled samba.samba.enabled
+uci_set samba.@samba[0].enabled samba.samba.filesharing
+
+uci_set samba.samba.name
+uci_set samba.samba.workgroup
+uci_set samba.samba.description
+uci_set samba.samba.enabled
+uci_set samba.samba.filesharing
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+
+copy_web_users
+
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+
+uci_set wireless.radio_2G.state
+uci_set wireless.radio_2G.standard
+uci_set wireless.radio_2G.channel
+uci_set wireless.radio_2G.channelwidth
+uci_set wireless.radio_2G.sgi
+uci_set wireless.radio_2G.cdd
+uci_set wireless.radio_2G.stbc
+
+uci_set wireless.radio_5G.state
+uci_set wireless.radio_5G.channel
+uci_set wireless.radio_5G.channelwidth
+uci_set wireless.radio_5G.sgi
+uci_set wireless.radio_5G.cdd
+uci_set wireless.radio_5G.stbc
+
+uci_set wireless.wl0.ssid
+
+uci_set wireless.wl0_1.ssid
+
+uci_set wireless.wl0_2.ssid
+
+uci_set wireless.wl1.ssid
+
+uci_set wireless.wl1_1.ssid
+
+uci_set wireless.ap0.state
+uci_set wireless.ap0.public
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('wireless','ap0','security_mode') if (v ~= 'none' and v ~= 'wpa2-psk') then n:set('wireless','ap0','security_mode','wpa2-psk') else n:set('wireless','ap0','security_mode',v) end n:commit('wireless')\"
+uci_set wireless.ap0.wps_state
+uci_set wireless.ap0.wep_key
+uci_set wireless.ap0.wpa_psk_key
+uci_set wireless.ap0.acl_mode
+uci_set wireless.ap0.acl_accept_list
+uci_set wireless.ap0.acl_deny_list
+
+uci_set wireless.ap1.state
+uci_set wireless.ap1.public
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('wireless','ap1','security_mode') if (v ~= 'none' and v ~= 'wpa2-psk') then n:set('wireless','ap1','security_mode','wpa2-psk') else n:set('wireless','ap1','security_mode',v) end n:commit('wireless')\"
+uci_set wireless.ap1.wps_state
+uci_set wireless.ap1.wep_key
+uci_set wireless.ap1.wpa_psk_key
+uci_set wireless.ap1.acl_mode
+uci_set wireless.ap1.acl_accept_list
+uci_set wireless.ap1.acl_deny_list
+
+uci_set wireless.ap2.state
+
+uci_set wireless.ap3.state
+uci_set wireless.ap3.public
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('wireless','ap3','security_mode') if (v ~= 'none' and v ~= 'wpa2-psk') then n:set('wireless','ap3','security_mode','wpa2-psk') else n:set('wireless','ap3','security_mode',v) end n:commit('wireless')\"
+uci_set wireless.ap3.wps_state
+uci_set wireless.ap3.wep_key
+uci_set wireless.ap3.wpa_psk_key
+uci_set wireless.ap3.acl_mode
+uci_set wireless.ap3.acl_accept_list
+uci_set wireless.ap3.acl_deny_list
+
+uci_set wireless.ap4.state
+uci_set wireless.ap4.public
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('wireless','ap4','security_mode') if (v ~= 'none' and v ~= 'wpa2-psk') then n:set('wireless','ap4','security_mode','wpa2-psk') else n:set('wireless','ap4','security_mode',v) end n:commit('wireless')\"
+uci_set wireless.ap4.wps_state
+uci_set wireless.ap4.wep_key
+uci_set wireless.ap4.wpa_psk_key
+uci_set wireless.ap4.acl_mode
+uci_set wireless.ap4.acl_accept_list
+uci_set wireless.ap4.acl_deny_list
+
+uci_set wireless.ap5.state
+uci_section wireless.ap5
+uci_section wireless.ap5_auth0
+uci_section wireless.ap5_acct0
+
+
+
