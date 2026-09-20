@@ -1,0 +1,270 @@
+#!/bin/sh
+subnetmask2prefix()
+{
+    echo $1 | awk '
+    function count1s(N){
+        c = 0
+        for(i=0; i<8; ++i) if(and(2**i, N)) ++c
+        return c
+    }
+    function subnetmaskToPrefix(subnetmask) {
+        split(subnetmask, v, ".")
+        return count1s(v[1]) + count1s(v[2]) + count1s(v[3]) + count1s(v[4])
+    }
+    {
+        print("/" subnetmaskToPrefix($1))
+    }'
+}
+uci set mmpbxrvsipnet.sip_net.voice_uplink_rate_limit='130'
+uci set mmpbxrvsipnet.sip_net.voice_limit_qos_field='dscp'
+uci set mmpbxrvsipnet.sip_net.voice_limit_qos_value='cs0'
+uci set mmpbxrvsipnet.sip_net.switch_next_proxy_on_failure_response='0'
+uci set mmpbxrvsipnet.sip_net.dns_query_timeout='5000'
+uci set mmpbxrvsipnet.sip_net.conference_release_call_after_transfer='1'
+uci set mmpbxrvsipnet.sip_net.disconnect_on_bye_response='0'
+uci set mmpbxrvsipnet.sip_net.cancel_invite_timer='32000'
+uci commit mmpbxrvsipnet
+uci set network.vlan_ppp.vid='2'
+domainName=`uci get mmpbxrvsipnet.sip_net.domain_name`
+wansensingEnable=`uci get wansensing.global.enable`
+PPPUsername=`uci get network.ppp.username`
+PPPPassword=`uci get network.ppp.password`
+if [ "$domainName" == "uni-v1.tpg.com.au" ]; then
+  if [ "$wansensingEnable" == '1' ]; then
+    uci set xtm.atm_video='atmdevice'
+    uci set xtm.atm_video.ulp='eth'
+    uci set xtm.atm_video.vpi='8'
+    uci set xtm.atm_video.vci='34'
+    uci set xtm.atm_video.path='fast'
+    uci set xtm.atm_video.enc='llc'
+    uci set xtm.atm_video2='atmdevice'
+    uci set xtm.atm_video2.ulp='eth'
+    uci set xtm.atm_video2.vpi='9'
+    uci set xtm.atm_video2.vci='89'
+    uci set xtm.atm_video2.path='fast'
+    uci set xtm.atm_video2.enc='llc'
+    uci set xtm.atm_ipoe='atmdevice'
+    uci set xtm.atm_ipoe.ulp='eth'
+    uci set xtm.atm_ipoe.vpi='8'
+    uci set xtm.atm_ipoe.vci='33'
+    uci set xtm.atm_ipoe.path='fast'
+    uci set xtm.atm_ipoe.enc='llc'
+    uci del network.wan
+    uci set network.wan='interface'
+    uci set network.wan.proto='pppoe'
+    uci set network.wan.metric='10'
+    uci set network.wan.ipv6='1'
+    uci set network.wan.username=$PPPUsername
+    uci set network.wan.password=$PPPPassword
+    uci set network.wan.keepalive='4,20'
+    uci set network.ppp.auto='0'
+    uci set network.ppp.auto=0
+    uci del network.ppp.ifname
+    uci set network.pppv=interface
+    uci set network.pppv.proto='pppoe'
+    uci set network.pppv.metric='10'
+    uci set network.pppv.username=$PPPUsername
+    uci set network.pppv.password=$PPPPassword
+    uci set network.pppv.keepalive='4,20'
+    uci set network.pppv.ipv6='1'
+    uci del network.ipoe.ifname
+    uci del network.ipoe.ip4table
+    uci set network.video=interface
+    uci set network.video.proto=static
+    uci set network.video.ipaddr=192.168.253.1
+    uci set network.video.netmask=255.255.255.0
+    uci set network.video.igmpversion=2
+    uci set network.video2=interface
+    uci set network.video2.proto=dhcp
+    uci set network.video2.release='1'
+    uci set network.video2.auto=1
+    uci set network.video2.igmpversion=2
+    uci set network.video6=interface
+    uci set network.video6.ifname=@video
+    uci set network.video6.proto=dhcpv6
+    uci set network.video6.reqopts='23 25'
+    uci set network.video6.reqaddress=none
+    uci set network.video6.noslaaconly=1
+    uci set network.vlan_ppp=device
+    uci set network.vlan_ppp.type='8021q'
+    uci set network.vlan_ppp.ifname='ptm0'
+    uci set network.vlan_ppp.name='vlan_ppp'
+    uci set network.vlan_ppp.vid='10'
+    uci set network.vlan_video=device
+    uci set network.vlan_video.type='8021q'
+    uci set network.vlan_video.ifname='ptm0'
+    uci set network.vlan_video.name='vlan_video'
+    uci set network.vlan_video.vid='13'
+    uci del network.voip
+    uci set network.atm_ipoe=device
+    uci set network.atm_ipoe.name='atm_ipoe'
+    uci set network.atm_ipoe.mtu='1500'
+    uci commit xtm
+    count=0
+    while [ `$(printf "uci get firewall.@zone[%d].name" $count)` ]
+    do
+      if [ `$(printf "uci get firewall.@zone[%d].name" $count)` == 'wan' ]; then
+        zone_network=`printf "firewall.@zone[%d].network" $count`
+        uci add_list ${zone_network}='video'
+        uci add_list ${zone_network}='video2'
+        uci add_list ${zone_network}='video6'
+      fi
+     count=`expr $count + 1`
+    done
+    uci set igmpproxy.video=interface
+    uci set igmpproxy.video.state='upstream'
+    uci set igmpproxy.video2=interface
+    uci set igmpproxy.video2.state='upstream'
+    uci commit igmpproxy
+  fi
+  uci del qos.Voice.pcp
+  uci del qos.CWMP
+  uci del_list qos.W_Q4.trafficid='9'
+  uci del_list qos.L_Q2.trafficid='9'
+  uci del_list qos.WMM_VO_Q0.trafficid='9'
+  count=0
+  while [ `$(printf "uci get qos.@reclassify[%d]._key" $count)` ]
+  do
+    if [ `$(printf "uci get qos.@reclassify[%d].target" $count)` == 'pcp_5' ]; then
+      uci del qos.@reclassify[$count]
+    fi
+    if [ `$(printf "uci get qos.@reclassify[%d].target" $count)` == 'CWMP' ]; then
+      uci del qos.@reclassify[$count]
+    fi
+    count=`expr $count + 1`
+  done
+  count=0
+  while [ `$(printf "uci get qos.@classify[%d]._key" $count)` ]
+  do
+    if [ `$(printf "uci get qos.@classify[%d].target" $count)` == 'Management' ]; then
+      if [ `$(printf "uci get qos.@classify[%d].proto" $count)` == 'udp' ]; then
+        uci set qos.@classify[$count].dstports='8881,30005,500,4500'
+      fi
+    fi
+    if [ `$(printf "uci get qos.@classify[%d].target" $count)` == 'CWMP' ]; then
+      if [ `$(printf "uci get qos.@classify[%d].proto" $count)` == 'tcp' ]; then
+        uci set qos.@classify[$count].target='Management'
+        uci set qos.@classify[$count].dstports='8881,30005'
+        uci set qos.@classify[$count].proto='tcp'
+      else
+        uci del qos.@classify[$count]
+      fi
+    fi
+    count=`expr $count + 1`
+  done
+  uci commit qos
+  count=0
+  while [ `$(printf "uci get mmpbx.@service[%d].type" $count)` ]
+  do
+    if [ `$(printf "uci get mmpbx.@service[%d].type" $count)` == 'CLIR' ]; then
+      uci set mmpbx.@service[$count].provisioned='0'
+    fi
+    if [ `$(printf "uci get mmpbx.@service[%d].type" $count)` == 'CONFERENCE' ]; then
+      uci set mmpbx.@service[$count].provisioned='1'
+      uci set mmpbx.@service[$count].activated='1'
+    fi
+    if [ `$(printf "uci get mmpbx.@service[%d].type" $count)` == 'HOLD' ]; then
+      uci set mmpbx.@service[$count].provisioned='1'
+      uci set mmpbx.@service[$count].activated='1'
+    fi
+    if [ `$(printf "uci get mmpbx.@service[%d].type" $count)` == 'MWI' ]; then
+      uci set mmpbx.@service[$count].provisioned='1'
+      uci set mmpbx.@service[$count].activated='1'
+    fi
+    if [ `$(printf "uci get mmpbx.@service[%d].type" $count)` == 'TRANSFER' ]; then
+      uci set mmpbx.@service[$count].provisioned='1'
+      uci set mmpbx.@service[$count].activated='1'
+    fi
+    count=`expr $count + 1`
+  done
+  profile0=$(uci get mmpbxrvsipnet.sip_profile_0.enabled)
+  profile1=$(uci get mmpbxrvsipnet.sip_profile_1.enabled)
+  if [ $(uci get env.rip.sw_flag) = "F2" ]; then
+    uci set mmpbxrvsipnet.sip_net.isp='Internode'
+    uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.internode.on.net'
+    uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.internode.on.net'
+    uci set mmpbxrvsipnet.sip_net.domain_name='sip.internode.on.net'
+  else
+    uci set mmpbxrvsipnet.sip_net.primary_proxy='sip.nsw.iinet.net.au'
+    uci set mmpbxrvsipnet.sip_net.primary_registrar='sip.nsw.iinet.net.au'
+    uci set mmpbxrvsipnet.sip_net.domain_name='iinetphone.iinet.net.au'
+  fi
+  ssid_prefix=$(uci get env.var.ssid_prefix)
+  uci set mmpbxrvsipnet.sip_net.isp=$ssid_prefix
+  uci set env.var.provisioning_code='Technicolor TG789vac v2'
+  uci commit env
+  uci commit mmpbxrvsipnet
+fi
+uci commit network
+
+lanIPaddr=`uci get network.lan.ipaddr``subnetmask2prefix $(uci get network.lan.netmask)`
+guestIPaddr=`uci get network.Guest1.ipaddr``subnetmask2prefix $(uci get network.Guest1.netmask)`
+guest5GIPaddr=`uci get network.Guest1_5GHz.ipaddr``subnetmask2prefix $(uci get network.Guest1_5GHz.netmask)`
+VLAN1=`uci get network.VLAN1.ipaddr``subnetmask2prefix $(uci get network.VLAN1.netmask)`
+VLAN2=`uci get network.VLAN2.ipaddr``subnetmask2prefix $(uci get network.VLAN2.netmask)`
+VLAN3=`uci get network.VLAN3.ipaddr``subnetmask2prefix $(uci get network.VLAN3.netmask)`
+count=0
+while [ `$(printf "uci get firewall.@zone[%d].name" $count)` ]
+do
+  if [ `$(printf "uci get firewall.@zone[%d].name" $count)` == 'wan' ]; then
+    masq_src=`printf "firewall.@zone[%d].masq_src" $count`
+    IP1=`uci get $masq_src | awk -F ' ' '{print $1}' `
+    IP2=`uci get $masq_src | awk -F ' ' '{print $2}' `
+    IP3=`uci get $masq_src | awk -F ' ' '{print $3}' `
+    IP4=`uci get $masq_src | awk -F ' ' '{print $4}' `
+    IP5=`uci get $masq_src | awk -F ' ' '{print $5}' `
+    IP6=`uci get $masq_src | awk -F ' ' '{print $6}' `
+    uci set ${masq_src}=''
+    uci add_list ${masq_src}=$lanIPaddr
+    uci add_list ${masq_src}=$guestIPaddr
+    uci add_list ${masq_src}=$guest5GIPaddr
+    if [ $VLAN1 != '/0' ]; then                       
+      if [ $VLAN1 = $IP1 ] || [ $VLAN1 = $IP2 ] || [ $VLAN1 = $IP3 ] || [ $VLAN1 = $IP4 ] || [ $VLAN1 = $IP5 ] || [ $VLAN1 = $IP6 ]; then
+        uci add_list ${masq_src}=$VLAN1               
+      fi                                              
+    fi                                   
+    if [ $VLAN2 != '/0' ]; then                                                                                                       
+      if [ $VLAN2 = $IP1 ] || [ $VLAN2 = $IP2 ] || [ $VLAN2 = $IP3 ] || [ $VLAN2 = $IP4 ] || [ $VLAN2 = $IP5 ] || [ $VLAN2 = $IP6 ]; then
+        uci add_list ${masq_src}=$VLAN2    
+      fi 
+    fi                         
+    if [ $VLAN3 != '/0' ]; then                                                                                                       
+      if [ $VLAN3 = $IP1 ] || [ $VLAN3 = $IP2 ] || [ $VLAN3 = $IP3 ] || [ $VLAN3 = $IP4 ] || [ $VLAN3 = $IP5 ] || [ $VLAN3 = $IP6 ]; then
+        uci add_list ${masq_src}=$VLAN3
+      fi   
+    fi   
+  fi
+  count=`expr $count + 1`
+done
+uci commit firewall
+nimda_user=$(uci get web.usr_nimda.name)
+if [ $nimda_user ]; then
+  uci delete web.usr_nimda
+  uci del_list web.default.users='usr_nimda'
+fi
+uci commit web
+count=0
+while [ `$(printf "uci get mmpbx.@codec_filter[%d].name" $count)` ]
+do
+  if [ `$(printf "uci get mmpbx.@codec_filter[%d].name" $count)` == 'G729' ]; then
+    exit 0
+  fi
+  count=`expr $count + 1`
+done
+count=0
+while [ `$(printf "uci get mmpbx.@codec_filter[%d].name" $count)` ]
+do
+  if [ `$(printf "uci get mmpbx.@codec_filter[%d].name" $count)` == 'G726-32' ]; then
+    uci set `$(printf "mmpbx.@codec_filter[%d].priority" $count)`='5'
+  fi
+  count=`expr $count + 1`
+done
+uci add mmpbx codec_filter
+uci set mmpbx.@codec_filter[-1].name='G729'
+uci set mmpbx.@codec_filter[-1].media_filter='media_filter_audio_generic'
+uci set mmpbx.@codec_filter[-1].allow='1'
+uci set mmpbx.@codec_filter[-1].priority='4'
+uci set mmpbx.@codec_filter[-1].remove_silence_suppression='1'
+uci set mmpbx.@codec_filter[-1].rtp_map='0'
+uci commit mmpbx
+exit 0

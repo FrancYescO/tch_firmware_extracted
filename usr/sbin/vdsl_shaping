@@ -1,0 +1,110 @@
+#!/bin/sh
+
+uci_remove_shaping() {
+	uci delete qos.W_Q0.mbr
+	uci delete qos.W_Q1.mbr
+	uci delete qos.W_Q2.mbr
+	uci delete qos.W_Q3.mbr
+	uci delete qos.W_Q4.mbr
+	uci delete qos.W_Q5.mbr
+	uci delete qos.W_Q6.mbr
+	uci delete qos.W_Q7.mbr
+
+	uci delete qos.W_Q0.pbr
+	uci delete qos.W_Q1.pbr
+	uci delete qos.W_Q2.pbr
+	uci delete qos.W_Q3.pbr
+	uci delete qos.W_Q4.pbr
+	uci delete qos.W_Q5.pbr
+	uci delete qos.W_Q6.pbr
+	uci delete qos.W_Q7.pbr
+
+	uci delete qos.W_Q0.mbs
+	uci delete qos.W_Q1.mbs
+	uci delete qos.W_Q2.mbs
+	uci delete qos.W_Q3.mbs
+	uci delete qos.W_Q4.mbs
+	uci delete qos.W_Q5.mbs
+	uci delete qos.W_Q6.mbs
+	uci delete qos.W_Q7.mbs
+	
+	uci commit qos
+}
+
+uci_add_shaping() {
+	mbr=$1
+	pbr=$2
+	mbs=$3
+
+	uci set qos.W_Q0.mbr=$mbr
+	uci set qos.W_Q1.mbr=$mbr
+	uci set qos.W_Q2.mbr=$mbr
+	uci set qos.W_Q3.mbr=$mbr
+	uci set qos.W_Q4.mbr=$mbr
+	uci set qos.W_Q5.mbr=$mbr
+	uci set qos.W_Q6.mbr=$mbr
+	uci set qos.W_Q7.mbr=$mbr
+
+	uci set qos.W_Q0.pbr=$pbr
+	uci set qos.W_Q1.pbr=$pbr
+	uci set qos.W_Q2.pbr=$pbr
+	uci set qos.W_Q3.pbr=$pbr
+	uci set qos.W_Q4.pbr=$pbr
+	uci set qos.W_Q5.pbr=$pbr
+	uci set qos.W_Q6.pbr=$pbr
+	uci set qos.W_Q7.pbr=$pbr
+
+	uci set qos.W_Q0.mbs=$mbs
+	uci set qos.W_Q1.mbs=$mbs
+	uci set qos.W_Q2.mbs=$mbs
+	uci set qos.W_Q3.mbs=$mbs
+	uci set qos.W_Q4.mbs=$mbs
+	uci set qos.W_Q5.mbs=$mbs
+	uci set qos.W_Q6.mbs=$mbs
+	uci set qos.W_Q7.mbs=$mbs
+
+	uci commit qos
+}
+
+if [ "$1" = "" ]; then
+	echo help:
+	echo "    vdsl_shaping set mbr pbr mbs"
+	echo "    vdsl_shaping get"
+fi
+
+
+if [ "$1" = "set" ]; then
+	mbr=$2
+	pbr=$3
+	mbs=$4
+	
+	if [ "$mbr" = "0" ]; then
+		echo "Disabling shaping..."
+		uci_remove_shaping
+	else
+		echo "Enabling shaping..."
+		uci_add_shaping "$mbr" "$pbr" "$mbs"
+	fi
+	
+	/etc/init.d/qos restart
+	sleep 5
+	echo "Restarting xtm interface..."
+	/etc/init.d/xtm restart
+fi
+
+if [ "$1" = "get" ]; then
+	mbr=`uci get qos.W_Q0.mbr 2>/dev/null`
+	pbr=`uci get qos.W_Q0.pbr 2>/dev/null`
+	mbs=`uci get qos.W_Q0.mbs 2>/dev/null`
+	if [ "$mbr" = "" ]; then
+		mbr="0"
+	fi
+	if [ "$pbr" = "" ]; then
+		pbr="0"
+	fi
+	if [ "$mbs" = "" ]; then
+		mbs="0"
+	fi
+	echo $mbr
+fi
+
