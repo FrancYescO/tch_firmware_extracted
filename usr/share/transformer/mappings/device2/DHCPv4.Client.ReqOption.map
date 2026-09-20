@@ -1,0 +1,167 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DHCPv4_Client_i_ReqOption_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Client.{i}.ReqOption.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ReqOptionNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      Order = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Tag = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "254",
+          },
+        },
+      },
+      Value = {
+        access = "readOnly",
+        type = "hexBinary",
+        min = "0",
+        max = "255",
+        default = "",
+      },
+    }
+  }
+}
+
+-- function aliases
+local mapper, string = mapper, string
+local nwCommon = mapper("nwcommon")
+local uciHelper = mapper("ucihelper")
+local networkBinding = { config = "network"}
+local isConfigChanged = false
+local splitKey = nwCommon.split_key
+local match, gmatch, gsub, find = string.match, string.gmatch, string.gsub, string.find
+local getUbusInterfaceStatus=nwCommon.get_ubus_interface_status
+
+local keyToTagName = {}
+local tagValues = {}
+
+local function getUciParam(sectionName,option)
+  networkBinding.sectionname = sectionName
+  networkBinding.option = option
+  return uciHelper.get_from_uci(networkBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  networkBinding.sectionname = sectionName
+  networkBinding.option = option
+  uciHelper.set_on_uci(networkBinding, value, commitapply)
+  isConfigChanged = true
+end
+--[[
+     We have tag and values both in uci and ubus,
+     Some additional dhcp options also will be available while reading passthru via ubus call,
+     those options are also added to entries.
+--]]
+Device_DHCPv4_Client_i_ReqOption_i_.entries = function(mapping, parentKey)
+  local uciReqOpt = getUciParam(parentKey,"reqopts")
+  local ubusReqOpt = getUbusInterfaceStatus(parentKey)
+  local entryList = {}
+  keyToTagName = {}
+  ubusReqOpt = ubusReqOpt and ubusReqOpt["data"]
+  ubusReqOpt = ubusReqOpt and ubusReqOpt["passthru"]
+  tagValues = nwCommon.get_dhcp_tag_value(ubusReqOpt)
+  if uciReqOpt then
+    local index
+    local _key
+    for opt in gmatch(uciReqOpt,"(%d+)") do        -- Entry formed for uci request options
+      index = #entryList+1
+      _key = parentKey.."|"..index --Create a Unique Key for each request option
+      entryList[index] = _key
+      keyToTagName[ _key ] = opt
+    end
+    for tag in pairs(tagValues) do               -- Entry formed for additional request options that will be populated in ubus
+      if not find(uciReqOpt,tag) then
+        index = #entryList+1
+        _key = parentKey.."|"..index
+        entryList[index] = _key
+        keyToTagName[ _key ] = tag
+      end
+    end
+  end
+  return entryList
+end
+
+Device_DHCPv4_Client_i_ReqOption_i_.get = {
+  Enable = "1",
+  Order = function(mapping, param, key)
+    local _,order = splitKey(key)
+    return order or ""
+  end,
+  Tag = function(mapping, param, key)
+    return keyToTagName[key] or ""
+  end,
+  Value = function(mapping, param, key)
+    return tagValues[keyToTagName[key]] or ""
+  end
+}
+
+Device_DHCPv4_Client_i_ReqOption_i_.getall = function(mapping, key)
+  local _, order = splitKey(key)
+  local allValues = {
+    Enable = "1",
+    Order = order,
+    Tag = keyToTagName[key] or "",
+    Value = tagValues[keyToTagName[key]] or "",
+  }
+  return allValues
+end
+
+Device_DHCPv4_Client_i_ReqOption_i_.set = {
+  Tag = function(mapping, param, value, key)
+    local parentKey=splitKey(key)
+    local tag = keyToTagName[key] or ""
+    local reqOpt = getUciParam(parentKey,"reqopts")
+    if find(reqOpt,tag) then
+      reqOpt = gsub(" "..reqOpt.." ", "%s+"..tag.."%s+", " "..value.." ")
+      reqOpt = match(reqOpt, "^%s*(.-)%s*$")
+      setUciParam(parentKey, "reqopts", reqOpt)
+    else
+      return nil, "Cannot Modify UBUS values"
+    end
+  end,
+}
+
+Device_DHCPv4_Client_i_ReqOption_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_DHCPv4_Client_i_ReqOption_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_DHCPv4_Client_i_ReqOption_i_)
+

@@ -1,0 +1,34 @@
+#!/usr/bin/env lua
+
+-- ************* COPYRIGHT AND CONFIDENTIALITY INFORMATION **********************
+-- **                                                                          **
+-- ** Copyright (c) 2015 Technicolor                                           **
+-- ** All Rights Reserved                                                      **
+-- **                                                                          **
+-- ** This program contains proprietary information which is a trade           **
+-- ** secret of TECHNICOLOR and/or its affiliates and also is protected as     **
+-- ** an unpublished work under applicable Copyright laws. Recipient is        **
+-- ** to retain this program in confidence and is not permitted to use or      **
+-- ** make copies thereof other than as permitted in a written agreement       **
+-- ** with TECHNICOLOR, UNLESS OTHERWISE EXPRESSLY ALLOWED BY APPLICABLE LAWS. **
+-- **                                                                          **
+-- ******************************************************************************
+
+local lsl = require("luasyslog")
+
+local args = {...}
+local f
+local input = args[1]
+if input then
+  f = assert(io.open(input, "r"))
+else
+  f = io.stdin
+end
+f:setvbuf("no")
+
+local rules = lsl.parse_uci("system", "log")
+lsl.init_logfiles(rules)
+for s in f:lines() do
+    lsl.handle_message(s, rules)
+end
+lsl.close_logfiles(rules)

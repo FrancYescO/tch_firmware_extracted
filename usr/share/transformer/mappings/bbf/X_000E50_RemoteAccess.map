@@ -1,0 +1,313 @@
+local Multi_Services_X_000E50_RemoteAccess_i_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_RemoteAccess.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+      },
+      URL = {
+        access = "readOnly",
+        type = "string",
+      },
+      Secure = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Port = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Mode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Temporary",
+          "Permanent",
+        },
+      },
+      IPIntf = {
+        access = "readOnly",
+        type = "string",
+      },
+      RandomPassword = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      RandomPort = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+      },
+      User = {
+        access = "readOnly",
+        type = "string",
+      },
+      Start = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local common = mapper('nwcommon')
+local get_ubus_interface_status = common.get_ubus_interface_status
+local get_lower_layers = common.get_lower_layers
+local findLanWanInterfaces = common.findLanWanInterfaces
+local wanconn = require("transformer.shared.wanconnection")
+local format = string.format
+
+local uci_helper = mapper("ucihelper")
+local web_binding = {config="web", sectionname="assistance"}
+-- binding for uci_helper
+local binding={config="", sectionname="",option=""}
+
+--wget cmd to enable/disable remote assistance
+-- assistant = enable_mode_pwdcfg_password
+local precmd = "/usr/bin/wget http://127.0.0.1:55555/ra?%s=%s_%s_%s_%s -O - &"
+local enable_map = {
+  ["0"] = "off",
+  ["1"] = "on",
+}
+local mode_map = {
+  ["0"] = "temporary",
+  ["1"] = "permanent",
+}
+
+Multi_Services_X_000E50_RemoteAccess_i_.entries = function()
+  local assistances = {}
+  uci_helper.foreach_on_uci(web_binding, function(s)
+    assistances[#assistances+1] = s['.name']
+  end)
+  return assistances
+end
+
+
+local stateFile = "/var/run/assistance/%s"
+local function loadState(name)
+    local state = {
+        wanip="";
+        wanport="";
+        lanport="";
+        enabled="0";
+        password="_dummy_";
+        mode="0";
+    }
+    local f = io.open(stateFile:format(name), 'r')
+    if f then
+        for ln in f:lines() do
+            local key, value = ln:match('^%s*([^=%s]*)%s*=%s*([^%s]*)')
+            if key then
+                state[key] = value
+            end
+        end
+        f:close()
+    end
+    return state
+end
+
+
+Multi_Services_X_000E50_RemoteAccess_i_.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Status = function(mapping, param, key)
+    local state = loadState(key)
+    if state.enabled == "1" then
+       return "Active"
+    end
+    return "Inactive"
+  end,
+  URL = function(mapping, param, key)
+    local state = loadState(key)
+    if state.wanip~="" and state.enabled == "1" then
+      return ("https://" .. state.wanip .. ":" .. state.wanport)
+    else
+      return ""
+    end
+  end,
+  Secure = "1",                      --only https is supported
+  Port = function(mapping, param, key)
+    local state = loadState(key)
+    if state.enabled == "1" then
+      return  state.wanport
+    else
+      return ""
+    end
+  end,
+  Mode = function(mapping, param, key)
+    local state = loadState(key)
+    return  state.mode=="1" and "Permanent" or "Temporary"
+  end,
+  IPIntf = function(mapping, param, key)
+    binding.sectionname=key
+    binding.config="web"
+    binding.option="interface"
+    local value = uci_helper.get_from_uci(binding)
+    if value == "" then
+      value = "wan"
+    end
+    if mapping.objectType.name:match('^Device%.') then
+      return resolve('Device.IP.Interface.{i}.', value) or ""
+    end
+    local lanInterfaces = findLanWanInterfaces(false)
+    local isLan = false
+    for _,j in pairs(lanInterfaces) do
+      if (value == j) then
+        isLan = true
+        break
+      end
+    end
+    if (isLan) then
+      return resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', value) or ""
+    else
+      local key, status = wanconn.get_connection_key(value)
+      if key and status then
+        if status.proto == "pppoe" or status.proto == "pppoa" then
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key) or ""
+        else
+          return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key) or ""
+        end
+      end
+    end
+    return ""
+  end,
+  RandomPassword = function(mapping, param, key)
+    local state = loadState(key)
+    return (state.password=='') and '0' or '1'
+  end,
+  RandomPort = "1",                  -- only Random Port is supported in current remote assitance implemenation
+  Password = function(mapping, param, key)
+    local state = loadState(key)
+    if state.enabled == "1" then
+      return  state.password
+    else
+      return ""
+    end
+  end,
+  User = function(mapping, param, key)
+    binding.sectionname=key
+    binding.config="web"
+    binding.option="user"
+    local usr = uci_helper.get_from_uci(binding)
+    if  usr~="" then
+      return usr
+    end
+    return ""
+  end,
+  Start = function(mapping, param, key)
+    local state = loadState(key)
+    return  state.enabled
+  end,
+}
+
+Multi_Services_X_000E50_RemoteAccess_i_.getall = function(mapping,key)
+  local allvalues={
+    Status = "Inactive",
+    URL = "",
+    Secure = "1",
+    Port = "",
+    Mode = "Temporary",
+    RandomPassword = "1",
+    RandomPort = "1",
+    Password = "",
+    Start = ""
+  }
+  local state = loadState(key)
+  allvalues.Start = state.enabled
+
+  if state.enabled == "1" then
+    allvalues.Status   = "Active"
+    allvalues.URL      = "https://" .. state.wanip .. ":" .. state.wanport
+    allvalues.Password = state.password
+    allvalues.Port     = state.wanport
+  end
+  allvalues.RandomPassword = state.password=='' and '0' or '1'
+  allvalues.Mode = (state.mode=="1") and "Permanent" or "Temporary"
+  return allvalues
+end
+
+local transaction={}
+Multi_Services_X_000E50_RemoteAccess_i_.set = {
+  Password = function (mapping, param, value, key)
+    transaction[key]=transaction[key] or {}
+    transaction[key]["password"] = value
+  end,
+  Mode = function (mapping, param, value, key)
+    transaction[key]=transaction[key] or {}
+    if value == "Permanent" then
+       transaction[key]["mode"] = "1"
+    else
+       transaction[key]["mode"] = "0"
+    end
+  end,
+  Start =  function (mapping, param, value, key)
+    binding.sectionname=key
+    binding.config="web"
+    binding.option="interface"
+    local intf = uci_helper.get_from_uci(binding)
+    if intf == "" then
+      intf = "wan"
+    end
+    local v = get_ubus_interface_status(intf)
+    v = v and v['ipv4-address']
+    v = v and v[1]
+    local wan_ip = (v and v['address']) or ""
+    if wan_ip == "" and value == "1" then
+      return nil, "Internet service is not available"
+    else
+      transaction[key]=transaction[key] or {}
+      transaction[key]["start"] = value
+    end
+  end,
+}
+
+Multi_Services_X_000E50_RemoteAccess_i_.commit = function ()
+  local state, enable, mode, cmd, pwdcfg, pwd
+  for k,_ in pairs(transaction) do
+     state = loadState(k)
+     enable = transaction[k]["start"] or state.enabled
+     mode = transaction[k]["mode"] or state.mode
+     if mode=="0" and state.mode == "1" and not transaction[k]["start"] then
+        -- when mode changes from permanent to temporary and start is not set to true,
+        -- we need to disable remote assistant by default
+        enable = "0"
+     elseif enable == "0" and state.enabled =="1" then
+        -- when we shut down remote assistant, the mode should be changed to  Temporary
+        mode = "0"
+     end
+     pwdcfg="fixed"
+     pwd=transaction[k]["password"]
+     if not transaction[k]["password"] then
+       pwdcfg="keep"
+       pwd=""
+     elseif
+       transaction[k]["password"]=="" then
+       pwdcfg="random"
+       pwd=""
+     end
+     cmd = format(precmd, k, enable_map[enable], mode_map[mode], pwdcfg, pwd)
+     os.execute(cmd)
+  end
+  transaction = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_RemoteAccess_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

@@ -1,0 +1,134 @@
+local network_firewall_ = {
+  objectType = {
+    name = "rpc.network.firewall.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      mode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+            "lax",
+            "normal",
+            "high",
+            "user",
+        }
+      },
+      internetping = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      natstatus = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      useroutgoingdefault = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+            "ACCEPT",
+            "REJECT",
+            "DROP",
+        },
+      },
+      userincomingdefault = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+            "REJECT",
+            "DROP",
+        },
+      },
+    },
+  }
+}
+
+local logger = require("transformer.logger")
+local log = logger.new("network.firewall", 2)
+local fw_helper = require("transformer.shared.firewall_helper")
+local uci_helper = mapper("ucihelper")
+
+local get = {
+    mode = function(mapping, param)
+        return fw_helper.get_firewall_mode()
+    end,
+    internetping = function(mapping, param)
+        -- Look for a rule named "Allow-Ping" or "Allow-Ping-wan" and move it from enabled = 1 to 0
+        -- TODO use a named rule or rules group
+        local enabled = "0"
+        uci_helper.foreach_on_uci({config="firewall", sectionname="rule"}, function(s)
+            if s["name"] == "Allow-Ping" or s["name"] == "Allow-Ping-wan" then
+                enabled = s["enabled"] or "1" -- by default, a rule is enabled
+                return false
+            end
+        end)
+        return enabled
+    end,
+    natstatus = function(mapping, param)
+        local enabled = "0"
+        uci_helper.foreach_on_uci({config="firewall", sectionname="zone"}, function(s)
+            if s["name"] == "wan" then
+                enabled = s["masq"]
+                return false
+            end
+        end)
+        return enabled
+    end,
+    useroutgoingdefault = function(mapping, param)
+        return uci_helper.get_from_uci({config= "firewall", sectionname="fwconfig", option="defaultoutgoing_user", default="ACCEPT"})
+    end,
+    userincomingdefault = function(mapping, param)
+        return uci_helper.get_from_uci({config= "firewall", sectionname="fwconfig", option="defaultincoming_user", default="DROP"})
+    end
+}
+
+local set = {
+    mode = function(mapping, paramname, paramvalue)
+        return fw_helper.set_firewall_mode(paramvalue, commitapply)
+    end,
+    natstatus = function(mapping, paramname, paramvalue)
+        uci_helper.foreach_on_uci({config="firewall", sectionname="zone"}, function(s)
+            if s["name"] == "wan" then
+                uci_helper.set_on_uci({config="firewall", sectionname=s[".name"], option="masq"}, paramvalue, commitapply)
+                return false
+            end
+        end)
+        uci_helper.commit({config = "firewall"})
+    end,
+    internetping = function(mapping, paramname, paramvalue)
+        -- Look for a rule named "Allow-Ping" or "Allow-Ping-wan" and move it from enabled = 1 to 0
+        uci_helper.foreach_on_uci({config="firewall", sectionname="rule"}, function(s)
+            if s["name"] == "Allow-Ping" or s["name"] == "Allow-Ping-wan" then
+                uci_helper.set_on_uci({config="firewall", sectionname=s[".name"], option="enabled"}, paramvalue, commitapply)
+                return false
+            end
+        end)
+        uci_helper.commit({config = "firewall"})
+    end,
+    useroutgoingdefault = function(mapping, paramname, paramvalue)
+        uci_helper.set_on_uci({config= "firewall", sectionname="fwconfig", option="defaultoutgoing_user"}, paramvalue, commitapply)
+
+        local mode = fw_helper.get_firewall_mode()
+        if mode == "user" then
+           fw_helper.setoutgoingpolicyto(paramvalue, commitapply)
+        end
+
+        uci_helper.commit({config = "firewall"})
+    end,
+    userincomingdefault = function(mapping, paramname, paramvalue)
+        uci_helper.set_on_uci({config= "firewall", sectionname="fwconfig", option="defaultincoming_user"}, paramvalue, commitapply)
+
+        local mode = fw_helper.get_firewall_mode()
+        if mode == "user" then
+          fw_helper.setincomingpolicyto(paramvalue, commitapply)
+        end
+
+        uci_helper.commit({config = "firewall"})
+
+    end
+}
+
+network_firewall_.get = get
+network_firewall_.set = set
+register(network_firewall_)
