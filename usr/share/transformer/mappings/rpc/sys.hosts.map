@@ -1,0 +1,562 @@
+local require = require
+local register = register
+local table, pairs, tostring, error = table, pairs, tostring, error
+local string = string
+local popen = io.popen
+
+-- sys.hosts
+local Sys_Hosts_ = {
+  objectType = {
+    name = "sys.hosts.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      WirelessNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      EthernetNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ActiveWirelessNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      ActiveEthernetNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+local function getExternalWifiIntfType(devices)
+  local wirelessRadio = conn:call("wireless.radio", "get" , {})
+  local keyValue
+  local intfType=""
+  local  macAddr=""
+  for e, f in pairs(wirelessRadio) do
+    if f["remotely_managed"] == 1 and f["integrated_ap"] == 1 then
+      keyValue = e
+      break
+    end
+  end
+  if (keyValue) then
+    local ssid = conn:call("wireless.ssid", "get", {})
+    for _,l in pairs(ssid) do
+      if l["radio"] == keyValue then
+        local result = ("0x" .. string.sub(l["mac_address"],(#l["mac_address"] -1)))
+        local obtMacAddr = string.format("%x",((result -1)%256))
+        macAddr= string.gsub(l["mac_address"],(string.sub(l["mac_address"],(#l["mac_address"] -1))),obtMacAddr)
+      end
+    end
+    devices = devices or conn:call("hostmanager.device" ,"get", {})
+    for _,w in pairs(devices) do
+      if w["mac-address"] == macAddr then
+        intfType= w["l2interface"]
+      end
+    end
+  end
+  return intfType, macAddr
+end
+
+Sys_Hosts_.get = {
+  WirelessNumberOfEntries = function(mapping, param, key)
+    local devices = conn:call("hostmanager.device", "get", {})
+    if devices == nil then
+      error("retrieving hosts failed")
+    end
+    local numberOfHosts = 0
+    local intfType, macAddr = getExternalWifiIntfType(devices)
+    for _, v in pairs(devices) do
+      if ((v["technology"] == "wireless" and (v["l3interface"] == "br-lan" or v["l3interface"] == "Guest1" or v["l3interface"] == "Guest1_5GHz" )) or (v["mac-address"] ~= macAddr and v["technology"] == "ethernet" and v["l2interface"] == intfType)) then
+        numberOfHosts = numberOfHosts + 1
+      end
+    end
+    return tostring(numberOfHosts)
+  end,
+  EthernetNumberOfEntries = function(mapping, param, key)
+    local devices = conn:call("hostmanager.device", "get", {})
+    if devices == nil then
+      error("retrieving hosts failed")
+    end
+    local intfType, macAddr = getExternalWifiIntfType(devices)
+    local numberOfHosts = 0
+    for _, v in pairs(devices) do
+      if v["technology"] == "ethernet" and (v["l3interface"] == "br-lan" or v["l3interface"] == "Guest1" or v["l3interface"] == "Guest1_5GHz") and (v["l2interface"] ~= intfType and v["mac-address"] ~= macAddr) then
+        numberOfHosts = numberOfHosts + 1
+      end
+    end
+    return tostring(numberOfHosts)
+  end,
+  ActiveWirelessNumberOfEntries = function(mapping, param, key)
+    local devices = conn:call("hostmanager.device", "get", {})
+    if devices == nil then
+      error("retrieving hosts failed")
+    end
+    local intfType, macAddr = getExternalWifiIntfType(devices)
+    local numberOfHosts = 0
+    for _, v in pairs(devices) do
+      if v["state"] == "connected" and ((v["technology"] == "wireless" and (v["l3interface"] == "br-lan" or v["l3interface"] == "Guest1" or v["l3interface"] == "Guest1_5GHz")) or (v["mac-address"] ~= macAddr and v["technology"] == "ethernet" and v["l2interface"] == intfType)) then
+        numberOfHosts = numberOfHosts + 1
+      end
+    end
+    return tostring(numberOfHosts)
+  end,
+  ActiveEthernetNumberOfEntries = function(mapping, param, key)
+    local devices = conn:call("hostmanager.device", "get", {})
+    if devices == nil then
+      error("retrieving hosts failed")
+    end
+    local intfType, macAddr = getExternalWifiIntfType(devices)
+    local numberOfHosts = 0
+    for _, v in pairs(devices) do
+      if v["technology"] == "ethernet" and  (v["l3interface"] == "br-lan" or v["l3interface"] == "Guest1" or v["l3interface"] == "Guest1_5GHz") and (v["l2interface"] ~= intfType and v["mac-address"] ~= macAddr) and v["state"] == "connected" then
+        numberOfHosts = numberOfHosts + 1
+      end
+    end
+    return tostring(numberOfHosts)
+  end,
+}
+
+register(Sys_Hosts_)
+
+-- sys.hosts.host.{i}
+local Sys_Hosts_Host_i_ = {
+  objectType = {
+    name = "sys.hosts.host.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "HostNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      HostName = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      InterfaceType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Ethernet",
+          "USB",
+          "802.11",
+          "HomePNA",
+          "HomePlug",
+          "Other",
+        }
+      },
+      ConnectedTime = {
+         access = "readOnly",
+         type = "string",
+      },
+      L2Interface = {
+         access = "readOnly",
+         type = "string",
+      },
+      L3Interface = {
+         access = "readOnly",
+         type = "string",
+      },
+      State = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Port = {
+        access = "readOnly",
+        type = "string",
+      },
+      Speed = {
+         access = "readOnly",
+         type = "string",
+      }
+    }
+  }
+}
+
+-- Convert a device key to device information
+local function key2dev(key)
+  local device = conn:call("hostmanager.device", "get", { ["mac-address"] = key })
+  -- only one entry should be present
+  for _,v in pairs(device) do
+    return v
+  end
+end
+
+-- Extract an IP address from the given value and add it to the list
+local function extractAddress(value, addresses)
+  if value["state"] == "connected" then
+    if addresses == "" then
+      addresses = value["address"]
+    else
+      addresses = addresses .. " " .. value["address"]
+    end
+  end
+  return addresses
+end
+
+Sys_Hosts_Host_i_.entries = function(mapping)
+  local devices = conn:call("hostmanager.device", "get", {})
+  if devices == nil then
+    error("retrieving hosts failed")
+  end
+  local _, macAddr = getExternalWifiIntfType(devices)
+  local Hosts = {}
+  for _, v in pairs(devices) do
+    --remove the "br-lan" filter to show all the devices on RPC, including the devices connected to wifi guest.
+    --the EthernetNumberOfEntries and WirelessNumberOfEntries are the number of the devices on br-lan
+    --We need to do the filter in other place if possible.
+    --if (v["technology"] == "wireless" or v["technology"] == "ethernet") and v["l3interface"] == "br-lan" then
+    -- Filter out the device representing an external wifi chip.
+    if (v["technology"] == "wireless" or v["technology"] == "ethernet") and (v["mac-address"] ~= macAddr)  then
+        Hosts[#Hosts+1] = v["mac-address"]
+    end
+  end
+  if mapping.mapping_tod then mapping.mapping_tod.load_instances() end
+  return Hosts
+end
+
+local function extractIPAddresses(dev)
+    local addresses = ""
+    if dev ~= nil then
+        -- Extract IPv4 addresses
+        if dev["ipv4"] ~= nil then
+            for _,value in pairs(dev["ipv4"]) do
+                addresses = extractAddress(value, addresses)
+            end
+        end
+        -- Extract IPv6 addresses
+        if dev["ipv6"] ~= nil then
+            for _,value in pairs(dev["ipv6"]) do
+                addresses = extractAddress(value, addresses)
+            end
+        end
+    end
+    return addresses
+end
+
+local function extractHostName(dev)
+    if dev ~= nil and dev["hostname"] ~= nil then
+        return dev["hostname"]
+    end
+    return ""
+end
+
+local function extractInterfaceType(dev)
+   local intfType, macAddr = getExternalWifiIntfType()
+   if dev["mac-address"] ~= macAddr and dev["l2interface"] == intfType then
+      return "wireless"
+   else
+        return dev["technology"]
+    end
+    return ""
+end
+
+local function extractConnectedTime(dev)
+    if dev["connected_time"] ~= nil then
+        return tostring(dev["connected_time"])
+    end
+    return ""
+end
+
+local function extractL2Interface(dev)
+   local intfType, macAddr = getExternalWifiIntfType()
+   if dev["mac-address"] ~= macAddr and dev["l2interface"] == intfType then
+     return "wl1"
+   else
+     return dev["l2interface"]
+   end
+    return ""
+end
+
+local function extractl3interface(dev)
+    if dev["l3interface"] ~= nil then
+        return dev["l3interface"]
+    end
+    return ""
+end
+
+local function extractState(dev)
+    if dev["state"] == "connected" then
+        return "1"
+    end
+    return "0"
+end
+
+local function extractPort(dev)
+    -- [CL] Some platforms don't have l2interfaces that make sense (e.g. without switch driver)
+    -- [CL] If the device in the hostmanager ubus call knows what port a device is attached to, let's trust it
+    -- [CL] Hacking this into the generic sys.hosts.map file until someone can explain me how to properly customize this without
+    -- [CL] copying the entire file and hence losing all future functionality/bugfixes since noone looks at our platforms anyway.
+    local intfType, macAddr = getExternalWifiIntfType()
+    if dev["switchport"] ~= nil then
+        return tostring(dev["switchport"])
+    else
+       if dev["technology"] == "ethernet" and (dev["l3interface"] == "br-lan" or dev["l3interface"] == "Guest1" or dev["l3interface"] == "Guest1_5GHz") and dev["l2interface"] == intfType and dev["mac-address"] ~= macAddr then
+           return ""
+       elseif dev["technology"] == "ethernet" and (dev["l3interface"] == "br-lan" or dev["l3interface"] == "Guest1" or dev["l3interface"] == "Guest1_5GHz") and dev["l2interface"] ~= nil then
+           local portNumber = string.match(dev["l2interface"],"%a*(%d+)")
+           if portNumber ~= nil then
+               portNumber = portNumber + 1
+               return tostring(portNumber)
+           end
+           return ""
+       end
+       return ""
+    end
+end
+
+local function getInterfaceState(l2interface)
+    local log = popen("/usr/bin/ethctl " .. l2interface .. " media-type 2>&1")
+    if log == nil then
+        return ""
+    end
+    local speed
+    local logString = log:read("*a")
+    if logString then
+       speed = string.match(logString, "%d+") -- Only numbers present
+    end
+    log:close()
+    return speed or ""
+end
+
+local function extractSpeed(dev)
+    if dev["technology"] == "wireless" then
+        if dev["wireless"] and dev["wireless"]["tx_phy_rate"] ~= nil then
+            return tostring(dev["wireless"]["tx_phy_rate"] / 1000)
+        end
+        return ""
+    elseif dev["technology"] == "ethernet" then
+        if dev["l2interface"] ~= nil and dev["l2interface"] ~= "" then
+            return getInterfaceState(dev["l2interface"])
+        elseif dev["l3interface"] ~= nil then
+            return getInterfaceState(dev["l3interface"])
+        end
+        return ""
+    end
+    return ""
+end
+
+Sys_Hosts_Host_i_.getall = function(mapping, key)
+    local dev = key2dev(key)
+    return {
+        MACAddress = key,
+        IPAddress = extractIPAddresses(dev),
+        HostName = extractHostName(dev),
+        InterfaceType = extractInterfaceType(dev),
+        ConnectedTime = extractConnectedTime(dev),
+        L2Interface = extractL2Interface(dev),
+        L3Interface = extractl3interface(dev),
+        State = extractState(dev),
+        Port = extractPort(dev),
+        Speed = extractSpeed(dev)
+    }
+end
+
+Sys_Hosts_Host_i_.get = {
+  IPAddress = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractIPAddresses(dev)
+  end,
+  MACAddress = function(mapping, param, key)
+    return key
+  end,
+  HostName = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractHostName(dev)
+  end,
+  InterfaceType = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractInterfaceType(dev)
+  end,
+  ConnectedTime = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractConnectedTime(dev)
+  end,
+  L2Interface = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractL2Interface(dev)
+  end,
+  L3Interface = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractl3interface(dev)
+  end,
+  State = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractState(dev)
+  end,
+  Port = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractPort(dev)
+  end,
+  Speed = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractSpeed(dev)
+  end
+}
+
+register(Sys_Hosts_Host_i_)
+
+-- sys.hosts.host.{i}.tod
+
+-- We're going to get this multi-instance working as single-instance child
+-- for a multi-instance parent ('sys.hosts.host.{i}')
+local mapinfo_tod_uci = {
+    config = "tod",
+    type = "host",
+    options = { "id", "type", "enabled", "mode", "start_time", "stop_time" },
+    lists = { "weekdays" },
+}
+local mapping_tod_uci = mapper("uci_1to1").createMultiMap(mapinfo_tod_uci)
+
+local Sys_Hosts_Host_i_tod_ = {
+  objectType = {
+    name = "sys.hosts.host.{i}.tod.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      enabled    = mapping_tod_uci.objectType.parameters["enabled"],
+      type       = mapping_tod_uci.objectType.parameters["type"],
+      mode       = mapping_tod_uci.objectType.parameters["mode"],
+      start_time = mapping_tod_uci.objectType.parameters["start_time"],
+      stop_time  = mapping_tod_uci.objectType.parameters["stop_time"],
+    },
+  },
+}
+
+local ucihelper = mapper("ucihelper")
+
+--- Load all instances from uci and add their key to a table
+--  The table will be indexed by 'id' (= macaddress)
+Sys_Hosts_Host_i_tod_.load_instances = function()
+  Sys_Hosts_Host_i_tod_.instances = {}
+
+  if table.getn(mapping_tod_uci.entries(mapping_tod_uci)) == 0 then return end
+
+  local uci_binding = {
+    config = mapping_tod_uci.binding["config"],
+    sectionname = mapping_tod_uci.binding["type"],
+    state = mapping_tod_uci.binding["state"],
+  }
+  local function cb(t)
+    local id = t["id"]
+    if id ~= nil then
+      Sys_Hosts_Host_i_tod_.instances[string.lower(id)] = t["_key"]
+    end
+  end
+  ucihelper.foreach_on_uci(uci_binding, cb)
+end
+-- There's a dependency for entries() in parent mapping
+Sys_Hosts_Host_i_.mapping_tod = Sys_Hosts_Host_i_tod_
+
+-- Convert a device key to time-of-day (uci) key
+local function key2tod(id)
+  return Sys_Hosts_Host_i_tod_.instances[id]
+end
+
+Sys_Hosts_Host_i_tod_.get = function(mapping, paramname, parentkey)
+  local tod_key = key2tod(parentkey)
+  if tod_key == nil then return "" end
+  return mapping_tod_uci.get(mapping_tod_uci, paramname, tod_key)
+end
+
+Sys_Hosts_Host_i_tod_.getall = function(mapping, parentkey)
+  local tod_key = key2tod(parentkey)
+  if tod_key == nil then
+    return { enabled = "", mode = "", start_time = "", stop_time = "", type = ""}
+  end
+  return mapping_tod_uci.getall(mapping_tod_uci, tod_key)
+end
+
+Sys_Hosts_Host_i_tod_.set = function(mapping, paramname, value, parentkey)
+  local tod_key = key2tod(parentkey)
+  if tod_key == nil then
+    if paramname == "mode" and value == "" then return end
+    -- we need to create an instance
+    tod_key = mapping_tod_uci.add(mapping_tod_uci)
+    if tod_key == nil then return end
+    mapping_tod_uci.set(mapping_tod_uci, "id", parentkey, tod_key)
+  elseif paramname == "mode" and value == "" then
+    mapping_tod_uci.delete(mapping_tod_uci, tod_key)
+    return
+  end
+  return mapping_tod_uci.set(mapping_tod_uci, paramname, value, tod_key)
+end
+
+Sys_Hosts_Host_i_tod_.commit = function()
+  return mapping_tod_uci.commit(mapping_tod_uci)
+end
+
+Sys_Hosts_Host_i_tod_.revert = function()
+  return mapping_tod_uci.revert(mapping_tod_uci)
+end
+
+register(Sys_Hosts_Host_i_tod_)
+
+-- submappings (lists: sys.hosts.host.{i}.tod.weekdays.@.)
+local function tod_sub_get(mapping, paramname, key, parentkey)
+  return mapping.mapping_uci.get(mapping.mapping_uci, paramname, key, key2tod(parentkey))
+end
+
+local function tod_sub_set(mapping, paramname, value, key, parentkey)
+  return mapping.mapping_uci.set(mapping.mapping_uci, paramname, value, key, key2tod(parentkey))
+end
+
+local function tod_sub_add(mapping, name, parentkey)
+  local tod_key = key2tod(parentkey)
+  if tod_key == nil then tod_key = mapping_tod_uci.add(mapping_tod_uci) end
+  if tod_key == nil then return end
+  mapping_tod_uci.set(mapping_tod_uci, "id", parentkey, tod_key)
+
+  return mapping.mapping_uci.add(mapping.mapping_uci, name, tod_key)
+end
+
+local function tod_sub_delete(mapping, key, parentkey)
+  return mapping.mapping_uci.delete(mapping.mapping_uci, key, key2tod(parentkey))
+end
+
+local function tod_sub_deleteall(mapping, parentkey)
+  return mapping.mapping_uci.deleteall(mapping.mapping_uci, key2tod(parentkey))
+end
+
+local function tod_sub_entries(mapping, parentkey)
+  local tod_key = key2tod(parentkey)
+  if tod_key == nil then return {} end
+  return mapping.mapping_uci.entries(mapping.mapping_uci, tod_key)
+end
+
+for _, submapping_uci in ipairs(mapping_tod_uci.submappings) do
+  local submapping = {
+    objectType = {
+      name = Sys_Hosts_Host_i_tod_.objectType.name .. submapping_uci.binding.option .. ".@.",
+      access = submapping_uci.objectType.access,
+      numEntriesParameter = submapping_uci.objectType.numEntriesParameter,
+      minEntries = submapping_uci.objectType.minEntries,
+      maxEntries = submapping_uci.objectType.maxEntries,
+      parameters = submapping_uci.objectType.parameters,
+    },
+    get = tod_sub_get,
+    set = tod_sub_set,
+    add = tod_sub_add,
+    delete = tod_sub_delete,
+    deleteall = tod_sub_deleteall,
+    entries = tod_sub_entries,
+    mapping_uci = submapping_uci,
+  }
+
+  register(submapping)
+end
