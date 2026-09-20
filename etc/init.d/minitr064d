@@ -1,0 +1,162 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+START=95
+
+SERVICE_USE_PID=1
+
+
+upnpd_write_bool() {
+	local opt="$1"
+	local def="${2:-0}"
+	local alt="$3"
+	local val
+
+	config_get_bool val config "$opt" "$def"
+	if [ "$val" -eq 0 ]; then
+		echo "${alt:-$opt}=no" >> $tmpconf
+	else
+		echo "${alt:-$opt}=yes" >> $tmpconf
+	fi
+}
+
+boot() {
+	return
+}
+
+start() {
+	config_load "minitr064d"
+	local intiface logging enabled
+	local extip port usesysuptime conffile serial_number model_number
+	local uuid notify_interval presentation_url enable_upnp 
+	local https_port https_cert https_key minissdpdsocket
+
+
+	config_get intiface config internal_iface
+	config_get extip config external_ip
+	config_get port config port 0
+	config_get_bool logging config log_output 0
+	config_get conffile config config_file
+	config_get serial_number config serial_number
+	config_get model_number config model_number
+	config_get friendly_name config friendly_name
+	config_get manufacturer_name config manufacturer_name
+	config_get manufacturer_url config manufacturer_url
+	config_get model_name config model_name
+	config_get model_description config model_description
+	config_get model_url config model_url
+
+	config_get uuid config uuid
+	config_get notify_interval config notify_interval
+	config_get presentation_url config presentation_url
+        config_get https_port config https_port
+	config_get https_cert config https_cert
+	config_get https_key config https_key
+	config_get minissdpdsocket config minissdpdsocket
+	config_get password_dslfconfig password dslfconfig
+	config_get password_dslfreset password dslfreset
+
+	local args
+
+	. /lib/functions/network.sh
+
+
+	if [ -n "$conffile" ]; then
+		args="-f $conffile"
+	else
+		local tmpconf="/var/etc/minitr064d.conf"
+		args="-f $tmpconf"
+                if [ -e $tmpconf ] ; then
+			rm  $tmpconf
+		fi
+		mkdir -p /var/etc
+
+		local iface
+		for iface in ${intiface:-lan}; do
+			local device
+			network_get_device device "$iface" && {
+				echo "listening_ip=$device" >>$tmpconf
+			}
+		done
+
+		[ "$port" != "auto" ] && \
+			echo "port=$port" >>$tmpconf
+                
+		config_load "minitr064d"
+		upnpd_write_bool enable_upnp 1
+		upnpd_write_bool system_uptime 1
+
+		[ -n "${presentation_url}" ] && \
+			echo "presentation_url=${presentation_url}" >>$tmpconf
+
+		[ -n "${notify_interval}" ] && \
+			echo "notify_interval=${notify_interval}" >>$tmpconf
+
+		[ -z "$uuid" ] && {
+			uuid="$(which uuidgen)"
+			[ -n "$uuid" ] && uuid="$($uuid -t)"
+			[ -z "$uuid" ] && uuid="$(cat /proc/sys/kernel/random/uuid)"
+			uci set minitr064d.config.uuid=$uuid
+			uci commit upnpd
+		}
+
+		[ "$uuid" = "nocli" ] || \
+			echo "uuid=$uuid" >>$tmpconf
+
+		[ -n "${serial_number}" ] && \
+			echo "serial=${serial_number}" >>$tmpconf
+
+		[ -n "${model_number}" ] && \
+			echo "model_number=${model_number}" >>$tmpconf
+
+		[ -n "${friendly_name}" ] && \
+			echo "friendly_name=${friendly_name}" >>$tmpconf
+
+		[ -n "${manufacturer_name}" ] && \
+			echo "manufacturer_name=${manufacturer_name}" >>$tmpconf
+
+		[ -n "${manufacturer_url}" ] && \
+			echo "manufacturer_url=${manufacturer_url}" >>$tmpconf
+
+		[ -n "${model_name}" ] && \
+			echo "model_name=${model_name}" >>$tmpconf
+
+		[ -n "${model_description}" ] && \
+			echo "model_description=${model_description}" >>$tmpconf
+
+		[ -n "${model_url}" ] && \
+			echo "model_url=${model_url}" >>$tmpconf
+
+		[ -n "${minissdpdsocket}" ] && \
+			echo "minissdpdsocket=${minissdpdsocket}" >>$tmpconf
+		
+		[ -n "${https_port}" ] && \
+			echo "https_port=${https_port}" >>$tmpconf
+		
+		[ -n "${https_cert}" ] && \
+			echo "https_cert=${https_cert}" >>$tmpconf
+		
+		[ -n "${https_key}" ] && \
+			echo "https_key=${https_key}" >>$tmpconf
+
+		[ -n "${password_dslfconfig}" ] && \
+			echo "password_dslfconfig=${password_dslfconfig}" >>$tmpconf
+		
+		[ -n "${password_dslfreset}" ] && \
+			echo "password_dslfreset=${password_dslfreset}" >>$tmpconf
+
+	fi
+
+	if [ "$logging" = "1" ]; then
+		SERVICE_DAEMONIZE=1 \
+		service_start /usr/sbin/minitr064d $args -d
+	else
+		SERVICE_DAEMONIZE= \
+		service_start /usr/sbin/minitr064d $args
+	fi
+}
+
+stop() {
+	service_stop /usr/sbin/minitr064d
+
+}
