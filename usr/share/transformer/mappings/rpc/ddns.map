@@ -1,0 +1,45 @@
+local register = register;
+local uci_helper = mapper("ucihelper")
+local open = io.open
+
+local ddns_ = {
+    objectType = {
+        name = 'rpc.ddns.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+	      status = {
+	        access = "readOnly",
+	        type = "string"
+	      },
+
+        }
+    }
+}
+
+ddns_.get = {
+  status = function(mapping, param, key)
+    local state = "connecting"
+    local services = {}
+    local fd
+    local ddns_binding = {config = "ddns", sectionname = "service"}
+
+    uci_helper.foreach_on_uci(ddns_binding, function(s)
+        services[#services + 1] = s['.name']
+    end)
+
+    -- Currently we only support one service
+    if services[1] then
+        fd = open("/var/run/dynamic_dns/" .. services[1] .. ".state", "r")
+    end
+
+    if fd then
+        state = fd:read("*l")
+        fd:close()
+    end
+    return state
+  end
+}
+
+register(ddns_)

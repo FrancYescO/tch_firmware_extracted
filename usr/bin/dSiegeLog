@@ -1,0 +1,26 @@
+CUR_LOGNUM=0
+LOGSIZELIMIT=`uci get siege.log.sizelimit`
+FILECOUNT=`uci get siege.log.filecount`
+LOGDIR=`uci get siege.log.dir`
+FS=/
+FILENAME=log
+FILEEXT=.txt
+LOGFILE=${LOGDIR}${FS}${FILENAME}${FILEEXT}
+BAKFILEEXT=.bak
+while :
+do
+    SIZE=`du $LOGFILE | cut -f1`
+    if [ $SIZE -gt $LOGSIZELIMIT ]; 
+    then
+        BAKFILE=${LOGDIR}${FS}${FILENAME}${CUR_LOGNUM}${BAKFILEEXT}
+        cp $LOGFILE $BAKFILE
+        echo "" > $LOGFILE
+        CUR_LOGNUM=`expr $CUR_LOGNUM \+ 1`
+    fi
+    if [ $CUR_LOGNUM -ge $FILECOUNT ];
+    then
+	echo `date` "::SIEGE LOG OVERFLOW:Overwriting file starting with log0.log" >> $LOGFILE
+	CUR_LOGNUM=0
+    fi
+    sleep 60
+done

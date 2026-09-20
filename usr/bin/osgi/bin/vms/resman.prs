@@ -1,0 +1,114 @@
+# The resource manager allows the gateway provides to limit the resources used
+# by the frameworks and it's bundles.
+#
+# This file provides some basic configurations as well instructions for configuring the
+# resource constraints.
+#
+# This is NOT a regular properties file and the properties here don't get in system
+# properties. This file is loaded by the resource manager itself and then for faster
+# access it is stored in binary format in the storage. Therefore, if you modify this
+# file, you should start the framework with clean storage so the changes to take effect.
+
+
+# ---------[ group/individual resource context ]---------
+# The Resource Manager service supports of two types of constraints - group and per-bundle
+# Normally an OSGi application is defined by a set of bundles. This is the reason for
+# having the group constraints, which can be applied to the whole set. The groups are with
+# higher priorities than per-bundle definitions. Here is the full order of priorities:
+# 1. all system bundles are in system context if 'mbs.resman.sysBundlesInBase' is true.
+# 2. group by group name (using 'mbs.resman.group.<group name>.*' or 
+#    'mbs.resman.groupdef.*' as fall-back if group definition is not defined)
+# 3. group by start level (using 'mbs.resman.grouplevel.<start level>.*')
+# 4. group by start level forced by 'mbs.resman.groupByStartLevel' property
+#    (using 'mbs.resman.groupdef.*')
+# 5. per-bundle definition, defines in the following properties:
+#   - 'mbs.resman.<symbolic name>.*'
+#   - fallback to 'mbs.resman.level.<start level>.*'
+#   - fallback to 'mbs.resman.default.*'
+
+# To put a bundle in a shared "named" context, use the following property:
+#mbs.resman.<symbolic name>.group=<group name>
+# The group definition is defined in properties like this below:
+#mbs.resman.group.<group name>.maxThreads=2
+
+# To group all bundles from start level into one and same context, you must specify a 
+# group level policy by using properties like this below:
+#mbs.resman.grouplevel.<start level>.maxThreads=2
+
+
+# ---------[ default resource policy definitions ]---------
+# Definition of the default per-bundle resource policy. It is applied, when the bundle has
+# to be in individual resource context, but it's resource policy is not defined.
+# - The maximum threads per bundle, see 'mbs.resman.check.threads'; -1 means no limit
+#mbs.resman.default.maxThreads=-1
+# - The maximum number of sockets per bundle, see 'mbs.resman.check.sockets'; -1 means no limit
+#mbs.resman.default.maxSockets=-1
+# - The maximum allowed disk space per bundle, see 'mbs.resman.check.disk'; -1 means no limit
+#mbs.resman.default.maxDisk=-1
+# - The old segment memory size, see 'mbs.resman.check.mem', (J9 only)
+#mbs.resman.default.oldMemSize=300000
+# - The new segment memory size, see 'mbs.resman.check.mem', (J9 only)
+#mbs.resman.default.newMemSize=30000
+# - The maximum CPU usage per bundle, see 'mbs.resman.check.cpu'; -1 means no limit
+#mbs.resman.default.maxCPU=-1
+# - The maximum number of opened files per bundle, see 'mbs.resman.check.openfiles'; -1 means no limit
+#mbs.resman.default.maxOpenFiles=-1
+# - The maximum number of write operations per bundle, see 'mbs.resman.check.writecount'; -1 means no limit
+#mbs.resman.default.maxWrites=-1
+# - The number of violation detected until policy is executed
+#mbs.resman.default.maxViolations=1
+# - The violation policy - stop bundle (deafault value)
+#mbs.resman.default.action=stop
+# - The violation policy - stop bundle and disable further activation
+#mbs.resman.default.action=disable
+# - The violation policy - uninstall bundle
+#mbs.resman.default.action=uninstall
+# - The violation policy - uninstall and prevent further installation
+#mbs.resman.default.action=blacklist
+
+# Definition of the default group resource policy. It is applied, when the bundle has to 
+# be in group resource context, but it's resource policy is not defined.
+#mbs.resman.groupdef.maxThreads=10
+#mbs.resman.groupdef.maxSockets=10
+#mbs.resman.groupdef.maxDisk=204800
+#mbs.resman.groupdef.maxOpenFiles=220
+#mbs.resman.groupdef.maxWrites=1600
+#mbs.resman.groupdef.oldMemSize=150000
+#mbs.resman.groupdef.newMemSize=150000
+#mbs.resman.groupdef.maxCPU=30
+#mbs.resman.groupdef.maxViolations=1
+#mbs.resman.groupdef.action=stop
+#mbs.resman.groupdef.action=disable
+#mbs.resman.groupdef.action=uninstall
+#mbs.resman.groupdef.action=blacklist
+
+
+# ---------[ group resource policy definition examples ]---------
+# Put "app1.model.bundle" and "app1.controller.bundle" in a named group and limit the 
+# number of threads to 20:
+#mbs.resman.app1.model.bundle.group=App1
+#mbs.resman.app1.controller.bundle.group=App1
+#mbs.resman.group.App1.maxThreads=20
+
+# Force all bundles from start level 5 to run in same group, and allow them to reach 
+# up to 50% of CPU usage.
+#mbs.resman.grouplevel.5.maxCPU=50
+
+
+# ---------[ per-bundle resource policy definition examples ]---------
+# Define policy for the bundle "myApp" - and force uninstallation
+# if the resource policy is violated.
+#mbs.resman.myApp.action=uninstall
+
+# Instead of defining individual policy to all bundles from start level use a fall-back 
+# mechanism and define the level policy. In this situation the bundles from start level 7
+# gets individual policy (unless group policy is defined which is with higher order), but
+# the policy values are the same. The definition below allows each bundle from start level
+# 7 to occupy 200K of disk storage.
+#mbs.resman.level.7.maxDisk=200000
+
+# increase the default memory segment for the web console
+mbs.resman.org.apache.felix.webconsole.oldMemSize=500000
+mbs.resman.org.apache.felix.webconsole.group=Webconsole.core
+mbs.resman.group.Webconsole.core.oldMemSize=500000
+mbs.resman.group.Webconsole.core.newMemSize=50000

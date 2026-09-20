@@ -1,0 +1,378 @@
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'Normal'
+	option weight '7'
+
+config class 'Interactive'
+	option weight '7'
+
+config class 'Network_Control'
+	option weight '14'
+
+config class 'Video_Sig'
+	option weight '14'
+
+config class 'Video_Data'
+	option weight '27'
+
+config class 'Management'
+	option weight '27'
+
+config class 'Voice_Data'
+	option weight '52'
+	option priority '1'
+
+config class 'Voice_Sig'
+	option weight '52'
+	option priority '1'
+
+#TO_IPTV_ADSL
+config class 'Normal_iptv_adsl'
+	option weight '1'
+	option priority '0'
+
+config class 'Video_iptv_adsl'
+	option weight '64'
+	option priority '1'
+
+config class 'acklow_iptv_adsl'
+        option weight '1'
+        option priority '2'
+
+config class 'ackhigh_iptv_adsl'
+        option weight '64'
+        option priority '3'
+
+#TO_LAN
+config class 'Interactive_lan'
+	option priority '0'
+
+config class 'Video_lan'
+	option priority '1'
+
+config class 'Management_lan'
+	option priority '2'
+
+config class 'Voice_lan'
+	option priority '3'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'Normal Interactive Network_Control Video_Sig Video_Data Management Voice_Sig Voice_Data'
+	option policy 'wfq'
+
+config classgroup 'TO_IPTV_ADSL'
+	option classes 'Normal_iptv_adsl Video_iptv_adsl acklow_iptv_adsl ackhigh_iptv_adsl'
+        option policy 'sp_wrr'
+
+config classgroup 'TO_LAN'
+	option classes 'Interactive_lan Video_lan Management_lan Voice_lan'
+	option policy 'sp'
+
+#WAN QoS Class Instantiation
+config device 'atm_wan'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'atm_mgmt'
+	option enable '0'
+
+config device 'atm_iptv'
+	option classgroup 'TO_IPTV_ADSL'
+	option enable '1'
+
+config device 'atm_voip'
+	option enable '0'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'eth0'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth1'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth2'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth3'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config interface 'wan'
+	option classgroup 'TO_WAN'
+	option enabled '1'
+
+config interface 'iptv'
+	option classgroup 'TO_WAN'
+	option enabled '1'
+
+config interface 'voip'
+	option classgroup 'TO_WAN'
+	option enabled '1'
+
+config interface 'mgmt'
+	option classgroup 'TO_WAN'
+	option enabled '1'
+
+config interface 'lan'
+	option classgroup 'TO_LAN'
+	option enabled '1'
+
+#TO_WAN QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+
+config reclassify
+	option target 'Voice_Sig'
+	option dstports '5060'
+
+config reclassify
+	option target 'Voice_Sig'
+	option dscp '0x24'
+
+config reclassify
+	option target 'Voice_Data'
+	option helper 'sip'
+
+config reclassify
+	option target 'Voice_Data'
+	option dscp '0x2e'
+
+config reclassify
+	option target 'Management'
+	option dstports '7547'
+
+	#IMPORTANT NOTE: Static config of dport 7547 for cwmpd is broken once acs url is provisioned using another port via dhcpv4 option 43
+
+config reclassify
+	option target 'Video_Sig'
+	option dstports '554,5055'
+
+config reclassify
+	option target 'Video_Data'
+	option helper 'rtsp'
+
+config reclassify
+	option target 'Network_Control'
+	option proto 'icmp --icmp-type redirect'
+
+config reclassify
+	option target 'Video_Sig'
+	option proto 'igmp'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '213.64.59.0/24'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.22.194.0/24'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.197.185.0/25'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.109'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.129'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.130'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.131'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.135'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.236.188.136'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '194.23.1.64/26'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '195.67.199.0/24'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '81.236.58.43'
+
+config reclassify
+ option target 'Network_Control'
+ option dsthost '81.236.58.45'
+
+config reclassify
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+
+config reclassify
+	option target 'Network_Control'
+	option proto 'esp'
+
+config reclassify
+	option target 'Network_Control'
+	option proto 'ah'
+
+config reclassify
+	option target 'Network_Control'
+	option proto 'gre'
+
+config reclassify
+	option target 'Interactive'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+
+config reclassify
+	option target 'Interactive'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+
+config reclassify
+	option target 'Interactive'
+	option helper 'ftp'
+
+	#IMPORTANT NOTE:Hotspot data should be pushed to Best_Effort the question is how?
+
+#TO_IPTV_ADSL QoS classification rule Definition
+config reclassify
+	option target 'Video_iptv_adsl'
+	option proto 'igmp'
+
+config reclassify
+	option target 'Video_iptv_adsl'
+	option dstports '554,5055'
+
+config reclassify
+	option target 'Video_iptv_adsl'
+	option dstports '53,67,68'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+	option dsthost '213.64.59.0/24'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.22.194.0/24'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+	option dsthost '194.197.185.0/25'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.109'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.129'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.130'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.131'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.135'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.236.188.136'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '194.23.1.64/26'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '195.67.199.0/24'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '81.236.58.43'
+
+config reclassify
+ 	option target 'Video_iptv_adsl'
+ 	option dsthost '81.236.58.45'
+
+#TO_LAN QoS classification rule Definition
+
+config reclassify
+	option target 'Voice_lan'
+	option ports '5060'
+
+config reclassify
+	option target 'Voice_lan'
+	option helper 'sip'
+
+config reclassify
+	option target 'Management_lan'
+	option ports '53'
+
+config reclassify
+	option target 'Management_lan'
+	option proto 'udp'
+	option ports '67,68,500,4500'
+
+config reclassify
+	option target 'Management_lan'
+	option proto 'icmp'
+
+config reclassify
+	option target 'Video_lan'
+	option proto 'igmp'
+
+config reclassify
+	option target 'Video_lan'
+	option ports '554,5055'
+
+config reclassify
+	option target 'Video_lan'
+	option helper 'rtsp'
+
+
+#DSCP Remarking for HOTSPOT and Guest Traffic
+
+config remarking
+	option interface hotspot
+	option routed '1'
+	option host '1'
+	option DSCP '8'
+
+config remarking
+	option interface Guest1
+	option routed '1'
+	option host '1'
+	option DSCP '8'
+
+# WMM config for traffic goes to wl0
+
+config wmm userwlan
+	option mark_ipv4 'class'
+	option mark_ipv6 'class'
+	option mark_802_1q 'class'
+
+config device wl0
+	option enable '1'
+	option wmm 'userwlan'

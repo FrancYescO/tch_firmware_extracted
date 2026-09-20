@@ -1,0 +1,41 @@
+#!/bin/sh
+
+PLUGINDIR="/usr/lib/mobiled_plugins"
+# vid is 05c6, have to remove the leading 0 as else the compare fails
+PIDVID="
+        5c6/9025
+"
+MAX_PDN=1
+
+if [ "$DEVTYPE" == "usb_interface" ]; then
+case "$ACTION" in
+    add)
+        for pidvid in $PIDVID; do
+            if [ $(expr match $PRODUCT $pidvid) != 0 ]; then
+
+                IFNUMBER=0
+                INTERFACES=$(uci show network | grep 'proto=mobiled' | cut -d '.' -f 2)
+                for INTERFACE in $INTERFACES
+                do
+                    if [ $IFNUMBER -lt $MAX_PDN ]; then
+                        uci set network.${INTERFACE}.ifname=wwan${IFNUMBER}
+                        uci set network.${INTERFACE}.pdnid=${IFNUMBER}
+                        IFNUMBER=$((IFNUMBER+1))
+                    fi
+                done
+                uci commit
+                qmi-connection start 1> /var/log/qmi.log 2>&1
+                /etc/init.d/network reload
+            fi
+        done
+    ;;
+    remove)
+        for pidvid in $PIDVID; do
+            if [ $(expr match $PRODUCT $pidvid) != 0 ]; then
+                qmi-connection stop 1> /var/log/qmi.log 2>&1
+                /etc/init.d/network reload
+            fi
+        done
+    ;;
+esac
+fi
