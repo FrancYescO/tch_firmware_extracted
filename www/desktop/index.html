@@ -1,0 +1,580 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Kian Cross
+  Luke Meppem
+--> <!DOCTYPE HTML> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width,minimum-scale=1,initial-scale=1,user-scalable=yes"> <meta name="mobile-web-app-capable" content="yes"> <meta name="apple-mobile-web-app-capable" content="yes"> <meta http-equiv="cache-control" content="max-age=0"> <meta http-equiv="cache-control" content="no-cache"> <meta http-equiv="expires" content="0"> <meta http-equiv="expires" content="Tue, 01 Jan 1980 1:00:00 GMT"> <meta http-equiv="pragma" content="no-cache"> <%
+  require("libos")
+  
+  local json = require("json")
+  local dumaos_manifest = json.load("/dumaos/dumaos.json")
+  local platform_information = os.platform_information()
+  
+  local ap_mode = os.get_ap_mode()
+  local accessibility_mode = os.config_get("accessibility_mode") == "1"
+  local firmware_version = os.firmware_version()
+  local hardware_version = platform_information.altModel or platform_information.model
+  local translation_ready = os.load(string.format("/www/language/dumaos/%s/ready", lang)) == "true"
+  local theme_ready = os.load("/dumaos/themes/ready") == "true"
+  
+  local dumaos_enabled = os.dumaos_enabled()
+  local dumaos_suspended = os.dumaos_suspended()
+  local dumaos_running = os.dumaos_running()
+
+  local password_regex = "^[a-zA-Z0-9_!£$&@?\\-~#%^\\*()\\+;<>='\\[\\]\\{\\},\\.|`]+$"
+
+  -- bool to int string
+  local function btis(val)
+    return val and "1" or "0"
+  end
+
+  if platform_information.sdk == "OpenWRT" and os.execute("/dumaos/setup_done.sh") ~= 0 then
+%> <script> location.replace("/desktop/setup.html?cache=0"); </script> </head> <%
+  elseif not dumaos_enabled or dumaos_suspended then
+%> <% if platform_information.vendor == "TELSTRA" and not dumaos_enabled then %> <script> location.replace("/desktop/telstra_dumaos_disabled.html"); </script> <% else %> <script> location.replace("/cgi-bin/restart.htm?cache=0"); </script> <% end %>  <%
+  elseif not translation_ready or not theme_ready or (not dumaos_running and not ap_mode) then
+%> <h2>DumaOS not loaded yet!</h2> <p>Don't worry we will redirect you shortly.</p> <p style="color:white;"><%= string.format([[TR-%s TH-%s DR-%s]],btis(translation_ready),btis(theme_ready),btis(dumaos_running)) %></p> <script> setTimeout(function() { location.reload(); }, 5000); </script> <%
+  else
+%> <noscript> <meta http-equiv="refresh" content="0;URL='index.htm'"> </noscript> <title>DumaOS</title> <script src="/nd-js/browser-setup.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <style> <%in /www/desktop/preloader.css %> </style> <link rel="import" href="/custom-elements/app-layout/app-drawer-layout/app-drawer-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-drawer/app-drawer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-header/app-header.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-scroll-effects/app-scroll-effects.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-header-layout/app-header-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/app-layout/app-toolbar/app-toolbar.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/av-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/social-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/communication-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/hardware-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-badge/paper-badge.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-icon-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item-body.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu-button/paper-menu-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu/paper-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/file-upload/file-upload.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/granite-led/granite-led.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-ripple/paper-ripple.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu/paper-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu/paper-submenu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-menu/duma-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/storage.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/cycle.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/word-type.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/application-sidebar.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/language-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/time-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/network-speeds.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/services-info.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/desktop/rapp-overview.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% if platform_information.vendor ~= "NETGEAR" then %> <link rel="import" href="/desktop/try-the-mobile-app.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% end %> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="apple-touch-icon" sizes="180x180" href="favicons/apple-touch-icon.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="icon" type="image/png" href="favicons/favicon-32x32.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" sizes="32x32"> <link rel="icon" type="image/png" href="favicons/favicon-16x16.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" sizes="16x16"> <link rel="manifest" href="favicons/fav.json?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="mask-icon" href="favicons/safari-pinned-tab.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" color="#da333c"> <meta name="theme-color" content="#ffffff"> <style is="custom-style" include="duma-theme iron-flex iron-flex-alignment iron-positioning"> body {
+        overflow: hidden;
+        min-height: 100%;
+      }
+
+      body[unresolved] {
+        height: 100vh;
+        background: <%= theme.PRIMARY_BACKGROUND_COLOR %>;
+        margin: 0;
+        opacity: 1;
+      }
+
+      .top-nav {
+        flex-shrink: 0;
+        height: 40px;
+        margin-left: auto;
+      }  
+
+      .top-nav ::content paper-tooltip {
+        top: 56px !important;
+      }
+      
+      .notification-icon {
+        display: inline-block;
+        box-sizing: border-box;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+      }
+
+      .notification-timestamp {
+	text-align: center;
+        font-size: 10px;
+	margin: 0px;
+      }
+
+      .notification-background {
+	position: absolute;
+	z-index: -1;
+      }
+      
+      .logo {
+        padding-right: 16px;
+      }
+
+      .logo img {
+        display: block;
+      }
+
+      .logo.dumaos {
+      }
+      
+      .logo.border {
+        padding-left: 16px;
+        border-left: thin solid var(--map-color);
+      }
+
+      .logo.netduma > img,
+      .logo.dumaos > img,
+      .logo.vendor > img {
+        height: 24px;
+        margin: 0;
+      }
+
+      .logo.dumaos > img {
+        width: 128px;
+      }
+      .logo.powered-by.dumaos > img {
+        height: 36px;
+        width: 100px;
+      }
+            
+      .logo.netduma > img {
+        width: 148px;
+      }
+
+      .logo.vendor > img  {
+        width: 177px;
+      }
+
+      .logo.nighthawk > img {
+        height: 40px;
+      }
+
+      .logo.comcast > img {
+        height: 38px;
+      }
+
+      .logo-os {
+        fill: var(--primary-text-color);
+      }
+
+      .logo-duma,
+      .logo-head {
+        fill: var(--primary-color);
+      }  
+
+      @media (max-width: 900px) {
+        .logo {
+          display: none;
+        }
+      }      
+
+      span.version {
+        display: block;
+        font-size: 12px;
+        text-transform: uppercase;            
+        opacity: 0.75;
+        font-weight: 400;
+        line-height: 12px;
+        height: 12px;
+        margin-top: 4px;
+      }
+      
+      paper-icon-item ::content .notification-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 0;
+        margin: 8px;
+      }
+			
+      body[collapsed] #application {
+        margin-left:  64px;
+      }
+
+      body:not([collapsed]) #application {
+        margin-left: 272px;
+      }			
+
+      #application iframe, #application #disconnection-page {
+        border: none;
+        position: relative;
+        display: block;
+        transition: all 250ms ease;
+        -webkit-transition: all 250ms ease;
+        -moz-transition: all 250ms ease;
+        -ms-transition: all 250ms ease;
+        -o-transition: all 250ms ease;
+        opacity: 1;
+        visibility: visible;
+        padding: 0; 
+        width: 100%;
+        min-height: calc(100vh - 64px);
+      }
+      
+      #disconnection-page > div {
+        height: 100%;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        @apply(--layout-center-justified);
+      }
+      #disconnection-page .disconnected {
+        padding: 16px;
+        max-width: 50em;
+        text-align: center; 
+      }
+      #disconnection-page .disconnected p:first-child {
+        margin-top: 0;
+      }
+
+      .loading.hidden {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity ease 250ms, visibility ease 250ms;
+      }
+
+      .loading {
+        display: block;
+        height: 100vh;
+        width: 100vw;
+        background-color: <%= theme.PRIMARY_BACKGROUND_COLOR %>;
+        background-image: url(/themes/<%= current_theme %>/<%= theme.BACKGROUND_IMAGE %>);
+        background-size: cover;
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        z-index: 100;
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .loading .loader {
+        margin: 0 auto;
+        position: relative;
+        margin-top: -14px;
+        top: 50%;
+        text-align: center;
+      }
+
+      .loading.application-loader {
+        height: calc(100vh - 64px);
+        width: calc(100vw - 256px);
+        background-color: transparent;
+        background-image: none;
+        z-index: 99;
+      }
+      body[collapsed=true] .loading.application-loader {
+        width: calc(100vw - 64px);
+      }
+
+      .loading.application-loader + #main-wrapper #application {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 1500ms ease, visibility 1500ms ease;
+      }
+
+      .loading.application-loader.hidden + #main-wrapper #application {
+        visibility: visible;
+        opacity: 1;
+      }      
+
+      .main-wrapper {
+        position: relative;
+        display: block;
+        height: 100vh;
+        background-color: var(--primary-background-color);        
+        color: var(--primary-text-color);
+        @apply(--paper-font-body1);
+      }
+
+      .main-wrapper::before {
+        content: "";
+        display: block;
+        background: var(--background-image) no-repeat center center;
+        background-position: 50% 50%;
+        background-size: cover;
+        height: 101%;
+        left: -0.5%;
+        position: absolute;
+        top: -0.5%;
+        width: 101%;    
+      }
+
+      .notifications {
+        position: relative;
+      }
+      
+      paper-dialog ::content table.dialog {
+        margin-bottom: 16px;
+      }
+
+      td:first-child,
+      th:first-child {
+        padding-left: 24px;
+      }
+
+      td:last-child,
+      th:last-child {
+        padding-right: 24px;
+      }
+			
+      #sidebar-wrapper {
+        @apply(--layout-horizontal);
+        height: calc(100% - 64px);
+      }
+      
+      /* app-drawer */
+      app-drawer {
+        --app-drawer-width: 320px;
+        --app-drawer-content-container: {
+            background-color: var(--transparent-background-color);
+            color: var(--primary-text-color);
+        };
+        
+        --app-drawer-scrim-background: var(--transparent-background-color);
+      }
+
+      app-drawer ::content paper-listbox {
+        --paper-listbox-color: var(--primary-text-color);
+      }
+
+      app-drawer#app-drawer {
+        top: 56px;
+        --app-drawer-width: 256px;
+        --app-drawer-content-container: {
+          background-color: transparent;  
+          color: var(--primary-text-color);
+          padding: 0;
+        };
+        /*@apply(--shadow-elevation-2dp);*/
+      }
+
+      app-drawer#app-drawer app-toolbar {
+        padding: 0 14px;
+      }
+			
+			app-drawer#notification-drawer {
+        z-index: 1;
+				text-align: left;
+        --app-drawer-content-container: {
+          background-color: var(--primary-background-color);
+        };				
+			}
+			app-drawer#notification-drawer app-toolbar > div {
+        flex-grow: 1;
+      }
+
+      app-drawer#notification-drawer .scroll-wrap {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      app-drawer#notification-drawer .scroll-wrap > *:not(.scroll-cont){
+        flex: 0 0 auto;
+      }
+      app-drawer#notification-drawer .scroll-wrap > .scroll-cont {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+            
+      /* app-toolbar */
+      app-toolbar {
+        --app-toolbar-font-size: 16px;
+        padding-left: 64px;
+      }
+
+      app-toolbar ::content h1[main-title],
+      app-toolbar ::content div[main-title] {
+        white-space: nowrap;
+        display: inline-block;
+        flex: 0 0 auto;
+        font-size: 16px;
+        font-weight: 400;
+      }
+
+      app-toolbar paper-icon-button#sidebar-toggle {
+        margin-right: 12px;
+      }    
+
+      #update-container {
+        display: inline-block;
+      }
+
+      .skip-nav {
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        z-index: -999;
+      }
+      .skip-nav:focus-within {
+        width: auto;
+        height: auto;
+        overflow: auto;
+        padding: 12px;
+        text-align: center;
+        z-index: 999;
+      }
+
+      file-upload#firmware-upgrade-file {
+        --error-color: var(--primary-color);
+
+        --file-upload-commands: {
+          float: none;
+          text-align: center;
+          margin-bottom: 4px;
+        };
+
+        --file-upload-upload-border: {
+          display: block;
+        };
+        width: 240px;
+      }
+
+      file-upload ::content .name span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+      }
+
+      paper-menu-button.drop-menu {
+        margin: 0;
+      }
+      .firmware-label {
+        color: var(--disabled-text-color);
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+
+      #preferences-dialog paper-button {
+        color: var(--primary-color);
+      }
+
+      paper-tooltip ::content .tooltip-close {
+        color: var(--primary-color);
+        padding: 0;
+      } <% if platform_information.model == "XR1000" then %> #netgear-armor img {
+        max-width: 100%;
+        display: block;
+      }
+      img.armor-logo {
+        height: 64px;
+        margin-bottom: 16px;
+      }
+      img.armor-qr { 
+        width: 200px;
+        margin-bottom: 8px;
+      }
+      #netgear-armor .armor-wrap {
+        @apply(--layout-horizontal);
+        @apply(--layout-justified);
+      }
+      #netgear-armor .armor-wrap > div {
+        flex-grow: 0;
+        flex-shrink: 0;
+      }            
+      #netgear-armor .armor-content {
+        flex-basis: 45%;
+      }
+      #netgear-armor .armor-ui {
+        flex-basis: 50%;
+        flex-basis: calc(55% - 16px);
+      }
+      #netgear-armor #armor-enabled {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        
+      }
+      #netgear-armor #armor-enabled granite-led {
+        --granite-led-background-color-powered: green;
+        --granite-led-background-color: var(--primary-color);
+        --granite-led-opacity: 1;
+      }
+      #ng-armor-dialog {
+        max-width: 768px;
+      } <% end %> </style>  <body class="fullbleed" unresolved> <style> /* declare here so don't have to wait for browser setup to finish */
+      @keyframes fadeInAndOut {
+        0% {
+          opacity: 0;
+        }
+        25% {
+          opacity: 1;
+        }
+        90% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+      @keyframes fadeIn {
+        0% {
+          opacity: 0;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      #page-loader .loading-header:not(.show-welcome) {
+        display: none;
+      }
+      #page-loader .loading-header.show-welcome > span {
+        position: fixed;
+        top: 48%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 32px;
+        font-family: 'Roboto', 'Noto', sans-serif;
+        opacity: 0;
+        animation-name: fadeInAndOut;
+        animation-duration: 9s;
+        animation-timing-function: ease-in;
+        animation-fill-mode: forwards;
+        color: <%= theme.PRIMARY_TEXT_COLOR %>;
+      }
+      #page-loader .loading-header.show-welcome > img {
+        position: fixed;
+        top: 52%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        height: 48px;
+        opacity: 0;
+        margin-top: 2em !important;
+        animation-name: fadeInAndOut;
+        animation-duration: 8s;
+        animation-delay: 1s;
+        animation-timing-function: ease-in;
+        animation-fill-mode: forwards;
+      } <% if platform_information.vendor == "TELSTRA" then %> #page-loader .loading-header.show-welcome > img {
+        height: 96px;
+        animation-name: fadeIn;
+        animation-duration: 1s;
+        animation-delay: 0s;
+      }
+      #page-loader .loading-header.show-welcome > img:first-child {
+        top: 34%;
+      }
+      #page-loader .loading-header.show-welcome > img:nth-child(n+2) {
+        top: 60%;
+        height: 64px;
+      } <% end %> #page-loader .loader.wait {
+        opacity: 0;
+        animation-name: fadeIn;
+        animation-duration: 1s;
+        animation-delay: <%= platform_information.vendor == "TELSTRA" and "0s" or "10s" %>;
+        animation-timing-function: ease-in;
+        animation-fill-mode: forwards;
+      }
+      #page-loader .loader .circle-clipper {
+        border-color: <%= theme.PRIMARY_TEXT_COLOR %> !important;
+      } </style> <div class="loading" id="page-loader"> <div class="loading-header x-scope"> <% if platform_information.vendor == "TELSTRA" then %> <img src="/desktop/Welcome_To_Game_Optimiser.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo-large x-scope" alt="<%= i18n.welcomeToGameOptimiserSplash %>"> <img src="/desktop/Powered_By_DumaOS_Black.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo-large x-scope" alt="<%= i18n.poweredByDumaOSSplash %>"> <% else %> <span class="x-scope"><%= i18n.welcomeTo %></span> <img src="/desktop/DumaOS_V3_Wordmark_White.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="x-scope" alt="<%= i18n.dumaosSplash %>"> <% end %> </div> <div class="loader wait"> <div class="preloader-wrapper small active"> <div class="spinner-layer"> <div class="circle-clipper left"> <div class="circle"></div> </div><div class="gap-patch"> <div class="circle"></div> </div><div class="circle-clipper right"> <div class="circle"></div> </div> </div> </div> </div> <script> (function(context){
+          var showWelcome = top.location.href.indexOf("showWelcome=true");
+          if(showWelcome !== -1){
+            var loaderHeader = document.querySelector("#page-loader > .loading-header");
+            loaderHeader.classList.add("show-welcome");
+          }else{
+            var loaderSpinner = document.querySelector("#page-loader > .loader");
+            loaderSpinner.classList.remove("wait");
+          }
+        })(this); </script> </div> <div class="loading application-loader hidden" id="application-loader"> <div class="loader"> <div class="preloader-wrapper small active"> <div class="spinner-layer"> <div class="circle-clipper left"> <div class="circle"></div> </div><div class="gap-patch"> <div class="circle"></div> </div><div class="circle-clipper right"> <div class="circle"></div> </div> </div> </div> </div> </div> <div class="main-wrapper"> <app-toolbar role="banner"> <% if platform_information.vendor == "NETGEAR" then %> <div class="logo vendor"> <img src="/desktop/netgear.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="nighthawk-logo" alt="Netgear Nighthawk"> <%
+              local router_title = i18n.gamingRouter
+              if platform_information.model == "R7000" then
+                router_title = "SingleOS Router"
+              end
+            %> <span class="version"><%= hardware_version %>&nbsp;<%= router_title %></span> </div> <% if platform_information.model ~= "R7000" then %> <div class="logo nighthawk"> <img src="/desktop/netgear-nighthawk.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="nigthhawk-logo" alt="Netgear Nighthawk"> </div> <% end %> <% elseif platform_information.vendor == "NETDUMA" then %> <div class="logo netduma"> <img src="/desktop/netduma.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="netduma-logo" alt="Netduma"> <span class="version"><%= string.format("%s %s",hardware_version, i18n.gamingRouter or "") %></span> </div> <% end %> <% if platform_information.vendor == "TELSTRA" then %> <div class="logo telstra"> <img src="/desktop/telstra.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" alt="Telstra "> </div> <div class="logo vendor"> <img src="/desktop/Game_Optimiser_Logo.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" alt="<%= i18n.gameOptimiser %>" class="game-optimiser-logo"> </div> <div class="logo dumaos powered-by border"> <img src="/desktop/Powered_By_DumaOS_Black.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo" alt="<%= i18n.poweredByDumaOS %>"> </div> <% elseif platform_information.vendor == "COMCAST" then %> <div class="logo comcast"> <img src="/desktop/Xfinity_logo.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="comcast-logo" alt="Xfinity"> </div> <div class="logo dumaos powered-by border"> <img src="/desktop/Powered_By_DumaOS_White.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo" alt="<%= i18n.poweredByDumaOS %>"> </div> <% else %> <div class="logo dumaos border"> <img src="/desktop/dumaos.svg?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="dumaos-logo" alt="<%= i18n.dumaOS %>"> </div> <% end %> <h1 main-title id="app-name"></h1> <paper-menu-button id="help-menu-button" class="drop-menu" horizontal-align="left" ignore-select no-overlap aria-label="<%= i18n.helpMenu %>"> <paper-icon-button class="dropdown-trigger" icon="icons:help-outline" aria-label="<%= i18n.helpMenu %>"></paper-icon-button> <duma-menu class="dropdown-content" reset-on-overlay-close> <iron-page name="main" page-read="<%= i18n.helpMenu %>"> <paper-menu> <!--DumaOS Tour--> <paper-item id="launch-dumaos-tour-button" role="menuitem"> <paper-ripple></paper-ripple> <%= i18n.launchDumaosTour %> </paper-item> <!--Start Tour--> <paper-item id="app-help-button" role="menuitem" aria-haspopup="true"> <paper-ripple></paper-ripple> <iron-icon icon="help-outline"></iron-icon> <%= i18n.appHelp %> </paper-item> <% if platform_information.vendor == "TELSTRA" then %> <paper-item href="https://www.telstra.com.au/support/category/entertainment/gaming/game-optimiser?" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="support"></iron-icon> <%= i18n.helpAndSupport %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://www.telstra.com/game-optimiser-user-guide"menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="duma-icons:user-guide"></iron-icon> <%= i18n.userGuide %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://telstra.netduma.com?" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="duma-icons:user-forum"></iron-icon> <%= i18n.userForums %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://telstra.com/game-optimiser-feedback?" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="communication:comment"></iron-icon> <%= i18n.leaveFeedback %> <iron-icon icon="launch" right></iron-icon> </paper-item> <% else %> <!--Help Page--> <paper-item goto="support" role="menuitem" aria-haspopup="true"> <paper-ripple></paper-ripple> <iron-icon icon="social:group"></iron-icon> <%= i18n.support %> <iron-icon icon="chevron-right"></iron-icon> </paper-item> <% end %> <!--Network Speeds Button--> <paper-item id="services-info-button" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="duma-application-icons:categories"></iron-icon> <%= i18n.servicesInfo %> </paper-item> </paper-menu> </iron-page> <iron-page name="support" page-read="<%= i18n.support %>"> <paper-menu> <paper-item goto="main" aria-label="<%= i18n.ariaReturn %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="chevron-left"></iron-icon> <%= i18n.support %> </paper-item> <hr disabled="disabled"> <% if platform_information.vendor == "NETGEAR" then %> <paper-item href="http://downloadcenter.netgear.com/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.documentation %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="http://support.netgear.com?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.onlineSupport %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="http://kb.netgear.com/app/answers/detail/a_id/12923?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.routerFaq %> <iron-icon icon="launch" right></iron-icon> </paper-item> <% elseif platform_information.vendor == "NETDUMA" then %> <paper-item href="http://forum.netduma.com?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.supportForum %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="http://support.netduma.com/support/home?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.helpCenter %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://<%= i18n.websiteURL %>/#" role="menuitem"> <%= i18n.websiteURL %> <iron-icon icon="launch" right></iron-icon> </paper-item> <% end %> <% if platform_information.vendor ~= "TELSTRA" then %> <!--Legal--> <paper-item goto="legal" role="menuitem" aria-haspopup="true"> <paper-ripple></paper-ripple> <%= i18n.legal %> <iron-icon icon="chevron-right"></iron-icon> </paper-item> <% end %> </paper-menu> </iron-page> <iron-page name="legal" page-read="<%= i18n.legal %>"> <paper-menu> <paper-item goto="support" aria-label="<%= i18n.ariaReturn %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="chevron-left"></iron-icon> <%= i18n.legal %> </paper-item> <hr disabled="disabled"> <% if platform_information.vendor == "NETGEAR" then %> <paper-item href="/license.htm#" role="menuitem"> <%= i18n.gnuGpl %> <iron-icon icon="launch" right></iron-icon> </paper-item> <% elseif platform_information.vendor == "NETDUMA" then %> <paper-item href="https://netduma.com/eula/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.eula %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://netduma.com/privacy-policy/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.privacyPolicy %> <iron-icon icon="launch" right></iron-icon> </paper-item> <paper-item href="https://netduma.com/rapp-standard-terms-conditions/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" role="menuitem"> <%= i18n.termsAndConditions %> <iron-icon icon="launch" right></iron-icon> </paper-item> <% end %> </paper-menu> </iron-page> </duma-menu> </paper-menu-button> <paper-tooltip id="hover-help-tooltip" for="help-menu-button .dropdown-trigger"><%= i18n.helpMenu %></paper-tooltip> <paper-tooltip id="tour-help-tooltip" for="help-menu-button .dropdown-trigger" manual-mode> <h3> <%= i18n.restartTour %> <paper-button class="tooltip-close"><%= i18n.ok %></paper-button> </h3> </paper-tooltip> <paper-button id="skip-nav-focus-button" class="skip-nav" tabindex="0" aria-label="<%= i18n.skipNavigation %>"><%= i18n.skipNavigation %></paper-button> <div class="top-nav"> <label class="firmware-label"><%= hardware_version %>&nbsp;<%= firmware_version %></label> <% if platform_information.model == "XR1000" then %> <paper-icon-button id="ng-armor-button" icon="duma-icons:ng-armor" aria-label="<%= i18n.netgearArmor %>"></paper-icon-button> <paper-tooltip position="bottom" for="ng-armor-button" animation-delay="0" offset="0"><%= i18n.netgearArmor %></paper-tooltip> <% end %> <% if platform_information.model == "XR1000" or platform_information.model == "XR500" then %> <div id="update-container"> <paper-icon-button id="update-button" disabled="disabled" icon="icons:update"> </paper-icon-button> <paper-tooltip for="update-button"> <span class="update-button-text"><%= i18n.noUpdateAvailable %></span> </paper-tooltip> </div> <% end %> <!--User Settings Menu--> <% if ap_mode then %> <paper-icon-button id="logout-button" icon="icons:exit-to-app"></paper-icon-button> <paper-tooltip for="logout-button"><span><%= i18n.logout %></span></paper-tooltip> <% else %> <paper-menu-button id="user-settings-button" class="drop-menu" horizontal-align="right" ignore-select no-overlap aria-label="<%= i18n.dumaosSettings %>"> <paper-icon-button id="more-options-menu" icon="more-vert" class="dropdown-trigger" aria-label="<%= i18n.dumaosSettings %>"></paper-icon-button> <duma-menu class="dropdown-content" reset-on-overlay-close> <iron-page name="main" page-read="<%= i18n.dumaosSettings %>"> <paper-menu> <paper-item goto="router-admin" aria-label="<%= i18n.routerAdmin %>" role="menuitem" aria-haspopup="true"> <paper-ripple></paper-ripple> <iron-icon icon="social:person"></iron-icon> <%= i18n.routerAdmin %> <iron-icon icon="chevron-right"></iron-icon> </paper-item> <hr disabled="disabled"> <% if os.implements_netgear_specification() then %> <!--Language Selection Button--> <paper-item dont-close click-this=".dropdown-trigger" role="menuitem"> <language-selector id="language-selector" disabled="disabled"></language-selector> </paper-item> <% end %> <!--Info Button--> <!-- <div id="dumaos-information-button">
+                    <paper-ripple></paper-ripple>
+                    <iron-icon icon="icons:info-outline"></iron-icon> <%= i18n.information %> </div> --> <!--Theme Selection Button--> <!-- <paper-button id="theme-selection-button">
+                    <iron-icon icon="image:palette"></iron-icon>
+                    Themes
+                  </paper-button> --> <!--Accessibility--> <paper-item id="accessibility-button" aria-label="<%= i18n.accessibility %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="list"></iron-icon> <%= i18n.accessibility %> </paper-item> <!--Advanced Settings Page--> <paper-item goto="advanced-settings" aria-label="<%= i18n.advancedSettings %>" role="menuitem" aria-haspopup="true"> <paper-ripple></paper-ripple> <iron-icon icon="build"></iron-icon> <%= i18n.advancedSettings %> <iron-icon icon="chevron-right"></iron-icon> </paper-item> <% if platform_information.vendor ~= "TELSTRA" and platform_information.model ~= "XR1000" and platform_information.model ~= "XR500" then %> <!--Update Selector--> <paper-item id="update-button" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="icons:update"></iron-icon> <span class="update-button-text"><%= i18n.noUpdateAvailable %></span> </paper-item> <% end %> <!--Reboot button--> <paper-item id="reboot-button" aria-label="<%= i18n.reboot %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="icons:power-settings-new"></iron-icon> <%= i18n.reboot %> </paper-item> </paper-menu> </iron-page> <iron-page name="router-admin" page-read="<%= i18n.routerAdmin %>"> <paper-menu> <paper-item goto="main" aria-label="<%= i18n.ariaReturn %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="chevron-left"></iron-icon> <%= i18n.routerAdmin %> </paper-item> <hr disabled="disabled"> <% if platform_information.sdk == "OpenWRT" then %> <!--Account Settings Button--> <paper-item id="account-settings-button" aria-label="<%= i18n.routerLogin %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="communication:vpn-key"></iron-icon> <%= i18n.routerLogin %> </paper-item> <% end %> <!--Preferences--> <paper-item id="preferences-button" aria-label="<%= i18n.preferences %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="list"></iron-icon> <%= i18n.preferences %> </paper-item> <!--Log out button--> <paper-item id="logout-button" aria-label="<%= i18n.logout %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="icons:exit-to-app"></iron-icon> <%= i18n.logout %> </paper-item> </paper-menu> </iron-page> <iron-page name="advanced-settings" page-read="<%= i18n.advancedSettings %>"> <paper-menu> <paper-item goto="main" aria-label="<%= i18n.ariaReturn %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="chevron-left"></iron-icon> <%= i18n.advancedSettings %> </paper-item> <hr disabled="disabled"> <!--Network Speeds Button--> <paper-item id="network-speeds-button" aria-label="<%= i18n.networkSpeeds %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="duma-icons:speed"></iron-icon> <%= i18n.networkSpeeds %> </paper-item> <% if platform_information.model == "R2" then %> <!--Rapp Memory Overview--> <paper-item id="rapp-overview-button" aria-label="<%= i18n.rappPerformance %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="hardware:memory"></iron-icon> <%= i18n.rappPerformance %> </paper-item> <% end %> <% if platform_information.vendor ~= "TELSTRA" then %> <!--Time Button--> <paper-item id="time-settings-button" aria-label="<%= i18n.timeSettings %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="schedule"></iron-icon> <%= i18n.timeSettings %> </paper-item> <% end %> <% if platform_information.sdk == "OpenWRT" then %> <!--Factory Reset--> <paper-item id="factory-reset-button" aria-label="<%= i18n.factoryReset %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="restore"></iron-icon> <%= i18n.factoryReset %> </paper-item> <% end %> <% if platform_information.vendor == "TELSTRA" then %> <!--Restore Defaults--> <paper-item id="restore-defaults-button" aria-label="<%= i18n.restoreDefaults %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="restore"></iron-icon> <%= i18n.restoreDefaults %> </paper-item> <!--Stop DumaOS--> <paper-item id="dumaos-suspend" aria-label="<%= i18n.pauseDumaOS %>" role="menuitem"> <paper-ripple></paper-ripple> <iron-icon icon="av:pause"></iron-icon> <%= i18n.pauseDumaOS %> </paper-item> <% end %> </paper-menu> </iron-page> </duma-menu> </paper-menu-button> <paper-tooltip id="hover-settings-tooltip" for="user-settings-button .dropdown-trigger"><%= i18n.dumaosSettings %></paper-tooltip> <% end %> <paper-icon-button id="notifications-open" icon="social:notifications" alt="<%= i18n.inbox %>" aria-label="<%= i18n.notifications %>"></paper-icon-button> <paper-tooltip id="hover-notifications-tooltip" for="notifications-open"><%= i18n.notifications %></paper-tooltip> <paper-badge for="notifications-open" id="notification-number"></paper-badge> </div> </app-toolbar> <app-drawer id="notification-drawer" align="end"> <div class="drawer-content scroll-wrap"> <app-toolbar> <div main-title><%= i18n.notifications %></div> <paper-icon-button icon="close" id="notifications-close" aria-label="<%= i18n.notificationsCloseAriaLabel %>"></paper-icon-button> </app-toolbar> <div class="scroll-cont"> <div role="listbox" id="notifications" aria-label="<%= i18n.notifications %>"> <paper-item id="no-notifications-message" style="display: none;" disabled="disabled"> <%= i18n.noNotifications %> </paper-item> </div> </div> <div> <paper-button id="delete-all-notifications"><%= i18n.clearAllNotifications %></paper-button> </div> </div> </app-drawer> <div id="sidebar-wrapper"> <application-sidebar></application-sidebar> <div id="application" class="flex" role="main" tabindex="-1"> <div id="disconnection-page" style="display: none;"> <div> <div class="disconnected"> <p> <%= i18n.disconnectionMessage %> </p> <paper-spinner-lite></paper-spinner-lite> </div> </div> </div> </div> </div> </div> <paper-dialog id="dumaos-information-dialog" modal> <h2 dialog-label><%= i18n.information %></h2> <paper-dialog-scrollable> <div class="inner"> <!-- <paper-button background id="launch-dumaos-tour-button"><%= i18n.launchDumaosTour %> </paper-button> --> <!-- <paper-button background id="reboot-button"><%= i18n.reboot %> </paper-button> --> <!-- <% if platform_information.sdk == "OpenWRT" then %> <paper-button background id="factory-reset-button"><%= i18n.factoryReset %></paper-button> <% end %> --> <!-- <% if platform_information.vendor == "TELSTRA" then %> <paper-button background id="restore-defaults-button"><%= i18n.restoreDefaults %></paper-button> <% end %> --> </div> <table class="dialog"> <tbody> <tr> <td><%= i18n.firmwareVersion %></td> <td><%= hardware_version %>&nbsp;<%= firmware_version %></td> </tr> </tbody> </table> <div class="inner"> <% if platform_information.vendor == "NETGEAR" then %> <a target="_blank" href="http://downloadcenter.netgear.com/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat><%= i18n.documentation %></paper-button> </a> <a target="_blank" href="http://support.netgear.com?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat><%= i18n.onlineSupport %></paper-button> </a> <a target="_blank" href="http://kb.netgear.com/app/answers/detail/a_id/12923?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat><%= i18n.routerFaq %></paper-button> </a> <a target="_blank" href="/license.htm#" tabindex="-1"> <paper-button flat><%= i18n.gnuGpl %></paper-button> </a> <% elseif platform_information.vendor == "NETDUMA" then %> <a target="_blank" href="https://netduma.com/#" tabindex="-1"> <paper-button flat>netduma.com</paper-button> </a> <a target="_blank" href="https://dumaos.com?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>dumaos.com</paper-button> </a> <a target="_blank" href="http://forum.netduma.com?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>Forum</paper-button> </a> <a target="_blank" href="http://support.netduma.com/support/home?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>Help Center</paper-button> </a> <a target="_blank" href="https://netduma.com/eula/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>EULA</paper-button> </a> <a target="_blank" href="https://netduma.com/privacy-policy/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>Privacy Policy</paper-button> </a> <a target="_blank" href="https://netduma.com/rapp-standard-terms-conditions/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" tabindex="-1"> <paper-button flat>Terms and Conditions</paper-button> </a> <% end %> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss autofocus><%= i18n.done %></paper-button> </div> </paper-dialog> <rapp-overview id="rapp-overview"></rapp-overview> <network-speeds id="network-speeds"></network-speeds> <services-info id="services-info"></services-info> <% if os.implements_netgear_specification() then %> <paper-dialog id="update-progress-dialog" modal> <h1 dialog-label><%= i18n.upgradeInProgress %></h1> <p dialog-desc> <%= i18n.routerAboutToUpdate %> </p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="update-confirmation-alert"> <h2><%= i18n.updateFirmwareTitle %></h2> <div class="inner"> <div><b><%= i18n.currentVersion %>:</b> <span id="update-current-version"></span></div> <div><b><%= i18n.newVersion %>:</b> <span id="update-new-version"></span></div> <div><b><%= i18n.releaseNotes %>:</b></div> <ul id="update-release-notes"></ul> </div> </duma-alert> <% elseif platform_information.sdk == "OpenWRT" then %> <paper-dialog id="firmware-upgrade-dialog" modal> <h2 dialog-label><%= i18n.firmwareUpgradeHeader %></h2> <paper-dialog-scrollable> <div class="inner"> <file-upload id="firmware-upgrade-file" droppable="true" raised="true" drop-text="<%= i18n.firmwareUpgradeDropFileLabel %>" error-text="<%= i18n.firmwareUpgradeErrorLabel %>" target="/cgi-bin/manupgrade.has" method="POST" file-data-name="uploadfile" manual-upload><%= i18n.firmwareUpgradeSelectUpgradeFile %></file-upload> </div> </paper-dialog-scrollable> <div class="horizontal center-justified layout" hidden> <paper-spinner-lite active></paper-spinner-lite> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button id="firmware-upgrade-button"><%= i18n.upgrade %></paper-button> </div> </paper-dialog> <paper-dialog id="confirmation-dialog" modal> <h1 dialog-label><%= i18n.upgradeInProgress %></h1> <p dialog-desc><%= i18n.upgradeInProgressMessage %></p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <% end %> <duma-alert id="adblocker-alert"> <h2><%= i18n.adblockerDetectedTitle %></h2> <p> <%= i18n.adblockerDetected1 %> </p> <p> <%= i18n.adblockerDetected2 %> </p> </duma-alert> <paper-dialog id="langauge-change-in-progress" modal> <p dialog-label><%= i18n.languageChangingHeader %></p> <p dialog-desc><%= i18n.languageChangingMessage %></p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="language-update-error"> <h2><%= i18n.languageChangeErrorHeader %></h2> <%= i18n.languageChangeErrorMessage %> </duma-alert> <duma-alert id="generic-duma-alert"></duma-alert> <% if platform_information.vendor == "TELSTRA" then %> <paper-dialog id="restore-defaults-dialog" modal> <h2 dialog-label><%= i18n.restoreDefaults %></h2> <div class="inner"> <p dialog-desc><%= i18n.restoreDefaultsConfirmation %></p> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button id="restore-confirm"><%= i18n.restoreDefaults %></paper-button> </div> </div> </paper-dialog> <% end %> <paper-dialog id="theme-selection-dialog" modal> <h2 dialog-label><%= i18n.themeSelection %></h2> <paper-dialog-scrollable> <div class="inner"> <p dialog-desc><%= i18n.themeSelectionText %></p> <input id="selected-theme" hidden> <paper-dropdown-menu label="Theme" aria-label="<%= i18n.themes %>"> <paper-listbox class="dropdown-content" attr-for-selected="value" id="theme-dropdown" aria-label="<%= i18n.themes %>"></paper-listbox> </paper-dropdown-menu> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button background autofocus id="save-theme-button"> <%= i18n.save %> </paper-button> </div> </paper-dialog> <% if platform_information.vendor ~= "TELSTRA" then %> <time-selector id="time-settings"></time-selector> <% end %> <% if platform_information.sdk == "OpenWRT" then %> <paper-dialog id="account-settings-dialog" modal> <h2 dialog-label>Account Settings</h2> <paper-dialog-scrollable> <div class="inner"> <p dialog-desc> You can change the username or password used to login to the router </p> <paper-input id="account-settings-username" label="<%= i18n.username %>" required minlength="1" maxlength="16" error-message="<%= i18n.usernameError %>" pattern="<%= password_regex %>" auto-validate></paper-input> <paper-input id="account-settings-password" label="<%= i18n.password %>" type="password" required minlength="1" maxlength="16" error-message="<%= i18n.passwordError %>" pattern="<%= password_regex %>" auto-validate></paper-input> <paper-input id="account-settings-password-confirmation" label="<%= i18n.passwordConfirmation %>" type="password" required error-message="<%= i18n.passwordConfirmationError %>"></paper-input> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button background autofocus id="save-account-settings-button"> <%= i18n.save %> </paper-button> </div> </paper-dialog> <% end %> <% if platform_information.model == "XR1000" then %> <paper-dialog id="ng-armor-dialog" with-backdrop> <h2 dialog-label><%= i18n.netgearArmor %></h2> <div id="netgear-armor"> <div class="armor-wrap"> <div class="armor-ui"> <img src="/nd-img/armor_Demo.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" alt="<%= i18n.demo_alt %>"> </div> <div class="armor-content"> <img src="/nd-img/armor_Wordmark.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="armor-logo" alt="<%= i18n.logo_alt %>"> <div id="armor-enabled"> <granite-led powered></granite-led> <span><%= i18n.status %></span> </div> <%= i18n.netgearArmorDesc %> <img src="/nd-img/armor_QR.png?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" class="armor-qr" alt="<%= i18n.qr_alt %>"> <paper-checkbox id="armor-reminder" checked="checked"><%= i18n.doNotRemindMe %></paper-checkbox> </div> </div> </div> <div class="buttons"> <paper-button dialog-dismiss autofocus><%= i18n.done %></paper-button> </div> </paper-dialog> <% end %> <paper-dialog id="preferences-dialog" modal> <h2 dialog-label><%= i18n.preferences %></h2> <div class="inner layout vertical"> <div> <paper-checkbox id="notifications-toggle"><%= i18n.notifications %></paper-checkbox> <p><%= i18n.notificationsDesc %></p> </div> <% if platform_information.model == "R2" then %> <div> <paper-checkbox id="telemetry-toggle"><%= i18n.telemetryToggle %></paper-checkbox> </div> <div> <a href="https://netduma.com/privacy-policy/?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" target="_blank"> <paper-button>Privacy Policy</paper-button> </a> </div> <% end %> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> <paper-dialog id="accessibility-dialog" modal> <h2 dialog-label><%= i18n.accessibility %></h2> <paper-dialog-scrollable> <div class="inner layout vertical"> <!-- disabled for now until multiple accessibility options are available --> <!-- <div>
+            <paper-button id="enable-all-accessibility" aria-label="<%= i18n.enableAllAria %>"><%= i18n.enableAll %></paper-button>
+          </div> --> <div> <paper-checkbox id="accessibility-toggle" aria-label="<%= i18n.accessibilityMode %>" aria-describedby="accessibility-mode-description" autofocus><%= i18n.accessibilityMode %></paper-checkbox> <p id="accessibility-mode-description"><%= i18n.accessibilityDesc %></p> <paper-checkbox id="chart-table-toggle" aria-label="<%= i18n.chartTableMode %>" aria-describedby="chart-table-mode-description"><%= i18n.chartTableMode %></paper-checkbox> <p id="chart-table-mode-description"><%= i18n.chartTableDesc %></p> </div> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button id="accessibility-cancel" aria-label="<%= i18n.cancel %>"><%= i18n.cancel %></paper-button> <paper-button id="accessibility-save" aria-label="<%= i18n.save %>"><%= i18n.save %></paper-button> </div> </paper-dialog> <% if platform_information.vendor ~= "NETGEAR" then %> <try-the-mobile-app></try-the-mobile-app> <% end %> <script> var apMode = <%= ap_mode %>;
+      // These need to be here otherwise the first few imports wont get the values correctly
+      top.accessibility_mode = <%= accessibility_mode %>;
+      top.chartsAsTables = localStorage.getItem("chartsAsTables") === "true";
+      var firmwareVersion = "<%= firmware_version %>";
+      var blockForceTourStart = localStorage.getItem("block-force-tour-start");
+      blockForceTourStart = blockForceTourStart === "true" || blockForceTourStart == true;
+
+      //Is internet explorer? has to be here because index.js causes syntax errors
+      function isNotCompatibleBrowser() {
+        var ua = window.navigator.userAgent;
+        var msie = ua.indexOf("MSIE ");
+        return msie > 0 || !!navigator.userAgent.match(/Trident.*rv\:11\./);
+      }
+      if(isNotCompatibleBrowser()){
+        /* This is a redirect because:
+         if it used `document.documentElement.innerHTML = "Text here";` to overwrite the page,
+         there is some JS running in the background for the web imports.
+         This then causes the page to go blank after about 10-20 seconds, instead of showing the text. */
+        document.location = "/desktop/badbrowser.html";
+      } </script> <% if platform_information.model == "LH1000" then %> <script src="/js/global.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>" defer="defer"></script> <% end %> <script src="/nd-js/blockadblock.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <script src="/desktop/index.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> </body> <%
+  end
+%> </html> 

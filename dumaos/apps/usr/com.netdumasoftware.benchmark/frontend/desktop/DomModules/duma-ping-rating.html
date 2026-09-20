@@ -1,0 +1,104 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-ping-rating"> <template> <style> </style> <!-- local DOM HTML --> <duma-rating id="rating" value="[[score]]" animated="[[animated]]" tooltip="[[tooltip]]" tooltip-icons="[[tooltipIcons]]" thresholds="[[thresholds]]"></duma-rating> </template> <script> Polymer(
+    {
+      is: 'duma-ping-rating',
+      properties:
+      {
+        animated:
+        {
+          type: Boolean,
+          value: false,
+        },
+        thresholds:
+        {
+          type: Object,
+          value:
+          {
+            max: 80,
+
+            limits: 
+            [
+              {
+                letter: "D",
+                limit: 20,
+                colour: "<%= theme.RATING_D %>",
+              },
+              {
+                letter: "C",
+                limit: 30,
+                colour: "<%= theme.RATING_C %>",
+              },
+              {
+                letter: "B",
+                limit: 45,
+                colour: "<%= theme.RATING_B %>",
+              },
+              {
+                letter: "A",
+                limit: 55,
+                colour: "<%= theme.RATING_A %>",
+              },
+              {
+                letter: "A+",
+                limit: 60,
+                colour: "<%= theme.RATING_APLUS %>",
+              }
+            ],
+          }
+        },
+        tooltipIcons:
+        {
+          type: Object,
+          value:
+          {
+            0: "<%= i18n.average %>",
+            1: "<%= i18n.jitter %>",
+            2: "<%= i18n.packetLoss %>",
+          },
+        },
+        tooltip:
+        {
+          type: Object,
+          value: function ()
+          {
+            return {
+              line0: "",
+              line1: "",
+              line2: "",
+            };
+          },
+        },
+        ping: Number,
+        jitter: Number,
+        droppedPercent: Number,
+        score: Number
+      },
+
+      observers: [
+        "calcScore(ping, jitter, droppedPercent)"
+      ],
+
+      // Upload and download as percentages of expected speeds
+      calcScore: function (ping, jitter, droppedPercent)
+      {
+        this.score = null;
+        //if any are null, we don't want to calculate score
+        if(ping === null || jitter === null || droppedPercent === null) return;
+        // Ping rating is calculated by adding the average ping and jitter
+        // then dropping 10 points (typically a whole level) for every dropped packet
+        this.tooltip = {
+          line0: ping.toFixed(1) + " ms",
+          line1: jitter.toFixed(1) + " ms",
+          line2: droppedPercent.toFixed(1) + "%",
+        }
+        this.score = Math.min(Math.max((80 - ping) + jitter - (10 * droppedPercent), 0), 80);
+        return this.score;
+      },
+
+      reset: function ()
+      {
+        this.ping = null;
+        this.jitter = null;
+        this.droppedPercent = null;
+        this.$.rating.reset();
+      },
+    }); </script> </dom-module> 

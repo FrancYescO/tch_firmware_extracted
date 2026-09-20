@@ -1,0 +1,303 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-days/duma-days.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/time.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script src="/apps/com.netdumasoftware.benchmark/desktop/Scripts/shared.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="benchmark-schedules"> <template> <style is="custom-style" include="iron-flex iron-flex-alignment duma-theme"> :host {
+        display: block;
+      }
+      .scheduleTable-wrap {
+        @apply(--layout-horizontal);
+        border: thin solid var(--divider-color);
+        border-width: thin 0 thin 0;
+        position: relative;
+        z-index: 0;
+      }
+      .schedule-title {
+        @apply(--paper-font-subhead);
+        flex-grow: 1;
+      }
+      #tableWrap  {
+        overflow: hidden;
+        width: 100%;
+      }
+      .schedule-date duma-days {
+        min-width: 90%;
+      }
+      
+      .horizontal-table {
+        display: flex;
+        overflow-y: hidden;
+      }
+      .horizontal-table tr > th,
+      .horizontal-table tr > td {
+        overflow: visible;
+        height: 40px;
+      }
+      .horizontal-table tr:first-child > * {
+        height: 64px;
+      }
+      .horizontal-table tr > td > div {
+        @apply(--layout-vertical);
+        @apply(--layout-center);
+      }
+      .horizontal-table th {
+        background-color: var(--transparent-background-color);
+        padding: 0 16px;
+        white-space: nowrap;
+        text-align: end;
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        transition: background-color 0.2s ease;
+      }
+      .horizontal-table:not([data-scroll="0"]) th {
+        background-color: var(--primary-background-color);
+      }
+      .horizontal-table td {
+        position: relative;
+        min-width: 112px;
+      }
+      .horizontal-table td:nth-child(even){
+        background: rgba(var(--primary-background-rgb), 0.25);
+      }
+      .horizontal-table td:not([failed]) {
+        cursor: pointer;
+      }
+      .horizontal-table td:hover::before,
+      .horizontal-table td:focus::before {
+        content: '';
+        top: -500px;
+        height: 1000px;
+        left: 0;
+        position: absolute;  
+        width: 100%;
+        z-index: -1;
+      }
+      .horizontal-table td:focus::before,
+      .horizontal-table td:hover::before {
+        background-color: rgba(var(--primary-background-rgb), 0.5);
+      }
+      .horizontal-table tr:first-child th paper-button {
+        line-height: normal;
+      } </style> <div class="layout vertical"> <div class="scheduleTable-wrap"> <!-- Entries --> <table id="scheduleTable" role="region" aria-label$="[[ariaLabel]]" class="horizontal-table"> <tbody> <tr> <th> <div> <paper-button id="addTestButton" background on-click="add_test"><%= i18n.addTest %></paper-button> </div> </th> <template is="dom-repeat" items="[[schedules]]" as="schedule" sort="_scheduleSort"> <td on-click="_editClick" on-keydown="_editClick" schedule="[[schedule]]" tabindex="0" aria-label="[[_makeAriaLabel(schedule)]]"> <div> <paper-icon-button icon="delete-forever" on-click="_deleteClick" aria-label="<%= i18n.ariaDelete %>"></paper-icon-button> </div> </td> </template> </tr> <tr> <th><%= i18n.time %></th> <template is="dom-repeat" items="[[schedules]]" as="schedule" sort="_scheduleSort"> <td on-click="_editClick" schedule="[[schedule]]"> <div aria-label$="[[_getNext(schedule.next,'time',1)]]">[[_getNext(schedule.next,'time',0)]]</div> </td> </template> </tr> <tr> <th><%= i18n.date %></th> <template is="dom-repeat" items="[[schedules]]" as="schedule" sort="_scheduleSort"> <td on-click="_editClick" schedule="[[schedule]]"> <div aria-label$="[[_getNext(schedule.next,'date',1)]]">[[_getNext(schedule.next,'date',0)]]</div> </td> </template> </tr> <tr> <th><%= i18n.labelRepeat %></th> <template is="dom-repeat" items="[[schedules]]" as="schedule" sort="_scheduleSort"> <td on-click="_editClick" schedule="[[schedule]]"> <template is="dom-if" if="[[!_isShowDays(schedule)]]"> <div class="schedule-date">[[schedule.date]]</div> </template> <template is="dom-if" if="[[_isShowDays(schedule)]]"> <div class="schedule-date"><duma-days cron="[[schedule.cron]]"></duma-days></div> </template> </td> </template> </tr> </tbody> </table> </div> </div> </template> <script> Polymer(
+    {
+      is: 'benchmark-schedules',
+      properties:
+      {
+        // {
+        //   time: "19:00",
+        //   date: "Daily | Every Tuesday | Mo Tu Th Fr | 19/10",
+        //   repeat: false,
+        //   failed: false,
+        //   id: ""
+        // }
+        schedules: {
+          type: Array,
+          value: []
+        },
+        ariaLabel: String
+      },
+      
+      _getNext: function(next,part,full){
+        if(!next) return "<%= i18n.overAYear %>"
+        if(part === "time")
+          return full ? next.toLocaleTimeString() : next.toLocaleString({},{hour:"2-digit",minute:"2-digit"});
+        else
+          return full ? next.toLocaleDateString() : next.toLocaleString({},{day:"2-digit",month:"2-digit",year:"2-digit"});
+      },
+
+      _isShowDays: function(schedule){
+        return schedule.date === "SHOW_DAYS";
+      },
+
+      _scheduleSort: function(a,b){
+        if(!a.next) return 1;
+        if(!b.next) return -1;
+        return a.next.getTime() - b.next.getTime();
+      },
+
+      _makeAriaLabel: function(schedule){
+        var nextTest = schedule.next.toLocaleString([], {day: 'numeric', month: 'long', year: 'numeric', hour12: false, hour: '2-digit', minute:'2-digit'});
+        var nextTime = schedule.next.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'});
+
+        if(schedule.repeat){
+          //repeating test
+          if(schedule.preset){
+            //from a preset
+            return "<%= i18n.ariaTestRepeating %>".format(schedule.date);
+          }else{
+            //individual days
+            var daysText;
+            var days = schedule.activeDays.map(function(v){return v[1]});
+            if(days.length === 1){
+              daysText = days[0];
+            }else{
+              //{0} and {1}
+              daysText = "<%= i18n.ariaTestRepeatingAndCombo %>".format(days.slice(0, days.length - 1).join(", "),days[days.length-1]);
+            }
+            return "<%= i18n.ariaTestDays %>".format(nextTime, daysText);
+          }
+        }else{
+          //one time test
+          return "<%= i18n.ariaTestOnce %>".format(nextTest);
+        }
+
+      },
+
+      _refocus: function(elem){
+        //refocus back on the elem (such as button) that dialog was opened from. Delay to allow dialog to fade away first
+        setTimeout(function(){
+          $(elem).focus();
+        },5);
+      },
+
+      _editClick: function(e){
+        var jtarget = $(e.target);
+        //no paper-icon-button to prevent when space is clicked on delete button
+        if(!jtarget.closest("paper-icon-button")) return;
+        //if on space key or enter key, or no keyCode for click event
+        if(e.keyCode && e.keyCode !== 13 && e.keyCode !== 32) return;
+        var schedule = jtarget.closest("td").prop("schedule");
+        if(schedule){
+          this.add_schedule.open(schedule.rule.id,this.reload_schedules.bind(this),this._refocus.bind(this,e.target));
+        }
+      },
+      
+      _deleteClick: function(e){
+        //stop click propagation to the <td> and _editClick
+        e.stopImmediatePropagation();
+        var schedule = $(e.target).closest("td").prop("schedule");
+        $("duma-alert")[0].show(
+          "<%= i18n.confirmDelete %>",
+          [
+            { text: "<%= i18n.cancel %>", action: "dismiss", callback: this._refocus.bind(this,e.target) },
+            { text: "<%= i18n.confirm %>", action: "confirm", callback: function () {
+              long_rpc_promise("com.netdumasoftware.benchmark","delete_cron_rule",[schedule.rule.id]).done(function(){
+                  this.reload_schedules();
+                }.bind(this));
+              }.bind(this)
+            }
+          ]
+        );
+      },
+
+      ready: function(){
+        this.add_schedule = $(this).closest("duma-panel").find("benchmark-add-scheduled")[0];
+        setTimeout(this.reload_schedules.bind(this),100);
+
+        function storeScroll(){
+          this.dataset.scroll = this.scrollLeft || 0;
+        }
+        this.$.scheduleTable.addEventListener('scroll',storeScroll);
+        storeScroll.call(this.$.scheduleTable);
+      },
+        
+      reload_schedules: function(){
+        long_rpc_promise("com.netdumasoftware.benchmark","get_cron_rules",[]).done(function(result){
+          result = result[0] ? JSON.parse(result[0]) : [];
+          var keys = Object.keys(result);
+          var schedules = [];
+          for(var i = 0; i < keys.length; i ++){
+            var rule = result[keys[i]];
+            schedules.push(this.makeSchedule(rule.schedule, !rule.one_time, rule.failed, rule));
+          }
+          this.set("schedules",schedules);
+        }.bind(this));
+      },
+
+      add_test: function(){
+        this.add_schedule.open(null,this.reload_schedules.bind(this), this._refocus.bind(this,this.$.addTestButton));
+      },
+
+      makeSchedule: function(cron, repeat, failed, rule){
+        var presets = this.add_schedule.presets;
+        var newEntry = {
+          time: "",
+          date: "",
+          repeat: repeat,
+          failed: failed,
+          rule: rule,
+          next: (new Cron(rule.schedule)).next(24 * 3600 * 366 * 1000,60 * 1000),
+          cron: cron
+        }
+        if(typeof(cron) === "string") cron = new Cron(cron);
+        var minute = 0;
+        for(var i = 0; i < cron.minutes.length; i++){
+          if(cron.minutes[i]){
+            minute = i < 10 ? "0" + i.toString() : i.toString()
+            break;
+          }
+        }
+        var hour = 0;
+        for(var i = 0; i < cron.hours.length; i++){
+          if(cron.hours[i]){
+            hour = i < 10 ? "0" + i.toString() : i.toString();
+            break;
+          }
+        }
+        newEntry.time = hour + ":" + minute;
+
+        if(presets && presets.length){
+          for(var i = 0; i < presets.length; i++){
+            var pre = presets[i];
+            if(pre.cron && pre.cron.matches(cron,true)){
+              newEntry.date = pre.display;
+              newEntry.preset = pre;
+              return newEntry;
+            }
+          }
+        }
+
+        var daysShort = ["<%= i18n.sundayShort %>","<%= i18n.mondayShort %>","<%= i18n.tuesdayShort %>","<%= i18n.wednesdayShort %>","<%= i18n.thursdayShort %>","<%= i18n.fridayShort %>","<%= i18n.saturdayShort %>"];
+        var days = ["<%= i18n.sunday %>","<%= i18n.monday %>","<%= i18n.tuesday %>","<%= i18n.wednesday %>","<%= i18n.thursday %>","<%= i18n.friday %>","<%= i18n.saturday %>"];
+        var activeDays = [];
+        for(var i = 0; i < cron.weekdays.length; i++){
+          if(cron.weekdays[i]){
+            activeDays.push([daysShort[i],days[i]]);
+          }
+        }
+        if(activeDays.length === 7){
+          var months = ["<%= i18n.january %>","<%= i18n.february %>","<%= i18n.march %>","<%= i18n.april %>","<%= i18n.may %>","<%= i18n.june %>","<%= i18n.july %>","<%= i18n.august %>","<%= i18n.september %>","<%= i18n.october %>","<%= i18n.november %>","<%= i18n.december %>"];
+          var monthsShort = ["<%= i18n.jan %>","<%= i18n.feb %>","<%= i18n.mar %>","<%= i18n.apr %>","<%= i18n.mayShort %>","<%= i18n.jun %>","<%= i18n.jul %>","<%= i18n.aug %>","<%= i18n.sep %>","<%= i18n.oct %>","<%= i18n.nov %>","<%= i18n.dec %>"];
+          var activeMonths = [];
+          var activeDates = [];
+          var dateGaps = [];
+          for(var m = 0; m < cron.months.length; m ++){
+            if(cron.months[m]) activeMonths.push([monthsShort[m],months[m]]);
+          }
+          for(var d = 0; d < cron.days.length;d ++){
+            if(cron.days[d]){
+              if(activeDates.length){
+                dateGaps.push(d - activeDates[activeDates.length-1]);
+              }
+              activeDates.push(d + 1);
+            }
+          }
+          for(var i = 1; i < dateGaps.length; i++){
+            if(dateGaps[i] !== dateGaps[i-1]){
+              dateGaps = -1;
+              break;
+            }
+          }
+          if(typeof(dateGaps) !== "number") dateGaps = dateGaps[0];
+
+          if(activeMonths.length === 12){
+            if(activeDates.length === 31)
+              newEntry.date = "<%= i18n.daily %>";
+            else if(dateGaps){
+              newEntry.date = "<%= i18n.every_days %>".format(dateGaps);
+            }else{
+              newEntry.date = "<%= i18n.every_month_on %> " + (activeDates[0] < 10 ? "0" + activeDates[0].toString() : activeDates[0].toString());
+            }
+          }else{
+            newEntry.date = "<%= i18n.oneTime %>";//newEntry.next.toLocaleString({},{day:"2-digit",month:"short",year:"2-digit"});
+          }
+        }else if(activeDays.length === 1){
+          newEntry.date = activeDays[0][1];
+        // }else if(activeDays.length === 2 && activeDays[0][0] === "Su" && activeDays[1][0] === "Sa"){
+        //   newEntry.date = "Every Weekend";
+        // }else if(activeDays.length === 5 && activeDays[0][0] === "Mo" && activeDays[4][0] === "Fr"){
+        //   newEntry.date = "Every Weekday";
+        }else{
+          newEntry.date = "SHOW_DAYS";
+        }
+        newEntry.activeDays = activeDays;
+        return newEntry;
+      },
+    }); </script> </dom-module> 

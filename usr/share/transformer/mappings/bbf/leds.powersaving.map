@@ -1,0 +1,84 @@
+local Multi_Leds_X_000E50_PowerSaving_ = {
+  objectType = {
+    name = "#ROOT.Leds.X_000E50_PowerSaving.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/Disable the Powersaving mode",
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local ledfwBinding = { config = "ledfw" }
+local commitapply = commitapply
+local configChanged = false
+
+local function getUciValue(binding, sectionname, option, default)
+  binding.sectionname = sectionname
+  binding.option = option
+  binding.default = default
+  return getFromUci(binding)
+end
+
+local function setUciValue(binding, sectionname, option, value)
+  binding.sectionname = sectionname
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  configChanged = true
+end
+
+local function powersaving_supported()
+  local eth_control = getUciValue(ledfwBinding, "ethernet", "enable", "")
+  if eth_control and eth_control ~= "" then
+    return true
+  end
+  return
+end
+
+Multi_Leds_X_000E50_PowerSaving_.get = {
+  Enable = function(mapping, param)
+    local eth_control = getUciValue(ledfwBinding, "ethernet", "enable", "")
+    return eth_control == "1" and "0" or "1"
+  end
+}
+
+Multi_Leds_X_000E50_PowerSaving_.set = {
+  Enable = function(mapping, param, value)
+    if value == "1" then
+      setUciValue(ledfwBinding, "ethernet", "enable", "0")
+    else
+      setUciValue(ledfwBinding, "ethernet", "enable", "1")
+    end
+  end
+}
+
+Multi_Leds_X_000E50_PowerSaving_.commit = function()
+  if configChanged then
+    uciHelper.commit(ledfwBinding)
+  end
+  configChanged = false
+end
+
+Multi_Leds_X_000E50_PowerSaving_.revert = function()
+  if configChanged then
+    uciHelper.revert(ledfwBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Leds_X_000E50_PowerSaving_, "#ROOT", { "Device", "rpc" })
+for _, dupli in ipairs(duplicates) do
+  if (not powersaving_supported()) then
+    dupli.objectType.parameters["Enable"] = nil
+  end
+  register(dupli)
+end
