@@ -1,0 +1,299 @@
+#!/bin/sh
+
+# script triggered by mountd
+# mountd provides environment variables ACTION, DEVICE, NAME
+# f.e. ACTION=add DEVICE=sda1 NAME=USB-A1
+
+# Source UCI functions
+. /lib/functions.sh
+
+# UCI
+UCI="uci -P /var/state"
+
+# Set by samba_init
+MOUNTDPATH=""
+MOUNTPOINT=""
+SAMBACONFIGSDIR=""
+
+# Set by samba_device_valid
+DISK=""
+PARTITION=""
+
+# Set by samba_device_info
+VENDOR=""
+MODEL=""
+START=""
+SIZE=""
+HASH=""
+
+# samba_log <logmsg>
+samba_log () {
+  local logmsg=${1}
+  logger -t hotplug.d-mount-samba ${logmsg}
+}
+
+# samba_init
+# sets MOUNTDPATH MOUNTPOINT SAMBACONFIGSDIR.
+samba_init () {
+  # Retrieve mountd configuration. Remove trailing slashes from paths.
+  config_load mountd
+  config_get MOUNTDPATH mountd path "/mnt/usb/"
+  MOUNTDPATH=$(echo ${MOUNTDPATH} | sed 's:/*$::')
+
+  # Retrieve samba configuration. Remove trailing slashes from paths.
+  config_load samba
+  config_get SAMBACONFIGSDIR samba configsdir "/var/etc/smb.auto/"
+  SAMBACONFIGSDIR=$(echo ${SAMBACONFIGSDIR} | sed 's:/*$::')
+
+  # Load /var/state/samba config for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load samba
+
+  MOUNTPOINT=${MOUNTDPATH}/${NAME}
+  mkdir -p ${SAMBACONFIGSDIR}
+
+  samba_log "ACTION=${ACTION} DEVICE=${DEVICE} NAME=${NAME}"
+}
+
+# samba_device_valid <device>
+# sets DISK PARTITION.
+samba_device_valid () {
+  local device=${1}
+  if [ -z "${device}" ] ; then
+    samba_log "No device specified"
+    return 1
+  fi
+
+  DISK=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  PARTITION=$(echo ${device} | awk 'match($0, /[0-9]+/) { print substr($0, RSTART, RLENGTH) }')
+
+  if [ -z "${DISK}" ] ; then
+    samba_log "${device} is not a disk"
+    return 1
+  fi
+
+  # On action remove no further checks are possible. /proc/partitions will not
+  # contain device information anymore.
+  if [ "${ACTION}" == "remove" ]; then return 0 ; fi
+
+  # If device has no partition table and a filesystem, one entry will match.
+  # If device has a partition table, multiple entries will match.
+  local count=$(cat /proc/partitions | grep -c ${DISK})
+  if [ "${count}" -eq "1" ] ; then
+    : # No further checks
+  else
+    if [ -z "${PARTITION}" ] ; then
+      samba_log "${device} is not a partition"
+      return 1
+    fi
+
+    # Size of an extended partition is reported as a single block
+    local blocks=$(cat /proc/partitions | grep ${device} | awk '{print $3}')
+    if [ ${blocks} -eq 1 ] ; then
+      samba_log "${device} is an extended partition"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# samba_device_info <device>
+# sets VENDOR MODEL START SIZE HASH.
+samba_device_info () { # DEVICE
+  local device=${1}
+  local disk=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+
+  VENDOR=$(cat /sys/class/block/${disk}/device/vendor | sed 's/ //g')
+  MODEL=$(cat /sys/class/block/${disk}/device/model | sed 's/ //g')
+  START=$(cat /sys/class/block/${device}/start)
+  SIZE=$(cat /sys/class/block/${device}/size)
+  HASH=$(echo "${START}${SIZE}" | sha256sum | cut -c1-4)
+
+  samba_log "VENDOR=${VENDOR} MODEL=${MODEL} START=${START} SIZE=${SIZE} HASH=${HASH}"
+}
+
+# samba_mountpoint_chmod777
+samba_mountpoint_chmod777 () {
+  chmod 777 ${MOUNTPOINT}
+}
+
+# samba_do_reload
+samba_do_reload () {
+  # rebuild samba configuration
+  echo -n "" > ${SAMBACONFIGSDIR}.conf
+  for CONF in ${SAMBACONFIGSDIR}/*; do
+    # catch filename patterns expanding to themselves if no match.
+    if [ -e "$CONF" ] ; then
+      echo "include = $CONF" >> ${SAMBACONFIGSDIR}.conf
+    fi
+  done
+
+  # reload configuration. Samba reloads configuration every 60s (default), but
+  # seems to reload the configuration on new connects. Force reload is thus
+  # unnecessary.
+  #killall -HUP smbd nmbd
+}
+
+# samba_find_share <section> <shareconfig> <sharename>
+# sets <sharename>
+samba_find_share () {
+  local shareconfig=${2}
+  local config=""
+  config_get config ${1} configpath
+
+  if [ "${config}" == "${shareconfig}" ] ; then
+    # Set value of <sharename> to <section>
+    eval ${3}=${1}
+  fi
+}
+
+# samba_add_config
+# samba_add_config <sharename> <shareconfig> <mountpoint>
+samba_add_config () {
+  local sharename=${1}
+  local shareconfig=${2}
+  local mountpoint=${3}
+
+  cat << EOF > ${shareconfig}
+[${sharename}]
+       path = ${mountpoint}
+       read only = no
+       guest ok = yes
+       create mask = 0700
+       directory mask = 0700
+EOF
+}
+
+# samba_del_config
+# samba_del_config <shareconfig>
+samba_del_config () {
+  local shareconfig=${1}
+
+  rm ${shareconfig}
+}
+
+# samba_add_uci
+# samba_add_uci <sharename> <shareconfig> <device> <filesystem> <mountpoint>
+samba_add_uci () {
+  local sharename=${1}
+  local shareconfig=${2}
+  local device=${3}
+  local filesystem=${4}
+  local mountpoint=${5}
+
+  ${UCI} set samba.${sharename}=sambashare
+  ${UCI} set samba.${sharename}.device=${device}
+  ${UCI} set samba.${sharename}.filesystem=${filesystem}
+  ${UCI} set samba.${sharename}.configpath=${shareconfig}
+  ${UCI} set samba.${sharename}.path=${mountpoint}
+  ${UCI} set samba.${sharename}.guest_ok=yes
+  ${UCI} set samba.${sharename}.create_mask=0700
+  ${UCI} set samba.${sharename}.dir_mask=0700
+  ${UCI} set samba.${sharename}.read_only=no
+  ${UCI} set samba.${sharename}.enabled=1
+  ${UCI} commit samba
+}
+
+# samba_del_uci
+# samba_del_uci <sharename>
+samba_del_uci () {
+  local sharename=${1}
+
+  # Must be after removing the conf! Commiting to the uci will trigger a
+  # commit&apply reload of the samba deamon.
+  # Common way:
+  # ${UCI} delete samba.${sharename}
+  # ${UCI} commit samba
+  #
+  # When using /var/state, the common way has a nasty quirk. Instead of
+  # removing the entries from the config file, it keeps them and adds the
+  # same statement with a '-' in front to indicate deletion. Setting the same
+  # option adds a new, and duplicate, entry. This causes the file to grow in
+  # size over time. A workaround is removing these entries using sed and
+  # reloading the config.
+  sed -i "/${sharename}/d" /var/state/samba
+  config_load samba
+}
+
+# samba_add_share <sharename> <shareconfig>
+samba_add_share () {
+  local sharename=${1}
+  local shareconfig=${2}
+  if [ -z "${sharename}" ] ; then return ; fi
+  if [ -z "${shareconfig}" ] ; then return ; fi
+
+  # Stop + restart of mountd does not cause a 'remove' ACTION. Old data for
+  # the same sharename may exists. Clean it up.
+  local oldsharename=""
+  config_foreach samba_find_share sambashare ${shareconfig} "oldsharename"
+  if [ -n "${oldsharename}" ] ; then
+    samba_log "Old share ${oldsharename}... Cleanup."
+    samba_del_config ${shareconfig}
+    samba_del_uci ${sharename}
+  fi
+
+  samba_log "Add share ${sharename} (${shareconfig})"
+
+  local filesystem=$(mount | grep ${DEVICE} | awk '{print $5}')
+  if [ -z ${filesystem} ] ; then
+    filesystem="unknown"
+  elif [ "${filesystem}" == "ufsd" ] ; then
+    filesystem="ntfs/hfs+"
+  else
+    : # Do nothing.
+  fi
+
+  samba_add_config ${sharename} ${shareconfig} ${MOUNTPOINT}
+  # Must be after writing the conf! Commiting to the uci will trigger a
+  # commit&apply reload of the samba deamon.
+  samba_add_uci ${sharename} ${shareconfig} ${DEVICE} ${filesystem} ${MOUNTPOINT}
+}
+
+# samba_del_share <shareconfig>
+samba_del_share () {
+  local sharename=""
+  local shareconfig=${1}
+  if [ -z "${shareconfig}" ] ; then return ; fi
+
+  config_foreach samba_find_share sambashare ${shareconfig} "sharename"
+  if [ -z "${sharename}" ] ; then
+    samba_log "Unable to find sharename for ${shareconfig}"
+    return
+  fi
+  samba_log "Remove share ${sharename} (${shareconfig})"
+
+  samba_del_config ${shareconfig}
+  # Must be after removing the conf! Commiting to the uci will trigger a
+  # commit&apply reload of the samba deamon.
+  samba_del_uci ${sharename}
+}
+
+# Start of execution
+samba_init
+
+if [ "${ACTION}" == "add" ]; then
+  if ! samba_device_valid ${DEVICE} ; then return ; fi
+  samba_device_info ${DEVICE}
+  samba_mountpoint_chmod777
+
+  ubus send usb.usb_led '{"status":"on"}'
+
+  local sharename="${VENDOR}_${MODEL}_${PARTITION}_${HASH}"
+  local shareconfig="${SAMBACONFIGSDIR}/${NAME}.conf"
+  samba_add_share ${sharename} ${shareconfig}
+  samba_do_reload
+fi
+
+if [ "${ACTION}" == "remove" ]; then
+  if ! samba_device_valid ${DEVICE} ; then return; fi
+
+  ubus send usb.usb_led '{"status":"off"}'
+
+  # Not possible to reconstruct sharename. At the time this script is called,
+  # the device is already unmounted and VENDOR/MODEL info is not accessible
+  # anymore.
+  local shareconfig="${SAMBACONFIGSDIR}/${NAME}.conf"
+  samba_del_share ${shareconfig}
+  samba_do_reload
+fi

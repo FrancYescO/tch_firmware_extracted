@@ -1,0 +1,26 @@
+#!/bin/sh /etc/rc.common
+
+# Start/stop mountd via procd.
+# Mountd requires SIGALRM to be available. This is ensured by procd (replaces
+# init), which has no signals blocked. This signal state is inherited by all
+# child processes, and thus mountd.
+# Mountd is required to not have PGID 1 (Process Group ID). Mount request from
+# the same PGID are ignored by mountd. Since tranformer has PGID 1, transformer
+# can not trigger mounts. Starting mountd binary directly from procd causes its
+# PGID to be 1. Workaround is to start mountd via procd via its original
+# services script.
+USE_PROCD=1
+MOUNTD_INIT=/etc/init.d/mountd
+
+start_service()
+{
+	procd_open_instance
+	procd_set_param command "${MOUNTD_INIT}" "start"
+	procd_set_param env "SERVICE_SIG=INT"
+	procd_close_instance
+}
+
+stop_service()
+{
+	SERVICE_SIG=INT ${MOUNTD_INIT} "stop"
+}

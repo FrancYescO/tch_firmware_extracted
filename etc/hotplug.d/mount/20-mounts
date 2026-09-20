@@ -1,0 +1,462 @@
+#!/bin/sh
+
+# script triggered by mountd
+# mountd provides environment variables ACTION, DEVICE, NAME
+# f.e. ACTION=add DEVICE=sda1 NAME=USB-A1
+
+# Source UCI functions
+. /lib/functions.sh
+
+# UCI
+UCI="uci -P /var/state"
+
+# Set by mounts_init
+MOUNTDPATH=""
+MOUNTPOINT=""
+
+# Set by mounts_device_valid
+DISK=""
+PARTITION=""
+
+# Set by mounts_device_info
+VENDOR=""
+MODEL=""
+START=""
+SIZE=""
+HASH=""
+STATUS=""
+
+# mounts_log <logmsg>
+mounts_log () {
+  local logmsg=${1}
+  logger -t hotplug.d-mount-mounts ${logmsg}
+}
+
+# mounts_init
+# sets MOUNTDPATH MOUNTPOINT.
+mounts_init () {
+  # Retrieve mountd configuration. Remove trailing slashes from paths.
+  config_load mountd
+  config_get MOUNTDPATH mountd path "/mnt/usb/"
+  MOUNTDPATH=$(echo ${MOUNTDPATH} | sed 's:/*$::')
+
+  # Load /var/state/mounts config for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+
+  MOUNTPOINT=${MOUNTDPATH}/${NAME}
+
+  mounts_log "ACTION=${ACTION} DEVICE=${DEVICE} NAME=${NAME}"
+}
+
+# mounts_device_valid <device>
+# sets DISK PARTITION.
+mounts_device_valid () {
+  local device=${1}
+  if [ -z "${device}" ] ; then
+    mounts_log "No device specified"
+    return 1
+  fi
+
+  DISK=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  PARTITION=$(echo ${device} | awk 'match($0, /[0-9]+/) { print substr($0, RSTART, RLENGTH) }')
+
+  if [ -z "${DISK}" ] ; then
+    mounts_log "${device} is not a disk"
+    return 1
+  fi
+
+  # On action remove no further checks are possible. /proc/partitions will not
+  # contain device information anymore.
+  if [ "${ACTION}" == "remove" ]; then return 0 ; fi
+
+  # If device has no partition table and a filesystem, one entry will match.
+  # If device has a partition table, multiple entries will match.
+  local count=$(cat /proc/partitions | grep -c ${DISK})
+  if [ "${count}" -eq "1" ] ; then
+    : # No further checks
+  else
+    if [ -z "${PARTITION}" ] ; then
+      mounts_log "${device} is not a partition"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# mounts_device_status <device>
+# returns "mount success", "mount failure" or "extended partition".
+mounts_device_status () {
+  local device=${1}
+
+  # Size of an extended partition is reported as a single block
+  local blocks=$(cat /proc/partitions | grep ${device} | awk '{print $3}')
+  if [ ${blocks} -eq 1 ] ; then
+    echo "extended partition" && return 1
+  fi
+
+  # Mount failure if no entry in mounts
+  local mounts=$(cat /proc/mounts | grep -c ${device})
+  if [ "${mounts}" -ne "1" ] ; then
+    echo "mount failure" && return 1
+  fi
+
+  # Mount success otherwise
+  echo "mount success" && return 0
+}
+
+# mounts_device_info <device>
+# sets VENDOR MODEL START SIZE HASH STATUS.
+mounts_device_info () {
+  local device=${1}
+  local disk=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+
+  VENDOR=$(cat /sys/class/block/${disk}/device/vendor | sed 's/ //g')
+  MODEL=$(cat /sys/class/block/${disk}/device/model | sed 's/ //g')
+  START=$(cat /sys/class/block/${device}/start)
+  SIZE=$(cat /sys/class/block/${device}/size)
+  HASH=$(echo "${START}${SIZE}" | sha256sum | cut -c1-4)
+  STATUS=$(mounts_device_status ${device})
+
+  mounts_log "VENDOR=${VENDOR} MODEL=${MODEL} START=${START} SIZE=${SIZE} HASH=${HASH} STATUS=${STATUS}"
+}
+
+# mounts_restart_mountd
+mounts_restart_mountd () {
+  mounts_log "Restarting mountd"
+
+  # Double-fork.
+  # Spawn an inner and outer subshell. The outer subshell exits as soon as
+  # the inner subshell is spawned in the background. The background process
+  # (inner shell) changes its parent process ID to 1.
+  ( (
+  # Give parent time to exit.
+  sleep 1
+
+  # Stop minidlna and samba to avoid 'device is busy' when umounting
+  /etc/init.d/minidlna stop
+  /etc/init.d/samba stop
+
+  # Umount partitions if erroneous/multiple disks. To catch both cases,
+  # mounts is checked for mountd mountpoints.
+  # In case of an erroneous disk, the disk will disappear for a brief moment
+  # and then reoccur. This results in a race condition between the ACTION
+  # 'remove' caused by the disappearance and the ACTION 'add' by the
+  # reoccurance.
+  local mounts=$(cat /proc/mounts | awk '{print $2}' | grep -c /tmp/run/mountd/)
+  if [ "${mounts}" -ne "0" ] ; then
+    /bin/umount /tmp/run/mountd/*
+  fi
+
+  # Stop mountd.
+  # For a proper cleanup, SIGINT has to be sent to mountd. Default SIGTERM is
+  # sent.
+  #
+  # IMPORTANT
+  # The subshell inherits fds and signals from its parent.
+  # (1) No process may have an open fd to the /tmp/run/mountd mountpoint or
+  # the umount will fail.
+  # (2) No signals, especially SIGALRM, may be blocked. Mountd relies on
+  # SIGALRM for timer functionality.
+  #
+  # (1) is fixed by closing all fds (except stdin, stdout and stderr) when
+  # this script is run.
+  # (2) is fixed by starting/stopping mountd via procd.
+  /etc/init.d/mountd-procd stop
+
+  # Restart minidlna and samba
+  /etc/init.d/minidlna start
+  /etc/init.d/samba start
+
+  # Restart mountd
+  /etc/init.d/mountd-procd start
+
+  )& )
+}
+
+# mounts_find_serial <section> <device> <serial>
+# sets <serial>
+mounts_find_serial () {
+  local device=${2}
+  local dev=""
+  config_get dev ${1} disc
+
+  local device_disk=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  local dev_disk=$(echo ${dev} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  if [ "${dev_disk}" == "${device_disk}" ] ; then
+    # Set value of <serial> to <section>
+    eval ${3}=${1}
+  fi
+}
+
+# mounts_find_disk <section> <device> <diskname>
+# sets <diskname>
+mounts_find_disk () {
+  local device=${2}
+  local dev=""
+  config_get dev ${1} device
+
+  local device_disk=$(echo ${device} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  local dev_disk=$(echo ${dev} | awk 'match($0, /[a-zA-Z]+/) { print substr($0, RSTART, RLENGTH) }')
+  if [ "${dev_disk}" == "${device_disk}" ] ; then
+    # Set value of <diskname> to <dev_disk>
+    eval ${3}=${dev_disk}
+  fi
+}
+
+# mounts_find_mount <section> <device> <mountname>
+# sets <mountname>
+mounts_find_mount () {
+  local device=${2}
+  local dev=""
+  config_get dev ${1} device
+
+  if [ "${dev}" == "${device}" ] ; then
+    # Set value of <mountname> to <section>
+    eval ${3}=${1}
+  fi
+}
+
+# mounts_get_serial <device> <serial>
+# sets <serial>
+mounts_get_serial () {
+  local device=${1}
+
+  # Retrieve disk serial from /var/state/mountd
+  LOAD_STATE=1
+  config_load mountd
+
+  local _serial=""
+  config_foreach mounts_find_serial mountd_disc ${device} "_serial"
+  # Set value of <serial> to _serial
+  eval ${2}=${_serial}
+
+  # /var/state/mounts config is expected for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+}
+
+# mounts_has_mounts <section> <hasmounts>
+# sets <hasmounts>
+mounts_has_mounts () {
+    # This callback is executed for each mount found.
+    # Set value of <hasmounts> to 1.
+    eval ${2}=1
+}
+
+# mounts_add_uci <device> <filesystem> <mountpoint> <status>
+mounts_add_uci () {
+  local device=${1}
+  local filesystem=${2}
+  local mountpoint=${3}
+  local status="${4}"
+
+  ${UCI} set mounts.${device}=mount
+  ${UCI} set mounts.${device}.device=${device}
+  ${UCI} set mounts.${device}.filesystem=${filesystem}
+  ${UCI} set mounts.${device}.mountpoint=${mountpoint}
+  ${UCI} set mounts.${device}.status="${status}"
+  ${UCI} commit mounts
+}
+
+# mounts_del_uci <device>
+mounts_del_uci () {
+  local device=${1}
+
+  # Common way:
+  # ${UCI} delete mounts.${device}
+  # ${UCI} commit mounts
+  #
+  # When using /var/state, the common way has a nasty quirk. Instead of
+  # removing the entries from the config file, it keeps them and adds the
+  # same statement with a '-' in front to indicate deletion. Setting the same
+  # option adds a new, and duplicate, entry. This causes the file to grow in
+  # size over time. A workaround is removing these entries using sed and
+  # reloading the config.
+  sed -i "/${device}/d" /var/state/mounts
+  config_load mounts
+}
+
+# mounts_unignore_mount <serial>
+mounts_unignore_mount () {
+  local serial=${1}
+  if [ -z "${serial}" ] ; then
+    mounts_log "failure unignoring ${DEVICE}, no disk serial"
+    return 1
+  fi
+
+  # Load /etc/config/mountd
+  LOAD_STATE=0
+  config_load mountd
+
+  # A mountd partition can be ignored by setting the option partX to 0, with X
+  # being the partition number. Reverting to unignore.
+  # UCI search path MUST be /etc/config, NOT /var/state. Thus not using ${UCI}.
+  # UCI sectiontype = mountd
+  # UCI sectionname = serial
+  # UCI sectionoption = partX (X = partition number)
+  uci delete mountd.${serial}.part${PARTITION}
+  uci commit mountd
+
+  # /var/state/mounts config is expected for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+}
+
+# mounts_ignore_mount <serial>
+mounts_ignore_mount () {
+  local serial=${1}
+  if [ -z "${serial}" ] ; then
+    mounts_log "failure ignoring ${DEVICE}, no disk serial"
+    return 1
+  fi
+
+  mounts_log "ignoring ${DEVICE} on disk ${DISK} (${serial})"
+
+  # Load /etc/config/mountd
+  LOAD_STATE=0
+  config_load mountd
+
+  # A mountd partition can be ignored by setting the option partX to 0, with X
+  # being the partition number.
+  # UCI search path MUST be /etc/config, NOT /var/state. Thus not using ${UCI}.
+  # UCI sectiontype = mountd
+  # UCI sectionname = serial
+  # UCI sectionoption = partX (X = partition number)
+  uci set mountd.${serial}=mountd
+  uci set mountd.${serial}.part${PARTITION}=0
+  uci commit mountd
+
+  # /var/state/mounts config is expected for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+}
+
+# mounts_cleanup_ignores <serial>
+mounts_cleanup_ignores () {
+  local serial=${1}
+  if [ -z "${serial}" ] ; then
+    mounts_log "failure cleaning up ignores ${DISK}, no disk serial"
+    return 1
+  fi
+
+  # Load /etc/config/mountd
+  LOAD_STATE=0
+  config_load mountd
+
+  # A mountd partition can be ignored by setting the option partX to 0, with X
+  # being the partition number. Clean ignores by deleting complete section.
+  # UCI search path MUST be /etc/config, NOT /var/state. Thus not using ${UCI}.
+  # UCI sectiontype = mountd
+  # UCI sectionname = serial
+  uci delete mountd.${serial}
+  uci commit mountd
+
+  # /var/state/mounts config is expected for all future UCI manipulations.
+  LOAD_STATE=1
+  config_load mounts
+}
+
+# mounts_check_mount
+mounts_check_mount () {
+  if [ "${STATUS}" == "mount success" ] ; then
+    return 0
+  fi
+
+  # Mounting went wrong. Have mountd ignore the mount.
+  local serial=""
+  mounts_get_serial ${DEVICE} "serial"
+  mounts_ignore_mount ${serial}
+}
+
+# mounts_add_mount
+mounts_add_mount () {
+  mounts_check_mount
+
+  # Stop + restart of mountd does not cause a 'remove' ACTION. Old data for
+  # the same mount may exists. Clean it up.
+  local oldmountname=""
+  config_foreach mounts_find_mount mount ${DEVICE} "oldmountname"
+  if [ -n "${oldmountname}" ] ; then
+    mounts_log "Old mount ${oldmountname}... Cleanup."
+    mounts_del_uci ${DEVICE}
+  fi
+
+  mounts_log "Add mount ${DEVICE} (${MOUNTPOINT})"
+
+  local filesystem=$(mount | grep ${DEVICE} | awk '{print $5}')
+  if [ -z ${filesystem} ] ; then
+    filesystem="unknown"
+  elif [ "${filesystem}" == "ufsd" ] ; then
+    filesystem="ntfs/hfs+"
+  else
+    : # Do nothing.
+  fi
+
+  mounts_add_uci ${DEVICE} ${filesystem} ${MOUNTPOINT} "${STATUS}"
+}
+
+# mounts_del_mount
+mounts_del_mount () {
+  mounts_log "Remove mount ${DEVICE} (${MOUNTPOINT})"
+  mounts_del_uci ${DEVICE}
+
+  # Are all partitions of the disk deleted?
+  local diskname=""
+  config_foreach mounts_find_disk mount ${DEVICE} "diskname"
+  if [ -z "${diskname}" ] ; then
+    mounts_log "Removed disk ${diskname}"
+    # Mountd leaves behind directories inside /tmp/run/mountd/ from time to
+    # time. The idea is to restart mountd to ensure proper cleanup. However
+    # restarting mountd causes more severe problems in certain corner cases,
+    # resulting in multiple mountd instances to co-exists. Pick the lesser
+    # evil by not restarting mountd.
+    # F.e. when quickly physically removing and re-inserting the disk.
+    #mounts_restart_mountd
+
+    # Ignoring a mount, triggers a removal event. To prevent undoing the
+    # ignore, cleanup the mount ignores only at disk removal.
+    local serial=""
+    mounts_get_serial ${DEVICE} "serial"
+    mounts_cleanup_ignores ${serial}
+  fi
+}
+
+# Start of execution
+
+# Close all filedescriptors except stdin, stdout and stderr.
+# This script is trigger by a call from within mountd and inherits all
+# filedescriptors, including the fd on the /tmp/run/mountd/ mountpoint. This
+# fd needs to be closed to cleanup the mountpoint (ref. mounts_restart_mountd).
+for fd in $(ls /proc/$$/fd); do
+  [ ${fd} -gt 2 ] && eval "exec ${fd}>&-"
+done
+
+if [ "${ACTION}" == "add" ]; then
+  # Double-fork.
+  # Spawn an inner and outer subshell. The outer subshell exits as soon as
+  # the inner subshell is spawned in the background. The background process
+  # (inner shell) changes its parent process ID to 1.
+  ( (
+    # ACTION=add is called immediately after writing updated mountd information
+    # to /var/state/mountd. Without a small delay, information about the added
+    # partition is not yet persistent.
+    sleep 1
+    mounts_init
+
+    if ! mounts_device_valid ${DEVICE} ; then return ; fi
+    mounts_device_info ${DEVICE}
+    mounts_add_mount
+  )& )
+fi
+
+if [ "${ACTION}" == "remove" ]; then
+  # ACTION=remove is called before writing updated mountd information to
+  # /var/state/mountd. Information about the removed partition is still
+  # available.
+  mounts_init
+
+  if ! mounts_device_valid ${DEVICE} ; then return; fi
+  mounts_del_mount
+fi

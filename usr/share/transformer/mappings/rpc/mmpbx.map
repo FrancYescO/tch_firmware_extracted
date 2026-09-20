@@ -1,0 +1,122 @@
+local conn = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+local remove, insert = table.remove, table.insert
+
+local mmpbx = {
+    objectType = {
+        name = "rpc.mmpbx.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            resetCallStats = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+            },
+            state = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "STARTING",
+                    "RUNNING",
+                    "STOPPING",
+                    "NA",
+                },
+                default = "NA",
+            },
+            audio_alert = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+        },
+    }
+}
+
+local audioAlertCfgValue = "file_pstnlocaldial" --list play value
+local binding = { config = "mmpbx", sectionname = "pstnlocaldial", option = "play" }
+
+--to get specifical audio alert cfg info
+local function getAudioAlertCfgInfo()
+    local pstnLocalDialPlayTable = uci_helper.get_from_uci(binding)
+
+    if type(pstnLocalDialPlayTable) == "table" then
+        for i, v in pairs(pstnLocalDialPlayTable) do
+            if v == audioAlertCfgValue then
+                return "1", i, pstnLocalDialPlayTable
+            end
+        end
+    end
+
+    return "0", -1, pstnLocalDialPlayTable
+end
+
+local function getAudioAlertState()
+    return getAudioAlertCfgInfo() --note: return value should be string
+end
+
+mmpbx.get = {
+    resetCallStats = "false",
+    state = function(mapping, paramName, key)
+        return uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
+    end,
+    audio_alert = getAudioAlertState,
+}
+
+--The caller should make sure pstnLocalDialPlayTable is reasonable:
+-- 1\If delete, pstnLocalDialPlayTable should not be nil
+-- 2\If add, pstnLocalDialPlayTable can be nil, currently there is no this scenario
+local function getPstnLocalDialTable(addItemFlag, audioAlertSetString, index, pstnLocalDialPlayTable)
+    local pstnDialPlayFinalTable = {}
+
+    if type(pstnLocalDialPlayTable) == "table" then
+        pstnDialPlayFinalTable = pstnLocalDialPlayTable
+    end
+
+    if (addItemFlag == 1) then
+        insert(pstnDialPlayFinalTable, 1, audioAlertSetString)
+    else
+        remove(pstnDialPlayFinalTable, index)
+        if #pstnDialPlayFinalTable == 0 then
+            pstnDialPlayFinalTable = "" --for set_on_uci
+        end
+    end
+
+    return pstnDialPlayFinalTable
+end
+
+local function audioAlertSet(value)
+    local audioAlertCfged, index, pstnLocalDialPlayTable = getAudioAlertCfgInfo()
+
+    if value == "1" then  --to enable audio_alert
+        if "0" == audioAlertCfged then     --not configed priviously
+            uci_helper.set_on_uci(binding, getPstnLocalDialTable(1, audioAlertCfgValue, index, pstnLocalDialPlayTable), commitapply)
+        end
+    else
+        if "1" == audioAlertCfged then
+            uci_helper.set_on_uci(binding, getPstnLocalDialTable(0, nil, index, pstnLocalDialPlayTable), commitapply)
+        end
+    end
+
+    return
+end
+
+local function set(mapping, paramName, paramValue, key)
+    if paramName == "audio_alert" then
+        return audioAlertSet(paramValue)
+    else
+        conn:call("mmpbx.profile.stats", "reset", {})
+        conn:call("mmpbx.device.stats", "reset", {})
+        return nil
+    end
+end
+
+local function commit(mapping)
+    uci_helper.commit({config = "mmpbx"})
+end
+
+mmpbx.set = set
+mmpbx.commit = commit
+
+register(mmpbx)

@@ -1,0 +1,162 @@
+#!/bin/sh
+# Copyright (C) 2010 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+#set -x
+minidlna_print() {
+    logger -t minidlna_bg "$1"
+}
+
+tmp_db_dir="`uci get -q minidlna.config.db_dir`"
+[ -z $tmp_db_dir ] && {
+    minidlna_print "NOTICE: No need to do minidlna related operation."
+    return
+}
+db_dir=${tmp_db_dir}
+MINIDLNA_TMP_DIR="${db_dir}/tmp"
+#next line must be removed in final; just to see if things work fine (copying in fingerprinting)
+echo "Fingerprints " > ${db_dir}/media_disk_fingerprint
+
+FILE_FP_DONE="`uci get -q minidlna.config.db_dir`/media_disk_fingerprint_done"
+
+BTX=". $1/$$ "
+shift
+
+mdigest() {
+    while read sum fle
+    do
+        echo $sum
+    done
+}
+
+minidlna_rm_FP_done() {
+    minidlna_print "Remove FP done file '$FILE_FP_DONE'"
+    rm -f $FILE_FP_DONE
+    rm -f $db_dir/files.db
+}
+
+minidlna_set_FP_done() {
+    local dbfp
+    if [ -f $db_dir/files.db ]
+    then
+        dd if=${db_dir}/files.db bs=1 skip=100 2>/dev/null | md5sum | mdigest >>${db_dir}/media_disk_fingerprint
+    fi
+    md5sum ${db_dir}/media_disk_fingerprint | mdigest > ${db_dir}/media_disk_fingerprint_done
+    rm ${db_dir}/media_disk_fingerprint
+    minidlna_print "Media database scan done: ${db_dir}"
+}
+
+minidlna_finger_print() {
+    local mfp dfp mediadirlist=""
+    minidlna_print "Start profile check"
+
+    rm -fr $MINIDLNA_TMP_DIR
+    [ -d $MINIDLNA_TMP_DIR ] && {
+        minidlna_print "WARNING: check media disk on errors!"
+    }
+
+    [ "$MINIDLNA_MEDIA_FINGERPRINT" == "1" ] && mediadirlist=`uci get minidlna.config.media_dir`
+    minidlna_print "Creating directory $MINIDLNA_TMP_DIR"
+
+    # Only create temporary directory if minidlna.config.db_dir points to a directory on a mounted disk;
+    # we do not want to pollute the gateway inadvertently in case db_dir is set to a path on the gateway itself.
+    local ismounted=$(readlink -f `uci get -q minidlna.config.db_dir` | grep mountd)
+    if [[ ! -z "$ismounted" ]]; then
+        mkdir $MINIDLNA_TMP_DIR
+        [ ! -d $MINIDLNA_TMP_DIR ] && {
+            minidlna_print "ERROR: could not create $MINIDLNA_TMP_DIR"
+            return
+        }
+    else
+      local db_dir=$(uci get -q minidlna.config.db_dir)
+      minidlna_print "db_dir ${db_dir:-<empty>} is not mounted; not creating tmp dir"
+      return
+    fi
+
+    touch ${MINIDLNA_TMP_DIR}/media_disk_fingerprint
+    for mdir in $mediadirlist ; do
+        dir=${mdir%/*}
+        jdir=${dir##*/}
+        echo "Take fingerprint of " > ${MINIDLNA_TMP_DIR}/${jdir}.txt
+        find $mdir -type f \( \
+            -name "*.mpg" -o -name "*.tts"  -o -name "*.wma" -o -name "*.wmv" \
+            -o -name "*.mp3" -o -name "*.mpg"  -o -name "*.tts" -o -name "*.mp4" \
+            -o -name "*.3gp" -o -name "*.adts" -o -name "*.ifo" -o -name "*.png" \
+            -o -name "*.pcm" -o -name "*.wav"  -o -name "*.jpg" \
+        \) -exec ls -et '{}' \; >> ${MINIDLNA_TMP_DIR}/${jdir}.txt
+
+        [ -r ${MINIDLNA_TMP_DIR}/${jdir}.txt ] && {
+            mfp=`md5sum ${MINIDLNA_TMP_DIR}/${jdir}.txt | mdigest`
+            echo "$mdir : $mfp" >> ${MINIDLNA_TMP_DIR}/media_disk_fingerprint
+            rm ${MINIDLNA_TMP_DIR}/${jdir}.txt
+            minidlna_print "mediadir=$dir calc fingerprint=$mfp"
+        } || minidlna_print "ERROR mediadir=$dir NOT calc fingerprint=$mfp"
+    done
+    cp ${MINIDLNA_TMP_DIR}/media_disk_fingerprint ${MINIDLNA_TMP_DIR}/media_disk_fingerprint_tmp
+#add files.db hash check
+    dd if=${db_dir}/files.db bs=1 skip=100 2>/dev/null | md5sum | mdigest >>${MINIDLNA_TMP_DIR}/media_disk_fingerprint_tmp
+    md_fp=`md5sum ${MINIDLNA_TMP_DIR}/media_disk_fingerprint_tmp | mdigest`
+#    minidlna_print "Media disk calc fingerprint=$md_fp"
+
+    FPdone=`cat $FILE_FP_DONE`
+    if [ -f $db_dir/files.db -a -n $FILE_FP_DONE -a -f $FILE_FP_DONE -a x"$md_fp" == x"$FPdone" ]
+    then
+#        minidlna_print "Skip media database rescan ($md_fp == $FPdone)"
+        minidlna_print "Skip media database rescan (Match !)"
+    else
+#        minidlna_print "Force rescan media database ($md_fp != $FPdone)"
+        minidlna_print "Force rescan media database (No match !)"
+        option_force_reload=-R
+        minidlna_rm_FP_done
+    fi
+
+    cp ${MINIDLNA_TMP_DIR}/media_disk_fingerprint $db_dir
+    rm -rf ${MINIDLNA_TMP_DIR}
+}
+
+[ -n "$BOOT_DELAY" ] && {
+    minidlna_print "Delay minidlna startup with $BOOT_DELAY sec"
+    sleep $BOOT_DELAY
+}
+
+if [ x"$MINIDLNA_FORCE_RESCAN" == x"1" ]
+then
+    minidlna_print "Option set force rescan media database"
+    option_force_reload=-R
+    minidlna_rm_FP_done
+else
+    if [ x"$MINIDLNA_MEDIA_FINGERPRINT" == x"1" ]
+    then
+        minidlna_print "Option media fingerprint"
+    else
+        minidlna_print "Skip media fingerprint"
+    fi
+    minidlna_finger_print
+fi
+
+log_file="`uci get minidlna.config.log_dir`/minidlna.log"
+[ -f $log_file ] && {
+    cp $log_file $log_file.bak
+    rm $log_file
+}
+
+/usr/sbin/cgroup_wrapper.sh $@ ${option_force_reload}
+
+
+tail -f $log_file | while read a
+do
+    check_finished=`echo $a | grep "Finished parsing playlists."`
+    [ -n "$check_finished" ] && {
+        minidlna_set_FP_done
+    }
+done
+
+# For debug
+sleep 5
+PID=`cat $MINIDLNA_D_PID`
+[ -n "$PID" ] && PID_CHECK=`ps -w | grep $PID | egrep -e "/usr/sbin/minidlnad"`
+
+minidlna_print "minidlnad started ($?:$PID)"

@@ -1,0 +1,716 @@
+local register, require = register, require
+local lfs = require("lfs")
+local uci = require('uci')
+local cursor = uci.cursor(nil, "/var/state")
+local match, tostring, open, remove, popen, gmatch, format = string.match, tostring, io.open, table.remove, io.popen, string.gmatch, string.format
+local posix = require("tch.posix")
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+
+local sys_usb_ = {
+    objectType = {
+        name = "sys.usb.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {},
+    }
+}
+
+register(sys_usb_)
+
+local sys_usb_device_i_ = {
+    objectType = {
+        name = "sys.usb.device.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "DeviceNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            path = {
+                access = "readOnly",
+                type = "string",
+            },
+            manufacturer = {
+                access = "readOnly",
+                type = "string",
+            },
+            product = {
+                access = "readOnly",
+                type = "string",
+            },
+            idVendor = {
+                access = "readOnly",
+                type = "string",
+            },
+            idProduct = {
+                access = "readOnly",
+                type = "string",
+            },
+            serial = {
+                access = "readOnly",
+                type = "string",
+            },
+            version = {
+                access = "readOnly",
+                type = "string",
+            },
+            speed = {
+                access = "readOnly",
+                type = "string",
+            },
+            bDeviceClassText = {
+                access = "readOnly",
+                type = "string",
+            },
+            bDeviceClass = {
+                access = "readOnly",
+                type = "string",
+            },
+            bDeviceSubClass = {
+                access = "readOnly",
+                type = "string",
+            },
+            bDeviceProtocol = {
+                access = "readOnly",
+                type = "string",
+            },
+            bMaxPower = {
+                access = "readOnly",
+                type = "string",
+            },
+            unmount = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+        }
+    }
+}
+
+local syspath = "/sys/bus/usb/devices/"
+
+local function firstline(filename)
+    local fd, msg = open(filename)
+    if not fd then
+        -- you could return nil and and error message but that will abort
+        -- iterating over all parameters.
+        -- so here I opt to just return an empty string.
+        return ""
+    end
+    local result = fd:read("*l")
+    if result == nil then
+        result = ""
+    end
+    fd:close()
+    return result
+end
+
+local devicePattern = "^(%d+)-([%d%.]+)$" -- a USB device directory is of the form bus-port.port ...
+
+local function entriesSysBusUsbDevices()
+    local entries = {}
+    for file in lfs.dir(syspath) do
+        if match(file, devicePattern) then
+           entries[#entries+1] = file
+        end
+    end
+    return entries
+end
+
+local deviceClassMap = {
+    ["00"] = "See interfaces class",
+    ["01"] = "Audio",
+    ["02"] = "Communication and CDC control",
+    ["03"] = "Human interface device (HID)",
+    ["05"] = "Physical interface device (PID)",
+    ["06"] = "Image",
+    ["07"] = "Printer",
+    ["08"] = "Mass storage (MSC or UMS)",
+    ["09"] = "USB hub",
+    ["0A"] = "CDC-Data",
+    ["0B"] = "Smartcard",
+    ["0D"] = "Content security",
+    ["0E"] = "Video",
+    ["0F"] = "Personal Healthcare",
+    ["10"] = "Audio/Video (AV)",
+    ["DC"] = "Diagnostic device",
+    ["E0"] = "Wireless controller",
+    ["EF"] = "Miscellaneous",
+    ["FE"] = "Application specific",
+    ["FF"] = "Vendor-specific",
+}
+
+local function getClassText(path)
+    local class = string.upper(firstline(path))
+    if deviceClassMap[class] then
+        return deviceClassMap[class]
+    end
+    return ""
+end
+
+local function get(mapping, paramName, key)
+    if paramName == "bDeviceClassText" then
+        return getClassText(syspath .. key .. "/bDeviceClass")
+    elseif paramName == "unmount" then
+        return "0"
+    elseif paramName == "path" then
+        return key
+    else
+        local result = firstline(syspath .. key .. "/" .. paramName)
+        return result
+    end
+end
+
+local entriesSysBusUsbDevicespartitions -- forward declaration
+local umountDeviceTable = {}
+local function unmountUsb(mapping, paramName, paramValue, key)
+    umountDeviceTable = entriesSysBusUsbDevicespartitions(mapping)
+    commitapply:newset("rpc.usb.umount")
+end
+
+
+sys_usb_device_i_.entries = entriesSysBusUsbDevices
+sys_usb_device_i_.get = get
+sys_usb_device_i_.set = unmountUsb
+sys_usb_device_i_.commit = function()
+    if #umountDeviceTable ~= 0 then
+        cursor:create_config_file("usb")
+        cursor:set("usb","unmount","unmount")
+        cursor:commit("usb")
+        local result, msg = cursor:set("usb","unmount", "device", umountDeviceTable)
+        if result == false then
+            return result, msg
+        end
+        result, msg = cursor:save("usb")
+        if result == false then
+            return result, msg
+        end
+        cursor:close()
+    end
+    umountDeviceTable = {}
+end
+
+sys_usb_device_i_.revert = function()
+    umountDeviceTable = {}
+end
+
+register(sys_usb_device_i_)
+
+local sys_usb_device_i_interface_i_ = {
+    objectType = {
+        name = "sys.usb.device.{i}.interface.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "InterfacesNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            path = {
+                access = "readOnly",
+                type = "string",
+            },
+            bInterfaceClassText = {
+                access = "readOnly",
+                type = "string",
+            },
+            bInterfaceClass = {
+                access = "readOnly",
+                type = "string",
+            },
+            bInterfaceSubClass = {
+                access = "readOnly",
+                type = "string",
+            },
+            bInterfaceProtocol = {
+                access = "readOnly",
+                type = "string",
+            },
+        }
+    }
+}
+
+local function entriesSysBusUsbDevicesInterfaces(mapping, parentkey)
+    local interfacePattern = ":(%d+)%.(%d+)$" -- replace potential . and - by escaped sequence
+    local entries = {}
+    for file in lfs.dir(syspath .. parentkey .. "/") do
+        if match(file, interfacePattern) then
+            entries[#entries+1] = file
+        end
+    end
+    return entries
+end
+
+local function getInterfaces(mapping, paramName, key, parentkey)
+    if paramName == "bInterfaceClassText" then
+        return getClassText(syspath .. parentkey .. "/" .. key .. "/bInterfaceClass")
+    elseif paramName == "bInterfaceSubClassText" then
+        return ""
+    elseif paramName == "path" then
+        return key
+    else
+        local result = firstline(syspath .. parentkey .. "/" .. key .. "/" .. paramName)
+        return result
+    end
+end
+
+sys_usb_device_i_interface_i_.entries = entriesSysBusUsbDevicesInterfaces
+sys_usb_device_i_interface_i_.get = getInterfaces
+register(sys_usb_device_i_interface_i_)
+
+-- With the transition to mountd, partitions are mounted on request (they do
+-- not stay mounted) and the mountpoint has become a mountd configuration.
+local sys_usb_partition_ = {
+    objectType = {
+        name = "sys.usb.partition.@.",
+        access = "readOnly",
+        numEntriesParameter = "partitionOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            port = {
+                access = "readOnly",
+                type = "string",
+            },
+            manufacturer = {
+                access = "readOnly",
+                type = "string",
+            },
+            product = {
+                access = "readOnly",
+                type = "string",
+            },
+            version = {
+                access = "readOnly",
+                type = "string",
+            },
+            path = {
+                access = "readOnly",
+                type = "string",
+            },
+            FileSystem = {
+                access = "readOnly",
+                type = "string",
+            },
+            TotalSpace = {
+                access = "readOnly",
+                type = "string",
+            },
+            UsedSpace = {
+                access = "readOnly",
+                type = "string",
+            },
+            AvailableSpace = {
+                access = "readOnly",
+                type = "string",
+            },
+            Volume = {
+                access = "readOnly",
+                type = "string",
+            },
+            Share = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            Stop = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            Power = {
+                access = "readOnly",
+                type = "string",
+            },
+            UsbBusy = {
+                access = "readOnly",
+                type = "boolean",
+                default = "0",
+            },
+            KeyPath = {
+                access = "readOnly",
+                type = "string",
+            },
+        }
+    }
+}
+
+function entriesSysBusUsbDevicespartitions(mapping)
+    local entries = {}
+
+    local part_list = {}
+    local function uci_cb(s)
+        if s.device and match(s.device, "sd[a-z][0-9]+") then
+            part_list[s.device] = true
+        end
+    end
+    cursor:load("mounts")
+    cursor:foreach("mounts", "mount", uci_cb)
+    cursor:unload("mounts")
+
+    local deviceEntries = entriesSysBusUsbDevices()
+    for _,device in ipairs(deviceEntries) do
+        if match(device, "^(%d+)-(%d+)$") then
+            local dev_list = {}
+            local path = syspath .. device .. "/"
+            local str = "/usr/bin/find " .. path .. " -name sd*"
+            local fp = popen(str)
+            if fp then
+                for ln in fp:lines() do
+                    if ln ~= "" then
+                        local dev
+                        for w in gmatch(ln, "[^/]+") do
+                            dev = w
+                        end
+                        if dev then
+                            dev_list[#dev_list+1] =  dev
+                        end
+                    end
+                end
+                fp:close()
+            end
+            if #dev_list == 1 then
+                entries[#entries+1] = device .. "_" .. dev_list[1]
+            else
+                for _, v in pairs(dev_list) do
+                    local dev = match(v, "sd[a-z][0-9]+")
+                    if dev and part_list[dev] then
+                        entries[#entries+1] =  device .. "_" .. dev
+                    end
+                end
+            end
+        end
+    end
+    return entries
+end
+
+local function getMountsMount(key)
+    local mount = {}
+
+    local function uci_cb(s)
+      if s.device == key then
+        mount = s
+      end
+    end
+
+    cursor:load("mounts")
+    cursor:foreach("mounts", "mount", uci_cb)
+    cursor:unload("mounts")
+    return mount
+end
+
+local function getSambashare(key)
+    local share = {}
+
+    local function uci_cb(s)
+      if s.device == key then
+        share = s[".name"]
+      end
+    end
+
+    cursor:load("samba")
+    cursor:foreach("samba", "sambashare", uci_cb)
+    cursor:unload("samba")
+    return share
+end
+
+local function getMountPoint(key)
+    local mount = getMountsMount(key)
+    local mountpoint = mount.mountpoint or ""
+    return mountpoint
+end
+
+local function getFileSystem(key)
+    local mount = getMountsMount(key)
+    local filesystem = mount.filesystem or ""
+    return filesystem
+end
+
+local key_pattern = "(.*)_(.*)"
+local function split_partition_key(key)
+   return match(key, key_pattern)
+end
+
+local binding = { config = "minidlna", sectionname = "config", option = "", extended = true }
+binding.option = "start_dir"
+local start_dir = get_from_uci(binding)
+local umountPathTable = {}
+
+--note:mount should not be null
+local function getMedia_dirFromMountPoint(mount)
+    return mount .. start_dir
+end
+
+local function isPathShared(tmpMedia_dir, media_dir)
+    if type(media_dir) == "string" and "" ~= media_dir then
+        if tmpMedia_dir == media_dir then
+            return "1", i
+        end
+    end
+
+    if type(media_dir) == "table" then
+       for i, v in ipairs(media_dir) do
+            if v == tmpMedia_dir then
+                return "1", i
+            end
+        end
+    end
+
+    return "0", -1
+end
+
+local function getPartitions(mapping, paramName, key)
+    if paramName == "KeyPath" then
+        return key
+    end
+
+    local devkey, path = split_partition_key(key)
+    if paramName == "path" then
+        return path
+    elseif paramName == "FileSystem" then
+        return getFileSystem(path)
+    else
+        local mount = getMountPoint(path)
+        if mount == "" then
+          return mount
+        end
+
+        -- Possible failure if mount has to be remounted by mountd on statvfs.
+        -- Most of the times this results in no failures, catch the cases where
+        -- is does fail and handle properly.
+        local result, statvfs_info = pcall(posix.statvfs, mount)
+        if not result then
+            return ""
+        end
+
+        if paramName == "port" then
+            return devkey
+        elseif paramName == "manufacturer" or paramName == "product" or paramName == "version" then
+            return firstline(syspath .. devkey .. "/" .. paramName)
+        elseif paramName == "Volume" then
+            local volume = match(mount,".*/([^/]*)")
+            return volume or ""
+        elseif paramName == "TotalSpace" then
+            local size = statvfs_info.f_bsize * statvfs_info.f_blocks/(1024*1024*1024)
+            size = format("%0.2f",size) .. "GB"
+            return size
+        elseif paramName == "UsedSpace" then
+            local size = statvfs_info.f_bsize * (statvfs_info.f_blocks-statvfs_info.f_bfree)/(1024*1024*1024)
+            size = format("%0.2f",size) .. "GB"
+            return size
+        elseif paramName == "AvailableSpace" then
+            local size = statvfs_info.f_bsize * statvfs_info.f_bfree/(1024*1024*1024)
+            size = format("%0.2f",size) .. "GB"
+            return size
+        elseif paramName == "Share" then
+            binding.option = "media_dir"
+            return isPathShared(getMedia_dirFromMountPoint(mount), get_from_uci(binding))
+        elseif paramName == "Stop" then
+            local handle = popen("df -h | grep ".. path)
+            if handle ~= nil then
+                local cmdResult = handle:read("*a")
+                handle:close()
+                if "" ~= cmdResult then
+                    return "0"
+                end
+            end
+            return "1"
+        elseif paramName == "Power" then
+            return "High Power"
+        elseif paramName == "UsbBusy" then
+            local tmpCmd = "/usr/bin/fuser " .. mount
+            local fp = popen(tmpCmd)
+            if fp ~= nil then
+                local cmdResult = fp:read("*a")
+                fp:close()
+                if "" ~= cmdResult then
+                  return "1"
+                end
+            end
+            return "0"
+        end
+    end
+    return ""
+end
+
+--note:media_dir should not be null
+local function getMountPointFromMedia_dir(media_dir)
+    local tmpMount = match(media_dir, "(%S+)".. start_dir)
+    if nil == tmpMount then
+        return match(media_dir, "(%S+)".. "%" .. start_dir)
+    else
+        return tmpMount
+    end
+end
+
+local function getDb_dirFromMountPoint(mount)
+    return mount .. "/.dlna"
+end
+
+--note:db_dir should not be null, minidlna.config.db_dir='$MOUNT_POINT/.dlna'
+local function isMountUsedByDb_dir(mount)
+    binding.option = "db_dir"
+    local db_dir = get_from_uci(binding)
+    local tmpDb_dir = getDb_dirFromMountPoint(mount)
+    if db_dir == tmpDb_dir then
+        return true
+    end
+    return false
+end
+
+local function getDb_dirFromMedia_dir(media_dir)
+    return getMountPointFromMedia_dir(media_dir) .. "/.dlna"
+end
+
+local function removeMinidlnaRelatedContent(media_dir)
+    local db_dir = getDb_dirFromMedia_dir(media_dir)
+    os.execute("rm -rf " .. db_dir )
+end
+
+--To stop share for minidlna
+local function stopSharing(media_dir, mount)
+    local db_dir
+    local isDb_dirChange = true
+    local tmpMedia_dir = getMedia_dirFromMountPoint(mount)
+    local isFind, i = isPathShared(tmpMedia_dir, media_dir)
+
+    if "0" == isFind then
+        return
+    end
+
+    removeMinidlnaRelatedContent(tmpMedia_dir)
+
+    if type(media_dir) == "table" then
+        remove(media_dir, i)
+        if 0 == #media_dir then
+            db_dir = ""
+            media_dir = {}
+        elseif isMountUsedByDb_dir(mount) then
+            db_dir = getDb_dirFromMedia_dir(media_dir[1])
+        else
+            isDb_dirChange = false
+        end
+    elseif type(media_dir) == "string" then
+        db_dir = ""
+        media_dir = {}
+    end
+
+    if isDb_dirChange then
+        if db_dir ~= "" then
+            os.execute("mkdir ".. db_dir)
+        end
+        binding.option = "db_dir"
+        set_on_uci(binding, db_dir, commitapply)
+        binding.option = "log_dir"
+        set_on_uci(binding, db_dir, commitapply) --log_dir is equal to db_dir
+    end
+    binding.option = "media_dir"
+    set_on_uci(binding, media_dir, commitapply)
+end
+
+--To add the conf and restart the minidlna
+local function sharePartitionManage(paramValue, path)
+    local mount = getMountPoint(path)
+    local realValue = paramValue
+    if mount == "" then
+        return
+    end
+
+    --to check whether the usb will be umounted
+    local filename = "/tmp/toumountusb"
+    local handle, msg = open(filename, "r")
+    if handle then
+        local data = handle:read("*a")
+        if match(data, mount) then
+           realValue = "0"
+        end
+        handle:close()
+    end
+
+    binding.option = "media_dir"
+    local media_dir = get_from_uci(binding)
+
+    if realValue == "1" then
+        --check whether setted before
+        local tmpMedia_dir = getMedia_dirFromMountPoint(mount)
+        if "1" ==  isPathShared(tmpMedia_dir, media_dir) then
+            return
+        end
+
+        if type(media_dir) == "table" then
+            media_dir[#media_dir + 1] = tmpMedia_dir
+            set_on_uci(binding, media_dir, commitapply)
+        else
+            if type(media_dir) == "string" and "" ~= media_dir then     --Means only one value
+                set_on_uci(binding, { media_dir, tmpMedia_dir }, commitapply)
+            else                                    --Means no media_dir at all
+                binding.option = "media_dir"
+                set_on_uci(binding, { tmpMedia_dir }, commitapply)
+                local db_dir = getDb_dirFromMountPoint(mount)
+                os.execute("mkdir ".. db_dir)
+                binding.option = "db_dir"
+                set_on_uci(binding, db_dir, commitapply)
+                binding.option = "log_dir"
+                set_on_uci(binding, db_dir, commitapply)
+            end
+        end
+    else
+        stopSharing(media_dir, mount)
+    end
+    return
+end
+
+local function umountUsb(paramValue, path)
+    local mount = getMountPoint(path)
+    if mount == "" then
+       return
+    end
+
+    --To reset the minidlna share setting
+    binding.option = "media_dir"
+    if isPathShared(getMedia_dirFromMountPoint(mount), get_from_uci(binding)) then
+        sharePartitionManage("0", path)
+    end
+
+    umountPathTable[#umountPathTable + 1] = mount
+    return
+end
+
+local function setPartitions(mapping, paramName, paramValue, key)
+    local _, path = split_partition_key(key)
+    if paramName == "Share" then
+        return sharePartitionManage(paramValue, path)
+    elseif paramName == "Stop" then
+        if "0" == paramValue then
+           return
+        end
+        return umountUsb(paramValue, path)
+    end
+end
+
+local function writeUmountFile(umountPathTable)
+    local filename = "/tmp/toumountusb"
+    local handle, msg = open(filename, "w")
+    if not handle then
+        return
+    end
+    for _, v in ipairs(umountPathTable) do
+        handle:write(v)
+    end
+    handle:close()
+
+    return
+end
+sys_usb_partition_.entries = entriesSysBusUsbDevicespartitions
+sys_usb_partition_.get = getPartitions
+sys_usb_partition_.set = setPartitions
+sys_usb_partition_.commit = function()
+    uci_helper.commit({ config = "minidlna" })
+    if #umountPathTable ~= 0 then
+        writeUmountFile(umountPathTable)
+    end
+    umountPathTable = {}
+    commitapply:newset("rpc.usb.umount")
+end
+
+register(sys_usb_partition_)
