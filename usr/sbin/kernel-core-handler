@@ -1,0 +1,65 @@
+#!/bin/sh
+
+#Usage :kernel-core-handler [--url=<URL of Panic Storage Sever>] [--force ]
+
+. $IPKG_INSTROOT/lib/functions.sh
+url=$(uci_get kernel_crash_handler @kernel_crash[0] url)
+action=$(uci_get kernel_crash_handler @kernel_crash[0] action)
+upload=$(uci_get kernel_crash_handler @kernel_crash[0] upload)
+version=$(uci_get version @version[0] version unknown)
+factory_id=$(uci_get env rip factory_id unknown)
+serial=$(uci_get env rip serial unknown)
+board=$(uci_get env rip board_mnemonic unknown)
+storage_path="/root"
+file="kernel_crash"
+filepath="/tmp/$file"
+crash="/proc/prozone/panic"
+exe_name="Null"
+
+for counter in "$@"
+do
+case $counter in
+    --url=*|--URL=*)
+    url="${counter#*=}"
+    ;;
+
+    --force|--FORCE)
+    upload=1
+    ;;
+    *)
+    echo "Usage kernel-core-handler <options>"
+    echo "options : --url=http://webserver_address"
+    echo "          --force"
+    exit
+    ;;
+esac
+done
+
+
+if [ $upload -eq 1 ]
+then
+        cat $crash > $filepath
+        size=`wc -c $filepath |cut -d" " -f1`
+        if [ $size -eq 0 ]
+        then
+                echo "No panic available"
+                exit
+        fi
+        
+	curl -m 360 -X POST -F "exe=$exe_name" -F "version=${version}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@${filepath}" ${url}
+	echo "kernel panic uploaded!!!!!"
+	echo 0 > $crash
+        if [ $action == "compress" ]
+        then
+                gzip -c $filepath > ${storage_path}/${file}.gz
+                rm -rf $filepath
+        elif [ $action == "delete" ]
+        then
+                rm -rf $filepath
+        else
+                echo "Invalid action value set use compress/delete"
+                rm -rf  $filepath
+        fi
+else
+        echo "upload option is not enabled"
+fi
