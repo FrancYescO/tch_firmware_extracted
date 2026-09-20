@@ -1,0 +1,51 @@
+local network_dmz_ = {
+  objectType = {
+    name = "rpc.network.dmz.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    },
+  }
+}
+
+local uciswitch = require('transformer.shared.uciswitch')
+local switcher = uciswitch.switcher('/etc/dmzcontrol/enable', commitapply)
+
+network_dmz_.get = {
+  enabled = function()
+    return switcher:isEnabled() and "1" or "0"
+  end,
+}
+
+network_dmz_.set = {
+  enabled = function(_, _, value)
+    local enable = value=="1"
+    if enable == switcher:isEnabled() then
+      return --nothing to do
+    end
+    if not switcher:enable(enable) then
+      return nil, "failed to switch"
+    end
+    commitapply:newset("rpc.network.dmz.enabled")
+  end,
+}
+
+local function endTransaction(action)
+  action(switcher)
+end
+
+network_dmz_.commit = function()
+  endTransaction(switcher.commit)
+end
+
+network_dmz_.revert = function()
+  endTransaction(switcher.revert)
+end
+
+register(network_dmz_)
+
