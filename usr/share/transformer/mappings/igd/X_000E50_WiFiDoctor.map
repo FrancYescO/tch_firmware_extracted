@@ -1,0 +1,77 @@
+local InternetGatewayDevice_X_000E50_WiFiDoctor_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_000E50_WiFiDoctor.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      CSUrl = {
+        access = "readWrite",
+        type = "string",
+      },
+    }
+  }
+}
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local uci_helper = mapper("ucihelper")
+local binding={config="txmember", sectionname="config"}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+InternetGatewayDevice_X_000E50_WiFiDoctor_.get = {
+  Enable = function(mapping)
+    binding.option = "enabled"
+    return uci_helper.get_from_uci(binding)
+  end,
+  CSUrl = function(mapping)
+    binding.option = "cs_url"
+    return uci_helper.get_from_uci(binding)
+  end,
+}
+
+InternetGatewayDevice_X_000E50_WiFiDoctor_.getall = function(mapping)
+  local allValues = uci_helper.getall_from_uci(binding)
+  return {
+    Enable = allValues.enabled,
+    CSUrl = allValues.cs_url,
+  }
+end
+
+local setSomething
+InternetGatewayDevice_X_000E50_WiFiDoctor_.set = {
+  Enable = function(mapping, param, value)
+    binding.option = "enabled"
+    uci_helper.set_on_uci(binding, value, commitapply)
+    setSomething = true
+  end,
+  CSUrl = function(mapping, param, value)
+    binding.option = "cs_url"
+    uci_helper.set_on_uci(binding, value, commitapply)
+    setSomething = true
+  end,
+}
+
+InternetGatewayDevice_X_000E50_WiFiDoctor_.commit = function()
+  if setSomething then
+    uci_helper.commit(binding)
+    setSomething = nil
+  end
+end
+
+InternetGatewayDevice_X_000E50_WiFiDoctor_.revert = function()
+  if setSomething then
+    uci_helper.revert(binding)
+    setSomething = nil
+  end
+end
+
+register(InternetGatewayDevice_X_000E50_WiFiDoctor_)
+

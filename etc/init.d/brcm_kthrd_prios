@@ -1,0 +1,52 @@
+#!/bin/sh /etc/rc.common
+
+source /lib/functions/functions-tch.sh
+
+# After modules loaded and XDSL started
+START=19
+
+# Match the priorities Broadcom set on several kthreads.
+# Information based on eid_bcm_kthreads.txt, wlmngr and running threads.
+
+start() {
+    # USB workqueue thread
+    setrtprio khubd 5
+
+    # Broadcom Buffer Pool Manager thread
+    setrtprio bpm 75
+
+    # Broadcom FAP GSO LOOPBACK thread
+    setrtprio fapGsoLoopBk 5
+
+    # Broadcom bcmenet driver threads
+    setrtprio bcmsw_rx 5
+    setcpumask bcmsw_rx 1
+
+    # Wlan threads
+    # WFD < 4.16L03
+    setrtprio wfd 5
+
+    # WFD >= 4.16L03
+    setrtprio wfd0-thrd 5
+    setrtprio wfd1-thrd 5
+
+    # Wlan driver
+    setrtprio wl0-kthrd 5
+    setrtprio wl1-kthrd 5
+    setrtprio dhd1_dpc 5
+
+    #DHD Driver must be on same cpu as bcmsw_rx because of locking issues (CSP934579)
+    if [ "$(process_exists dhd1_dpc)" == "1" ] ; then
+        setcpumask dhd1_dpc 1
+        setcpumask wl0-kthrd 2
+    fi
+
+    #Wl0-kthrd shuld be on different cpu as bcmsw_rx (NG-28749)
+    if [ "$(process_exists wl1-kthrd)" != "1" ] && [ "$(process_exists dhd1_dpc)" != "1" ] ; then
+	setcpumask wl0-kthrd 2
+    fi
+    #############################################
+    #Configure priority for Technicolor Packages#
+    #############################################
+
+}

@@ -1,0 +1,153 @@
+local require, mapper, register = require, mapper, register
+local table, pairs, tostring, error = table, pairs, tostring, error
+local string = string
+
+-- uci.firewall.userredirect.{i}
+local mapinfo_userredirect_uci = {
+    config = "firewall",
+    type = "userredirect",
+    options = { "enabled", "name", "family", "src", "dest", "src_dport", "dest_ip", "dest_port", "target" },
+    lists = { "proto" }
+}
+
+local mapping_portforward_uci = mapper("uci_1to1").createMultiMap(mapinfo_userredirect_uci)
+
+local mapping_portforward_rpc = {
+    objectType = {
+        name = "rpc.network.firewall.portforward.{i}.",
+        access = mapping_portforward_uci.objectType.access,
+        minEntries = mapping_portforward_uci.objectType.minEntries,
+        maxEntries = mapping_portforward_uci.objectType.maxEntries,
+        parameters = mapping_portforward_uci.objectType.parameters,
+    }
+}
+
+mapping_portforward_rpc.get = function(mapping, param, key)
+    return mapping_portforward_uci.get(mapping_portforward_uci, param, key)
+end
+
+mapping_portforward_rpc.getall = function(mapping, key)
+    return mapping_portforward_uci.getall(mapping_portforward_uci, key)
+end
+
+mapping_portforward_rpc.set = function(mapping, paramname, value, key)
+    return mapping_portforward_uci.set(mapping_portforward_uci, paramname, value, key)
+end
+
+mapping_portforward_rpc.add = function(mapping, name)
+    return mapping_portforward_uci.add(mapping_portforward_uci, name)
+end
+
+mapping_portforward_rpc.delete = function(mapping, parentkey)
+    return mapping_portforward_uci.delete(mapping_portforward_uci, parentkey)
+end
+
+mapping_portforward_rpc.entries = function(mapping)
+    return mapping_portforward_uci.entries(mapping_portforward_uci)
+end
+
+-- Helper functions
+local ucihelper = mapper("ucihelper")
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+local function dhcp_update_uci(portforward_hosts, commitapply)
+  local uci_binding = {
+      config = "dhcp",
+      sectionname = "host",
+  }
+  -- prepare list for which to remove or add
+  local uci_hosts_delete = {}
+  local function cb(t)
+      local t_ip = t["ip"]
+      if portforward_hosts[t_ip] == nil then
+          if t["owner"] == "portforward" then
+              table.insert(uci_hosts_delete, t[".name"])
+          end
+      else
+          portforward_hosts[t_ip] = nil
+      end
+  end
+  ucihelper.foreach_on_uci(uci_binding, cb)
+
+  -- process delete list
+  for _, name in ipairs(uci_hosts_delete) do
+      local uci_binding_del = {
+          config = uci_binding["config"],
+          sectionname = name
+      }
+      ucihelper.delete_on_uci(uci_binding_del, commitapply)
+  end
+
+  -- create new entries
+  for host, mac in pairs(portforward_hosts) do
+      if mac ~= "" then
+          local result, errmsg = ucihelper.add_on_uci(uci_binding)
+          if not result then break end
+          local uci_binding_set = {
+              config = uci_binding["config"],
+              sectionname = result,
+              option = "ip"
+          }
+          ucihelper.set_on_uci(uci_binding_set, host, commitapply)
+          uci_binding_set["option"] = "mac"
+          ucihelper.set_on_uci(uci_binding_set, mac, commitapply)
+          uci_binding_set["option"] = "owner"
+          ucihelper.set_on_uci(uci_binding_set, "portforward", commitapply)
+      end
+  end
+
+  -- commit all on uci
+  ucihelper.commit(uci_binding)
+end
+
+local function portforward_update_dhcp()
+    local portforward_hosts = {}
+    local pfw_entries = mapping_portforward_uci.entries(mapping_portforward_uci)
+    for _, pfw_key in ipairs(pfw_entries) do
+        local pfw_destip = mapping_portforward_uci.get(mapping_portforward_uci, "dest_ip", pfw_key)
+        if pfw_destip ~= "" then
+            portforward_hosts[pfw_destip] = ""
+        end
+    end
+
+    for host, _ in pairs(portforward_hosts) do
+        local devices = conn:call("hostmanager.device", "get", { ["ipv4-address"] = host } )
+        if devices ~= nil then
+            -- select first result
+            local _, dev = next(devices, nil)
+
+            if (dev ~= nil and dev.ipv4 ~= nil) then
+                -- find matching ipv4 address
+                for _, ipv4 in pairs(dev.ipv4) do
+                    if ipv4["configuration"] == "dynamic" and ipv4["address"] == host then
+                        portforward_hosts[host] = dev["mac-address"]
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    dhcp_update_uci(portforward_hosts, mapping_portforward_uci.commitapply)
+end
+
+mapping_portforward_rpc.commit = function(mapping)
+    local result, errmsg = mapping_portforward_uci.commit(mapping_portforward_uci)
+    if result then
+        portforward_update_dhcp()
+    end
+    return result, errmsg
+end
+
+mapping_portforward_rpc.revert = function(mapping)
+    return mapping_portforward_uci.revert(mapping_portforward_uci)
+end
+
+register(mapping_portforward_rpc)
+
+for _, submap in ipairs(mapping_portforward_uci.submappings) do
+    submap.objectType.name = mapping_portforward_rpc.objectType.name .. submap.binding.option .. ".@."
+    register(submap)
+end
+

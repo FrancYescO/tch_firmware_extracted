@@ -1,0 +1,97 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_DeviceInfo_VendorConfigFile_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.DeviceInfo.VendorConfigFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorConfigFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      Date = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+    }
+  }
+}
+
+local uci = require("uci")
+local lfs = require("lfs")
+local open = io.open
+
+local banks = {"bank_1", "bank_2"}
+local entries = {}
+
+InternetGatewayDevice_DeviceInfo_VendorConfigFile_i_.entries = function()
+  if next (entries) == nil then
+    for _, bank in ipairs(banks) do
+      local mode = lfs.attributes("/overlay/" .. bank, "mode")
+      if mode == "directory" then
+        entries[#entries + 1] = bank
+      end
+    end
+  end
+  return entries
+end
+
+local templatebank = "/overlay/%s/etc/config"
+
+local function getOptionFromBank(bank, option)
+  local bankpath = string.format(templatebank, bank)
+  -- Use uci instead of uci_helper, because we need to be able to access the other bank.
+  -- With cursor we can retrieve the configuration option from other the bank.
+  local cursor = uci.cursor(bankpath)
+  local value = cursor:get(option)
+  cursor:close()
+  return value
+end
+
+local activeBank = ""
+
+local getActiveBank = function()
+  if activeBank == "" then
+    local fd = open("/proc/banktable/active")
+    if fd then
+      activeBank = fd:read("*line")
+      fd:close()
+    end
+  end
+  return activeBank
+end
+
+InternetGatewayDevice_DeviceInfo_VendorConfigFile_i_.get = {
+  Name = function(mapping, param, key, parentkey)
+    local mask = getOptionFromBank(getActiveBank(), "env.var.mask_override_igd_" .. key)
+    if mask == nil then
+      -- key should be "bank_1" or "bank_2"
+      mask = getOptionFromBank(key, "version.@version[0].mask")
+    end
+    return mask or ""
+  end,
+  Version = "1.00",
+  Date = function(mapping, param, key, parentkey)
+    return getOptionFromBank(key, "cwmpd.cwmpd_config.firstusedate") or "0001-01-01T00:00:00Z"
+  end,
+  Description = function(mapping, param, key, parentkey)
+    return  "Vendor config file is " .. key .. " configuration"
+  end,
+}
+
+register(InternetGatewayDevice_DeviceInfo_VendorConfigFile_i_)
+

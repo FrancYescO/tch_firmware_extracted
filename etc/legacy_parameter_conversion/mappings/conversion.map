@@ -1,0 +1,490 @@
+local gsub, format, match = string.gsub, string.format, string.match
+local sort, concat = table.sort, table.concat
+local ch = require("tch.configmigration.convert_helper")
+local emc = ch.escape_lua_magic_char
+
+local acs_policy_map = {
+  ["Legacy"] = 0,
+  ["Interference"] = 1,
+  ["Interference&Busy"] = 2,
+  ["Optimized"] = 3,
+  ["Custom1"] = 4,
+  ["Custom2"] = 5,
+  ["legacy&noise"] = 6,
+}
+
+local function ssid_map_template(wifi_iface)
+  return {
+    ["ssid"] =          { uci_secname = wifi_iface, uci_option = "ssid" }, -- override uci_secname if need
+    ["apisolation"] =   { uci_option = "ap_isolation", value = ch.convert_bool },
+    ["any"] =           { uci_option = "public", value = ch.convert_bool },
+    ["secmode"] =       { uci_option = "security_mode", value = ch.wireless_convert_secmode },
+    ["WEPkey"] =        { uci_option = "wep_key" },
+    ["WPAPSKkey"] =     { uci_option = "wpa_psk_key" },
+    ["pmksacache"] =    { uci_option = "pmksa_cache", value = ch.convert_bool },
+    ["stationhistory"] ={ uci_option = "station_history", value = ch.convert_bool },
+    ["maxassociations"]={ uci_option = "max_assoc" },
+  }
+end
+
+local trace_modules_map = {
+    ["level"]  = { uci_option = "level" },
+    ["radius"] = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["acs"]    = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["wps"]    = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["dot1x"]  = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["remote"] = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+  }
+
+local dsd_uf_action_map = {
+  ["accept"] = "ACCEPT",
+  ["block"]  = "DROP",
+}
+
+local function dsd_uf_get_uci_secname(_,_,lt)
+  if not lt._maps_store["_uf_uci_secname"] then
+     lt._maps_store["_uf_uci_secname"] = lt._maps_store["_ucicmd_result"]
+  end
+  return lt._maps_store["_uf_uci_secname"]
+end
+
+local function dsd_uf_get_mac_from_expr(_,_,lt,g_user_ini)
+  return match(g_user_ini["expr.ini"], "add name="..emc(lt._maps_store[1]).." type=mac mac=([:%x]+)")
+end
+
+local mobile_apn_map = {
+  ["telstra.internet"] = "telstra_internet",
+  ["telstra.extranet"] = "telstra_extranet",
+  ["telstra.bigpond"] = "telstra_bigpond",
+}
+
+local mobile_operator_code_list = {
+  ["50501"] = "50501",
+  ["50506"] = "50506",
+}
+
+local function mobile_network(_,_,lt,g_user_ini)
+  local apn = match(g_user_ini["mobile.ini"], "ifconfig intf=Mobile %C*apn=(%S+)")
+  return apn and mobile_apn_map[apn] or "other"
+end
+
+local map_table = {
+  ["contentsharing.ini"] = {
+    -- single instance case: one table means one instance here
+    {
+      key = "upnp config %C+",  -- a regex indicate how to identify an instance
+      uci_config = "minidlna",
+      uci_secname = "config",
+      map = {
+              --we use legacy parameter name as key for quick index,
+              ["state"] =        { uci_option = "enabled", value = ch.convert_bool },
+              ["friendlyname"] = { uci_option = "friendly_name" },
+            },
+    },
+
+    {
+      key = "ftp config %C+",
+      map = { -- "uci_config" and "uci_secname" can be overwritten
+              ["state"] = { uci_config = "pure-ftpd", uci_secname = "@pure-ftpd[0]", uci_option = "enabled", value = ch.convert_bool },
+            },
+    },
+
+    {
+      key = "cifs config %C+",
+      uci_config = "samba",
+      uci_secname = "@samba[0]",
+      map = {
+              ["state"] =     { uci_option = "enabled", value = ch.convert_bool },
+              ["workgroup"] = { uci_option = "workgroup" },
+              ["name"] =      { uci_option = "name" },
+              ["comment"] =   { uci_option = "description" },
+            },
+    },
+  },
+
+  ["wireless.ini"] = {
+    -- multi-instance case: one table means one instance as well
+    -- radio stuff
+    {
+      key = "radio %C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "radio_2G",
+      map = {
+              ["state"] =        { uci_option = "state", value = ch.convert_bool },
+              ["interop"] =      { uci_option = "standard", value = function (_,s) return gsub(s, "[8021/%.]", "") end },
+              ["country"] =      { uci_option = "country" },
+              ["channel"] =      { uci_option = "channel" },
+              ["channelwidth"] = { uci_option = "channelwidth",
+                                     value = function (_,s) s = s.."MHz"; return gsub(s, "20/40MHz", "auto") end },
+              ["sgi"] =          { uci_option = "sgi", value = ch.convert_bool },
+              ["cdd"] =          { uci_option = "cdd", value = ch.convert_bool },
+              ["stbc"] =         { uci_option = "stbc", value = ch.convert_bool },
+              ["frameburst"] =   { uci_option = "frame_bursting", value = ch.convert_bool },
+              ["interferencemode"]     = { uci_option = "interference_mode" },
+              ["interferencechannel"]  = { uci_option = "interference_channel_list" },
+              ["htsecurityrestriction"]= { uci_option = "ht_security_restriction", value = ch.convert_bool },
+            },
+    },
+    -- acs stuff
+    {
+      key = "acs config %C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "radio_2G",
+      map = {
+              ["state"]        = { uci_option = "acs_state", value = function (_,s) return s:lower() end, },
+              ["mode"]         = { uci_option = "acs_policy", value = function (_,s) return acs_policy_map[s] end, },
+              ["rescanperiod"] = { uci_option = "acs_rescan_period" },
+              ["rescandelay"]  = { uci_option = "acs_rescan_delay" },
+              ["rescandelaypolicy"]    = { uci_option = "acs_rescan_delay_policy", value = function (_,s) return s:lower() end, },
+              ["rescandelaymaxevents"] = { uci_option = "acs_rescan_delay_max_events" },
+              ["chmonitorperiod"]      = { uci_option = "acs_channel_monitor_period" },
+              ["chfaillockoutperiod"]  = { uci_option = "acs_channel_fail_lockout_period" },
+              ["allowedchannels"]      = { uci_option = "acs_allowed_channels" },
+              ["chmonitoraction"]      = { uci_option = "acs_monitor_action" },
+            },
+    },
+    -- ssid stuff: ap0~ap1
+    {
+      key = "mssid ifconfig ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = ssid_map_template("wl0"),
+    },
+    {
+      key = "mssid ifconfig ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = ssid_map_template("wl0_1"),
+    },
+    --ifattach(for homeware version:wifi-iface state & ap state):ap state, ssid_id is just used for run into this mapping
+    {
+      key = "mssid ifattach ssid_id=0%D-%C-radio_id=0",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["ssid_id"] = { uci_option = "state" , value = "1" }, },
+    },
+
+    --ifattach(for homeware version:wifi-iface state & ap state):ap state
+     {
+       key = "mssid ifattach ssid_id=1%D-%C-radio_id=0",
+       uci_config = "wireless",
+       uci_secname = "ap1",
+       map = { ["ssid_id"] = { uci_option = "state" , value = "1" }, },
+     },
+
+    --wps_state:ap0
+    {
+      key = "wps config ssid_id=0%D-%C-radio_id=0%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["state"] = { uci_option = "wps_state" , value = ch.convert_bool }, }
+    },
+
+    --wps_state:ap1
+    {
+      key = "wps config ssid_id=1%D-%C-radio_id=0%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["state"] = { uci_option = "wps_state" , value = ch.convert_bool }, }
+    },
+
+    -- MAC ACL stuff: ap0
+    {
+      key = "macacl config ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = {
+              ["control"] = { uci_option = "acl_mode" },
+              ["regtime"] = { uci_option = "acl_registration_time" },
+            },
+    },
+    {
+      key = "macacl config ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = {
+              ["control"] = { uci_option = "acl_mode" },
+              ["regtime"] = { uci_option = "acl_registration_time" },
+            },
+    },
+    -- MAC ACL accept list: ap0~ap1
+    {
+      key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=allow%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["hwaddr"] = { uci_option = "acl_accept_list", action = "add_list" }, },
+    },
+    {
+      key = "macacl add ssid_id=1%D-%C-radio_id=0%D-%C-permission=allow%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["hwaddr"] = { uci_option = "acl_accept_list", action = "add_list" }, },
+    },
+    -- MAC ACL deny list: ap0~ap1
+    {
+      key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=deny%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["hwaddr"] = { uci_option = "acl_deny_list", action = "add_list" }, },
+    },
+    {
+      key = "macacl add ssid_id=1%D-%C-radio_id=0%D-%C-permission=deny%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["hwaddr"] = { uci_option = "acl_deny_list", action = "add_list" }, },
+    },
+    -- trace modules stuff: ap0~ap1
+    {
+      key = "debug traceconfig ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = trace_modules_map,
+    },
+    {
+      key = "debug traceconfig ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = trace_modules_map,
+    },
+  },
+
+  ["dyndns.ini"] = {
+    -- single instance case: one table means one instance here
+    {
+      key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+      uci_config = "ddns",
+      uci_secname = "myddns",
+      map = {
+              --we use legacy parameter name as key for quick index,
+                ["name"] = {uci_option = "domain"},
+            },
+    },
+    {
+      key = "modify name=%C+ intf=%C+",
+      uci_config = "ddns",
+      uci_secname = "myddns",
+      map = {
+               ["status"] = { uci_option = "enabled", value = ch.convert_bool },
+               ["user"] = { uci_option = "username" },
+               ["password"] = { uci_option = "password", value = ch.decrypt },
+               ["intf"] = { uci_option = "interface", value = ch.convert_ddns_interface },
+               ["service"] = { uci_option = "service_name", value = ch.convert_ddns_service },
+            },
+    },
+  },
+
+  ["mobile.ini"] = {
+    -- single instance case: one table means one instance here
+    {
+      key = "ifconfig intf=%C+",  -- a regex indicate how to identify an instance
+      uci_config = "mobiledongle",
+      uci_secname = "config",
+      map = {
+              ["pin"]        = { uci_secname = "sim", uci_option = "pin", value = ch.decrypt},
+              ["mode"]       = { uci_option = "operator_mode", value = ch.convert_mobile_opermode },
+              ["operator"]   = { uci_option = "requested_operator",
+                value = function (_,lv) return mobile_operator_code_list[lv] or "50501" end
+              },
+              ["technology"] = { uci_option = "requested_technology" },
+              ["apn"]        = { uci_option = "network",
+                value = function (_,lv) return mobile_apn_map[lv] or "other" end
+              },
+            },
+    },
+    {
+      key = "ifconfig intf=%C+",
+      uci_config = "mobiledongle",
+      uci_secname = "other",
+      map = {
+              -- if legacy apn is not predefined, set mobiledongle.other.apn as customized value
+              ["apn"] = { uci_option = "apn",
+                value = function (_,lv) return mobile_apn_map[lv] and "" or lv end
+              },
+            },
+    },
+  },
+
+  ["dhcs.ini"] = {
+     {
+        key = "pool config name=LAN_private %C+",
+        uci_config = "dhcp",
+        uci_secname = "lan",
+        map = {
+           ["poolstart"] = { uci_option = "start", value = ch.dhcs_convert_pooloffset},
+           ["poolend"] = { uci_option = "limit", value = ch.dhcs_convert_poolrange},
+           ["state"] = {uci_option = "ignore", value = ch.dhcs_convert_poolstate},
+        },
+     }
+  },
+
+  ["cwmp.ini"] = {
+     {
+       key = "server config %C+",
+       uci_config = "cwmpd",
+       uci_secname = "cwmpd_config",
+       map = {
+          ["url"] =      { uci_option = "acs_url" },
+          ["username"] = { uci_option = "acs_user" },
+          ["password"] = { uci_option = "acs_pass", value = ch.decrypt },
+       },
+     },
+     {
+       key = "config state%C+",
+       uci_config = "cwmpd",
+       uci_secname = "cwmpd_config",
+       map = {
+          ["periodicInfInt"] = { uci_option = "periodicinform_interval" },
+       },
+     },
+  },
+
+  ["service.ini"] = {
+    {
+      keycap = "assign name=(%C+) host=%C+",
+      type = "multiple",
+      maps = {
+        {
+          keygen = function (t) return format("rule add name=(%s) %%C+portrange=([%%d%%-]+)%%C+", emc(t[1])) end,
+          type = "multiple",
+          maps = {
+            {
+              --uci_secname = nil, --it means nothing will be converted, because this element just do some preparations.
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              map = {
+                ["mode"] = { uci_option = "target", value = ch.service_get_portmapping_mode, },
+              },
+            },
+            {
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "firewall",
+              map = {
+                -- when use UCI 'add' action, you need to provide 'uci_sectype' element.
+                ["name"] = { uci_option = "name", uci_sectype = "userredirect", action = ch.service_add_portmapping_if_need },
+              },
+            },
+            {
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                ["name"]      = { uci_option = "name", },
+                ["protocol"]  = { uci_option = "proto", action = "add_list",
+                                  -- looks like homeware has a bug, type of 'proto' is list, however,
+                                  -- if we provide a list like {"tcp","udp"}, GUI will be confused
+                                  -- when we change a port mapping entry.
+                                  value = function (_,lv) if type(lv) == "table" then sort(lv);return concat(lv);end end },
+                ["ipversion"] = { uci_option = "family",
+                                  value = function (_,lv) if type(lv) == "table" then return "any" end end, },
+                ["mode"]      = { uci_option = "target", value = function (_,_,lt) return lt._maps_store["_target"] end, },
+                ["portrange"] = { uci_option = "src_dport", },
+              },
+            },
+            {
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                -- The parameter 'baseport' is optional in legacy, 'portrange' is mandatory;
+                -- but in homeware the 'dest_port' is mandatory. We cannot map an optional
+                -- parameter to a mandatory one, so we have to create a new map element to
+                -- map a mandatory parameter to another mandatory one.
+                ["portrange"] = { uci_option = "dest_port", value = ch.service_convert_baseport_to_dest_port, },
+                -- uci option 'src' is mandatory when target is DNAT in homeware, in this case value usually is 'wan'
+                -- uci option 'dest' is mandatory when target is SNAT in homeware, in this case value usually is 'wan'
+                ["name"] = { uci_option = function (_,_,lt) return lt._maps_store["_target"] == "DNAT" and "src" or "dest" end,
+                             value = "wan", },
+              },
+            },
+            {
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                ["host"] = { uci_option = "dest_ip", },
+                -- there is no corresponding legacy parameter for uci_option "enabled",
+                -- since we only migrated effective legacy port mapping, so homeware
+                -- option "enabled" should always be "1"
+                ["name"] = { uci_option = "enabled", value = "1", },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+
+
+  ["dsd.ini"] = {
+    {
+      key = "urlfilter config %C+",
+      uci_config = "parental",
+      uci_secname = "general",
+      map = {
+        ["state"] = { uci_option = "enable", value = ch.convert_bool },
+      },
+    },
+    {
+      keycap = "urlfilter rule add clientmac=(%S+)",
+      type = "multiple",
+      maps = {
+        { -- add URLfilter which not indicate url
+          keygen = function (t) return format("urlfilter rule add clientmac=%s action=%%C+", emc(t[1])) end,
+          uci_config = "parental",
+          map = {
+            ["clientmac"] = { uci_option = "dummy", uci_sectype = "URLfilter", action = "add" },
+          },
+        }, -- maps[1]
+        { -- set URLfilter which not indicate url
+          keygen = function (t) return format("urlfilter rule add clientmac=%s action=%%C+", emc(t[1])) end,
+          uci_config = "parental",
+          uci_secname = dsd_uf_get_uci_secname,
+          map = {
+            ["clientmac"] = { uci_option = "mac", value = dsd_uf_get_mac_from_expr },
+            ["action"] = { uci_option = "action", value = function (_,s) return dsd_uf_action_map[s] end, },
+          },
+        }, -- maps[2]
+        { -- URLfilter with url
+          keygen = function (t) return format("urlfilter rule add clientmac=(%s) url=(%%S+)%%C+", emc(t[1])) end,
+          type = "multiple",
+          maps = {
+            { -- add URLfilter
+              keygen = function (t) return format("urlfilter rule add clientmac=%s url=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "parental",
+              map = {
+                ["clientmac"] = { uci_option = "dummy", uci_sectype = "URLfilter", action = "add" },
+              },
+            }, -- maps[3].maps[1]
+            { -- set URLfilter
+              keygen = function (t) return format("urlfilter rule add clientmac=%s url=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "parental",
+              uci_secname = dsd_uf_get_uci_secname,
+              map = {
+                ["url"]       = { uci_option = "site", },
+                ["action"]    = { uci_option = "action", value = function (_,s) return dsd_uf_action_map[s] end, },
+                ["clientmac"] = { uci_option = "mac", value = dsd_uf_get_mac_from_expr },
+              },
+            }, -- maps[3].maps[2]
+          }, -- maps[3].maps
+        }, -- maps[3]
+      },
+    }
+  },
+
+  ["ip.ini"] = {},
+  ["ppp.ini"] = {
+    {
+      key = "ifconfig intf=MobileBroadband %C+",
+      uci_config = "mobiledongle",
+      uci_secname = mobile_network,
+      map = {
+        ["user"] = { uci_option = "username", },
+        ["password"] = { uci_option = "password", value = ch.decrypt },
+      },
+    },
+  },
+  ["tod.ini"] = {},
+  ["mlpuser.ini"] = {},
+}
+
+return map_table

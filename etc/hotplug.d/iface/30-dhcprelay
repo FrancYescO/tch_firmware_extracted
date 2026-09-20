@@ -1,0 +1,46 @@
+# Copyright (C) 2015 Technicolor Delivery Technologies, SAS
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+. $IPKG_INSTROOT/lib/functions/service.sh
+
+SERVICE_DAEMONIZE=1
+
+get_phys_dev() {
+    network_get_physdev intf_dev "$1"
+    echo "$intf_dev"
+}
+
+start() {
+    config_load dhcprelay
+    config_get serverip config serverip
+    config_get serveriface config serveriface
+    config_get clientiface config clientiface
+    config_get_bool enabled config enabled
+
+    [ $INTERFACE = $serveriface -a "$enabled" = 1 ] && {
+        [ -z "$clientiface" ] && {
+            logger -t dhcprelay "Starting: cannot start with clientiface empty"
+            exit 1
+        }
+        local clientdev=$(get_phys_dev $clientiface)
+        logger -t dhcprelay "Starting due to $ACTION of $INTERFACE: relaying $clientdev ($clientiface) to $DEVICE (IP=$serverip)"
+        service_start /usr/sbin/dhcprelay $clientdev $DEVICE $serverip
+    }
+}
+
+stop() {
+    config_load dhcp
+    config_get serveriface dhcprelay serveriface
+    [ $INTERFACE = $serveriface ] && {
+        logger -t dhcprelay "Stopping on interface $INTERFACE"
+        service_stop /usr/sbin/dhcprelay
+    }
+}
+
+[ "$ACTION" = ifup ] && {
+    start
+}
+
+[ "$ACTION" = ifdown ] && {
+    stop
+}

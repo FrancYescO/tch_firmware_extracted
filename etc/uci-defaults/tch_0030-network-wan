@@ -1,0 +1,176 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+# /etc/config/network
+
+uci set network.wan=interface
+uci set network.wan.auto='0'
+uci set network.wan.proto='dhcp'
+uci set network.wan.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.wan.iface6rd='6rd'
+uci set network.wan.mtu6rd='1480'
+uci set network.wan.type='bridge'
+uci set network.wan.vendorid='LongLeaseTime'
+
+uci set network.wwan=interface
+uci set network.wwan.auto='0'
+
+uci set network.iptv=interface
+uci set network.iptv.auto='0'
+uci set network.iptv.proto='dhcp'
+uci set network.iptv.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.iptv.iface6rd='0'
+uci set network.iptv.vendorid='IPTV_RGW_PRIV'
+uci set network.iptv.ip4table='iptv'
+uci set network.iptv.dnsset='iptv'
+
+uci set network.voip=interface
+uci set network.voip.auto='0'
+uci set network.voip.proto='dhcp'
+uci set network.voip.ip4table='voip'
+uci set network.voip.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.voip.iface6rd='0'
+uci set network.voip.vendorid='tel-002-'
+uci set network.voip.dnsset='voip'
+
+uci set network.mgmt=interface
+uci set network.mgmt.auto='0'
+uci set network.mgmt.proto='dhcp'
+uci set network.mgmt.initboot='1'
+uci set network.mgmt.ip4table='mgmt'
+uci set network.mgmt.reqopts='1 3 6 15 33 42 43 51 121 249'
+uci set network.mgmt.iface6rd='0'
+uci set network.mgmt.dnsset='mgmt'
+
+uci set network.gre=interface
+uci set network.gre.peeraddr='213.64.234.83'
+uci set network.gre.mtu='1500'
+uci set network.gre.df='1'
+uci set network.gre.zone='wan'
+uci set network.gre.tunlink='wan'
+uci set network.gre.ttl='100'
+uci set network.gre.proto='gretap'
+uci set network.gre.network='hotspot'
+
+uci set network.vlan_data=device
+uci set network.vlan_data.name='eth4'
+
+uci set network.vlan_iptv=device
+uci set network.vlan_iptv.type='8021q'
+uci set network.vlan_iptv.ifname='eth4'
+uci set network.vlan_iptv.name='vlan_iptv'
+uci set network.vlan_iptv.vid='845'
+uci set network.vlan_iptv.macaddr=`uci get env.var.local_wifi_mac`
+
+uci set network.vlan_voip=device
+uci set network.vlan_voip.type='8021q'
+uci set network.vlan_voip.ifname='eth4'
+uci set network.vlan_voip.name='vlan_voip'
+uci set network.vlan_voip.vid='855'
+uci set network.vlan_voip.macaddr=`uci get env.rip.wifi_mac`
+
+uci set network.vlan_mgmt=device
+uci set network.vlan_mgmt.type='8021q'
+uci set network.vlan_mgmt.ifname='eth4'
+uci set network.vlan_mgmt.name='vlan_mgmt'
+uci set network.vlan_mgmt.vid='294'
+uci set network.vlan_mgmt.macaddr=`uci get env.var.local_eth_mac`
+
+uci commit network
+
+# /etc/config/mwan
+# mwan requires globals section
+uci set mwan.globals=globals
+
+uci set mwan.iptv_only=policy
+uci set mwan.iptv_only.interface='iptv'
+
+uci set mwan.voip_only=policy
+uci set mwan.voip_only.interface='voip'
+
+uci set mwan.mgmt_only=policy
+uci set mwan.mgmt_only.interface='mgmt'
+
+
+add_mwan_rule_lan() {
+        uci batch <<EOF
+add mwan rule
+set mwan.@rule[-1].src='lan'
+set mwan.@rule[-1].dest_ip=$2
+set mwan.@rule[-1].policy=$1
+EOF
+}
+
+add_mwan_rule_lan 'iptv_only' '213.64.59.0/24'
+add_mwan_rule_lan 'iptv_only' '194.22.194.0/24'
+add_mwan_rule_lan 'iptv_only' '194.197.185.0/25'
+add_mwan_rule_lan 'iptv_only' '194.236.188.109'
+add_mwan_rule_lan 'iptv_only' '194.236.188.129'
+add_mwan_rule_lan 'iptv_only' '194.236.188.130'
+add_mwan_rule_lan 'iptv_only' '194.236.188.131'
+add_mwan_rule_lan 'iptv_only' '194.236.188.135'
+add_mwan_rule_lan 'iptv_only' '194.236.188.136'
+add_mwan_rule_lan 'iptv_only' '194.23.0.76'
+add_mwan_rule_lan 'iptv_only' '194.23.0.77'
+add_mwan_rule_lan 'iptv_only' '194.23.1.64/26'
+add_mwan_rule_lan 'iptv_only' '181.52.0.0/16'
+add_mwan_rule_lan 'iptv_only' '181.58.0.0/16'
+add_mwan_rule_lan 'iptv_only' '195.67.199.0/24'
+add_mwan_rule_lan 'iptv_only' '81.236.58.43'
+add_mwan_rule_lan 'iptv_only' '81.236.58.45'
+add_mwan_rule_lan 'iptv_only' '65.39.205.57'
+add_mwan_rule_lan 'iptv_only' '81.236.58.18'
+add_mwan_rule_lan 'iptv_only' '81.236.58.19'
+
+add_mwan_rule() {
+        uci batch <<EOF
+add mwan rule
+set mwan.@rule[-1].dest_ip=$2
+set mwan.@rule[-1].policy=$1
+EOF
+}
+
+add_mwan_rule 'mgmt_only' '10.54.3.204/32' 
+add_mwan_rule 'mgmt_only' '10.54.3.210/32'
+add_mwan_rule 'mgmt_only' '192.168.21.0/24'
+add_mwan_rule 'mgmt_only' '192.168.8.0/25'
+add_mwan_rule 'mgmt_only' '131.116.21.0/25'
+add_mwan_rule 'mgmt_only' '131.116.22.224/27'
+add_mwan_rule 'mgmt_only' '131.116.67.224/26'
+
+add_mwan_host() {
+if [ -n "$3" ]
+then
+        uci batch <<EOF
+add mwan host
+set mwan.@host[-1].path=$2
+set mwan.@host[-1].policy=$1
+set mwan.@host[-1].arg=$3
+EOF
+else
+        uci batch <<EOF
+add mwan host
+set mwan.@host[-1].path=$2
+set mwan.@host[-1].policy=$1
+EOF
+fi
+}
+
+add_mwan_host 'mgmt_only' '/usr/bin/cwmpd'
+
+add_mwan_host 'mgmt_only' '/sbin/udhcpc' 'udhcpc-vlan_mgmt'
+add_mwan_host 'iptv_only' '/sbin/udhcpc' 'udhcpc-vlan_iptv'
+add_mwan_host 'voip_only' '/sbin/udhcpc' 'udhcpc-vlan_voip'
+
+add_mwan_host 'mgmt_only' '/usr/sbin/dropbear' 'mgmt'
+
+add_mwan_host 'mgmt_only' '/sbin/udhcpc' 'udhcpc-atm_mgmt'
+add_mwan_host 'iptv_only' '/sbin/udhcpc' 'udhcpc-atm_iptv'
+add_mwan_host 'voip_only' '/sbin/udhcpc' 'udhcpc-atm_voip'
+
+add_mwan_host 'voip_only' '/usr/bin/mmpbxd'
+
+uci commit mwan
+
+exit 0

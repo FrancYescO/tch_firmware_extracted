@@ -1,0 +1,135 @@
+
+local sys_upnp_ = {
+  objectType = {
+    name = "sys.upnp.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {},
+  }
+}
+
+register(sys_upnp_)
+
+local sys_upnp_redirect_i_ = {
+  objectType = {
+    name = "sys.upnp.redirect.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "RedirectNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      proto = {
+        access = "readOnly",
+        type = "string",
+      },
+      dest_port = {
+        access = "readOnly",
+        type = "integer",
+      },
+      dest_ip = {
+        access = "readOnly",
+        type = "string",
+      },
+      src_dport = {
+        access = "readOnly",
+        type = "integer",
+      },
+      stop_time = {
+        access = "readOnly",
+        type = "integer",
+      },
+      description = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local leasePath="/var/upnp.leases"
+
+sys_upnp_redirect_i_.entries = function(mapping)
+  local fd = io.open(leasePath)
+  if not fd then
+    return {}
+  end
+  local leasetable = fd:read("*all")
+  fd:close()
+  local upnpkeys = {}
+  for proto, outPort, inPort in string.gmatch(leasetable, '([UDTCP]*):(%d*):[%d%s%.]*:(%d*):%d*:[^\r^\n]*')
+  do
+    upnpkeys[#upnpkeys+1] = proto .. outPort
+  end
+  return upnpkeys
+end
+
+-- List of regular expressions used to obtain specific information from the UPNP leases file
+local patterns = {
+  ["proto"] = "([UDTCP]*):(%d*):[%d%s%.]*:(%d*):%d*:[^\r^\n]*",
+  ["dest_port"] = "([UDTCP]*):(%d*):[%d%s%.]*:(%d*):%d*:[^\r^\n]*",
+  ["dest_ip"] = "([UDTCP]*):(%d*):([%d%s%.]*):(%d*):%d*:[^\r^\n]*",
+  ["src_dport"] = "([UDTCP]*):(%d*):[%d%s%.]*:(%d*):%d*:[^\r^\n]*",
+  ["stop_time"] = "([UDTCP]*):(%d*):[%d%s%.]*:(%d*):(%d*):[^\r^\n]*",
+  ["description"] = "([UDTCP]*):(%d*):[%d%s%.]*:(%d*):%d*:([^\r^\n]*)",
+}
+
+-- Read the specified parameter from the UPNP leases file
+-- @param mapping  reference to the mapping structure, not used here
+-- @param param    name of the parameter to be read
+-- @param key      key of the parameter to be read
+-- @return value of the parameter if found, "" otherwise
+local function readLeaseParam(mapping, param, key)
+  local fd = io.open(leasePath)
+  assert(fd)
+  local leasetable = fd:read("*all")
+  fd:close()
+  for param1, param2, param3, param4 in string.gmatch(leasetable, patterns[param]) do
+    local paramValue, paramKey
+    if param == "proto" then
+      paramValue = param1
+      paramKey = param1..param2
+    elseif param == "dest_port" then
+      paramValue = param2
+      paramKey = param1..param2
+    elseif param == "dest_ip" then
+      paramValue = param3
+      paramKey = param1..param2
+    elseif param == "src_dport" then
+      paramValue = param3
+      paramKey = param1..param2
+    elseif param == "stop_time" or param == "description" then
+      paramValue = param4
+      paramKey = param1..param2
+    end
+    if paramKey == key then
+      return paramValue
+    end
+  end
+  return ""
+end
+
+sys_upnp_redirect_i_.get = {
+  proto = readLeaseParam,
+  dest_port = readLeaseParam,
+  dest_ip = readLeaseParam,
+  src_dport = readLeaseParam,
+  stop_time = readLeaseParam,
+  description = readLeaseParam,
+}
+
+sys_upnp_redirect_i_.getall = function(mapping, key)
+  local fd = io.open(leasePath)
+  assert(fd)
+  local leasetable = fd:read("*all")
+  fd:close()
+  for proto, outPort, inIP, inPort, expiretime, descr in string.gmatch(leasetable, '([UDTCP]*):(%d*):([%d%s%.]*):(%d*):(%d*):([^\r^\n]*)') do
+    if proto..outPort == key then
+      return { ["proto"] = proto, ["dest_port"] = inPort, ["dest_ip"] = inIP,
+          ["src_dport"] = outPort, ["stop_time"] = expiretime, ["description"] = descr }
+    end
+  end
+  return {}
+end
+
+register(sys_upnp_redirect_i_)
