@@ -23,8 +23,10 @@ pip install -r requirements.txt
 ```
 unsquashfs (squashfs-tools >= 4.4, with xz support) must be available in PATH:
 ```
-brew install squashfs
+brew install squashfs          # macOS
+sudo apt install squashfs-tools   # Debian/Ubuntu
 ```
+On macOS the script automatically extracts into a temporary case-sensitive APFS volume (`hdiutil`); on Linux it runs natively (run it from a case-sensitive filesystem, device nodes may need root)
 ## Run
 ```python
 python main.py

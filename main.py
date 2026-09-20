@@ -164,6 +164,8 @@ def extract_rootfs(dec_filename):
 			outdir=os.path.join(mountpoint,dec_filename+".extracted")
 		else:
 			print("WARNING: extracting on a case-insensitive filesystem, files differing only by case will collide")
+	elif sys.platform!="darwin" and not fs_is_case_sensitive("."):
+		print("WARNING: current filesystem is case-insensitive, files differing only by case will collide, run from a case-sensitive filesystem")
 	print("Unsquashing %s (offset 0x%X, size %d, %s inodes)..."%(sqsh,offset,size,inodes))
 	proc=subprocess.run(["unsquashfs","-no-progress","-f","-d",outdir,sqsh],capture_output=True,text=True)
 	if proc.returncode!=0:
