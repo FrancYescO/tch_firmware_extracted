@@ -1,0 +1,57 @@
+#!/usr/bin/env lua
+--Script to update firewall cone config information inline with the lan subnet
+local require = require
+local match = string.match
+local cursor = require("uci").cursor()
+local bit = require("bit")
+local nwcommon = require("transformer.mapper.nwcommon")
+
+-- Return ip number base on the IP address / netmask
+local function poolbase(ipstr,maskstr)
+  if not ipstr or not maskstr then
+    return
+  end
+  local ipblocks = { match(ipstr, "(%d+)%.(%d+)%.(%d+)%.(%d+)") }
+  if #ipblocks ~= 4 then
+    return
+  end
+
+  local maskblocks = { match(maskstr, "(%d+)%.(%d+)%.(%d+)%.(%d+)") }
+  if #maskblocks ~= 4 then
+    return
+  end
+
+  for i, mask in ipairs(maskblocks) do
+    ipblocks[i] = bit.band(ipblocks[i], mask)
+  end
+
+  local result = 0
+  for _,v in ipairs(ipblocks) do
+    result = bit.lshift(result, 8) + v
+  end
+  return result
+end
+
+local stb_data = cursor:get_all("dhcp", "STB_networkid")
+
+if stb_data then
+   local interface_ip = cursor:get("network", stb_data.interface, "ipaddr")
+   local interface_mask = cursor:get("network", stb_data.interface, "netmask")
+   local base = poolbase(interface_ip,interface_mask)
+   local stb_ip = base + stb_data.start
+   local config_changed
+   local result = cursor:foreach("firewall", "cone", function(cone_info)
+     if match(cone_info.name, "SNMP_STB") and cone_info.dest_ip then
+        updated_ip = nwcommon.numToIPv4(stb_ip)
+        if cone_info.dest_ip ~= updated_ip then
+           cursor:set("firewall", cone_info[".name"], "dest_ip", updated_ip)
+           config_changed = 1
+        end
+        stb_ip = stb_ip + 1
+     end
+   end)
+   if config_changed then
+     cursor:commit("firewall")
+   end
+end
+

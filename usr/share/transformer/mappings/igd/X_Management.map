@@ -1,0 +1,274 @@
+-- Manually generated
+local InternetGatewayDevice_X_Management_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_Management.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      UPnPEnable  = {
+        access = "readWrite",
+        type = "boolean",
+        description = "To Enable or Disable UPnP",
+      },
+      TelnetPrompt = {
+        access = "readWrite",
+        type = "string",
+        description = "To set or get the Hostname and TelnetPrompt",
+      },
+      DNSPROXYStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of DNS Proxy",
+        enumeration = {
+          "Enabled",
+          "Disabled",
+        },
+      },
+      DNSPROXYEnable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables or Disables DNSPROXY",
+      },
+    },
+  }
+}
+
+local mapper, commitapply, register, ipairs, pairs = mapper, commitapply, register, ipairs, pairs
+local uciHelper = mapper("ucihelper")
+local setOnUci = uciHelper.set_on_uci
+local getFromUci = uciHelper.get_from_uci
+local foreachOnUci = uciHelper.foreach_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local upnpdBinding = { config = "upnpd" }
+local systemBinding = { config = "system" }
+local dhcpBinding = { config = "dhcp" }
+local networkBinding = { config = "network" }
+local transactions = {}
+local common = mapper("nwcommon")
+local getUbusInterfaceStatus = common.get_ubus_interface_status
+
+local laninterfaces = common.findLanWanInterfaces(false)
+local lanIntf = laninterfaces[1]
+
+-- To read the UPnPEnable param from the uci
+local function getUPnPEnable()
+  upnpdBinding.sectionname = "config"
+  upnpdBinding.option = "enable_upnp"
+  return getFromUci(upnpdBinding)
+end
+
+-- To read the TelnetPrompt param from the uci
+local function getTelnetPrompt()
+  systemBinding.sectionname = "@system[0]"
+  systemBinding.option = "hostname"
+  systemBinding.extended = true
+  return getFromUci(systemBinding)
+end
+
+-- Returns the status of the DNSProxy
+  -- returns "1" if the default gateway IP is used in the DHCP Server DNS options sent to the LAN(dhcp.lan.dhcp_option)
+  -- returns "0" if WAN DNS server IP address is used in the DHCP Server DNS options sent to the LAN
+local function getDnsProxyEnable()
+  networkBinding.sectionname = lanIntf
+  networkBinding.option = "ipaddr"
+  local ip = getFromUci(networkBinding)
+  dhcpBinding.sectionname = lanIntf
+  dhcpBinding.option = "dhcp_option"
+  local dhcpOptions = getFromUci(dhcpBinding)
+  local dnsServer = ""
+  if dhcpOptions == "" then
+    return "1"
+  end
+  for _, v in ipairs(dhcpOptions) do
+    if v:find("^6,") == 1 then
+      if dnsServer == "" then
+        dnsServer = v:sub(3)
+      else
+        dnsServer = dnsServer .. "," .. v:sub(3)
+      end
+    end
+  end
+  if (dnsServer == "")  or (dnsServer ~= "" and dnsServer:match(ip)) then
+    return "1"
+  end
+  return "0"
+end
+
+-- To set the UPnPEnable param in the uci
+-- @param value value of the option to be set in the section
+local function setUPnPEnable(value)
+  upnpdBinding.sectionname = "config"
+  upnpdBinding.option = "enable_upnp"
+  setOnUci(upnpdBinding, value, commitapply)
+  transactions[upnpdBinding.config] = true
+end
+
+-- To set the TelnetPrompt param in the uci
+-- @param value value of the option to be set in the section
+local function setTelnetPrompt(value)
+  systemBinding.sectionname = "@system[0]"
+  systemBinding.option = "hostname"
+  setOnUci(systemBinding, value, commitapply)
+  transactions[systemBinding.config] = true
+end
+
+-- Returns the DNS Servers of the WAN interface
+-- @param intf interface for which DNSServer is to retrieved
+local function getDNSServers(intf)
+  local status = getUbusInterfaceStatus(intf)
+  local dnsServer = status and status['dns-server'] or {}
+  return table.concat(dnsServer, ",")
+end
+
+-- set the correponding DNSserver based on the value
+-- @param value specified the DNSProxy to be enbled or disable
+local function setDnsProxyEnable(value)
+  local dnsServers = {}
+  local ip
+  dhcpBinding.sectionname = lanIntf
+  dhcpBinding.option = "dhcp_option"
+  local dhcpOptions = getFromUci(dhcpBinding)
+  if dhcpOptions ~= "" then
+    for _,v in ipairs(dhcpOptions) do
+      if not (v:find("^6,") == 1) then
+        dnsServers[#dnsServers + 1] = v
+      end
+    end
+  end
+  if value == "1" then
+    networkBinding.sectionname = lanIntf
+    networkBinding.option = "ipaddr"
+    ip = getFromUci(networkBinding)
+  else
+    local wanInterface = common.findLanWanInterfaces(true)
+    ip = getDNSServers(wanInterface[1])
+  end
+  dnsServers[#dnsServers + 1] = "6," .. ip
+  setOnUci(dhcpBinding, dnsServers, commitapply)
+  transactions[dhcpBinding.config] = true
+end
+
+InternetGatewayDevice_X_Management_.get = {
+  UPnPEnable = function ()
+    return getUPnPEnable()
+  end,
+  TelnetPrompt = function ()
+    return getTelnetPrompt()
+  end,
+  DNSPROXYStatus = function ()
+    if getDnsProxyEnable() == "1" then
+      return "Enabled"
+    end
+    return "Disabled"
+  end,
+  DNSPROXYEnable = function ()
+    return getDnsProxyEnable()
+  end,
+}
+
+InternetGatewayDevice_X_Management_.set = {
+  UPnPEnable = function (mapping, param, value)
+    setUPnPEnable(value)
+  end,
+  TelnetPrompt = function (mapping, param, value)
+    setTelnetPrompt(value)
+  end,
+  DNSPROXYEnable = function (mapping, param, value)
+    setDnsProxyEnable(value)
+  end,
+}
+
+InternetGatewayDevice_X_Management_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+InternetGatewayDevice_X_Management_.revert = function()
+  for config in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(InternetGatewayDevice_X_Management_)
+
+-- Manually generated
+local InternetGatewayDevice_X_Management_Server_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_Management.Server.",
+    access = "readOnly",
+    description = "SSHControl Parameter",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  },
+}
+
+register(InternetGatewayDevice_X_Management_Server_)
+
+-- Manually generated
+local InternetGatewayDevice_X_Management_Server_SSHServer_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_Management.Server.SSHServer.",
+    access = "readOnly",
+    description = "SSH Service Parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables/Disables SSH service on the gateway",
+      },
+    },
+  }
+}
+
+local dropBearBinding = { config = "dropbear", sectionname = "dropbear" }
+local configChanged
+
+InternetGatewayDevice_X_Management_Server_SSHServer_.get = {
+  Enable = function()
+    local value = "0"
+    foreachOnUci(dropBearBinding, function(s)
+      if s.enable == "1" then
+        value = "1"
+        return false
+      end
+    end)
+    return value
+  end
+}
+
+InternetGatewayDevice_X_Management_Server_SSHServer_.set = {
+  Enable = function(mapping, param, value)
+    local binding = { config = "dropbear" }
+    foreachOnUci(dropBearBinding, function(s)
+      binding.sectionname = s[".name"]
+      binding.option = "enable"
+      setOnUci(binding, value, commitapply)
+      configChanged = true
+    end)
+  end
+}
+
+InternetGatewayDevice_X_Management_Server_SSHServer_.commit = function()
+  if configChanged then
+    commit(dropBearBinding)
+  end
+  configChanged = false
+end
+
+InternetGatewayDevice_X_Management_Server_SSHServer_.revert = function()
+  if configChanged then
+    revert(dropBearBinding)
+  end
+  configChanged = false
+end
+
+register(InternetGatewayDevice_X_Management_Server_SSHServer_)

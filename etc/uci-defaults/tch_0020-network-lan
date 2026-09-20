@@ -1,0 +1,44 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+ucidef_set_interface_lan "eth0 eth1 eth2"
+
+uci set network.lan.ip6assign=64
+uci set network.lan.force_link=0
+uci set network.lan.ip6ifaceid=eui64
+uci set network.lan.ipaddr='192.168.1.1'
+uci set network.lan.hostname='ultrahub'
+
+#LAN IPv6 enabled by default
+uci set network.lan.ipv6='1'
+
+ucidef_set_switch "bcmsw" "1" "0"
+uci set network.bcmsw.qosimppauseenable=0
+uci set network.bcmsw.jumbo=0
+uci commit network
+
+
+# The LAN ethernet ports eth0-eth3 are expected at indexes 1-4.
+# The absolute order is of less importance;
+# it is more important that other ethernet ports such
+# as eth5 are indexed higher than 4.
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.lan=ordering
+uci set dmordering.lan.name='InternetGatewayDevice.LANEthernetInterfaceConfig.{i}.'
+uci add_list dmordering.lan.order=eth0
+uci add_list dmordering.lan.order=eth1
+uci add_list dmordering.lan.order=eth2
+uci add_list dmordering.lan.order=eth3
+#                                 eth4 is WAN
+uci add_list dmordering.lan.order=eth5
+uci commit dmordering
+
+
+#add config from CONFIG_WLAN_REMOTE_MGMT_ETH_INTERFACE
+
+uci set network.lan.ifname="`uci -q get \"network.lan.ifname\"` eth5"
+
+uci commit network
+
+exit 0
