@@ -1,0 +1,161 @@
+#!/usr/bin/lua
+
+local helper = require("mobiled.scripthelpers")
+local sqlite3 = require ("lsqlite3")
+local uloop = require("uloop")
+
+local log = require('tch.logger')
+log.init("lte-doctor", 6)
+
+local tonumber, arg, type = tonumber, arg, type
+local io = { open = io.open }
+local math = { floor = math.floor }
+
+local conn = require("ubus").connect(nil, 2)
+if not conn then
+	return
+end
+
+local recycle_period, update_interval, recycle_timer, update_timer, db
+-- Removing of old data will happen every minute
+local recycle_interval = (60 * 1000)
+local previous_status
+
+local function get_uptime()
+	local f = io.open("/proc/uptime")
+	local line = f:read("*line")
+	f:close()
+	return math.floor(tonumber(line:match("[%d%.]+")))
+end
+
+local function get_signal_parameters(insert_data)
+	local info = helper.getUbusData(conn, "mobiled.radio", "signal_quality", {})
+	if type(info) == "table" then
+		helper.merge_tables(insert_data, info)
+	end
+end
+
+local function get_network_parameters(insert_data)
+	local info = helper.getUbusData(conn, "mobiled.network", "serving_system", {})
+	if type(info) == "table" then
+		helper.merge_tables(insert_data, info)
+	end
+end
+
+local function get_led_parameters(insert_data)
+	local info = helper.getUbusData(conn, "mobiled.leds", "get", {})
+	if type(info) == "table" then
+		insert_data.bars = info.bars
+	end
+end
+
+local function get_mobiled_status(insert_data)
+	local info = helper.getUbusData(conn, "mobiled", "status", {})
+	if type(info) == "table" then
+		insert_data.status = info.status
+	end
+end
+
+local function read_file(name)
+	local f = io.open(name)
+	local line
+	if f then
+		line = f:read("*line")
+		f:close()
+	end
+	return line
+end
+
+local function get_rx_tx(insert_data)
+	insert_data.tx_kb = read_file("/tmp/lte_tx_kb") or 0
+	insert_data.rx_kb = read_file("/tmp/lte_rx_kb") or 0
+end
+
+local function update_database(insert_data)
+	local mcc, mnc, description = "", "", ""
+	if type(insert_data.plmn_info) == "table" then
+		mcc = insert_data.plmn_info.mcc or ""
+		mnc = insert_data.plmn_info.mnc or ""
+		description = insert_data.plmn_info.description or ""
+	end
+
+	local stmt = db:prepare('INSERT INTO log(uptime, status, nas_state, rssi, rsrp, rsrq, snr, sinr, cinr, path_loss, ecio, rscp, rrc_state, phy_cell_id, radio_interface, mnc, mcc, description, cell_id, tracking_area_code, tx_power, lte_band, lte_dl_bandwidth, lte_ul_bandwidth, dl_arfcn, ul_arfcn, dl_earfcn, ul_earfcn, dl_uarfcn, ul_uarfcn, lte_dl_freq, lte_ul_freq, bars, tx_kb, rx_kb, ri, cqi, radio_bearer_type, location_area_code, service_state) VALUES (:uptime, :status, :nas_state, :rssi, :rsrp, :rsrq, :snr, :sinr, :cinr, :path_loss, :ecio, :rscp, :rrc_state, :phy_cell_id, :radio_interface, :mnc , :mcc, :description, :cell_id, :tracking_area_code, :tx_power, :lte_band, :lte_dl_bandwidth, :lte_ul_bandwidth, :dl_arfcn, :ul_arfcn, :dl_earfcn, :ul_earfcn, :dl_uarfcn, :ul_uarfcn, :lte_dl_freq, :lte_ul_freq, :bars, :tx_kb, :rx_kb, :ri, :cqi, :radio_bearer_type, :location_area_code, :service_state);')
+	if stmt then
+		local uptime = get_uptime()
+		stmt:bind_values(uptime, insert_data.status, insert_data.nas_state, insert_data.rssi, insert_data.rsrp, insert_data.rsrq, insert_data.snr, insert_data.sinr, insert_data.cinr, insert_data.path_loss, insert_data.ecio, insert_data.rscp, insert_data.rrc_state, insert_data.phy_cell_id, insert_data.radio_interface, mnc, mcc, description, insert_data.cell_id, insert_data.tracking_area_code, insert_data.tx_power, insert_data.lte_band, insert_data.lte_dl_bandwidth, insert_data.lte_ul_bandwidth, insert_data.dl_arfcn, insert_data.ul_arfcn, insert_data.dl_earfcn, insert_data.ul_earfcn, insert_data.dl_uarfcn, insert_data.ul_uarfcn, insert_data.lte_dl_freq, insert_data.lte_ul_freq, insert_data.bars, insert_data.tx_kb, insert_data.rx_kb, insert_data.ri, insert_data.cqi, insert_data.radio_bearer_type, insert_data.location_area_code, insert_data.service_state)
+		stmt:step()
+		stmt:finalize()
+	else
+		log:error("Failed to prepare insert statement")
+	end
+end
+
+local function update_callback()
+	local insert_data = {}
+	setmetatable(insert_data, { __index = function() return "" end })
+	-- Only do an update when there is actually a device connected and enabled
+	get_mobiled_status(insert_data)
+	if previous_status ~= insert_data.status then
+		get_signal_parameters(insert_data)
+		get_network_parameters(insert_data)
+		get_led_parameters(insert_data)
+		get_rx_tx(insert_data)
+		update_database(insert_data)
+		if insert_data.status == "WaitingForDevice" or insert_data.status == "Disabled" then
+			previous_status = insert_data.status
+		else
+			previous_status = nil
+		end
+	end
+	update_timer:set(update_interval)
+end
+
+local function recycle_callback()
+	local uptime = get_uptime()
+	if uptime > recycle_period then
+		local remove_uptime = uptime - recycle_period
+		local ret = db:exec('DELETE FROM log WHERE uptime < ' .. remove_uptime)
+		if ret ~= sqlite3.OK then
+			log:error("Failed remove old data from \"log\" (" .. ret .. ")")
+		end
+	end
+	recycle_timer:set(recycle_interval)
+end
+
+local usage = "Usage: lua " .. arg[0] .. " [interval in seconds] [logging period in hours] [database filename]"
+
+if #arg ~= 3 then
+	log:error(usage)
+	return 1
+else
+	local filename = arg[3]
+	recycle_period = tonumber(arg[2])
+	update_interval = tonumber(arg[1])
+
+	if not update_interval or not recycle_period then
+		log:error(usage)
+		return 1
+	end
+
+	update_interval = update_interval * 1000
+	recycle_period = recycle_period * 3600
+
+	local _, errMsg
+	db, _, errMsg = sqlite3.open(filename)
+	if not db then
+		if errMsg then log:error(errMsg) end
+		return 1
+	end
+
+	local ret = db:exec[=[CREATE TABLE IF NOT EXISTS log(uptime DATETIME, status TEXT, nas_state TEXT, rssi INTEGER, rsrp INTEGER, rsrq INTEGER, snr REAL, sinr REAL, cinr REAL, path_loss REAL, ecio INTEGER, rscp INTEGER, rrc_state TEXT, phy_cell_id INTEGER, radio_interface TEXT, mcc TEXT, mnc TEXT, description TEXT, cell_id INTEGER, tracking_area_code INTEGER, tx_power REAL, lte_band INTEGER, lte_dl_bandwidth INTEGER, lte_ul_bandwidth INTEGER, dl_arfcn INTEGER, ul_arfcn, dl_earfcn INTEGER, ul_earfcn, dl_uarfcn INTEGER, ul_uarfcn INTEGER, lte_dl_freq REAL, lte_ul_freq REAL, bars INTEGER, tx_kb INTEGER, rx_kb INTEGER, ri INTEGER, cqi INTEGER, radio_bearer_type TEXT, location_area_code INTEGER, service_state TEXT);]=]
+	if ret ~= sqlite3.OK then
+		log:error("Failed to create table \"log\" (" .. ret .. ")")
+		return 1
+	end
+
+	uloop.init()
+	-- Removing of old data will happen every minute
+	recycle_timer = uloop.timer(recycle_callback, recycle_interval)
+	update_timer = uloop.timer(update_callback, update_interval)
+	uloop.run()
+end

@@ -1,0 +1,60 @@
+#!/bin/sh
+
+# check interface version
+case "$PLUTO_VERSION" in
+1.[0|1])        # Older release?!?  Play it safe, script may be using new features.
+        logger -t ipsec "Obsolete interface version!!! Called by obsolete release?"
+        exit 2
+        ;;
+1.*)    ;;
+*)      logger -t ipsec "Unknown interface version!"
+        exit 2
+        ;;
+esac
+
+add_gre_snat_rule() {
+        local zone
+        zone=$(fw3 -q device "$PLUTO_INTERFACE")
+        if [ -n "$zone" -a -n "$PLUTO_ME" -a -n "$PLUTO_MY_SOURCEIP" -a "$PLUTO_ME" != "$PLUTO_MY_SOURCEIP" -a "$PLUTO_MY_PROTOCOL" == "47" ]; then
+                iptables -t nat -C "postrouting_${zone}_rule" -p gre -s "$PLUTO_ME" -j SNAT --to-source "$PLUTO_MY_SOURCEIP" 2> /dev/null ||
+                iptables -t nat -I "postrouting_${zone}_rule" -p gre -s "$PLUTO_ME" -j SNAT --to-source "$PLUTO_MY_SOURCEIP"
+                conntrack -D -p gre -s "$PLUTO_ME"
+                conntrack -D -p gre -d "$PLUTO_ME"
+        fi
+}
+
+del_gre_snat_rule() {
+        local zone
+        zone=$(fw3 -q device "$PLUTO_INTERFACE")
+        if [ -n "$zone" -a -n "$PLUTO_ME" -a -n "$PLUTO_MY_SOURCEIP" -a "$PLUTO_ME" != "$PLUTO_MY_SOURCEIP" -a "$PLUTO_MY_PROTOCOL" == "47" ]; then
+                iptables -t nat -D "postrouting_${zone}_rule" -p gre -s "$PLUTO_ME" -j SNAT --to-source "$PLUTO_MY_SOURCEIP" 2> /dev/null
+                conntrack -D -p gre -d "$PLUTO_MY_SOURCEIP"
+        fi
+}
+
+case "$PLUTO_VERB:$1" in
+up-host:)
+        # connection to me coming up
+        # If you are doing a custom version, firewall commands go here.
+        add_gre_snat_rule
+        ;;
+down-host:)
+        # connection to me going down
+        # If you are doing a custom version, firewall commands go here.
+        del_gre_snat_rule
+        ;;
+up-client:)
+        # connection to my client subnet coming up
+        # If you are doing a custom version, firewall commands go here.
+        add_gre_snat_rule
+        ;;
+down-client:)
+        # connection to my client subnet going down
+        # If you are doing a custom version, firewall commands go here.
+        del_gre_snat_rule
+        ;;
+*)      logger -t ipsec "Unknown verb or parameter!!!"
+        exit 1
+        ;;
+esac
+
