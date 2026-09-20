@@ -1,0 +1,137 @@
+#!/bin/sh
+
+keep_persistent_files_rtfd() {
+	current_bank=$1
+	if [[ -d /overlay/rtfd_persistent_files -a -f /overlay/rtfd_persistent_filelist.conf ]]; then
+		while read file_to_copy directory; do
+			if [[ -n "$file_to_copy" ]]; then
+				if [[ -z "$directory" ]]; then
+					directory=$(dirname "$file_to_copy")
+				fi
+				if [[ ! -d "$current_bank/$directory" ]]; then
+					mkdir -p "$current_bank/$directory"
+				fi
+				if [[ -f "/overlay/rtfd_persistent_files/$(basename $file_to_copy)" ]]; then
+					cp "/overlay/rtfd_persistent_files/$(basename $file_to_copy)" "$current_bank/$directory"
+				fi
+			fi
+		done < /overlay/rtfd_persistent_filelist.conf
+	fi
+
+	rm -f /overlay/rtfd_persistent_filelist.conf
+	rm -rf /overlay/rtfd_persistent_files
+}
+
+rootfs_pivot() {
+    check_skip || jffs2_not_mounted || {
+	echo "switching to jffs2"
+	mount -o move /tmp/overlay /overlay 2>&-
+
+	# Check if any configuration need to be removed
+	rm -rf /overlay/*.remove_due_to_upgrade
+	parameter_conversion=1
+
+
+	# Insert bank manager kernel module to get the booted bank
+	if [[ -f /lib/modules/$(uname -r)/bankmgr.ko ]]; then
+		insmod bankmgr 2> /dev/null
+
+		# Check for RTFD
+		if [[ -L /overlay/remove_due_to_rtfd ]]; then
+			reset_bank=$(readlink /overlay/remove_due_to_rtfd)
+			echo "Applying reset to factory default to $reset_bank"
+			rm -rf $reset_bank
+			rm -f /overlay/remove_due_to_rtfd
+			parameter_conversion=0
+		fi
+
+		booted_bank=/overlay/$(cat /proc/banktable/booted)
+		passive_bank=/overlay/$(cat /proc/banktable/notbooted)
+
+		# Check if Homeware configuration is available on the active bank
+		if [[ -d $booted_bank ]]; then
+			echo "HOMEWARE_CONFIG_ON_ACTIVE_BANK"
+			keep_persistent_files_rtfd $booted_bank
+
+		# Check if Homeware configuration is available on the passive bank
+		elif [[ -d $passive_bank ]]; then
+			echo "HOMEWARE_CONFIG_ON_PASSIVE_BANK"
+			mkdir $booted_bank
+
+			# Check if configuration could be cleaned up (in case of config on root or legacy)
+			if [[ -d /overlay/etc/config ]]; then
+				rm -rf $(find /overlay -maxdepth 1 -path "/overlay/bank_*" -prune -o -path /overlay -o -print)
+			fi
+
+			# No legacy SW anymore, all legacy config can be erased
+			[ -L /overlay/config-bank-lastboot ] &&	rm /overlay/config-bank-lastboot
+			[ -d /overlay/config-bank-1 -o -d /overlay/config-bank-2 -o -d /overlay/common ] && \
+				rm -rf /overlay/config-bank-[12] /overlay/common && \
+				echo "All legacy configuration erased"
+
+			keep_persistent_files_rtfd $booted_bank
+			if [[ $parameter_conversion == 1 ]]; then
+				# Indicate the source configuration for parameter conversion
+				ln -sfn $passive_bank /overlay/homeware_conversion
+			fi
+
+		# Check if Homeware configuration is available on root jffs2 partition
+		elif [[ -d /overlay/etc/config ]]; then
+			echo "HOMEWARE_CONFIG_ON_ROOT"
+			mkdir $booted_bank
+			if [[ $parameter_conversion == 1 ]]; then
+				ln -sfn /overlay /overlay/homeware_conversion
+			fi
+
+		# Check for legacy configuration
+		elif [[ -L /overlay/config-bank-lastboot ]]; then
+			if [ -d /overlay/$(basename $(readlink /overlay/config-bank-lastboot)) ] && [ $parameter_conversion == 1 ]; then 
+				echo "LEGACY_CONFIG"
+				# Remove Legacy configuration of erased SW bank
+				unused_legacy_bank=/overlay/$(basename $(readlink /overlay/config-bank-lastboot) | sed 's/1$/2/;t;s/2$/1/')
+				[ -d $unused_legacy_bank ] && rm -rf $unused_legacy_bank && echo "Legacy configuration $unused_legacy_bank erased"
+
+				# Set the default value to check migration is needed. 
+				touch /overlay/legacy_conversion
+			fi
+
+		# no config found out, possibly running for the 1st time a BLI with an empty userfs
+		else
+			echo "NO_CONFIG_FOUND"
+			keep_persistent_files_rtfd $booted_bank
+		fi
+
+		if [[ ! -d $booted_bank ]]; then
+			mkdir $booted_bank
+		fi
+
+		echo "Dual bank, overlay on $booted_bank"
+		# Set up the overlay to use the correct user settings based on booted bank
+		fopivot $booted_bank /rom && pi_mount_skip_next=true
+
+	else
+		echo "Single bank, overlay on /"
+		# Check for RTFD
+		if [[ -L /overlay/remove_due_to_rtfd ]]; then
+			echo "Applying reset to factory default to overlay"
+			find /overlay -maxdepth 1 -mindepth 1 ! -name rtfd_persistent_filelist.conf ! -name rtfd_persistent_files -exec rm -rf {} \;
+			keep_persistent_files_rtfd /overlay
+		elif [[ -d /overlay/homeware_conversion ]]; then
+			echo "homware_conversion found"
+			mount -t tmpfs tmpfs /overlay/homeware_conversion
+			find /overlay -maxdepth 1 -mindepth 1 ! -name overlay ! -name homeware_conversion -exec mv {} /overlay/homeware_conversion/ \;
+		elif [[ ! -d /overlay/homeware_conversion && ! -f /overlay/etc/config/version && -n "$(grep 'config ripcontent' /overlay/etc/config/env)" ]]; then
+			# Old builds don't have version file in /overlay but have the environment file filled in with rip info (by firstboot script)
+			echo "Specific upgrade path for old builds not having parameter conversion"
+			mkdir /overlay/homeware_conversion
+			mount -t tmpfs tmpfs /overlay/homeware_conversion
+			find /overlay -maxdepth 1 -mindepth 1 ! -name overlay ! -name homeware_conversion -exec mv {} /overlay/homeware_conversion/ \;
+		fi
+		# For single bank platform, we use the complete overlay
+		fopivot /overlay /rom && pi_mount_skip_next=true
+	fi
+	}
+}
+
+boot_hook_add preinit_mount_root rootfs_pivot
+

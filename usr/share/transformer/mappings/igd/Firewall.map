@@ -1,0 +1,152 @@
+local InternetGatewayDevice_Firewall_= {
+  objectType = {
+    name = "InternetGatewayDevice.Firewall.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Config = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        enumeration = {
+            "High",
+            "Low",
+            "X_000E50_Lax",
+            "X_000E50_User"
+         },
+      },
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local lfs = require("lfs")
+local fw_binding = {config = "firewall", sectionname = "",option = "",default = ""}
+local fw_zone = {config = "firewall", sectionname = "zone"}
+
+local function setoutgoingpolicyto(policy)
+  fw_binding.sectionname = "defaultoutgoing"
+  fw_binding.option = "target"
+  fw_binding.default = ""
+  uci_helper.set_on_uci(fw_binding, policy, commitapply)
+end
+
+local function getoutoingpolicyformode(mode)
+  fw_binding.sectionname = "fwconfig"
+  fw_binding.option = "defaultoutgoing_" .. mode
+  fw_binding.default = "ACCEPT"
+  return uci_helper.get_from_uci(fw_binding)
+end
+
+local function setincomingpolicyto(policy)
+-- set FORWARD and INPUT on wan zone to the policy
+  uci_helper.foreach_on_uci(fw_zone, function(s)
+    if s["name"] == "wan" then
+      fw_binding.sectionname = s[".name"]
+      fw_binding.option = "forward"
+      fw_binding.default = ""
+      uci_helper.set_on_uci(fw_binding, policy, commitapply)
+      
+      fw_binding.option = "input"
+      uci_helper.set_on_uci(fw_binding, policy, commitapply)
+      return false
+    end
+ end)
+ uci_helper.commit({config = "firewall"})
+end
+
+local function getincomingpolicyformode(mode)
+  fw_binding.sectionname = "fwconfig"
+  fw_binding.option = "defaultincoming_" .. mode
+  fw_binding.default= "DROP"
+  return uci_helper.get_from_uci(fw_binding)
+end
+
+local function getfirewallmode()
+  fw_binding.sectionname = "userrules"
+  fw_binding.option = "enabled"
+  fw_binding.default= "0"
+  local user = uci_helper.get_from_uci(fw_binding)
+
+  fw_binding.sectionname = "userrules_v6"
+  local u_v6 = uci_helper.get_from_uci(fw_binding)
+ 
+  if user ~= "0" or u_v6 ~= "0" then
+    return "X_000E50_User"
+  end
+
+  fw_binding.sectionname = "highrules"
+  local high = uci_helper.get_from_uci(fw_binding)
+  if high ~= "0" then
+    return "High"
+  end
+
+  fw_binding.sectionname = "laxrules"
+  local lax = uci_helper.get_from_uci(fw_binding)
+  if lax ~= "0" then
+    return "X_000E50_Lax"
+  end 
+
+  fw_binding.sectionname = "normalrules"
+  local normal = uci_helper.get_from_uci(fw_binding)
+  if normal ~= "0" then
+    return "Low"
+  end
+end
+
+InternetGatewayDevice_Firewall_.get = {
+  Config = function(mapping, param, key, parentkey)
+    return getfirewallmode()
+  end,
+}
+
+InternetGatewayDevice_Firewall_.set = {
+  Config = function (mapping, paramname, paramvalue, key)
+    local options = {
+      High = { "highrules", "0"},
+      Low = { "normalrules", "0"},
+      X_000E50_User = {"userrules", "0"},
+      X_000E50_Lax = { "laxrules", "0"}
+    } 
+    options[paramvalue][2] = "1"
+      
+    fw_binding.default = ""
+    for k,v in pairs(options) do
+      fw_binding.sectionname = v[1]
+      fw_binding.option = "enabled"
+      uci_helper.set_on_uci(fw_binding, v[2], commitapply)
+    end
+    if paramvalue == "X_000E50_User" then
+      fw_binding.sectionname = "userrules_v6"
+      fw_binding.option = "enabled"
+      uci_helper.set_on_uci(fw_binding, "1", commitapply)
+    else
+      fw_binding.sectionname = "userrules_v6"
+      fw_binding.option = "enabled"
+      uci_helper.set_on_uci(fw_binding, "0", commitapply)
+    end
+    local policy = getoutoingpolicyformode(paramvalue)
+    setoutgoingpolicyto(policy)
+    policy = getincomingpolicyformode(paramvalue)
+    setincomingpolicyto(policy)
+    uci_helper.commit({config = "firewall"})
+  end,
+}
+
+
+local function uci_event_cb (mapping, action, config, sectiontype, sectionname, option)
+  return  { { key = "", paramname = "Config"} }
+end
+
+
+InternetGatewayDevice_Firewall_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = uci_event_cb }, "firewall", "rulesgroup", "highrules","enabled")
+  uci_evsrc.watch(mapping, { set = uci_event_cb }, "firewall", "rulesgroup", "userrules","enabled")
+  uci_evsrc.watch(mapping, { set = uci_event_cb }, "firewall", "rulesgroup", "normalrules","enabled")
+  uci_evsrc.watch(mapping, { set = uci_event_cb }, "firewall", "rulesgroup", "laxrules","enabled")
+end
+
+register(InternetGatewayDevice_Firewall_)
+
