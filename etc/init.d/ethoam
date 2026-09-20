@@ -1,0 +1,207 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+SERVICE_DAEMONIZE=1
+SERVICE_SIG_STOP="KILL"
+unset SERVICE_QUIET
+
+config_load ethoam
+
+check_driver_loaded()
+{
+  local loaded="$(lsmod | grep nciTMSkmod)"
+  if [ -z "$loaded" ]; then
+    insmod nciTMSkmod
+  fi
+}
+
+#tmsctl 1731/1731-2 start -i <ifname> -a <meg> [-l <megLevel>] -m <local_mepId> [-v <vlan>] [-s ccm [-t <CCMinterval>]] [-r <remote_mepId>]
+start_tmsctl_1731() #sectionname
+{
+  local section="$1"
+  local tmsctltype
+  local ifname
+  local meg
+  local megLevel
+  local mepId
+  local vlan
+  local ccm
+  local CCMinterval
+  local cmdflags
+  config_get tmsctltype $section "type"
+  config_get ifname $section "ifname"
+  if [ -z "$ifname" ]; then
+    logger -t ethoam "Required parameter ifname missing from $tmsctltype section $section!"
+    return 0
+  fi
+  config_get meg $section "meg" "MEG1"
+  if [ -z "$meg" ]; then
+    logger -t ethoam "Required parameter meg missing from $tmsctltype section $section!"
+    return 0
+  fi
+  cmdflags="-i $ifname -a $meg"
+  config_get megLevel $section "megLevel"
+  if [ -n "$megLevel" ]; then
+    cmdflags="$cmdflags -l $megLevel"
+  fi
+  config_get mepId $section "mepId"
+  if [ -z "$mepId" ]; then
+    logger -t ethoam "Required parameter mepId missing from $tmsctltype section $section!"
+    return 0
+  fi
+  cmdflags="$cmdflags -m $mepId"
+  config_get vlan $section "vlan"
+  if [ -n "$vlan" ]; then
+    cmdflags="$cmdflags -v $vlan"
+  fi
+  config_get ccm $section "ccm"
+  if [ -n "$ccm" ] && [ "$ccm" -eq "1" ]; then
+    cmdflags="$cmdflags -s ccm"
+    config_get CCMinterval $section "CCMinterval"
+    if [ -n "$CCMinterval" ]; then
+      cmdflags="$cmdflags -t $CCMinterval"
+    fi
+  fi
+  logger -t ethoam "Starting: /usr/bin/tmsctl $tmsctltype start $cmdflags"
+  /usr/bin/tmsctl $tmsctltype start $cmdflags
+}
+
+#tmsctl 3ah start -i <ifname> -m <oamID> -f <features> -e
+start_tmsctl_3ah() #sectionname
+{
+  local section="$1"
+  local tmsctltype
+  local ifname
+  local oamID
+  local features
+  config_get tmsctltype $section "type"
+  config_get ifname $section "ifname"
+  if [ -z "$ifname" ]; then
+    logger -t ethoam "Required parameter ifname missing from $tmsctltype section $section!"
+    return 0
+  fi
+  config_get oamID $section "oamID"
+  if [ -z "$oamID" ]; then
+    logger -t ethoam "Required parameter oamID missing from $tmsctltype section $section!"
+    return 0
+  fi
+  config_get features $section "features"
+  if [ -z "$features" ]; then
+    logger -t ethoam "Required parameter features missing from $tmsctltype section $section!"
+    return 0
+  fi
+  logger -t ethoam "Starting: /usr/bin/tmsctl $tmsctltype start -i $ifname -m $oamID -f $features -e"
+  /usr/bin/tmsctl $tmsctltype start -i $ifname -m $oamID -f $features -e
+}
+
+#tmsctl 1ag/1ag-2 start -i <ifname> -d <md> [-l <mdLevel>] -a <ma> -m <local_mepId> [-v <vlan>] [-s ccm [-t <CCMinterval>]] [-r <remote_mepId>]
+start_tmsctl_1ag()
+{
+  local section="$1"
+  local tmsctltype
+  local ifname
+  local md
+  local mdLevel
+  local ma
+  local local_mepId
+  local vlan
+  local ccm
+  local CCMinterval
+  local remote_mepId
+  local cmdflags
+  config_get tmsctltype $section "type"
+  config_get ifname $section "ifname"
+  if [ -z "$ifname" ]; then
+    logger -t ethoam "Required parameter ifname missing from $tmsctltype section $section!"
+    return 0
+  fi
+  config_get md $section "md"
+  if [ -z "$md" ]; then
+    logger -t ethoam "Required parameter md missing from $tmsctltype section $section!"
+    return 0
+  fi
+  cmdflags="-i $ifname -d $md"
+  config_get mdLevel $section "mdLevel"
+  if [ -n "$mdLevel" ]; then
+    cmdflags="$cmdflags -l $mdLevel"
+  fi
+  config_get ma $section "ma"
+  if [ -z "$ma" ]; then
+    logger -t ethoam "Required parameter ma missing from $tmsctltype section $section!"
+    return 0
+  fi
+  config_get local_mepId $section "local_mepId"
+  if [ -z "$local_mepId" ]; then
+    logger -t ethoam "Required parameter local_mepId missing from $tmsctltype section $section!"
+    return 0
+  fi
+  cmdflags="$cmdflags -a $ma -m $local_mepId"
+  config_get vlan $section "vlan"
+  if [ -n "$vlan" ]; then
+    cmdflags="$cmdflags -v $vlan"
+  fi
+  config_get ccm $section "ccm"
+  if [ -n "$ccm" ] && [ "$ccm" -eq "1" ]; then
+    cmdflags="$cmdflags -s ccm"
+    config_get CCMinterval $section "CCMinterval"
+    if [ -n "$CCMinterval" ]; then
+      cmdflags="$cmdflags -t $CCMinterval"
+    fi
+  fi
+  config_get remote_mepId $section "remote_mepId"
+  if [ -n "$remote_mepId" ]; then
+    cmdflags="$cmdflags -r $remote_mepId"
+  fi
+  logger -t ethoam "Starting: /usr/bin/tmsctl $tmsctltype start $cmdflags"
+  /usr/bin/tmsctl $tmsctltype start $cmdflags
+}
+
+start_tmsctl() #sectionname
+{
+  local section="$1"
+  logger -t ethoam "Starting section $section"
+  local tmsctl_type
+  local ifname
+  config_get tmsctl_type $section "type" "1731"
+  if [ -z "$tmsctl_type" ]; then
+    logger -t ethoam "Required parameter type missing from section $section!"
+    return 0
+  fi
+  if [ "$tmsctl_type" = "1731" -o "$tmsctl_type" = "1731-2" ]; then
+    start_tmsctl_1731 "$section"
+  fi
+  if [ "$tmsctl_type" = "3ah" ]; then
+    start_tmsctl_3ah "$section"
+  fi
+  if [ "$tmsctl_type" = "1ag" -o "$tmsctl_type" = "1ag-2" ]; then
+    start_tmsctl_1ag "$section"
+  fi
+}
+
+start()
+{
+  # config_get_bool <variable> <section> <option> [<default>]
+  config_get_bool ethoam_enabled global enable 0
+  if [ "$ethoam_enabled" = "1" ]; then
+    logger -t ethoam "Starting tmsctl"
+    awk '/MemFree/ {if ($2 <20480)  { print "3" >"/proc/sys/vm/drop_caches"} }' /proc/meminfo
+    check_driver_loaded
+    if [ ! -c /dev/tms ]; then
+      logger -t ethoam "Creating /dev/tms"
+      rm -f /dev/tms  
+      mknod -m 777 /dev/tms c 250 0
+    fi
+    # config_list_foreach <section> <option> <function>
+    config_list_foreach global configurations start_tmsctl
+  fi
+}
+
+stop()
+{
+  logger -t ethoam "Stopping tmsctl"
+  /usr/bin/tmsctl 1731 stop
+  /usr/bin/tmsctl 1731-2 stop
+  /usr/bin/tmsctl 3ah stop
+  /usr/bin/tmsctl 1ag stop
+  /usr/bin/tmsctl 1ag-2 stop
+}
