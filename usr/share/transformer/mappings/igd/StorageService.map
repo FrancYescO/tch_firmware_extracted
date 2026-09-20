@@ -1,0 +1,234 @@
+-- Automatically generated from StorageService:1.3
+-- using generator version 2.3
+local Multi_Storage_i_ = {
+  objectType = {
+    name = "#ROOT.StorageService.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "StorageServiceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+--[[ TODO:
+      Enable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+--]]
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      -- PhysicalMediumNumberOfEntries
+      -- automatically created when StorageService.{i}.PhysicalMedium.{i}. is loaded
+    }
+  }
+}
+
+local usbDevicesPath = "/sys/bus/usb/devices/"
+local open = io.open
+
+Multi_Storage_i_.entries = function()
+  local storageServiceEntries = {}
+  for file in lfs.dir(usbDevicesPath) do
+    if file:match("^%d+-[%d%.]+$") then
+      local storageService = false
+      local fileName = usbDevicesPath .. file .. "/"
+      for usbpath in lfs.dir(fileName) do
+        if usbpath:match("^%d+-[%d%.]+:[%d]%.[%d]$") then
+          local fd = open(fileName .. usbpath .. "/bInterfaceClass")
+          if fd then
+            local value = fd:read("*l")
+            if value == "08" then
+              storageService = true
+            end
+            fd:close()
+          end
+        end
+      end
+      if storageService then
+        storageServiceEntries[#storageServiceEntries+1] = file
+      end
+    end
+  end
+  return storageServiceEntries
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Storage_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_PhysicalMedium_i_ = {
+  objectType = {
+    name = "#ROOT.StorageService.{i}.PhysicalMedium.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "PhysicalMediumNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+--[[ TODO:
+      Name = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+--]]
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Model = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+--[[ TODO:
+      FirmwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ConnectionType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "USB 1.1",
+          "USB 2.0",
+          "USB 3.0",
+          "USB 3.1",
+          "IEEE1394",
+          "IEEE1394b",
+          "IDE",
+          "EIDE",
+          "ATA/33",
+          "ATA/66",
+          "ATA/100",
+          "ATA/133",
+          "SATA/150",
+          "SATA/300",
+          "SATA/600",
+          "SATA/1969",
+          "SCSI-1",
+          "Fast SCSI",
+          "Fast-Wide SCSI",
+          "Ultra SCSI",
+          "Ultra Wide SCSI",
+          "Ultra2 SCSI",
+          "Ultra2 Wide SCSI",
+          "Ultra3 SCSI",
+          "Ultra-320 SCSI",
+          "Ultra-640 SCSI",
+          "SAS-1",
+          "SAS-2",
+          "SAS-3",
+          "SAS-4",
+          "SSA",
+          "SSA-40",
+          "Fibre Channel",
+        },
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "HDD",
+          "SSD",
+          "SSHD",
+        },
+      },
+      Removable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Capacity = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Online",
+          "Standby",
+          "Offline",
+        },
+      },
+      Uptime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      SMARTCapable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Health = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "OK",
+          "Failing",
+          "Error",
+        },
+      },
+      HotSwappable = {
+        access = "readOnly",
+        type = "boolean",
+      },
+--]]
+    }
+  }
+}
+
+local usbInfo = {}
+local paramMap = {
+  Vendor       = "manufacturer",
+  Model        = "product",
+  SerialNumber = "serial"
+}
+Multi_PhysicalMedium_i_.entries = function(mapping, parentKey)
+  local physicalMediumEntries = {}
+  local usbValues = {}
+  local usbpath = usbDevicesPath .. parentKey .. "/"
+  for file in lfs.dir(usbpath) do
+    local parent = file:match("^([%d]+-[%d%.]+):[%d]%.[%d]$")
+    if parent == parentKey then
+      physicalMediumEntries[#physicalMediumEntries + 1] = file
+    end
+  end
+  for usbParam, usbVariant in pairs(paramMap) do
+    local path = usbpath .. usbVariant
+    local fd = open(path)
+    if fd then
+      local value = fd:read("*l")
+      fd:close()
+      usbValues[usbParam] = value
+    end
+  end
+  usbInfo[parentKey] = usbValues
+  return physicalMediumEntries
+end
+
+Multi_PhysicalMedium_i_.get = function (mapping, param, _, parentKey)
+  return usbInfo[parentKey][param] or ""
+end
+
+local duplicates = duplicator(Multi_PhysicalMedium_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
