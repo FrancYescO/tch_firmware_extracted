@@ -1,0 +1,195 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_Routing_Router_i_IPv6Forwarding_i_ = {
+  objectType = {
+    name = "Device.Routing.Router.{i}.IPv6Forwarding.{i}.",
+    access = "readOnly", -- readWrite currently not supported
+    numEntriesParameter = "IPv6ForwardingNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      DestIPPrefix = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      ForwardingPolicy = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      NextHop = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      Interface = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        default = "",
+      },
+--[[ TODO
+      Origin = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "DHCPv6",
+          "OSPF",
+          "RA",
+          "RIPng",
+          "Static",
+        },
+        default = "Static",
+      },--]]
+      ForwardingMetric = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      ExpirationTime = {
+        access = "readOnly",
+        type = "dateTime",
+        default = "9999-12-31T23:59:59Z",
+      },
+    }
+  }
+}
+
+local mapper, string, ipairs = mapper, string, ipairs
+local nwCommon = mapper("nwcommon")
+local hex2Decimal = nwCommon.hex2Decimal
+local ubus = mapper("ubus").connect()
+local routes = {}
+local deviceInterfaceMap = {}
+
+-- map a column number in /proc/net/ipv6_route to a route field name
+-- Reference: http://tldp.org/HOWTO/Linux+IPv6-HOWTO/proc-net.html
+local routeFields = {
+  [1] = 'destNetwork',
+  [2] = 'destPrefixLen',
+  [3] = 'sourceNetwork',
+  [4] = 'sourcePrefixLen',
+  [5] = 'nextHop',
+  [6] = 'metric',
+  [10] = 'deviceName',
+}
+
+local function loadRoutes()
+  local ipv6Routes = {}
+  local index, route
+  local fd = io.open("/proc/net/ipv6_route")
+  if fd then
+    for line in fd:lines() do
+      route = {}
+      index = 1
+      for field in line:gmatch("%S+") do
+        if routeFields[index] then
+          route[routeFields[index]] = field
+        end
+        index = index + 1
+      end
+      if(route.deviceName ~= 'lo') then --skip loopback interface entries.
+        ipv6Routes[#ipv6Routes+1] = route
+      end
+    end
+    fd:close()
+  end
+  return ipv6Routes
+end
+
+local function loadDeviceInterfaceMap()
+  local devIntfMap = {}
+  local interfaceDump = ubus:call("network.interface", "dump", {})
+  for _, intf in ipairs(interfaceDump.interface or {}) do
+    if intf.l3_device then
+      devIntfMap[intf.l3_device] = intf.interface or ""
+    end
+  end
+  return devIntfMap
+end
+
+Device_Routing_Router_i_IPv6Forwarding_i_.entries = function()
+  local ipv6FwdEntries = {}
+  routes = {}
+  local key
+  deviceInterfaceMap = loadDeviceInterfaceMap()
+  for _, route in ipairs(loadRoutes()) do
+    key = string.format("%s|%s|%s|%s|%s|%s", route.deviceName, route.destNetwork, route.destPrefixLen, route.sourceNetwork, route.sourcePrefixLen, route.metric)
+    ipv6FwdEntries[#ipv6FwdEntries+1] = key
+    routes[key] = route
+  end
+  return ipv6FwdEntries
+end
+
+-- Function to convert the 32-bit continuous characters into IPv6 address format
+local function convertToIPv6Format(ip)
+  return string.sub( ip:gsub('..?.?.?','%1:'), 1, -2)
+end
+
+Device_Routing_Router_i_IPv6Forwarding_i_.get = {
+  Enable = "1",
+  Status = "Enabled",
+  DestIPPrefix = function(mapping, param, key)
+    local destPrefixLen = hex2Decimal(routes[key].destPrefixLen) or 0
+    local destNetwork = routes[key].destNetwork
+    if destPrefixLen == 128 then
+      return convertToIPv6Format(destNetwork) .. '/' .. destPrefixLen
+    end
+    destNetwork = string.sub(routes[key].destNetwork, 1, math.ceil(destPrefixLen/4) )
+    return convertToIPv6Format(destNetwork) ..'::/'.. destPrefixLen
+  end,
+  ForwardingPolicy = "-1", -- Returning -1 as there is no ForwardingPolicy.
+  NextHop = function(mapping, param, key)
+    return convertToIPv6Format(routes[key].nextHop) or ""
+  end,
+  Interface = function(mapping, param, key)
+    local deviceName = routes[key].deviceName
+    return resolve("Device.IP.Interface.{i}.", deviceInterfaceMap[deviceName]) or ''
+  end,
+  ForwardingMetric = function(mapping, param, key)
+    return hex2Decimal(routes[key].metric) or ""
+  end,
+  ExpirationTime = "0001-01-01T00:00Z" -- Returning 0001-01-01T00:00Z as it is not known
+}
+
+-- A getall implementation is not done as it will not bring any improvement,
+-- as data retrieval is done in the entries call. The get will use the cached
+-- data, no work is duplicated.
+
+register(Device_Routing_Router_i_IPv6Forwarding_i_)

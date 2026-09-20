@@ -1,0 +1,57 @@
+#!/bin/ash
+
+# Returns actual WAN port type, upstreamrate, downstreamrate and status
+# to be used by miniupnpd GetCommonLinkProperties in upnpsoap.c, in a popen() call
+
+ethport=""
+TYPE=Ethernet
+STATE=Down
+UPRATE=0
+DOWNRATE=0
+
+wanifname=`uci get network.wan.ifname`
+#echo $wanifname
+
+if [[ -n "$wanifname" ]] ; then
+
+   if [[ -n "$(echo $wanifname | grep eth)" ]] ; then
+      TYPE=Ethernet
+      ethport=$(echo $wanifname | sed 's/.*eth\([0-9]\).*/\1/')
+   elif [[ -n "$( (uci get network.$(uci get network.wan.ifname).ifname 2>/dev/null) | grep eth )" ]] ; then
+      TYPE=Ethernet
+      ethport=$(uci get network.$(uci get network.wan.ifname).ifname | sed 's/.*eth\([0-9]\).*/\1/')
+   elif [[ "$(echo $wanifname | cut -c1-4)" == "atm_" ]] ; then
+      #TYPE=ADSL
+      TYPE=DSL
+   elif [[ -n "$( (uci get network.$(uci get network.wan.ifname).ifname 2>/dev/null) | grep ptm )" ]] ; then
+      #TYPE=VDSL
+      TYPE=DSL
+   fi
+
+   case $TYPE in 
+      Cable)
+      ;;
+      DSL|ADSL|VDSL)
+         rate=$(xdslctl info 2>&1 | grep -E "(Bearer:\W0|Channel:\W)" | sed 's/.*Upstream rate = \([0-9]*\).*/\1/')
+         UPRATE=$(( rate*1000 ))
+         rate=$(xdslctl info 2>&1 | grep -E "(Bearer:\W0|Channel:\W)" | sed 's/.*Downstream rate = \([0-9]*\).*/\1/')
+         DOWNRATE=$(( rate*1000 ))
+         if [[ -n "$(xdslctl info 2>&1  | grep "Showtime")" ]] ; then 
+            STATE=Up
+         fi
+      ;;
+      Ethernet)
+         rate=$(ethctl eth$ethport media-type 2>&1 | grep "media type is" | sed 's/.*media type is \([0-9]*\).*/\1/')
+         rate=$(( rate*1000000 ))
+         UPRATE=$rate
+         DOWNRATE=$rate
+         if [[ -n "$(ethctl eth$ethport media-type 2>&1  | grep "Link is up")" ]] ; then 
+            STATE=Up
+         fi
+      ;;
+   esac
+
+fi
+
+echo $TYPE $UPRATE $DOWNRATE $STATE
+

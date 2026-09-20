@@ -1,0 +1,267 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2010 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+#set -x
+
+START=99
+
+MINIDLNA_CONFIG_FILE="/var/etc/minidlna.conf"
+MINIDLNA_PID="/var/run/minidlna.pid"
+export MINIDLNA_D_PID="/var/run/minidlna_d.pid"
+MINIDLNA_BOOT="/var/run/minidlna_boot"
+MINIDLNA_Q="/var/run/minidlna_Q"
+
+CTX=". $$"
+minidlna_print() {
+	logger -t minidlna "$1$CTX"
+}
+minidlna_print "@@ NEW INSTANCE"
+
+# Find if element is in the array of elements. Example: e="E"; inarray $e A B C D E && echo "FOUND $e" || echo "NOT FOUND $e"
+inarray () { local m=$1; shift; for a in "$@"; do [[ "$a" == "$m" ]] && return 0; done; }
+isnum () { [ "$1" -eq "$1" ] 2>/dev/null; }
+
+# KILL -9 is the sofware equivelent of emergency evacuation, blood everyware. BAD PRACTICE.
+# Suggest kill -1 first to allow the tidy shutdown of databases, the saving and closing files and sockets.
+# If HUP is caught then kill -9 if you insist. Simple code is best.
+# Example1:  backup & killz $! `pidof "backup"` # kills all old backup process but does not kill the one: "$!" that you just started.
+# Example2:  killz tail 9345 9236 9215  # kills only tail processes matchning the process ids
+killz() {
+	# First argument excludes one of them OR PUT SOME TEXT HERE!
+	local m="$1"
+	shift
+	isnum "$m" && {
+		for a in "$@"; do
+			[[ "$a" == "$m" ]] && continue || { kill -HUP "$a" 2>/dev/null; kill -KILL "$a" 2>/dev/null; }
+			# minidlna_print " killz $m $a "
+		done
+	} || {
+		pof="`pidof $m`"
+		for q in $pof; do
+			for a in "$@"; do
+				[[ "$q" == "$a" ]] && { kill -HUP "$a" 2>/dev/null; kill -KILL "$a" 2>/dev/null; }
+				# minidlna_print " killz $m $a "
+			done
+		done
+	}
+}
+
+# Kill one or more processes by their exact names (no partial patterns).
+# Example: killzit my_bad_programs_instances my_old_program_instances vi_instances
+# Danger: pidof matches more than one exact complete file names, but NOT the full path. Test on command line before you use it.
+killzit() {
+	# First argument excludes one of them OR PUT SOME TEXT HERE!
+	local m=$1
+	shift
+    for a in $@ ; do
+    	killz "$m" `pidof "$a"`
+    done
+}
+
+## running process_basename pid_file4process
+# For example: running satnav /tmp/satnav.pid && echo SATNAV RUNNING || echo SATNAV NOT RUNNING
+isrunning() {
+	local pof=`pidof "$1"`
+	local pf="$2"
+	[[ -z "$pof" ]] && {
+		[[ -e $pf ]] && rm -f $pf
+		return 1
+	}
+	[[ -r $pf ]] && {
+		local pid="`cat $pf`"
+		inarray $pid $pof && return 0 || rm -f $pf
+	}
+	return 1
+}
+
+
+# Normally you would use service_check service_start like this:
+#start() {         service_check $APP && return 1 ; service_start $MINIDLNA $ARGS ; }
+# However since we have minidlna forking a child to scan and we wait for scanning/profiling of media to complets
+# we cant because the -R option for restart.
+minidlna_kill() {
+	local proc_name="$1"
+	local pid_file="$2"
+	local pid=""
+ 	#set -x
+	[[ -e $pid_file ]] && pid="`cat $pid_file`"
+	killz 1 `pidof "$proc_name"`
+	sleep 1
+    isrunning $proc_name $pid_file
+	#set +x
+}
+
+minidlna_cfg_append() {
+	echo "$1" >> "$MINIDLNA_CONFIG_FILE"
+}
+
+minidlna_cfg_addbool() {
+	local cfg="$1"
+	local key="$2"
+	local def="$3"
+	local val
+
+	config_get_bool val "$cfg" "$key" "$def"
+	[ "$val" -gt 0 ] && val="yes" || val="no"
+	minidlna_cfg_append "$key=$val"
+}
+
+minidlna_cfg_addstr() {
+	local cfg="$1"
+	local key="$2"
+	local def="$3"
+	local val
+
+	config_get val "$cfg" "$key" "$def"
+	[ -n "$val" ] && minidlna_cfg_append "$key=$val"
+}
+
+minidlna_cfg_add_media_dir() {
+	local val=$1
+
+	minidlna_cfg_append "media_dir=$val"
+}
+
+minidlna_create_config() {
+	local cfg=$1
+	local port
+	local interface
+
+	config_get port $cfg port
+	config_get interface $cfg interface
+
+	[ -z "$interface" -o -t "$port" ] && return 1
+
+	echo "# this file is generated automatically, don't edit" > "$MINIDLNA_CONFIG_FILE"
+
+	minidlna_cfg_append "port=$port"
+	minidlna_cfg_append "network_interface=$interface"
+
+	minidlna_cfg_addstr $cfg friendly_name
+	minidlna_cfg_addstr $cfg db_dir
+	minidlna_cfg_addstr $cfg log_dir
+	minidlna_cfg_addstr $cfg log_level
+	minidlna_cfg_addbool $cfg inotify '1'
+	minidlna_cfg_addbool $cfg enable_tivo '0'
+	minidlna_cfg_addbool $cfg strict_dlna '0'
+	minidlna_cfg_addstr $cfg album_art_names
+	minidlna_cfg_addstr $cfg presentation_url
+	minidlna_cfg_addstr $cfg notify_interval '900'
+	minidlna_cfg_addstr $cfg serial '12345678'
+	minidlna_cfg_addstr $cfg model_number '1'
+	minidlna_cfg_addstr $cfg minissdpsocket
+	minidlna_cfg_addstr $cfg root_container '.'
+	minidlna_cfg_addstr $cfg uuid
+	config_list_foreach "$cfg" "media_dir" minidlna_cfg_add_media_dir
+
+	return 0
+}
+
+minidlna_check() {
+	local cfg_changed='0'
+	for mdir in `uci get -q minidlna.config.media_dir` ; do
+		dir=`echo $mdir | cut -d'/' -f1-4`
+		#echo $mdir $dir
+		if [ ! $(mount | grep -e "/dev/sd[a-z]" | cut -d ' ' -f3 | grep $dir)  ] ; then
+			echo "$dir is not mounted !"
+			uci del_list minidlna.config.media_dir="$mdir"
+			uci commit minidlna
+			cfg_changed='1'
+		fi
+	done
+	echo "$cfg_changed"
+}
+
+start() {
+	#set -x
+
+	minidlna_print " ==== minidlna-start ==="
+
+	[ -z "$ACTION" -a ! -e $MINIDLNA_BOOT ] && {
+		minidlna_print "Start service (manual)"
+		echo "`date` :man" > $MINIDLNA_BOOT
+	}
+
+	# check if boot is ongoing (ACTION => script called from hotplugin context)
+	[ -n "$ACTION" -a ! -e $MINIDLNA_BOOT ] && {
+		minidlna_print "Service queued"
+		echo "`date` :req" >> $MINIDLNA_Q
+		return 0
+	}
+
+	isrunning minidlnad $MINIDLNA_D_PID
+	isrunning minidlna_bg $MINIDLNA_PID
+
+	[[ -r $MINIDLNA_D_PID ]] && {
+		minidlna_print "Service already running: `pidof minidlnad`"
+		return 1
+	}
+
+	minidlna_check
+
+	config_load 'minidlna'
+	local enabled
+	config_get_bool enabled config 'enabled' '0'
+
+	[ "$enabled" -gt 0 ] || return 1
+
+	minidlna_create_config config || return 1
+
+	[[ -z "`uci -q get minidlna.config.media_dir`" ]] && {
+		minidlna_print "Service STILL started with no disk connected"
+	} || {
+		minidlna_print "Service started"
+	}
+	export MINIDLNA_FORCE_RESCAN="`uci -q get minidlna.config.force_rescan`"
+	export MINIDLNA_MEDIA_FINGERPRINT="`uci -q get minidlna.config.media_fingerprint`"
+	killz $$ `pidof minidlna_bg`
+	/usr/sbin/minidlna_bg $$ /usr/sbin/minidlnad -f "$MINIDLNA_CONFIG_FILE" -P $MINIDLNA_D_PID >/dev/null 2>&1 &
+	echo $! > $MINIDLNA_PID
+	return 0
+}
+
+stop() {
+	minidlna_print " ==== minidlna-stop ==="
+	minidlna_kill minidlna_bg $MINIDLNA_PID
+	minidlna_kill minidlnad $MINIDLNA_D_PID
+	local ipid="`ps -w | egrep "tail .+/minidlna.log" | cut -f 1 -d "r"`"
+	killz tail $ipid
+	ipid="`ps -w | egrep "tail .+/minidlna_bg" | cut -f 1 -d "r"`"
+	killz tail $ipid
+	rm -rf /tmp/minidlna 2>/dev/null
+	return 0
+}
+
+reload() {
+	local dlna="`uci get -q minidlna.config.enabled`"
+	[[ -z "$dlna" ]] && {
+		minidlna_print "==== minidlna-reload triggered WARNING uci get minidnla empty"
+		stop
+	}
+	[[ "$dlna" == "1" ]] && {
+		minidlna_print "==== minidlna-reload => restart minidlna"
+		killz $$ `pidof minidlna_bg`
+		restart
+	} || {
+		minidlna_print "==== minidlna-reload triggered => KEEP minidlna"
+		#was stop but we run even when no USB attached.  tjc
+		killz $$ `pidof minidlna_bg`
+		restart
+	}
+	return 0
+}
+
+boot() {
+	minidlna_print " ==== minidlna-boot ==="
+	echo "`date` :auto" > $MINIDLNA_BOOT
+	[ -e $MINIDLNA_Q ] && {
+		minidlna_print "==== start from boot ==="
+		export BOOT_DELAY=`uci -q get minidlna.config.boot_delay`
+		start
+	}
+	return 0
+}

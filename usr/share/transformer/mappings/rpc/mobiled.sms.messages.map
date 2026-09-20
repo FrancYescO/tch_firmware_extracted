@@ -1,0 +1,80 @@
+local string, tonumber, type = string, tonumber, type
+
+local mobiled_sms_messages = {
+	objectType = {
+		name = 'rpc.mobiled.device.@.sms.message.@.',
+		access = 'readOnly',
+		numEntriesParameter = "MessageNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			status = {
+				access = "readOnly",
+				type = "string"
+			},
+			number = {
+				access = "readOnly",
+				type = "string"
+			},
+			text = {
+				access = "readOnly",
+				type = "string"
+			},
+			date = {
+				access = "readOnly",
+				type = "string"
+			},
+			id = {
+				access = "readOnly",
+				type = "unsignedInt"
+			}
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+    return
+end
+
+local helper = require("mobiled.scripthelpers")
+
+local function getSmsData(key, parentkey)
+	local message_id = tonumber(string.match(key, '%d'))
+	if message_id and message_id >= 1 then
+		local data = helper.getUbusData(conn, "mobiled.sms", "get", { dev_idx = tonumber(string.match(parentkey, '%d')) })
+		if type(data.messages) == "table" then
+			local message = data.messages[message_id]
+			if type(message) == "table" then
+				setmetatable(message, { __index = function() return "" end })
+				return message
+			end
+		end
+	end
+	return {}
+end
+
+local function getall(mapping, key, parentkey)
+	return getSmsData(key, parentkey)
+end
+
+local function get(mapping, paramName, key, parentkey)
+	return getall(mapping, key, parentkey)[paramName]
+end
+
+local function smsEntries(mapping, key, parentkey)
+	local data = helper.getUbusData(conn, "mobiled.sms", "get", { dev_idx = tonumber(parentkey) })
+	local messages = {}
+	if type(data.messages) == "table" then
+		for i=1, #data.messages do
+			table.insert(messages, { tostring(i), "message" .. i })
+		end
+	end
+	return messages
+end
+
+mobiled_sms_messages.getall = getall
+mobiled_sms_messages.get = get
+mobiled_sms_messages.entries = smsEntries
+
+register(mobiled_sms_messages)

@@ -1,0 +1,34 @@
+. /lib/functions.sh
+config_load "siege"
+config_get ENABLE log enable
+PIDFILE=/var/run/osgi.pid
+
+CRONTABS=/etc/crontabs
+CRONRULE=$CRONTABS/root
+
+if [ $ENABLE -eq 1 ];
+then
+    config_get SIEGELOG log dir
+    if ! [ -d $SIEGELOG ] ;
+    then
+	mkdir $SIEGELOG
+    fi
+    FILENAME=log
+    FILEEXT=.txt
+    FS=/
+    LOGFILE=${SIEGELOG}${FS}${FILENAME}${FILEEXT}
+    echo -e "###########################################" >>$LOGFILE
+    echo log-`date`>> $LOGFILE
+    echo -e "###########################################" >>$LOGFILE
+    if !(grep -q "\*/1 \* \* \* \* /usr/bin/dSiegeLog" $CRONRULE 2>/dev/null); then
+        mkdir -p $CRONTABS
+        echo "*/1 * * * * /usr/bin/dSiegeLog" >> $CRONRULE
+        sed -i "/^$/d" $CRONRULE
+        /etc/init.d/cron restart
+    fi
+    /usr/bin/jvms/bin/siege_jvm -v $@ >> $LOGFILE &
+    echo $! > $PIDFILE
+else
+    /usr/bin/jvms/bin/siege_jvm $@ &
+    echo $! > $PIDFILE
+fi
