@@ -1,0 +1,389 @@
+<!--
+  (C) 2021 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-timewheel/duma-timewheel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-drag-table/duma-drag-table.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-days/duma-days.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/devices.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="rules-table"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> /* hide double displayed toggle and checkbox in drag element */
+      duma-drag-table ::content .gu-mirror paper-checkbox #checkboxLabel,
+      duma-drag-table ::content .gu-mirror paper-toggle-button .toggle-label  {
+        display: none;
+      }
+      :host ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      :host .priority {
+        text-align: center;
+        width: 1px;
+      }
+      :host .overflow {
+        overflow-y: auto;
+        max-height: 6em;
+      }
+      :host .rule-name {
+        max-width: 128px;
+        white-space: pre;
+        display: inline-block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      :host .target-name {
+        max-width: 200px;
+        white-space: pre;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      :host .timewheels {
+        display: inline-block;
+      }
+      :host .timewheels > div {
+        width: 100%;
+        margin-bottom: 0.5em;
+      }
+      :host .track-wrap paper-checkbox {
+        padding: 0px 0px 0px 8px;
+      }
+      :host paper-dropdown-menu {
+        max-width: 10em;
+        min-width: 5em;
+      }
+      :host .drag_handle {
+        cursor: ns-resize;
+      }
+      :host .drag_handle.drag_disabled {
+        cursor: no-drop;
+      } </style> <div> <duma-drag-table id="trafficDragTable"> <table class="rules-table"> <caption class="sr-only"><%= i18n.trafficRules %></caption> <thead> <tr> <th scope="col"><%= i18n.priority %></th> <th scope="col"><%= i18n.enabled %></th> <th scope="col"><%= i18n.ruleName %></th> <th scope="col"><%= i18n.devices %></th> <th scope="col"><%= i18n.targets %></th> <th scope="col"><%= i18n.schedule %></th> <th scope="col"><%= i18n.action %></th> <th scope="col"><%= i18n.track %></th> <th></th> </tr> </thead> <tbody class="drag_container"> <template is="dom-repeat" items="[[rules]]" as="rule"> <tr class="row" rule="[[rule]]"> <td> <!-- drag handle --> <span class="priority" on-keyup="_priorityKeyUp" tabindex="0" aria-label$="[[_getPriorityAria(rule,index)]]"> [[_getPriority(index)]] <iron-icon icon="duma-icons:drag-indicator" class="drag_handle"></iron-icon> </span> </td> <td> <!-- enable toggle --> <paper-toggle-button on-checked-changed="_toggleEnabledChanged" checked="[[rule.enabled]]" disabled="[[allDisabled]]" aria-label$="[[_format('<%= i18n.enable_aria %>',rule.name)]]"></paper-toggle-button> </td> <td> <!-- name --> <span class="rule-name">[[rule.name]]</span> </td> <td> <!-- device targets --> <div class="overflow"> <ul> <template is="dom-repeat" items="[[getDeviceNames(rule,devices)]]"> <li class="target-name">[[item]]</li> </template> </ul> </div> </td> <td> <!-- application targets --> <div class="overflow"> <ul> <template is="dom-repeat" items="[[getTargets(rule,_apps,_categories)]]"> <li class="target-name">[[item]]</li> </template> </ul> </div> </td> <td> <!-- schedule --> <div class="timewheels"> <div class="layout horizontal"> <duma-timewheel small starting="[[_scheduleToBoolArr(rule.schedule,0)]]" allow$="[[rule.allow]]"></duma-timewheel> <duma-timewheel small starting="[[_scheduleToBoolArr(rule.schedule,1)]]" allow$="[[rule.allow]]" pm></duma-timewheel> </div> <duma-days cron="[[rule.schedule]]" allow$="[[rule.allow]]"></duma-days> </div> </td> <td> <!-- action dropdown --> <paper-dropdown-menu no-label-float allow-outside-scroll="true" class="dropdown-small" aria-label$="[[_format('<%= i18n.blockType %>',rule.name)]]"> <paper-listbox class="dropdown-content" attr-for-selected="value" selected="[[rule.allow]]" on-selected-changed="_toggleActionChanged"> <template is="dom-repeat" items="[[getAllowTypes(rule.services)]]"> <paper-item value="[[item]]">[[_allowTypeToDisplay(item)]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </td> <td> <!-- event capture --> <div class="track-wrap"> <paper-checkbox checked="[[rule.notifications]]" on-checked-changed="_toggleTrackChanged" aria-label$="[[_format('<%= i18n.trackEvents_aria %>',rule.name)]]"> </paper-checkbox> </div> </td> <td> <div class="layout horizontal"> <!-- edit --> <paper-icon-button id$="rule-edit-[[index]]" icon="image:edit" on-tap="_onEditClick" aria-label$="[[_format('<%= i18n.edit_aria %>',rule.name)]]"></paper-icon-button> <paper-tooltip for="rule-edit-[[index]]">[[_format('<%= i18n.edit_aria %>',rule.name)]]</paper-tooltip> <!-- delete --> <paper-icon-button id$="rule-delete-[[index]]" icon="delete-forever" on-tap="_onDeleteClick" aria-label$="[[_format('<%= i18n.delete_aria %>',rule.name)]]"></paper-icon-button> <paper-tooltip for="rule-delete-[[index]]">[[_format('<%= i18n.delete_aria %>',rule.name)]]</paper-tooltip> </div> </td> </tr> </template> </tbody> </table> </duma-drag-table> <duma-alert></duma-alert> </div> </template> <script> Polymer({
+      is: "rules-table",
+
+      properties: {
+        allDisabled: {
+          type: Boolean,
+          value: false
+        },
+
+        rules: {
+          type: Array,
+          value: () => [],
+          notify: true
+        },
+
+        // devices
+        devices: {
+          type: Object,
+        },
+
+        // services.json
+        _apps: {
+          type: Object,
+        },
+        _categories: {
+          type: Array,
+        },
+
+        __allowTypeTranslations: {
+          type: Object,
+          value: {
+            allow: "<%= i18n.allow %>",
+            block: "<%= i18n.block %>",
+            reject: "<%= i18n.reject %>",
+          }
+        },
+      },
+
+      observers: [
+        "refresh(_apps,_categories)"
+      ],
+
+      _getPriority: function(index){
+        return index + 1;
+      },
+
+      _getPriorityAria: function(rule,index){
+        return "<%= i18n.priorityAria %>".format(rule.name,this._getPriority(index));
+      },
+
+      _allowTypeToDisplay: function(allowType){
+        return this.__allowTypeTranslations[allowType] || ("ERROR: " + allowType);
+      },
+
+      _scheduleToBoolArr: function(cronString, pm){
+        var cron = new Cron(cronString);
+        var arr = pm ? cron.pm() : cron.am();
+        return JSON.stringify(arr);
+      },
+
+      _format(){
+        return String.format.apply(this,arguments);
+      },
+
+      getAllowTypes: function(services){
+        var canReject = false;
+        for(var i = 0; i < services.length; i++){
+          var serv = services[i];
+          // proto 6 means tcp, 17 udp. If no proto, assume both. Reject only works for tcp
+          if(serv.proto == 6){
+            canReject = true;
+            break;
+          }
+        }
+        return canReject ? ["allow", "block", "reject"] : ["allow", "block"];
+      },
+
+      getDeviceNames: function(rule, devices){
+        if(!rule.device || rule.device.length === 0){
+          return ["<%= i18n.allDevices %>"]
+        }
+        var names = [];
+        rule.device.forEach((devId) => {
+          var device = devices[devId];
+          if(!device){
+            console.warn("unknown device id:",devId);
+          }else{
+            names.push(device.name);
+          }
+        });
+        return names;
+      },
+
+      getTargets: function(rule, apps, categories){
+        if(
+          !rule.services ||
+          (!rule.services.length && !rule.categories.length) ||
+          // test for all-traffic { services:[ [] ], categories: [] }
+          (
+            rule.services.length === 1 && 
+            !rule.categories.length &&
+            Array.isArray(rule.services[0]) &&
+            rule.services[0].length === 0
+          ))
+          return ["<%= i18n.allTraffic %>"];
+
+        var names = [];
+
+        // TODO this is legacy services
+
+
+        // get applications matches from services
+        this._matchServicesToApps(apps, rule.services).forEach((app) => {
+          names.push(app.application || app);
+        });
+
+        // get category names from rule.categories
+        for(var key in categories){
+          if(rule.categories.includes(categories[key])){
+            names.push(key);
+          }
+        }
+
+        return names;
+      },
+
+      _matchServicesToApps: function(apps, rule_services){
+        var out = [];
+        var foundAppsFor = new Array(rule_services.length).fill(false);
+        for(var a = 0; a < apps.length; a++){
+          var app = apps[a];
+          var appIn = false;
+          for(var i = 0; !appIn && i < app.services.length; i++){
+            for(var ii = 0; !appIn && ii < rule_services.length; ii++){
+              if(this._compareServices(app.services[i], rule_services[ii])){
+                out.push(app);
+                // break out double loop
+                appIn = true;
+                foundAppsFor[ii] = true;
+              }
+            }
+          }
+        }
+        // handle services that have not have apps found for them, i.e. port ranges
+        for(var i = 0; i < rule_services.length; i++){
+          var serv = rule_services[i];
+          // if an app has been found, ignore this service
+          if(foundAppsFor[i]) continue;
+          // proto 6 means tcp, 17 udp. If no proto, assume both
+          var proto = serv.proto ? (serv.proto == 6 ? "<%= i18n.TCP %>" : "<%= i18n.UDP %>") : "<%= i18n.port %>";
+          if(serv.sport){
+            out.push("<%= i18n.format_source %>".format(proto, serv.sport[0], serv.sport[1]));
+          }else if(serv.dport){
+            out.push("<%= i18n.format_dest %>".format(proto, serv.dport[0], serv.dport[1]));
+          }else{
+            out.push("<%= i18n.unknown %>");
+          }
+        }
+        return out;
+      },
+
+      // compare two services against each other
+      _compareServices: function(a,b){
+        if(a.appid) {
+          return a.appid === b.appid;
+        }else if(a.sport || a.dport || a.proto){
+          // match sport && dport, and proto
+          return (
+            a.proto === b.proto &&
+            (
+              (!a.sport && !b.sport) ||
+              (a.sport && b.sport && a.sport[0] === b.sport[0] && a.sport[1] === b.sport[1])
+            ) && (
+              (!a.dport && !b.dport) ||
+              (a.dport && b.dport && a.dport[0] === b.dport[0] && a.dport[1] === b.dport[1])
+            )
+          )
+        }else if(a.icmp_type){
+          return a.icmp_type === b.icmp_type;
+        }else if(a.icmpv6_type){
+          return a.icmpv6_type === b.icmpv6_type;
+        }
+        return false;
+      },
+
+      ready: function(){
+        function JSONPromise(path){
+          return new Promise(function(resolve,reject){
+            $.getJSON(path,resolve);
+          });
+        }
+        Q.spread([
+          JSONPromise("/json/_services_.json?cache=0"),
+          JSONPromise("/json/categories.json?cache=0")
+        ], (services, categories) => {
+          this._apps = services;
+          this._categories = categories;
+        });
+
+        this.$.trafficDragTable.drop = function(el, target, source, sibling){
+          var tr = $(el).closest("tr");
+          var rule = tr.prop("rule");
+          this.moveRule(rule,tr.index());
+        }.bind(this);
+      },
+
+      refresh: function(){
+        // prevent loading rules until apps and categories are loaded
+        if(!this._apps || !this._categories) return;
+        return new Promise((resolve, reject) => {
+          Q.spread([
+            long_rpc_promise("com.netdumasoftware.trafficcontroller", "get_rules", []),
+            duma.devices.get_devices()
+          ],(rules,devices) => {
+            rules = rules[0];
+            this.devices = devices;
+            this.rules = rules;
+            $(this).closest("duma-panel").prop("loaded", true);
+          });
+        });
+      },
+
+      _getRuleIndexFromEvent: function(e){
+        var tr = $(e.target).closest("tr");
+        return tr.index();
+      },
+
+      _updateRuleRPCByIndex: function(index){
+        var rule = this.rules[index];
+        if(rule) return long_rpc_promise("com.netdumasoftware.trafficcontroller","update_rule",[rule]);
+        return new Promise((resolve,reject) => reject());
+      },
+
+      // change the enabled state
+      _toggleEnabledChanged: function(e){
+        var index = this._getRuleIndexFromEvent(e);
+        this.set("rules." + index + ".enabled", e.detail.value);
+        this._updateRuleRPCByIndex(index);
+      },
+      // change the track checkbox
+      _toggleTrackChanged: function(e){
+        var index = this._getRuleIndexFromEvent(e);
+        this.set("rules." + index + ".notifications", e.detail.value);
+        this._updateRuleRPCByIndex(index);
+
+      },
+      // change the actiond dropdown
+      _toggleActionChanged: function(e){
+        var index = this._getRuleIndexFromEvent(e);
+        this.set("rules." + index + ".allow", e.detail.value);
+        this._updateRuleRPCByIndex(index);
+      },
+
+      _onEditClick: function(e){
+        var index = this._getRuleIndexFromEvent(e);
+        var rule = this.rules[index];
+        $("rule-add-dialog",$(this).closest("duma-panel"))[0].openEdit((newRule) => {
+          this.set('rules.' + index,newRule);
+          long_rpc_promise("com.netdumasoftware.trafficcontroller","update_rule",[newRule]).catch(() => {
+            // on fail, do refresh
+            this.refresh();
+          });
+        },rule);
+      },
+
+      _onDeleteClick: function(e){
+        var index = this._getRuleIndexFromEvent(e);
+        var rule = this.rules[index];
+        $("duma-alert", this)[0].open("<%= i18n.deleteConfirm %>".format(rule.name),[
+          {text:"<%= i18n.yes %>",default:true,action:"confirm",callback:() => {
+            this.splice('rules',index,1);
+            long_rpc_promise("com.netdumasoftware.trafficcontroller","delete_rule",[rule.id]).catch(() => {
+              // on fail, do refresh
+              this.refresh();
+            });
+          }},
+          {text:"<%= i18n.no %>",default:false,action:"dismiss"}
+        ],false);
+      },
+
+      _getRuleIndex: function(ruleOrId){
+        for(var i = 0; i < this.rules.length; i++){
+          var rule = this.rules[i];
+          if(rule === ruleOrId || rule.id === ruleOrId || (typeof ruleOrId.id !== "undefined" && ruleOrId.id === rule.id)){
+            return i;
+          }
+        }
+        return -1;
+      },
+
+      moveRule: function(rule,to){
+        if(rule) {
+          var from = this._getRuleIndex(rule);
+          to = parseInt(to)
+          // add 1 to 'to' because converting to lua
+          long_rpc_promise("com.netdumasoftware.trafficcontroller","reorder_rule",[rule.id,to + 1]);
+          if(from >= 0){
+            // move tr element back to original place, so polymer can update correctly
+            var rows = $("tbody tr",this);
+            var misplaced = rows[to];
+            if(to === this.rules.length){
+              misplaced.parentElement.appendChild(misplaced);
+            }else{
+              misplaced.parentElement.insertBefore(misplaced,rows[from]);
+            }
+
+            // alter rules array the same way in polymer friendly way... more or less
+            var movingRule = this.splice('rules',from,1)[0];
+            this.splice('rules',to,0,movingRule);
+          }
+        }
+      },
+
+      _priorityKeyUp: function(e){
+        if(e.key){
+          var tr = $(e.target).closest("tr");
+          var index = tr.index();
+          var rule = this.rules[index];
+          if(rule){
+            var moveToIndex = index;
+            // if at top, don't go up
+            if(e.key === "ArrowUp" && index !== 0) moveToIndex -= 1;
+            // if at bottom, don't go down
+            if(e.key === "ArrowDown" && index !== this.rules.length-1) moveToIndex += 1;
+            if(index !== moveToIndex){
+              // move rule
+              this.moveRule(rule,moveToIndex);
+              // refocus on newly moved to row
+              Polymer.RenderStatus.afterNextRender(this,() => {
+                $("tbody tr .priority",this)[moveToIndex].focus();
+              });
+            }
+          }
+        }
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,80 @@
+-- Manually generated
+
+local rpc_multiap_agent_ = {
+  objectType = {
+    name = "rpc.multiap.agent.",
+    access = "readOnly",
+    description = "Trigger action parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Reboot = {
+        access = "readWrite",
+        type = "string",
+        description = "Trigger reboot for specific booster or all boosters or router and all boosters",
+      },
+      Reset = {
+        access = "readWrite",
+        type = "string",
+        description = "Trigger reset for specific booster or all boosters or router and all boosters",
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local eventsource = eventsource
+local uciHelper = mapper("ucihelper")
+local wirelessBinding = { config = "wireless" }
+
+rpc_multiap_agent_.get = function()
+  return ""
+end
+
+rpc_multiap_agent_.set = function(mapping, param, value)
+  -- Mac '01:80:C2:00:00:13' -> broadcast mac given to trigger action for all boosters
+  -- Mac 'FF:FF:FF:FF:FF:FF' -> Mac given to trigger action for router + boosters
+  local onboardedAgents = conn:call("mapVendorExtensions.agent", "get", {}) or {}
+  if not (onboardedAgents[value] or value == "01:80:C2:00:00:13" or value == "FF:FF:FF:FF:FF:FF") then
+    return nil, "Invalid MAC"
+  end
+  local fd = io.open("/tmp/.macaddress","w")
+  if fd then
+    fd:write(value, "\n")
+    fd:close()
+  else
+    return nil, "internal write error"
+  end
+  commitapply:newset("booster" ..param)
+end
+
+local function radioParamSet(_, _, _, _, sectionName, option, value)
+  conn:call("mapVendorExtensions.controller", "sendModifiedWifiConfig", {["Radio"] = sectionName, ["Parameter"] = option, ["Value"] = value})
+end
+
+local function apParamSet(_, _, _, _, sectionName, option, value)
+  wirelessBinding.sectionname = sectionName
+  wirelessBinding.option = "iface"
+  local iface = uciHelper.get_from_uci(wirelessBinding)
+  wirelessBinding.sectionname = iface
+  wirelessBinding.option = "fronthaul"
+  local is_fh = uciHelper.get_from_uci(wirelessBinding)
+  wirelessBinding.option = "backhaul"
+  local is_bh = uciHelper.get_from_uci(wirelessBinding)
+  if is_fh == "1" or is_bh == "1" then
+    wirelessBinding.option = "device"
+    local radio = uciHelper.get_from_uci(wirelessBinding)
+    conn:call("mapVendorExtensions.controller", "sendModifiedWifiConfig", {["Radio"] = radio, ["AP"] = sectionName, ["Parameter"] = option, ["Value"] = value})
+  end
+end
+
+rpc_multiap_agent_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, {set = radioParamSet}, "wireless" , "wifi-device", nil, "standard")
+  uci_evsrc.watch(mapping, {set = radioParamSet}, "wireless" , "wifi-device", nil, "channelwidth")
+  uci_evsrc.watch(mapping, {set = apParamSet}, "wireless" , "wifi-ap", nil, "wps_state")
+  uci_evsrc.watch(mapping, {set = apParamSet}, "wireless" , "wifi-ap", nil, "public")
+  uci_evsrc.watch(mapping, {set = apParamSet}, "wireless" , "wifi-ap", nil, "pmf")
+end
+
+register(rpc_multiap_agent_)

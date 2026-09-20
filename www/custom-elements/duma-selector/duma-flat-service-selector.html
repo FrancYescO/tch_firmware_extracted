@@ -1,0 +1,86 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-flat-service-selector"> <template> <array-selector id="servicesSelector" items="[[_services]]" selected="{{value}}" multi="[[multiple]]"></array-selector> <template is="dom-if" if="[[multiple]]"> <template is="dom-repeat" items="[[_services]]" as="service"> <paper-checkbox on-checked-changed="_onStageChange">[[service.name]]</paper-checkbox> </template> </template> <template is="dom-if" if="[[!multiple]]"> <paper-radio-group> <template is="dom-repeat" items="[[_services]]" as="service"> <paper-radio-button name="[[service]]" on-checked-changed="_onStateChange"> [[service.name]] </paper-radio-button> </template> </paper-radio-group> </template> </template> <script> Polymer({
+      is: "duma-flat-service-selector",
+
+      properties: {
+
+        multiple: {
+          type: Boolean,
+          value: false,
+          observer: "_onMultipleChange"
+        },
+
+        valid: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        value: {
+          type: Array,
+          notify: true
+        },
+
+        _services: Array,
+      },
+      
+      observers: [
+        "_isValid(value.splices, multiple)",
+        "_isValid(value, multiple)"
+      ],
+      
+      ready: function () {
+        this._refreshServices();
+      },
+
+      _onMultipleChange: function () {
+        if (this.multiple) {
+          this.value = null;
+          this.$.servicesSelector.clearSelection();
+        }
+      },
+
+      _refreshServices: function () {
+        $.getJSON(
+          "/json/_services_.json?cache=0",
+          function (services) {
+
+            this._services = services;
+
+          }.bind(this)
+        );
+      },
+
+      _onStateChange: function (event) {
+        if (event.target.checked) {
+          this.$.servicesSelector.select(event.model.service);
+        } else if (this.multiple) {
+          this.$.servicesSelector.deselect(event.model.service);
+        }
+      },
+
+      _isValid: function () {
+        if (this.multiple) {
+          this.valid = this.value && this.value.length > 0;
+        } else {
+          this.valid = this.value ? true : false;
+        }
+      },
+
+      reset: function () {
+        var radios = Polymer.dom(this.root).querySelectorAll("paper-radio-button");
+        var checkboxes = Polymer.dom(this.root).querySelectorAll("paper-checkbox");
+
+        for (var i = 0; i < radios.length; i++) {
+          radios[i].checked = false;
+        }
+
+        for (var i = 0; i < checkboxes.length; i++) {
+          checkboxes[i].checked = false;
+        }
+
+        this.$.servicesSelector.clearSelection();
+      },
+    }); </script> </dom-module> 

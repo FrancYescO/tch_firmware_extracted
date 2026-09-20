@@ -1,0 +1,779 @@
+<!-- 
+  (C) NETDUMA Software
+  Kian Cross <kian.cross@netdma.com>
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../duma-table/duma-table.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/chart.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-chart"> <template> <style include="duma-theme"> :host {
+        display: block;
+        min-height: 128px;
+        min-width: 64px;
+        padding: 0 16px 16px;
+        box-sizing: border-box;
+        width: 100%;
+        position: relative;
+        @apply(--layout-flex);
+      }
+
+      :host canvas {
+        display: block;
+        position: absolute;
+        max-width: 100%;
+        max-height: 100%;
+      }
+
+      :host canvas.clickable {
+        cursor: pointer;
+      }
+      /* we want to leave the canvas existing, because some stuff might interact directly with the canvas. */
+      :host[table-mode] {
+        padding: 0;
+      }
+      :host[table-mode] canvas {
+        display: none !important;
+      } </style> <template is="dom-if" if="[[showInTableMode(tableMode,justHideMeInTableMode)]]"> <duma-table items="[[ariaItems]]" selection-enabled="[[isSelectable]]" on-selecting-item="_onTableSelect" caption="[[tableCaption]]"> <template is="dom-repeat" items="[[ariaColumns]]"> <duma-table-column name$="[[item.name]]" bind-to$="[[item.bindTo]]"></duma-table-column> </template> </duma-table> </template> <canvas class="duma-chart-chart" width="{{width}}" height="{{height}}"></canvas> </template> <script> Polymer({
+      is: "duma-chart",
+
+      properties: {
+
+        type: String,
+        data: {
+          type: Object,
+          notify: true
+        },
+
+        options: {
+          type: Object,
+          observer: "_updateOptions"
+        },
+
+        pointerOverElements: {
+          type: Boolean,
+          value: false,
+          observer: "_updateOptions",
+        },
+
+        pointerOverLabels: {
+          type: Boolean,
+          value: false,
+          observer: "_updateOptions",
+        },
+
+        width: {
+          type: Number,
+          value: 400
+        },
+
+        height: {
+          type: Number,
+          value: 400
+        },
+
+        chart: {
+          type: Object,
+          notify: true
+        },
+
+        // Format data into a nicer way
+        ariaValueFormatter: {
+          type: Function,
+          value: function(){
+            return function(val,dataset){
+              if(dataset.ariaValueFormatter) return dataset.ariaValueFormatter.apply(this,arguments);
+              return val && (typeof val.y !== "undefined" ? val.y : val);
+            }
+          }
+        },
+
+        // list of headers for the table
+        ariaItems: {
+          type: Array,
+          value: function(){
+            return [];
+          }
+        },
+        // list of headers for the table
+        ariaColumns: {
+          type: Array,
+          value: function(){
+            return [];
+          }
+        },
+
+        accessibilityMode: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+
+        // is the chart in table display mode?
+        tableMode: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+        // if in table mode, does this chart get hidden instead of being converted
+        justHideMeInTableMode: {
+          type: Boolean,
+          value: false
+        },
+        tableCaption: {
+          type: String,
+          value: "<%= i18n.ariaHeader %>"
+        },
+        isSelectable: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      listeners: {
+        "iron-resize": "_resize"
+      },
+
+      showInTableMode: function(tableMode, forceHide) {
+        return tableMode && !forceHide;
+      },
+
+      /**
+       * Convert data to screen reader friendly table
+       */
+      makeAriaTable: function(type,data,options) {
+        if(!data || !options || !this.tableMode || this.justHideMeInTableMode) return;
+
+        if(options && options.title && options.title.text) this.tableCaption = options.title.text;
+
+        /**
+         * Pie / Doughnut charts:
+         * Key    |   Dataset1    |   Dataset2
+         * 
+         * Bar charts:
+         * Group  |   Dataset1    |   Dataset2
+         * 
+         * Line charts:
+         * Line Key    |   Latest Value
+        */
+
+        /** item: {key: string, val0: any, val1: any ...} */
+        var items = [];
+        /** header: {name: string, bindTo: keyof item} */
+        var headers = [{
+          name: "Key",
+          bindTo: "key"
+        }];
+        // when using static headers, we want to prevent any more changes
+        var preventHeaderChanges = false;
+
+        /**
+        * set a header for the table mode display. These are converted to <th> elements in the <thead>
+        * @param name the label to display by
+        * @param bindTo the value to bind to in the items. duma-table takes objects as items, and columns bind to properties in those objects
+        * In this case, the props are generated as {key, val0, val1, val2...}
+        */
+        function setHeader(name, bindTo){
+          if(preventHeaderChanges) return;
+          for(var i = 0; i < headers.length; i++){
+            if(headers[i].bindTo === bindTo){
+              // only override name if it exists
+              if(name) headers[i].name = name;
+              return;
+            }
+          }
+          headers.push({
+            name: name,
+            bindTo: bindTo
+          });
+        }
+        /**
+         * add values, where key is the row name. these are converted to an object like so:
+         * {
+         *   key: "row label",
+         *   val0: 21901,
+         *   val1: 23981,
+         *   val2: 2091
+         * }
+         * This is done to be compatible for duma-table, as it takes in objects
+        */
+        function addValues(key, rawValue, value, clickDetail){
+          var item = items.find(v => v.key === key) || (_={
+            key: key,
+            rawValues: [],
+            values: [],
+            clickDetails: []
+          },items.push(_),_);
+          if(value) item.values.push(value);
+          if(clickDetail) item.clickDetails.push(clickDetail);
+
+          if(typeof rawValue === "object"){
+            // copy over any sort override values
+            // such as using the unix timestamp for sorting instead of datestring, you can set `sort_key` to the number, and then `label` can be anything
+            Object.keys(rawValue).filter(key => key.startsWith("sort_")).forEach(s => item[s] = rawValue[s]);
+            item.rawValues.push( typeof rawValue.y !== "undefined" ? rawValue.y : rawValue );
+          }else{
+            if(rawValue) item.rawValues.push(rawValue);
+          }
+        }
+        // add default headers to easily identify when one is missing
+        setHeader("MISSING GROUP LABEL","key");
+        setHeader("MISSING VALUE LABEL","val0");
+
+        var static_headers = data.ariaHeaders || options.ariaHeaders;
+        if(static_headers && static_headers.length){
+          for(var i = 0; i < static_headers.length; i++){
+            var header = static_headers[i];
+            setHeader(header, i === 0 ? "key" : ("val" + (i-1)));
+          }
+          preventHeaderChanges = true;
+        }
+
+
+        //Handle bar and line together, as they can appear on each chart type
+        var withBarOrLineData = function(data){
+          var datasets = data.datasets;
+          if(options && options.scales){
+            // use y axes for horizontal bar
+            var xAxes = options.scales.xAxes && options.scales.xAxes[0];
+            var yAxes = options.scales.yAxes && options.scales.yAxes[0];
+            var invert = type === "horizontalBar";
+            if(xAxes && xAxes.scaleLabel){
+              setHeader(xAxes.scaleLabel.labelString || xAxes.scaleLabel, invert ? "val0" : "key");
+            }
+            if(yAxes && yAxes.scaleLabel){
+              setHeader(yAxes.scaleLabel.labelString || yAxes.scaleLabel, invert ? "key" : "val0");
+            }
+          }
+          for(var i = 0; i < datasets.length; i ++){
+            var dataset = datasets[i];
+            if(dataset.ariaIgnoreDataset) continue;
+            if(dataset.type === "line" || (type === "line" && !dataset.type)){
+              //line dataset
+              
+              if(!dataset.ariaModeTableEveryLine){
+                // If only doing the last point in the line (default)
+                var label = dataset.label;
+                var d = dataset.data[dataset.data.length - 1]
+                var value = this.ariaValueFormatter(d, dataset);
+                
+                addValues(label, d, value, {
+                  data: d,
+                  label: label,
+                  datasetIndex: i,
+                  index: dataset.data.length - 1
+                });
+              }else{
+                // If doing every point in the line
+                for(var ii = 0; dataset && dataset.data && ii < dataset.data.length; ii++){
+                  var d = dataset.data[ii];
+                  var label = d.label || d.t;
+                  var value = this.ariaValueFormatter(d, dataset);
+
+                  addValues(label, d, value, {
+                    data: d,
+                    label: label,
+                    datasetIndex: i,
+                    index: ii
+                  });
+                }
+              }
+              
+            }else{
+              //for network monitor bar: dataset.label === Upload || Download
+              // when using both bars and lines on same chart, just treat bars the same was lines are (as rows, not columns)
+              if(type !== "line") setHeader(dataset.label,"val" + i);
+              
+              if(dataset && dataset.data && dataset.data.length === 0){
+                addValues(dataset.label);
+              }
+
+              for(var ii = 0; dataset && dataset.data && ii < dataset.data.length; ii++){
+                //match data index to device group index
+                var l = type === "line" ? dataset.label : data.labels[ii];
+                var d = dataset.data[ii];
+                addValues(l, d, this.ariaValueFormatter(d,dataset), {
+                  data: d,
+                  label: l,
+                  datasetIndex: i,
+                  index: ii
+                });
+              }
+            }
+          }
+        }.bind(this);
+
+        switch(type){
+          case "pie":
+          case "doughnut":
+            var datasets = data.datasets;
+            for(var i = 0; i < datasets.length; i ++){
+              var dataset = datasets[i];
+              for(var ii = 0; dataset && dataset.data && ii < dataset.data.length; ii++){
+                var l = data.labels[ii];
+                var d = dataset.data[ii];
+                addValues(l, d, this.ariaValueFormatter(d,dataset),{
+                  data: d,
+                  label: l,
+                  datasetIndex: i,
+                  index: ii
+                });
+              }
+            }
+            break;
+          case "bar":
+          case "horizontalBar":
+          case "line":
+            withBarOrLineData(data);
+            break;
+        }
+
+        
+        items.forEach((item, i) => {
+          var clickMapping = {};
+          item.values.forEach((v,i) => {
+            var key = "val" + i;
+            item[key] = v;
+            var sortKey = "sort_" + key;
+            if(!item[sortKey]) item[sortKey] = item.rawValues[i];
+            clickMapping[key] = item.clickDetails[i];
+            setHeader("", key)
+          });
+          item.clickDetails = clickMapping;
+          item._index = i;
+        });
+
+        this.ariaItems = items.map(v=>v);
+        this.ariaColumns = headers.map(v=>v);
+      },
+
+      attached: function () {
+        // many places reference the chart via $, so this is to be compatible when removing the id from it
+        this.$.chart = this.$$(".duma-chart-chart");
+
+        Chart.defaults.global.maintainAspectRatio = false;
+        Chart.defaults.global.responsive = true;
+        
+        Chart.defaults.global.defaultFontColor = "<%= theme.PRIMARY_TEXT_COLOR %>";
+        Chart.defaults.global.defaultFontFamily = "'Roboto', 'Noto', sans-serif";
+        Chart.defaults.global.defaultFontSize = 12;
+        Chart.defaults.global.defaultFontStyle = 400; 
+        
+        Chart.defaults.global.title.fontSize = 16;
+        Chart.defaults.global.title.fontStyle = 400;
+        Chart.defaults.global.title.padding = 8;
+        
+        Chart.defaults.global.tooltips.bodySpacing = 0;
+        Chart.defaults.global.tooltips.titleFontColor = "<%= theme.PRIMARY_TEXT_COLOR %>";
+        Chart.defaults.global.tooltips.bodyFontColor = "<%= theme.SECONDARY_TEXT_COLOR %>";
+        Chart.defaults.global.tooltips.caretSize = 6;
+        Chart.defaults.global.tooltips.cornerRadius = 2;
+        Chart.defaults.global.tooltips.titleSpacing = 0;
+        Chart.defaults.global.tooltips.titleMarginBottom = 10;
+        Chart.defaults.global.tooltips.yPadding = 12;
+        Chart.defaults.global.tooltips.xPadding = 8;
+        Chart.defaults.global.tooltips.footerSpacing = 0;
+        Chart.defaults.global.tooltips.footerMarginTop = 0;
+        Chart.defaults.global.tooltips.backgroundColor = "<%= theme.PRIMARY_BACKGROUND_COLOR %>";
+
+        Chart.defaults.pie.legend.position = "left";
+        Chart.defaults.doughnut.cutoutPercentage = "75";
+        Chart.defaults.global.legend.labels.fontSize = 12;
+        Chart.defaults.global.legend.labels.boxWidth = 16; 
+        //Chart.defaults.global.legend.display = false;
+        Chart.defaults.global.scaleLineColor = "#fff";
+        
+        Chart.defaults.scale.gridLines.display = true;
+        Chart.defaults.scale.gridLines.drawBorder = true;
+        Chart.defaults.scale.gridLines.color = "<%= theme.DIVIDER_COLOR %>";
+        Chart.defaults.scale.gridLines.zeroLineColor = "rgba(255, 255, 255, 0)";
+
+        Chart.defaults.bar.scales.xAxes[0].gridLines.display = false;
+        
+        Chart.defaults.horizontalBar.scales.yAxes[0].gridLines.display = false;
+        
+        Chart.defaults.global.elements.point.radius = 4;
+        Chart.defaults.global.elements.line.borderWidth = 2;
+        
+        Chart.defaults.line.fill = false;    
+        
+        this._createChart(this.type, this.data, this.options);
+
+        this.accessibilityMode = top.accessibility_mode;
+        this.tableMode = top.chartsAsTables;
+      },	        
+
+      observers: [
+        "_updateCaller(type, data.*)"
+      ],
+
+      _updateCaller: function (type, data) {
+        this._updateChart(type, data.base);
+      },
+
+      _resize: function () {
+        if (this.chart) {
+          this.chart.resize();
+        }
+      },
+
+      _getAxisPixelBounds: function(){
+        var ret = {
+        };
+        for(var k in this.chart.scales){
+          var s = this.chart.scales[k];
+          ret[k] = {
+            left: s.left,
+            right: s.right,
+            bottom: s.bottom,
+            top: s.top,
+          }
+        }
+        return ret;
+      },
+      _inBounds: function(x,y,axis){
+        var axis = this._getAxisPixelBounds()[axis];
+        return axis
+          && x >= axis.left 
+          && x <= axis.right
+          && y >= axis.top
+          && y <= axis.bottom;
+      },
+      _isMouseOverLabel: function(e){
+        var point_data = null;
+        var axis = this.type === "horizontalBar" ? "y-axis-0" : "x-axis-0";
+        if(this._inBounds(e.offsetX,e.offsetY,axis)){
+          //TODO - make sure to update this if chartjs ever changes, this is very very specific code for v2.9.3
+          switch(this.type) {
+            case "horizontalBar":
+              this.chart.getElementsAtEventForMode(e, "y", 1).forEach(function(item) { point_data = item });
+              if(!point_data){
+                var above;
+                var below;
+                var newE = {
+                  clientX: e.clientX,
+                  clientY: e.clientY - 5,
+                  target: e.target
+                }
+                this.chart.getElementsAtEventForMode(newE, "y", 1).forEach(function(item) { above = item });
+                if(above){
+                  newE.clientY += 10;
+                  this.chart.getElementsAtEventForMode(newE, "y", 1).forEach(function(item) { below = item });
+                  if(above && below && above._index === below._index){
+                    point_data = above;
+                  }
+                }
+              }
+              break;
+
+            case "bar":
+              this.chart.getElementsAtEventForMode(e, "x", 1).forEach(function(item) { point_data = item });
+              if(!point_data){
+                var left;
+                var right;
+                var newE = {
+                  clientX: e.clientX - 5,
+                  clientY: e.clientY,
+                  target: e.target
+                }
+                this.chart.getElementsAtEventForMode(newE, "x", 1).forEach(function(item) { above = item });
+                if(above){
+                  newE.clientX += 10;
+                  this.chart.getElementsAtEventForMode(newE, "x", 1).forEach(function(item) { below = item });
+                  if(above && below && above._index === below._index){
+                    point_data = above;
+                  }
+                }
+              }
+              break;
+          }
+          return point_data;
+        }
+        return null;
+      },
+
+      _onTableSelect: function(e) {
+        var item = e.detail && e.detail.item;
+        var key = e.detail && e.detail.key;
+        var clickDetail = item && item.clickDetails[key];
+        if(clickDetail){
+          this.fire("chartClick", clickDetail);
+        }else if(item){
+          this.fire("labelClick", {
+            label: item.key,
+            index: item._index
+          });
+        }
+      },
+
+      _click: function (e) {
+        var element;
+        try {
+          element = this.chart.getElementAtEvent(e);
+        } catch (e) {
+          return;
+        }
+
+        if (element.length > 0) {
+          element = element[0]
+          var label = this.chart.data.labels ? this.chart.data.labels[element._index] : null;
+          var value = this.chart.data.datasets[element._datasetIndex].data[element._index];
+          this.fire("chartClick", {
+            label: label,
+            value: value,
+            datasetIndex: element._datasetIndex,
+            index: element._index
+          });
+        }else{
+          var point_data = this._isMouseOverLabel(e);
+          if(point_data){
+            var label = this.chart.data.labels ? this.chart.data.labels[point_data._index] : null;
+            var value = this.chart.data.datasets[point_data._datasetIndex].data[point_data._index];
+            this.fire("labelClick", {
+              label: label,
+              value: value,
+              datasetIndex: point_data._datasetIndex,
+              index: point_data._index
+            });
+          }
+        } 
+      },
+
+      _createChart: function (type, data, options) {
+        if (this.chart) {
+          this.chart.destroy();
+        }
+        this.chart = new Chart(this.$.chart, {
+          type: type,
+          data: data,
+          options: options
+        });
+      },
+
+      _updateChart: function (type, data) {
+        var options = this.options;
+        if (this.chart) {
+          if (this.chart.config.type !== type) {
+            this._createChart(type, data, options);
+          } else {
+
+            if(this.accessibilityMode) this._accessibilityData(data);
+
+            var datasetsMetaData = [];
+            for (var i = 0; i <  this.chart.data.datasets.length; i++) {
+              datasetsMetaData.push(this.chart.data.datasets[i]._meta);
+            }
+
+            for (var i = 0; i < datasetsMetaData.length && i < data.datasets.length; i++) {
+              data.datasets[i]._meta = datasetsMetaData[i];
+            }
+          
+            for (var key in data) {
+              if (data.hasOwnProperty(key)) {
+                this.chart.data[key] = data[key];
+              }
+            }
+            
+            for (var key in this.chart.data) {
+              if (this.chart.data.hasOwnProperty(key)) {
+                if (!data.hasOwnProperty(key)) {
+                  delete this.chart.data[key];
+                }
+              }
+            }
+
+            this.chart.update();
+          }
+        }
+        this.makeAriaTable(this.type,this.data,this.options);
+      },
+
+      _mousemove: function(e){
+        var graph = $(e.target);
+        var overLabel = this.pointerOverLabels ? this._isMouseOverLabel(e) : false;
+        var overElement = this.pointerOverElements ? this.chart.getElementAtEvent(e)[0] : false;
+        var showCursor = overElement || overLabel;
+        var has = graph.hasClass("clickable");
+        if(showCursor){
+          if(!has) graph.addClass("clickable");
+        }else{
+          if(has) graph.removeClass("clickable");
+        }
+        if(overElement){
+          var label = this.chart.data.labels[overElement._index];
+          var value = this.chart.data.datasets[overElement._datasetIndex].data[overElement._index];
+          this.fire("chartHover", {
+            label: label,
+            value: value,
+            datasetIndex: overElement._datasetIndex,
+            index: overElement._index
+          });
+        }
+        if(overLabel){
+          var label = this.chart.data.labels[overLabel._index];
+          var value = this.chart.data.datasets[overLabel._datasetIndex].data[overLabel._index];
+          this.fire("labelHover", {
+            label: label,
+            value: value,
+            datasetIndex: overLabel._datasetIndex,
+            index: overLabel._index
+          });
+        }
+      },
+
+      //canvas patterns to use
+      _patternKeys: [ 'zigzag', 'disc', 'dash', 'dot', 'cross', 'ring', 'line', 'dot-dash', 'line-vertical', 'weave', 'plus', 'zigzag-vertical', 'diagonal', 'diagonal-right-left', 'square', 'box', 'triangle', 'triangle-inverted', 'diamond', 'diamond-box', 'cross-dash' ],
+      _patternIndex: 0,
+      _nextPattern: function(index){
+        return this._patternKeys[(index !== undefined ? index : this._patternIndex++) % this._patternKeys.length];
+      },
+
+      //line points to use
+      _pointStyles: [ 'circle', 'rect', 'crossRot', 'triangle', 'rectRot', 'cross', 'rectRounded', 'star'],
+      _pointIndex: 0,
+      _nextPointStyle: function(index){
+        return this._pointStyles[(index !== undefined ? index : this._pointIndex++) % this._pointStyles.length];
+      },
+
+      //Convert colors to patterns
+      _convertToPattern: function(obj,key,customIndex){
+        var def = obj[key];
+        
+        // If it's already a pattern, don't convert
+        var isPattern = function(thing){
+          return thing instanceof CanvasPattern;
+        }
+        if(isPattern(def) || (Array.isArray(def) && isPattern(def[0])) ) return;
+        else{
+          //create the pattern, as an array of patterns, or a single pattern
+          //generates patterns, not draws. Draw because that's the library function
+          if(Array.isArray(def)){
+            obj[key] = def.map(function(val,index){
+              return pattern.draw(this._nextPattern(index),val);
+            }.bind(this));
+          }else{
+            obj[key] = pattern.draw(this._nextPattern(customIndex),def);
+          }
+        }
+      },
+      //force a dataset to have points on the lines
+      _forceLinePoints: function(dataset,index){
+        dataset.pointRadius = 4;
+        dataset.pointStyle = this._nextPointStyle(index);
+      },
+      //Convert backgroundColor of each element to patterns instead
+      _patternConvertData: function(data){
+        var datasets = data && data.datasets;
+        if(!datasets || !Array.isArray(datasets)) return;
+        for(var i = 0; i < datasets.length; i++){
+          var dataset = datasets[i];
+          if(this.type === "line") this._forceLinePoints(dataset,i);
+          else if(dataset.backgroundColor) this._convertToPattern(dataset,"backgroundColor",i);
+
+        }
+      },
+      //Convert backgroundColor of each element to patterns instead
+      _patternConvertOptions: function(options){
+        if(options.elements){
+          var elems = Object.keys(options.elements);
+          for(var e = 0; e < elems.length; e++){
+            var elKey = elems[0];
+            if(options.elements[elKey] && options.elements[elKey].backgroundColor){
+              this._convertToPattern(options.elements[elKey],"backgroundColor");
+            }
+          }
+        }
+      },
+      _accessibilityOptions: function(options){
+        if(this.accessibilityMode && !this.tableMode){
+          this._patternConvertOptions(options);
+        }
+      },
+      _accessibilityData: function(data){
+        if(this.accessibilityMode && !this.tableMode){
+          this._patternConvertData(data);
+        }
+      },
+
+      _setInDialogOptions: function(options){
+        if(!options) return;
+        var fontColor = "<%= theme.CHART_DIALOG_TEXT_COLOR or theme.PRIMARY_TEXT_COLOR %>";
+
+        if(!options.legend || !options.legend.labels || !options.legend.labels.fontColor){
+          if(!options.legend) options.legend = {};
+          if(!options.legend.labels) options.legend.labels = {};
+          if(!options.legend.labels.fontColor) options.legend.labels.fontColor = fontColor;
+        }
+        if(!options.title || !options.title.fontColor){
+          if(!options.title) options.title = {};
+          if(!options.title.fontColor) options.title.fontColor = fontColor;
+        }
+
+        if(options.scales){
+          // gridlines
+          var gridLineColor = "<%= theme.CHART_DIALOG_GRIDLINES_COLOR or theme.DIVIDER_COLOR %>";
+
+          if(!options.scales.xAxes) options.scales.xAxes = [{type:"linear"}];
+          if(!options.scales.yAxes) options.scales.yAxes = [{}];
+          var _setAxesColors = function(axis){
+            for(var i = 0; i < axis.length; i++){
+              var scale = axis[i];
+              if(!scale.gridLines) scale.gridLines = {};
+              if(!scale.gridLines.color) scale.gridLines.color = gridLineColor;
+
+              if(!scale.scaleLabel) scale.scaleLabel = {};
+              if(!scale.scaleLabel.fontColor) scale.scaleLabel.fontColor = fontColor;
+
+              if(!scale.ticks) scale.ticks = {};
+              if(!scale.ticks.fontColor) scale.ticks.fontColor = fontColor;
+              if(!scale.ticks.minor) scale.ticks.minor = {};
+              if(!scale.ticks.major) scale.ticks.major = {};
+              if(!scale.ticks.minor.fontColor) scale.ticks.minor.fontColor = fontColor;
+              if(!scale.ticks.major.fontColor) scale.ticks.major.fontColor = fontColor;
+            }
+          }
+          _setAxesColors(options.scales.xAxes);
+          _setAxesColors(options.scales.yAxes);
+        }
+      },
+
+      _updateOptions: function () {
+        if( this.options){
+          this._accessibilityOptions(this.options);
+          // Has to go here to avoid setting color for ALL charts (with Chart.defaults), and just set for this color
+          if($(this).closest("paper-dialog")[0]){
+            this._setInDialogOptions(this.options);
+          }
+          if(this.options.events && !this.options.events.includes("click")) this.options.events.push("click");
+
+          var old_click = this.options.onClick;
+          this.options.onClick = function(e){
+            if(old_click) old_click.apply(this,arguments);
+            this._click(e);
+          }.bind(this);
+
+
+          if ((this.pointerOverElements || this.pointerOverLabels)){
+            if(this.options.events){
+              if(!this.options.events.includes("mousemove")) this.options.events.push("mousemove");
+              if(!this.options.events.includes("mouseout")) this.options.events.push("mouseout");
+            }
+            var old_hover = this.options.onHover;
+            this.options.onHover = function(e){
+              if(old_hover) old_hover.apply(this,arguments);
+              this._mousemove(e);
+            }.bind(this);
+          }
+
+          if (this.chart) {
+            this.redraw();
+          }
+        }
+      },
+
+      update: function () {
+        this._updateChart(this.type, this.data, this.options);
+      },
+
+      redraw: function () {
+        this._createChart(this.type, this.data, this.options);
+      }
+    }); </script> </dom-module> 

@@ -1,0 +1,73 @@
+-- luacheck: globals register mapper resolve tokey commitapply
+local duplicator = mapper("multiroot").duplicate
+local dm_roots = { "InternetGatewayDevice", "Device", "sys" }
+
+-- Automatically generated from Device:2.14
+-- using generator version 3.0
+local Multi_SoftwareModules_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- ExecEnvNumberOfEntries
+      -- automatically created when Device.SoftwareModules.ExecEnv.{i}. is loaded
+      -- DeploymentUnitNumberOfEntries
+      -- automatically created when Device.SoftwareModules.DeploymentUnit.{i}. is loaded
+      -- ExecutionUnitNumberOfEntries
+      -- automatically created when Device.SoftwareModules.ExecutionUnit.{i}. is loaded
+      X_000E50_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      },
+      X_BELGACOM_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      },
+    },
+  },
+}
+
+do
+  local uci_helper = mapper("ucihelper")
+  local default_ee_binding={config="lcmd", sectionname="daemon_config", option="default_execution_environment"}
+
+  Multi_SoftwareModules_.get = {
+    X_000E50_DefaultExecutionEnvironment = function (mapping)
+      local value = uci_helper.get_from_uci(default_ee_binding)
+      return resolve(mapping.root..".SoftwareModules.ExecEnv.{i}.", value) or ""
+    end,
+  }
+  Multi_SoftwareModules_.get["X_BELGACOM_DefaultExecutionEnvironment"] =
+    Multi_SoftwareModules_.get["X_000E50_DefaultExecutionEnvironment"]
+
+  Multi_SoftwareModules_.set = {
+    X_000E50_DefaultExecutionEnvironment = function (mapping, _, value)
+      local rc
+      rc, value = pcall(tokey, value, mapping.root..".SoftwareModules.ExecEnv.{i}.")
+      if not rc or not value then
+        return nil, "invalid value"
+      end
+      uci_helper.set_on_uci(default_ee_binding, value, commitapply)
+    end,
+  }
+  Multi_SoftwareModules_.set["X_BELGACOM_DefaultExecutionEnvironment"] =
+    Multi_SoftwareModules_.set["X_000E50_DefaultExecutionEnvironment"]
+
+  Multi_SoftwareModules_.commit = function()
+    uci_helper.commit(default_ee_binding)
+  end
+
+  Multi_SoftwareModules_.revert = function()
+    uci_helper.revert(default_ee_binding)
+  end
+end
+
+local duplicates = duplicator(Multi_SoftwareModules_, "#ROOT", dm_roots)
+for _, m in ipairs(duplicates) do
+  local root = m.objectType.name:match("([^%.]+)%.")
+  m.root = root
+  register(m)
+end
+

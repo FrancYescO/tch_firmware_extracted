@@ -1,0 +1,109 @@
+-- Manually generated
+
+local register, match, commitApply  = register, string.match, commitapply
+local cursor = require("uci").cursor("/etc/shp_app_config/", "/etc/shp_app_config_state/")
+local setCursor = require("uci").cursor("/etc/shp_app_config/", nil)
+local config = "shp"
+local configChanged
+local transactions = {}
+
+local Multi_SoftwareModules_ExecutionUnit_i_Extensions_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.ExecutionUnit.{i}.Extensions.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ProvisioningUUID = {
+        access = "readWrite",
+        type = "string",
+        min = "0",
+        max = "36",
+        description = "The UUID that uniquely identifies the Home Network Security customer at the account level"
+      },
+      ProvisioningStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Dormant",
+          "Activated",
+          "Error"
+        },
+        description = "The current provision state of the Security Software Module"
+      },
+      ConnectionToCloud = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Down",
+          "Up",
+          "Error"
+        },
+        description = "The current connectivity state of the Security Software Module to the cloud management platform"
+      },
+      InternalRestartCountPrevSevenDays = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "A rolling count of the number of internal module restart events over the previous seven days"
+      }
+    }
+  }
+}
+
+local paramName = {
+  ["ProvisioningUUID"] = "UUID"
+}
+
+local function get(mapping, param)
+  param = paramName[param] or param
+  local result
+  cursor:load(config)
+  result = cursor:get(config, "global", param)
+  cursor:unload(config)
+  return result or ""
+end
+
+Multi_SoftwareModules_ExecutionUnit_i_Extensions_.get = {
+  ProvisioningUUID = get,
+  ProvisioningStatus = get,
+  ConnectionToCloud = get,
+  InternalRestartCountPrevSevenDays = get
+}
+
+Multi_SoftwareModules_ExecutionUnit_i_Extensions_.set = {
+  ProvisioningUUID = function(mapping, param, value)
+    if setCursor:load(config) then
+      setCursor:set(config, "global", "UUID", value)
+      commitApply:newset("setUUID")
+      configChanged = true
+    else
+      return nil, "UUID cannot be set when shp is not present"
+    end
+  end
+}
+
+Multi_SoftwareModules_ExecutionUnit_i_Extensions_.commit = function()
+  if configChanged then
+    setCursor:commit(config)
+  end
+  configChanged = false
+  setCursor:unload(config)
+  cursor:unload(config)
+end
+
+Multi_SoftwareModules_ExecutionUnit_i_Extensions_.revert = function()
+  if configChanged then
+    setCursor:revert(config)
+  end
+  configChanged = false
+  setCursor:unload(config)
+  cursor:unload(config)
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_SoftwareModules_ExecutionUnit_i_Extensions_, "#ROOT", { "Device", "sys" })
+for _, dupli in ipairs(duplicates) do
+  register (dupli)
+end
+
+register(Multi_SoftwareModules_ExecutionUnit_i_Extensions_)

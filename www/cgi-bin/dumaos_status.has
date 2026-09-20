@@ -1,0 +1,22 @@
+#!/usr/bin/haserl --shell=/bin/sh
+<%# This should only ever be on Telstra units %>
+<%
+  status=`/dumaos/dumaos_status.sh`
+  status_text="disabled"
+  if [ "$status" = "1" ]; then
+    echo -en 'HTTP/1.0 200 Ok \r\n' # running
+    status_text="running"
+  elif [ "$status" = "2" ]; then
+    echo -en 'HTTP/1.0 204 No Content\r\n' # stopped
+    status_text="stopped"
+  elif [ "$status" = "3" ]; then
+    echo -en 'HTTP/1.0 206 Partial Content\r\n' #starting
+    status_text="starting"
+  elif [ "$status" = "4" ]; then
+    echo -en 'HTTP/1.0 503 Service Unavailable\r\n' #disabled
+  fi
+  echo -en 'Cache-Control: no-cache, no-store, must-revalidate\r\n'
+  echo -en 'Pragma: no-cache\r\n'
+  echo -en 'Expires: 0\r\n\r\n'
+  printf "%s" $status_text
+%>

@@ -1,0 +1,303 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/set-tracking.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/bulk-add-ip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="ping-custom-list"> <template> <style is="custom-style" include="duma-theme"> .inputs-wrapper h5 {
+        margin-bottom: 0;
+      }
+      .must-horizontal {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+      .center {
+        align-items: center;
+      }
+      .list-scrollable {
+        overflow-y: auto;
+        max-height: 11em;
+        padding-bottom: 1em;
+        margin-top: 1em;
+      }
+      .list-scrollable div:nth-child(2n) {
+        background-color: var(--transparent-background-color);
+      }
+      .ip-display {
+        overflow: hidden;
+      }
+      .track-and-edit {
+        margin-top: 1em;
+        margin-bottom: 1em;
+        justify-content: flex-end;
+      }
+      #addIpName{
+        margin-bottom: -1.5em;
+        margin-top: 1em;
+      } </style> <paper-dialog id="dialog" modal> <div class="inner layout vertical"> <div class="layout vertical inputs-wrapper"> <iron-pages selected="[[_page]]" attr-for-selected="name"> <iron-page name="main"> <h2 dialog-label><%= i18n.customList %></h2> <div class="must-horizontal"> <paper-input id="listName" value="{{name}}" label="<%= i18n.listName %>" required maxlength="32" minlength="0" allowed-pattern="[[_nameRegex]]" prevent-invalid-input pattern="[[_nameRegex]]" auto-validate></paper-input> <paper-icon-button id="set-tracking" icon="schedule" on-click="_track_open"></paper-icon-button> </div> </iron-page> <iron-page name="ip-add"> <paper-input id="addIpName" label="<%= i18n.ipName %>" maxlength="32" minlength="0" allowed-pattern="[[_nameRegex]]" prevent-invalid-input pattern="[[_nameRegex]]" auto-validate></paper-input> <div class="must-horizontal"> <duma-ip-input id="addIpInput" error-message="[[_invalidText(_ipTemp)]]"></duma-ip-input> <paper-icon-button id="addIpButton" icon="add" on-click="_add_ip_click"></paper-icon-button> <!-- <paper-icon-button id="bulk-edit" icon="image:edit" on-click="_bulk_edit_open"></paper-icon-button> --> </div> </iron-page> </iron-pages> <div class="list-scrollable"> <template id="ipListRepeat" is="dom-repeat" items="[[_ipList(ip_addresses)]]" as="ipData"> <div class="must-horizontal center"> <span class="ip-display">[[_createIpText(ipData)]]</span> <paper-icon-button icon="delete-forever" ip-data="[[ipData]]" on-click="_delete_ip_click"></paper-icon-button> </div> </template> </div> <div> <template is="dom-if" if="[[_pageEquals(_page,'main')]]"> <paper-button background on-click="_onAddIpClick"><%= i18n.addIP %></paper-button> </template> </div> </div> <div class="buttons"> <template is="dom-if" if="[[_showDelete(_edit,_page)]]"> <paper-button id="delete" on-click="delete_list"><%= i18n.deleteList %></paper-button> </template> <paper-button id="cancel" on-click="cancel_click">[[_cancelButtonText(_page)]]</paper-button> <template is="dom-if" if="[[_pageEquals(_page,'ip-add')]]"> <paper-button id="bulk-edit" on-click="_bulk_edit_open"><%= i18n.bulkEdit %></paper-button> </template> <paper-button id="saveButton" background disabled="[[_saveDisabled(name,ip_addresses)]]" on-click="save_and_close"><%= i18n.saveList %></paper-button> </div> </div> </paper-dialog> <set-tracking id="setTracking"></set-tracking> <bulk-add-ip id="bulkEdit"></bulk-add-ip> <duma-alert id="alert"></duma-alert> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-custom-list",
+
+      properties: {
+        name: {
+          type: String,
+          value: "DEBUG-PLACEHOLDER"
+        },
+        ip_addresses: {
+          type: Object,
+          value: {}
+        },
+        _nameRegex: {
+          type: String,
+          value: "^[\\w!?,\\.\\t ]*$"
+        },
+        _track: {
+          type: String,
+          value: null
+        },
+        _oldTrack: {
+          type: Object,
+          value: null
+        },
+        _ipTemp: String,
+        _id: {
+          type: Number,
+          value: null
+        },
+        _bulkMode: {
+          type: Boolean,
+          value: false
+        },
+        _page: {
+          type: String,
+          value: "main"
+        }
+      },
+
+      _ipInputInputs: null,
+      _edit: false,
+      attached: function () {
+        this._ipInputInputs = $(this.$.dialog).find("duma-ip-input-inputs");
+        var base_valid_function = this._ipInputInputs[0]._getValidity.bind(this._ipInputInputs[0]);
+        this._ipInputInputs[0]._getValidity = function(){
+          return base_valid_function.call() && !this._hasIp(this.$.addIpInput.value);
+        }.bind(this);
+        this._ipInputInputs.on("value-changed",function(e){
+          this._ipTemp = e.detail.value;
+        }.bind(this));
+      },
+
+      _pageEquals: function(current,testAgainst){
+        return current == testAgainst;
+      },
+      _setPage: function(newPage){
+        this._page = newPage || "main";
+      },
+      _onAddIpClick: function(){
+        this._setPage('ip-add')
+      },
+
+      _showDelete: function(edit,page){
+        return edit && page == "main";
+      },
+
+      open: function(){
+        this._reset();
+        this.$.dialog.open();
+      },
+
+      edit: function(category){
+        long_rpc_promise(packageId,"get_servers",[category.identifier]).done(function(result){
+          if(result.length && result[0] !== null){
+            this.open();
+            var data = result[0] ? JSON.parse(result[0]).servers : {};
+            this._load(category, data);
+            this._edit = true;
+          }else{
+            var del_call = function(){
+              this._id = category.identifier;
+              this.delete_list();
+            }.bind(this)
+            this.$.alert.open("<%= i18n.errorOpen %>", [{ text: "<%= i18n.deleteList %>", action: "dismiss", callback: del_call },{ text: "<%= i18n.ok %>", default: true, action: "confirm" }])
+          }
+        }.bind(this));
+      },
+
+      _ipList: function(ip_addresses){
+        var ret = [];
+        forObject(ip_addresses, function(key,value){
+          ret.push(value);
+        });
+        return ret;
+      },
+
+      _load: function(category, servers){
+        this.name = category.display;
+        this._id = category.identifier;
+        this.ip_addresses = servers;
+        this._track = category.track;
+      },
+
+      _saveDisabled: function(){
+        return !this.$.listName.validate();
+      },
+
+      _reset: function(){
+        this.name = "";
+        this.$.listName.value = "";
+        this.$.addIpName.value = "";
+        this.$.addIpName.invalid = true;
+        this.ip_addresses = {};
+        this._edit = false;
+        this._track = null;
+        this._oldTrack = null;
+        this._page = "main";
+      },
+
+      _ipChanged: function(newValue){
+        this._ipTemp = newValue;
+      },
+      _invalidText: function(ip_address){
+        return !this.$.addIpInput.validate() ? (
+          this._hasIp(ip_address) ? "<%= i18n.errorExists %>" : "<%= i18n.errorInvalid %>"
+          ) : "<%= i18n.invalid %>";
+      },
+
+      _refresh: function(){
+        this.ip_addresses = Object.assign({},this.ip_addresses);
+        this.$.ipListRepeat.render();
+        this.$.dialog.center();
+      },
+
+      _createIpText: function(ip_data){
+        return ip_data.ip + (ip_data.display ? " - " + ip_data.display : "");
+      },
+      
+      _addFromProperties: function(){
+        if(this._ipValid()){
+          this.ip_addresses[this.$.addIpInput.value] = {
+            display: this.$.addIpName.value,
+            ip: this.$.addIpInput.value
+          };
+          this.$.addIpName.value = "";
+          this.$.addIpInput.value = "";
+          this._refresh();
+        }
+      },
+      _hasIp: function(ip){
+        return !!this.ip_addresses[ip];
+      },
+      _ipValid: function(){
+        return this.$.addIpInput.validate() && this.$.addIpName.validate();
+      },
+      _deleteIp: function(ip_address){
+        var i;
+        if(this._hasIp(ip_address)){
+          delete this.ip_addresses[ip_address];
+        }
+        this._refresh();
+        return;
+      },
+      _add_ip_click: function(event){
+        this._addFromProperties()
+      },
+      _delete_ip_click: function(event){
+        var paper_button = $(event.target).closest("paper-icon-button");
+        this._deleteIp(paper_button[0].ipData.ip);
+      },
+
+      save_and_close: function(){
+        var after = function(new_id){
+          var fireObject = {
+            name: this.name,
+            track: this._track,
+            servers: this.ip_addresses,
+            edit: this._edit
+          };
+          if(this._id !== null){
+            fireObject.id = this._id;
+          }
+          this.fire("list-updated",fireObject);
+
+          if (this._track !== null && (this._oldTrack === null || this._track !== this._oldTrack.schedule)) {
+            if(this._track !== true){
+              var after = function () {
+                if (this._track !== false) {
+                  var addPromise = long_rpc_promise(packageId, "add_scheduling_rule", [this._track, new_id[0]]);
+                }
+              }.bind(this);
+              if (this._oldTrack !== null) {
+                long_rpc_promise(packageId, "delete_scheduling_rule", [this._oldTrack.id]).done(function () {
+                  after();
+                });
+              } else {
+                after();
+              }
+            }
+          }
+
+          this.$.dialog.close();
+        }.bind(this);
+        if(this._edit){
+          long_rpc_promise(packageId,"update_category",[this._id,this.name,!!this._track,this.ip_addresses]).done(after);
+        }else{
+          long_rpc_promise(packageId,"add_category",[this.name,!!this._track,this.ip_addresses]).done(after);
+        }
+        
+      },
+
+      delete_list: function(){
+        if(this._id){
+          long_rpc_promise(packageId,"remove_category",[this._id]).done(function(success){
+            if(success[0]){
+              this.$.dialog.close();
+              this.fire("list-updated",{
+                delete: true,
+                id: this._id
+              });
+            }
+          }.bind(this));
+        }else{
+          this.$.alert("<%= i18n.errorNotFound %>");
+        }
+      },
+
+      _bulk_edit_open: function(){
+        var ip_valid = function(ip){
+          this.$.addIpInput.value = ip;
+          var ret = this.$.addIpInput.validate();
+          this.$.addIpInput.value = "";
+          return ret;
+        }.bind(this);
+        this.$.bulkEdit.open(this.ip_addresses,this._bulk_edit_close.bind(this),ip_valid,this._nameRegex);
+        this.$.dialog.close();
+      },
+      _bulk_edit_close: function(new_values){
+        this.$.dialog.open();
+        this.ip_addresses = new_values;
+        this._refresh();
+      },
+
+      _track_open: function(){
+        this.$.setTracking.open(this._id, this._track_close.bind(this), this._edit);
+        this.$.dialog.close();
+      },
+      _track_close: function(category, cronString, oldRule){
+        this.$.dialog.open();
+        this._track = cronString;
+        this._oldTrack = oldRule;
+      },
+
+      cancel_click: function(){
+        if(this._page !== "main"){
+          this._page = "main"
+        }else{
+          this.$.dialog.close();
+        }
+      },
+      _cancelButtonText: function(page){
+        return page == "main" ? "<%= i18n.cancel %>" : "<%= i18n.back %>";
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

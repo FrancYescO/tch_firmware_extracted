@@ -1,0 +1,80 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toast/paper-toast.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module is="duma-clipboard-button"> <template> <style is="custom-style" include="duma-theme"> </style> <paper-icon-button id="copySystem" icon$="[[_getIcon(downloadAs)]]" on-click="copy" aria-label="[[tooltip]]"></paper-icon-button> <paper-tooltip for="copySystem">[[tooltip]]</paper-tooltip> <paper-toast id="copyToast"></paper-toast> </template> <script> Polymer({
+      is: "duma-clipboard-button",
+
+      properties: {
+        getText: {
+          type: Function,
+          value: null
+        },
+        tooltip: {
+          type: String,
+          value: "<%= i18n.copyContent %>"
+        },
+        downloadAs: {
+          type: String,
+          value: ""
+        }
+      },
+
+      _getIcon: function(download){
+        return download ? "get-app" : "content-copy";
+      },
+
+      copy: function(){
+        if(this.getText){
+          var result = this.getText();
+          if(result){
+            if(this.downloadAs){
+              this._download(this.downloadAs,result);
+            }else{
+              this._copyStringToClipboard(result);
+            }
+          }
+        }
+      },
+
+      _copyStringToClipboard: function(str){
+        var success = false;
+        if(!navigator.clipboard){
+          var elem = document.createElement('textarea');
+          elem.textContent = str;
+          elem.style.position = "fixed";
+          document.body.appendChild(elem);
+
+          var selection = document.getSelection();
+          var range = document.createRange();
+          range.selectNode(elem);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          try {
+            var successful = document.execCommand('copy');
+            if(!successful) console.log('Copying text command was unsuccessful');
+            else success = true;
+          } catch (err) {
+            console.error('Oops, unable to copy', err);
+          }
+          selection.removeAllRanges();
+          document.body.removeChild(elem);
+        }else{
+          navigator.clipboard.writeText(str);
+          success = true;
+        }
+        this.$.copyToast.show({text: success ? "<%= i18n.copySuccess %>" : "<%= i18n.copyFailed %>", duration: 3000});
+      },
+
+      _download: function(filename, text) {
+        var element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+        element.setAttribute('download', filename);
+
+        element.style.display = 'none';
+        document.body.appendChild(element);
+
+        element.click();
+
+        document.body.removeChild(element);
+      }
+    }); </script> ​ </dom-module> 

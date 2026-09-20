@@ -1,0 +1,67 @@
+local Device_LEDs_ = {
+  objectType = {
+    name = "Device.LEDs.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+    --LEDNumberOfEntries
+    --automatically created when Device.LEDs.LED.{i}. is loaded
+  }
+}
+
+register(Device_LEDs_)
+
+local Device_LEDs_LED_i_ = {
+  objectType = {
+    name = "Device.LEDs.LED.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "LEDNumberOfEntries",
+    minEntries = 1,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+      },
+    }
+    --CycleElementNumberOfEntries
+    --automatically created when Device.LEDs.LED.{i}.CycleElement.{i}. is loaded
+  },
+  aliasDefault = "Name"
+}
+
+local leds = require("transformer.shared.leds")
+
+local ledNameMap = {
+  ["power"] = "Front",
+  ["wireless"] = "WiFi",
+  ["dect"] = "Pair",
+  ["internet"] = "Online",
+  ["ethernet"] = "Link",
+  ["mobile"] = "MobileMode",
+  ["lte"] = "MobileSignal",
+  ["voip"] = "Voice",
+}
+
+Device_LEDs_LED_i_.entries = function()
+  local entries = {}
+  local ledsInfo = leds.getLedsInfo()
+  for ledName in pairs(ledsInfo) do
+    entries[#entries+1] = ledName
+  end
+  return entries
+end
+
+Device_LEDs_LED_i_.get = function(mapping, param, key)
+  return ledNameMap[key] or ""
+end
+
+register(Device_LEDs_LED_i_)
