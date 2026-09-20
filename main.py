@@ -214,5 +214,7 @@ for file in glob.glob("*.rbi"):
 		print("Cleaning...")
 		if os.path.isdir(dec_filename+".extracted"):
 			shutil.rmtree(dec_filename+".extracted")
+		if sqsh and os.path.exists(sqsh):
+			os.remove(sqsh)
 		os.remove(file)
 		os.remove(dec_filename)
