@@ -1,0 +1,22 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+
+# if config file does not exist, create it
+[ -f /etc/config/ucidefaults ] || touch /etc/config/ucidefaults
+
+store_defaults() {
+  local ap="$1"
+  local section=$ap"_defaults"
+  uci set ucidefaults.$section=ap
+  uci set ucidefaults.$section.wpa_psk_key=$(uci -q get wireless.$ap.wpa_psk_key)
+  uci set ucidefaults.$section.wep_key=$(uci -q get wireless.$ap.wep_key)
+  uci set ucidefaults.$section.wps_ap_pin=$(uci -q get wireless.$ap.wps_ap_pin)
+  uci set ucidefaults.$section.security_mode=$(uci -q get wireless.$ap.security_mode)
+}
+
+config_load wireless
+
+config_foreach store_defaults wifi-ap
+
+uci commit ucidefaults

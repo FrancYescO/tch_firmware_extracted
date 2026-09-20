@@ -1,0 +1,66 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_Stats_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_MultiAP.Agent.{i}.STA.{i}.Stats.",
+    access = "readOnly",
+    description = "This object represents the stats of Associated Device of the Multi-AP Agent",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+        description = "The total number of bytes transmitted to the Associated Device, including framing characters",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+        description = "The total number of bytes received from the Associated Device, including framing characters",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+        description = "The total number of packets transmitted to the Associated Device",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+        description = "The total number of packets received from the Associated Device",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The total number of outbound packets that could not be transmitted because of errors",
+      },
+      RetransCount = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The total number of transmitted packets which were retransmissions",
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_Stats_.get = function(mapping, param, parentKey)
+  local agent, station = string.match(parentKey, "^([^|]*)|(.*)|.*")
+  local stationInfo = conn:call("mapVendorExtensions.agent.station", "get", { macaddr = station, device = agent }) or {}
+  return stationInfo and stationInfo[param] and tostring(stationInfo[param]) or "0"
+end
+
+Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_Stats_.getall = function(mapping, parentKey)
+  local agent, station = string.match(parentKey, "^([^|]*)|(.*)|.*")
+  local stationInfo = conn:call("mapVendorExtensions.agent.station", "get", { macaddr = station, device = agent }) or {}
+  return {
+    BytesSent = stationInfo and stationInfo.BytesSent and tostring(stationInfo.BytesSent) or "0",
+    BytesReceived = stationInfo and stationInfo.BytesReceived and tostring(stationInfo.BytesReceived) or "0",
+    PacketsSent = stationInfo and stationInfo.PacketsSent and tostring(stationInfo.PacketsSent) or "0",
+    PacketsReceived = stationInfo and stationInfo.PacketsReceived and tostring(stationInfo.PacketsReceived) or "0",
+    ErrorsSent = stationInfo and stationInfo.ErrorsSent and tostring(stationInfo.ErrorsSent) or "0",
+    RetransCount = stationInfo and stationInfo.RetransCount and tostring(stationInfo.RetransCount) or "0"
+  }
+end
+
+register(Device_Services_X_TELSTRA_MultiAP_Agent_i_STA_i_Stats_)

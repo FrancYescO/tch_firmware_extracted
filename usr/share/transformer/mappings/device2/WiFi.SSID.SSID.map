@@ -1,0 +1,62 @@
+-- Manually generated
+
+local Device_WiFi_SSID_i_SSID_ = {
+  objectType = {
+    name = "Device.WiFi.SSID.{i}.SSID.",
+    access = "readOnly",
+    description = "This object is an Associated Device of the Gateways WiFi Interface",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      X_TELSTRA_Backhaul = {
+        access = "readWrite",
+        type = "boolean",
+        description = "This enables or disables a particular BSS on a Gateway to allow it to be configured and identified as a Backhaul AP",
+      },
+      X_TELSTRA_Fronthaul = {
+        access = "readWrite",
+        type = "boolean",
+        description = "This enables or disables a particular BSS on a Gateway to allow it to be configured and identified as a Fronthaul AP",
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local wirelessBinding = { config = "wireless" }
+local configChanged = false
+
+local paramToOption = {
+  X_TELSTRA_Backhaul = "backhaul",
+  X_TELSTRA_Fronthaul = "fronthaul"
+}
+
+Device_WiFi_SSID_i_SSID_.get = function(mapping, param, key)
+  wirelessBinding.sectionname = key
+  wirelessBinding.option = paramToOption[param]
+  wirelessBinding.default = "0"
+  return uciHelper.get_from_uci(wirelessBinding)
+end
+
+Device_WiFi_SSID_i_SSID_.set = function(mapping, param, value, key)
+  wirelessBinding.sectionname = key
+  wirelessBinding.option = paramToOption[param]
+  uciHelper.set_on_uci(wirelessBinding, value, commitapply)
+  configChanged = true
+end
+
+Device_WiFi_SSID_i_SSID_.commit = function()
+  if configChanged then
+    uciHelper.commit(wirelessBinding)
+    configChanged = false
+  end
+end
+
+Device_WiFi_SSID_i_SSID_.revert = function()
+  if configChanged then
+    uciHelper.revert(wirelessBinding)
+    configChanged = false
+  end
+end
+
+register(Device_WiFi_SSID_i_SSID_)

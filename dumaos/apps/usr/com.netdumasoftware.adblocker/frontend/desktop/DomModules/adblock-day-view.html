@@ -1,0 +1,197 @@
+<!--
+  (C) 2019 NETDUMA Software
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script src="/apps/com.netdumasoftware.adblocker/desktop/Scripts/utillity.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <dom-module id="adblock-day-view"> <template> <style include="duma-theme"></style> <div class="chart-wrapper" vertical> <duma-legend id="legend" hide-stats legend-stats="[[legendStats]]"></duma-legend> <duma-chart id="adblockStatusChart" class="full-height" type="line" data="[[dataOptions]]" options="[[chartOptions]]"> </duma-chart> </div> </template> <script> Polymer(
+    {
+      is: 'adblock-day-view',
+      properties:
+      {
+        chartOptions:
+        {
+          type: Object,
+          value:
+          {
+            ariaHeaders: ["<%= i18n.queriesType %>", "<%= i18n.amount %>"],
+            tooltips:
+            {
+              callbacks:
+              {
+                //shorten the date format
+                title: (tooltipItem, data) => (new Date(tooltipItem[0].xLabel)).toLocaleString([], { dateStyle: "short", timeStyle: "short" }),
+                label: (data) => AddThousandsSeparators(data.yLabel),
+              }
+            },
+            scales:
+            {
+              yAxes:
+              [
+                {
+                  scaleLabel:
+                  {
+                    display: true,
+                    labelString: '<%= i18n.queriesYAxisLabel %>'
+                  },
+                  ticks:
+                  {
+                    callback: (val) => FormatUnits(val),
+                    beginAtZero: true,
+                    min: 0,
+                    maxTicksLimit: 5
+                  }
+                }
+              ],
+              xAxes:
+              [
+                {
+                  type: 'time',
+                  display: true,
+                  distribution: 'linear',
+                  ticks: {
+                    stepSize: 1,
+                  },
+                  bounds: "ticks",
+                  time: {
+                    unit: 'hour',
+                    displayFormats: {
+                      hour: 'HH:mm'
+                    }
+                  },
+                  gridLines:
+                  {
+                    display: false
+                  }
+                }
+              ]
+            },
+            legend:
+            {
+              display: false,
+            },
+            elements:
+            {
+              line:
+              {
+                tension: 0.1,
+                fill: false,
+                borderWidth: 2
+              },
+            },
+          }
+        },
+        legendStats: {
+          type: Array,
+          value: function(){
+            return [];
+          }
+        }
+      },
+      /**
+       * Create a dataset object which will be plugged into the chart
+       * @param {array} dataset - a dataset of time-value objects, e.g. {t:{number}, y:{number}}
+       * @param {string} colour - a colour to use in the chart for the dataset
+       * @param {string} label - a label to put on the tooltip
+       **/
+      createDatasetObject(dataset, colour, label)
+      {
+        this.push('legendStats',{
+          label: label,
+          colour: colour,
+          bgColour: colour,
+          visible: true
+        })
+        return {
+          borderColor: colour,
+          pointBackgroundColor: colour,
+          pointRadius: 0,
+          pointHitRadius: 10,
+          label: label,
+          data: dataset
+        };
+      },
+      /**
+       * This function takes a adblock status object and converts it into an object with 3 arrays, for the chart.
+       * The most recent time is the last item on the arrays.
+       * @param datasetObject {object} - object identifying options and adblock query values, received from rpc calls
+      **/
+      formatOriginalDatasets: function(originalDatasetObject)
+      {
+        var newDataObject =
+        {
+          totalQueryDataset: [],
+          blockedQueryDataset: [],
+          allowedQueryDataset: []
+        };
+
+        var time = Math.floor(Date.now());
+        time = time - (time % (60 *1000* 60)); //calculate current time to the latest hour
+        for (var i = 0; i < 24; i++)
+        {
+          var oldIndex = (originalDatasetObject.hour + i + 1) % 24; //find out which index to pull values with from the original arrays
+          var timeValue = time - (23 - i) * 60 * 60 * 1000; //calculate the right time and date to be displayed on the chart
+
+          newDataObject.totalQueryDataset.push(
+            {
+              t: timeValue,
+              y: originalDatasetObject.queries[oldIndex]
+            }
+          );
+
+          newDataObject.blockedQueryDataset.push(
+            {
+              t: timeValue,
+              y: originalDatasetObject.blocked_queries[oldIndex]
+            }
+          );
+
+          newDataObject.allowedQueryDataset.push(
+            {
+              t: timeValue,
+              y: (originalDatasetObject.queries[oldIndex] - originalDatasetObject.blocked_queries[oldIndex])
+            }
+          );
+        }
+        return newDataObject;
+
+      },
+      UpdateStaticHistory: function()
+      {
+        long_rpc_promise("com.netdumasoftware.burstwatch", "static_history", []).done(function(data)
+        {
+          var parsedData = data[0];
+          var formattedDatasets = this.formatOriginalDatasets(parsedData);
+
+          this.splice('legendStats',0,this.legendStats.length);
+
+          //set the datasets of the chart
+          this.$.adblockStatusChart.data =
+          {
+            labels: [],
+            datasets:
+            [
+              this.createDatasetObject(formattedDatasets.totalQueryDataset, this.colours[2], "<%= i18n.totalQueries %>"),
+              this.createDatasetObject(formattedDatasets.allowedQueryDataset, this.colours[1], "<%= i18n.queriesAllowed %>"),
+              this.createDatasetObject(formattedDatasets.blockedQueryDataset, this.colours[0], "<%= i18n.queriesBlocked %>"),
+            ],
+          };
+
+          this.$.adblockStatusChart.chart.update();
+
+          if (this.loaded == false)
+          {
+            $(this).closest("duma-panel").prop("loaded", true);
+            this.loaded = true;
+          }
+          this.$.legend.bindToChart(this.$.adblockStatusChart);
+        }.bind(this));
+      },
+      ready: function ()
+      {
+        // Colour selection
+        var cgen = getColourGenerator();
+        this.colours = [cgen(), cgen(), cgen()];
+
+        this.loaded = false;
+
+        this.UpdateStaticHistory();
+        setInterval(() => this.UpdateStaticHistory(), 10000);
+      },
+    }); </script> </dom-module> 

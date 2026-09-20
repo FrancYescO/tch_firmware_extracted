@@ -1,0 +1,104 @@
+local validPrimaryWanModes = {
+	"FIXED",
+	"MOBILE",
+}
+
+local defaultPrimaryWanMode = validPrimaryWanModes[1]
+
+local primaryWanModeBinding = {
+	config = "wansensing",
+	sectionname = "global",
+	option = "primarywanmode"
+}
+
+local Device_IP_XTELSTRAIP_ = {
+  objectType = {
+    name = "Device.IP.X_TELSTRA_IP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ActiveWANInterface = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "ADSL IPoE",
+          "ADSL PPPoE",
+          "None",
+          "VDSL",
+          "Ethernet",
+          "LTE",
+        },
+        default = "Unknown",
+      },
+      PrimaryWANMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = validPrimaryWanModes,
+        default = defaultPrimaryWanMode,
+      },
+    },
+  },
+}
+
+local ubusConnection = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+
+local function getActiveWANInterface()
+  local ubusStatus = ubusConnection:call("network.interface.wwan", "status", {})
+  if ubusStatus and ubusStatus["up"] then
+    return "LTE"
+  end
+  ubusStatus = ubusConnection:call("network.interface.wan", "status", {})
+  if ubusStatus and ubusStatus["up"] then
+    if ubusStatus["device"]:match("^eth") then
+	  return "Ethernet"
+	elseif ubusStatus["device"]:match("^ptm") then
+	  return "VDSL"
+	elseif ubusStatus["device"]:match("^atm") then
+	  if ubusStatus["proto"]:match("^ppp") then
+	    return "ADSL PPPoE"
+	  else
+	    return "ADSL IPoE"
+	  end
+	end
+  else
+    return "None"
+  end
+end
+
+local function validatePrimaryWanMode(primaryWanMode)
+	for _, validPrimaryWanMode in pairs(validPrimaryWanModes) do
+		if primaryWanMode == validPrimaryWanMode then
+			return primaryWanMode
+		end
+	end
+	return defaultPrimaryWanMode
+end
+
+local function getPrimaryWANMode()
+	return validatePrimaryWanMode(uciHelper.get_from_uci(primaryWanModeBinding))
+end
+
+local function setPrimaryWANMode(mapping, param, primaryWanMode)
+	uciHelper.set_on_uci(primaryWanModeBinding, validatePrimaryWanMode(primaryWanMode), commitapply)
+	uciHelper.commit(primaryWanModeBinding)
+end
+
+Device_IP_XTELSTRAIP_.get = {
+  ActiveWANInterface = getActiveWANInterface,
+  PrimaryWANMode = getPrimaryWANMode
+}
+
+Device_IP_XTELSTRAIP_.getall = function(mapping)
+  return {
+    ActiveWANInterface = getActiveWANInterface(),
+    PrimaryWANMode = getPrimaryWANMode()
+  }
+end
+
+Device_IP_XTELSTRAIP_.set = {
+  PrimaryWANMode = setPrimaryWANMode
+}
+
+register(Device_IP_XTELSTRAIP_)

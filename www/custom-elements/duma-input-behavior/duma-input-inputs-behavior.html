@@ -1,0 +1,228 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross
+--> <script> var Duma = Duma || {};
+  Duma.InputInputsBehavior = {
+    properties: {
+      value: {
+        type: String,
+        notify: true,
+        observer: "_setValue"
+      },
+
+      parts: {
+        type: Array,
+        value: []
+      },
+
+      disabled: Array
+    },
+
+    listeners: {
+      "keydown": "_onKeyPress",
+      "paste": "_onPaste"
+    },
+
+    observers: [
+      "_computeValue(parts.*)",
+      "_onDisableChange(disabled, disabled.*)"
+    ],
+
+    ready: function () {
+      var inputs = this.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) {
+        this.listen(inputs[i], "input", "_onInputChange");
+      }
+    },
+
+    _onDisableChange: function () {
+      var inputs = this.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) {
+        if (typeof(this.disabled) === "boolean") {
+          inputs[i].disabled = this.disabled;
+        } else {
+          inputs[i].disabled = this.disabled[i] ? this.disabled[i] : false;
+        }
+      }
+    },
+
+    _onInputChange: function (e) {
+      var inputs = this.querySelectorAll("input");
+
+      for (var i = 0; i < inputs.length; i++) {
+        if (inputs[i] === e.target && inputs[i] != e.target.value) {
+          this.set(["parts", i], e.target.value);
+          this._computeValue();
+        }
+      }
+    },
+    
+    _getFocusedSiblings: function (focused) {
+      var inputs = this.querySelectorAll("input");
+
+      for (var i = 0; i < inputs.length; i++) {
+        if (inputs[i] == focused) {
+          var output = {
+            previous: null,
+            next: null,
+            focused: focused
+          };
+          
+          for (var j = i - 1; j >= 0; j--) {
+            if (!inputs[j].disabled) {
+              output.previous = inputs[j];
+              break;
+            }
+          }
+          
+          for (var j = i + 1; j < inputs.length; j++) {
+            if (!inputs[j].disabled) {
+              output.next = inputs[j];
+              break;
+            }
+          }
+
+          return output;
+        }
+      }
+
+      return {};
+    },
+
+    _formatPaste: function(text){
+      var digitsRegex = /[\d]+/g;
+      var split = text.split(this._delimiter).filter((x) => !!x).map((x) => x.match(digitsRegex));
+      var len = this.querySelectorAll("input").length;
+
+      for(var i = 0; i < len; i ++){
+        if(!this.parts[i] && split[i]) split.push("");
+      }
+      
+      while(split.length < len) split.unshift("");
+      if(split.length > len) split.length = len;
+
+      for(var i = split.length - 1; i >= 0; i--){
+        if(!split[i]) split[i] = this.parts[i];
+      }
+
+      return split.join(this._delimiter);
+    },
+
+    _onPaste: function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      var siblings = this._getFocusedSiblings(document.activeElement);
+
+      if (siblings.focused) {
+        //Paste pastes from the end, going backwards. But fill with blank if there are currently blanks at the front
+        this._setValueCheckDisabled( this._formatPaste( e.clipboardData.getData("Text") ) );
+      }
+
+      while (siblings.next) {
+        siblings = this._getFocusedSiblings(siblings.next);
+      }
+
+      siblings.focused.focus();
+    },
+
+    _onKeyPress: function (e) {
+      var siblings = this._getFocusedSiblings(document.activeElement);
+
+      if (
+        e.keyCode === 9 || // 9 is tab key.
+        (
+          typeof(window.getSelection) != "undefined" &&
+          window.getSelection().toString()
+        ) ||
+        (
+          typeof(document.selection) != "undefined" &&
+          document.selection.type == "Text" &&
+          document.selection.createRange().text
+        )
+      ) { 
+        return;
+      }
+
+      if(e.keyCode == 8) { // 8 is backspace key.
+        if (
+          siblings.focused &&
+          siblings.focused.value.length === 0 &&
+          siblings.previous
+        ) {
+          siblings.previous.focus();
+        }
+
+      } else if (e.key === this._delimiter && siblings.next) {
+        siblings.next.focus();
+      } else if (
+        siblings.focused &&
+        (
+          siblings.focused.value.length ===
+          parseInt(siblings.focused.getAttribute("maxlength"))
+        ) &&
+        siblings.next
+      ) {
+        siblings.next.focus();
+        siblings.next.select();
+      }
+    },
+    
+    _computeValue: function() {
+      if (!this._delimiter) {
+        return false;
+      }
+
+      var value = this.parts.join(this._delimiter);
+      if (this.value != value) {
+        this.value = value;
+      }
+    },
+
+    setParts: function(newParts){
+      //If newParts is not there, then assume inputs being cleared, so set all to ""
+      var toReplace = newParts ? this.parts.slice() : ["","","",""];
+      for(var i = 0; newParts && i < newParts.length; i++){
+        if(this._checkDisabledOnSet && this.disabled && (this.disabled === true || this.disabled[i] === true)) continue;
+        toReplace[i] = newParts[i];
+      }
+      this.parts = toReplace;
+      //update the actual input elements
+      var inputs = this.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) {
+        if (this.parts[i] || this.parts[i] === 0) {
+          inputs[i].value = this.parts[i];
+        } else {
+          inputs[i].value = "";
+        }
+      }
+    },
+
+    _setValueCheckDisabled: function(value){
+      this._checkDisabledOnSet = true;
+      this.value = value;
+      this._checkDisabledOnSet = false;
+    },
+    
+    _setValue: function (value) {
+      if (!this._delimiter) {
+        return false;
+      }
+
+      //If value is "", we need to clear all inputs
+      if(value === "") {
+        this.setParts(null);
+        return true;
+      }
+      var inputs = this.querySelectorAll("input");
+      
+      value = value.replace(/ /g, "");
+      value = value.split(this._delimiter);
+
+      this.setParts(value);
+
+      this.validate();
+
+      return true;
+    }
+  }; </script> 

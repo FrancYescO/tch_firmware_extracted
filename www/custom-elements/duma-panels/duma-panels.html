@@ -1,0 +1,649 @@
+<!-- 
+  (C) NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../duma-alert/duma-alert.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../../libs/gridstack.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../../libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../../libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-toast/paper-toast.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-panels"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        padding: 0;
+        height: 100%;
+        color: var(--primary-text-color);
+        @apply(--paper-font-body1);      
+        @apply(--duma-panels);
+      }
+
+      /* Gridstack */
+      ::content .grid-stack {
+        padding-bottom: 16px;
+      }
+      
+      ::content .grid-stack .grid-stack-placeholder > .placeholder-content {
+        border: 1px dashed var(--disabled-text-color);
+        border-radius: 2px;
+        left: 0;
+        right: 16px;
+        transition: all 0.15s ease;
+      }      
+      ::content .grid-stack .grid-stack-placeholder > .placeholder-content:after {
+        content: "";
+        background-image: src(/www/desktop/grid-resize.svg);
+      }
+      ::content .grid-stack > .grid-stack-item > .grid-stack-item-content {
+        overflow: unset;
+        z-index: auto;
+        right: 16px;
+      }
+
+      ::content .grid-stack > .grid-stack-item > .ui-resizable-se {
+        right: 32px;
+        bottom: 12px;
+        width: 24px;
+        height: 24px;
+        -webkit-transform: rotate(45deg);
+        transform: rotate(45deg);            
+        background: url(/desktop/resize.svg);
+        visibility: visible;
+        opacity: 1;
+        transition: opacity ease .15s;
+        border-radius: 50%;
+      }
+      
+      :host[isdesktop]:hover ::content .grid-stack > .grid-stack-item.ui-resizable-autohide > .ui-resizable-se {
+        opacity: 0;
+        visibility; hidden;
+        transition: opacity ease .15s;
+        display: block !important;
+      }
+
+      ::content .content-wrapper {
+        border: 0 none;
+        height: 100%;
+        width: calc(100% - 16px);
+      }
+
+      :host ::content .loader-wrapper {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: calc(100% - 16px);
+        height: 100%;
+        opacity: 1;
+        visibility: visible;
+      }
+
+      :host ::content .loader-wrapper paper-spinner-lite {
+        margin: 0 auto;
+        position: relative;
+        margin-top: -14px;
+        top: 50%;
+        text-align: center; 
+        display: block;
+        right: 8px;
+        --paper-spinner-color: var(--primary-text-color);
+      }
+
+      :host ::content .overlay {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: -1;
+      }
+
+      :host ::content .show-overlay {
+        z-index: 1 !important;
+      }
+
+      :host ::content .drag-handle {
+        cursor: move;
+        position: absolute;
+        top: 0;
+        z-index: 2;
+        height: 56px;
+      }
+      
+      :host ::content .panel-wrapper {
+        position: relative;
+      }
+      :host ::content .panel-wrapper:after {
+        content: "";
+        display: block;
+        position: absolute;
+        top: 0;
+        right: 16px;
+        left: 0;
+        bottom: 0;
+        border-radius: 2px;
+        background: var(--transparent-background-color);
+        z-index: -1;
+        transition: background 0.15s ease;
+      }
+      :host ::content .panel-wrapper.ui-draggable-dragging:after {
+        background: var(--primary-background-color);
+        @apply(--shadow-elevation-12dp);
+      }      
+
+      :host ::content .panel-wrapper .content-wrapper {
+        overlow: hidden;
+        border-radius: 2px;
+      }
+      :host ::content .panel-wrapper.loaded .loader-wrapper,
+      :host ::content .panel-wrapper .content-wrapper {
+        visibility: hidden;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      
+      :host ::content .panel-wrapper .loader-wrapper,
+      :host ::content .panel-wrapper.loaded .content-wrapper {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity 0.2s ease;
+      }
+      :host #newPanelToast {
+        cursor: pointer;
+      }
+      :host #newPanelToast ::content .label {
+        margin-left: 1em;
+      } </style> <div class="grid-stack"></div> <paper-toast id="newPanelToast" no-cancel-on-outside-click="false"><iron-icon icon="arrow-downward"></iron-icon><span class="label">Go to panel</span></paper-toast> </template> <script> Polymer({
+      is: "duma-panels",
+
+      properties: {
+        height: {
+          type: Number,
+          value: 12,
+          observer: "_onResize"
+        },
+
+        width: {
+          type: Number,
+          value: 12,
+          observer: "_updateWidth"
+        },
+
+        draggable: {
+          value: false,
+          type: Boolean,
+          observer: "_onDraggableChange"
+        },
+
+        resizable: {
+          value: false,
+          type: Boolean,
+          observer: "_onResizableChange"
+        },
+
+        isdesktop: {
+          type: Boolean,
+          value: top.location.hash === "com.netdumasoftware.desktop"
+        }
+      },
+      
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      listeners: {
+        "iron-resize": "_onResize"
+      },
+      
+      ready: function () {
+        this.async(function () {
+          $(this.$$(".grid-stack")).gridstack({
+            verticalMargin: 16,
+            animate: true,
+            disableResize: !this.resizable,
+            disableDrag: !this.draggable,
+            width: this.width,
+            handle: ".drag-handle",
+            resizable: {
+              resize: function (_, ui) {
+                $(ui.element).find("duma-panel")[0].notifyResize();
+              }
+            }
+          });
+
+          this._bindEvents();
+
+          this.async(function () {
+            this._onResize();
+          }, 1);
+        });
+      },
+
+      _onDraggableChange: function () {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        grid.enableMove(this.draggable, true);
+      },
+
+      _onResizableChange: function () {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        grid.enableResize(this.draggable, true);
+      },
+
+      _bindEvents: function () {
+        var grid = $(this.$$(".grid-stack"));
+        
+        grid.on("dragstart resizestart", function (event) {
+          $(this).find(".overlay").addClass("show-overlay");
+        });
+
+        var _this = this;
+        
+        grid.on("dragstop resizestop", function (event) {
+          $(this).find(".overlay").removeClass("show-overlay");
+        });
+
+        // re-arrange the order of panels in children so tabbing is conventional
+        grid.on("change",function(e, items){
+          //ignore change events from paper elements etc...
+          if(!e.target.classList.contains("grid-stack") || !items) return;
+          // items is a list of panels who's position has changed, or are indexed by the parent later than the one that changed
+          // sort by Y ascending, then by X ascending, so it's left->right, top->bottom
+          function sortGridstackByYThenX(a,b){
+            if(a.y !== b.y) return a.y - b.y;
+            return a.x - b.x;
+          }
+          items.sort(sortGridstackByYThenX);
+          //get the first index of the items that have changed
+          //because we only get the changed items, and all items indexed after them, we only want to change the index of the changed ones
+          var startIndex = 9001;
+          for(var i = 0; i < items.length; i++){
+            var index = $(items[i].el).index();
+            if(index < startIndex) startIndex = index;
+          }
+          for(var i = 0; i < items.length; i++){
+            var info = items[i];
+            var el = $(info.el);
+            var setIndex = i + startIndex;
+            //re-get the panels each iteration, as the order changes each iteration of the for loop
+            var panels = el.parent().children();
+            //if it's not the last panel, insert it at the index. Otherwise, append to the end
+            if(setIndex < panels.length - 1) el.insertBefore(panels.eq(setIndex));
+            else el.parent().append(el);
+          }
+        });
+      },
+
+      _updateWidth: function () {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        grid.setGridWidth(this.width);
+      },
+
+      _onResize: function () {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        // TODO
+        var nr_vertical_cells = parseInt( this.height );
+        var duma_panels_height = $(this).height(); 
+        var margin = 16;
+        var min_height = 15;     /* 0 mens no min height */
+
+        var cheight = ( duma_panels_height - (margin * nr_vertical_cells)) / nr_vertical_cells;
+        grid.cellHeight( Math.max( cheight, min_height ) );
+      },
+
+      _getPinnedStatus: function (file, packageId, data, callback) {
+        callback (false);
+      },
+
+      _getPanelWrapper: function (loader) {
+        return $("<div></div>")
+          .attr("role","region")
+          .addClass("panel-wrapper")
+
+          .append($("<div class='overlay'></div>"))
+
+          .append($("<div class='drag-handle drag-handle-1' aria-label='<%= i18n.ariaDragHandle %>'></div>"))
+          .append($("<div class='drag-handle drag-handle-2' aria-label='<%= i18n.ariaDragHandle %>'></div>"))
+          .append($("<div class='drag-handle drag-handle-3' aria-label='<%= i18n.ariaDragHandle %>'></div>"))
+          .append($("<div class='drag-handle drag-handle-4' aria-label='<%= i18n.ariaDragHandle %>'></div>"))
+
+          .append($("<div class='loader-wrapper'></div>")
+            .append(loader)
+          );
+      },
+
+      _getLoader: function () {
+        return $("<paper-spinner-lite></paper-spinner-lite>")
+          .prop("active", true);
+      },
+
+      _setHandle: function (handle, left, right, width) {
+        left = left ? left + "px" : "auto";
+        right = right ? right + "px" : "auto";
+        width = width ? width + "px" : "auto";
+
+        $(handle)
+          .css("left", left)
+          .css("right", right)
+          .css("width", width);
+      },
+
+      // TODO call if panel draggable changes.
+      _setPanelHandles: function (panelWrapper, panel) {
+        var handle1 = $(panelWrapper).find(".drag-handle-1");
+        var handle2 = $(panelWrapper).find(".drag-handle-2");
+        var handle3 = $(panelWrapper).find(".drag-handle-3");
+        var handle4 = $(panelWrapper).find(".drag-handle-4");
+
+        if (!this.draggable) {
+          this._setHandle(handle1);
+          this._setHandle(handle2);
+          this._setHandle(handle3);
+          this._setHandle(handle4);
+          return;
+        }
+
+        handle1
+          .css("left", "0")
+          .css("width", "8px");
+
+        handle2
+          .css("right", "16px")
+          .css("width", "8px");
+
+        if (panel.drawerOpen) {
+
+          if (panel.showDrawerHelp) {
+            this._setHandle(handle3, 48, null, 160);
+            this._setHandle(handle4, 248, 8);
+
+          } else {
+            this._setHandle(handle3);
+            this._setHandle(handle4, 48, 8);
+          }
+
+        } else {
+          var left = 8;
+          var right = 24;
+
+          this._setHandle(handle3);
+
+          if (panel.showDrawer) {
+            left += 40;
+          }
+
+          if (panel.showHelp) {
+            right += 40;
+          }
+
+          if (panel.showClose) {
+            right += 40;
+          }
+
+          if (panel.showPin) {
+            right  += 40;
+          }
+
+          this._setHandle(handle4, left, right);
+        }
+      },
+
+      _initialisePanel: function (
+        file, packageId, data,
+        options, loader,
+        panelWrapper, contentWrapper
+      ) {
+
+        var panel = $(contentWrapper).find("duma-panel");
+
+        panel
+          .prop("desktop", options._desktop === true)
+          .prop("_data", data)
+          .prop("_file", file)
+          .prop("_package", packageId)
+          .prop("_height", Math.ceil(options.height / this.height * 12))
+          .prop("_width", Math.ceil(options.width / this.width * 12))
+
+          .on("closeClick", function () {
+            this.async(function() { this.remove(contentWrapper); });
+          }.bind(this))
+
+          .on("buttonChange drawerOpen drawerClose", function () {
+            this._setPanelHandles(panelWrapper, panel[0]);
+          }.bind(this))
+        
+          .on("loaded-changed", function (e) {
+            var loaded = e.detail.value;          
+            
+            loader.prop("active", !loaded);
+
+            if (loaded) {
+              $(panelWrapper).addClass("loaded");
+            } else {
+              $(panelWrapper).removeClass("loaded");
+            }
+          });
+
+        this._setPanelHandles(panelWrapper, panel[0]);
+
+        return panel[0];
+      },
+
+      _onContentImportsLoaded: function (contentWrapper) {
+        var linkPromises = [];
+
+        $(contentWrapper).find("link[rel=import]").each(function () {
+          var link = this;
+          linkPromises.push(Q.promise(function (resolve) {
+            link.onload = resolve;
+          }));
+        });
+
+        return Q.all(linkPromises);
+      },
+
+      _getContentScripts: function (contentWrapper) {
+        var scriptPromises = [];
+
+        $(contentWrapper).find("script").each(function () {
+
+          var script = this;
+          scriptPromises.push(Q.promise(function (resolve) {
+
+            if (script.src) {
+
+              $.ajax({
+                type: "GET",
+                url: script.src,
+                dataType: "text",
+                error: function () {
+                  resolve();
+                  setTimeout(function () {
+                    throw Error("Unable to load: " + script.src);
+                  });
+                },
+                success: function (javascript) {
+                  resolve(javascript);
+                }
+              });
+
+            } else {
+              resolve(script.innerHTML);
+            }
+          }));
+        });
+
+        return Q.all(scriptPromises);
+      },
+
+      _loadScripts: function (scripts, contentWrapper) {
+        for (var i = 0; i < scripts.length; i++) {
+          var script = scripts[i];
+          try {
+            (function (script) {
+              eval(script)
+            }).call(contentWrapper[0], script);
+          } catch (e) {
+            setTimeout(function () {
+              throw e;
+            });
+          }
+        }
+      },
+
+      _getContentWrapper: function (
+        file, packageId, data, options,
+        loader, panelWrapper
+      ) {
+
+        var contentWrapper = $("<div></div>")
+          .addClass("content-wrapper");
+
+        $.get(file + "??v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>", function (content) {
+          $(contentWrapper).prop("innerHTML", content);
+
+          this._onContentImportsLoaded(contentWrapper)
+            .then(function () {
+              return this._getContentScripts(contentWrapper)
+
+            }.bind(this))
+            .done(function (scripts) {
+
+              var panel = this._initialisePanel(
+                file, packageId, data,
+                options, loader,
+                panelWrapper, contentWrapper
+              );
+              
+              this._loadScripts(scripts, contentWrapper);
+
+              if (options.initialisationCallback) {
+                options.initialisationCallback(contentWrapper);
+              }
+
+              // This forces polymer to check if loaded has been set to true before init.
+              // This is caused by polymer not firing events for variables set before polymer has finished init
+              panel.forceLoadedCheck();
+            }.bind(this));
+
+          }.bind(this));
+
+        return contentWrapper;
+      },
+
+      _toastLockState: 0,
+      _showAddToast: function(newPanel){
+        // Don't show toast for first 5 seconds of loading
+        if(this._toastLockState < 2){
+          if(this._toastLockState === 0){
+            this._toastLockState = 1;
+            setTimeout(function(){
+              this._toastLockState = 2;
+            }.bind(this),5000);
+          }
+          return
+        }
+        var $w = $(window), wh = $w.height(),
+          top = $w.scrollTop(), bottom = top + wh,
+          $panel = $(newPanel),
+          panelCenter = $panel.offset().top + $panel.height()/2;
+        if (!(panelCenter >= top && panelCenter < bottom)) {
+          // the image is not half-visible
+          this.$.newPanelToast.show();
+          this.$.newPanelToast.onclick = function(){
+            newPanel.scrollIntoView({
+              block: "end",
+              inline: "nearest",
+              behavior: "smooth"
+            });
+          };
+        }
+      },
+
+      add: function (file, packageId, data, options, dontTriggerToast) {
+        if (typeof options === "undefined") {
+          options = {};
+        }
+        
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+
+        var loader = this._getLoader();
+        var panelWrapper = this._getPanelWrapper(loader);
+
+        var contentWrapper = this._getContentWrapper(
+          file, packageId, data,
+          options, loader, panelWrapper
+        );
+
+        $(panelWrapper).append(contentWrapper);
+
+        grid.addWidget(
+          panelWrapper, options.x, options.y, options.width,
+          options.height, options.autoPosition, options.minWidth,
+          options.maxWidth, options.minHeight, options.maxHeight,
+          options.id
+        );
+
+        if(!dontTriggerToast) this._showAddToast(panelWrapper[0]);
+
+        return panelWrapper;
+      },
+
+      _findPanelWrapper: function (element) {
+        if ($(element).hasClass("panel-wrapper")) {
+          return element;
+        } else {
+          return $(element).closest(".panel-wrapper")[0];
+        }
+      },
+
+      remove: function (element) {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        var panelWrapper = this._findPanelWrapper(element);
+        var panel = $(panelWrapper).find("duma-panel")[0];
+        
+        if (panel) {
+          panel._triggerDestructor();
+        }
+        grid.removeWidget(panelWrapper);
+      },
+
+      update: function (element, options) {
+        var grid = $(this.$$(".grid-stack")).data("gridstack");
+        if (!grid) {
+          return;
+        }
+
+        element = this._findPanelWrapper(element);
+
+        grid.update(
+          element, options.x, options.y, options.width, options.height
+        );
+      },
+
+      list: function () {
+        var processedPanels = [];
+
+        var panels = $(".grid-stack > .grid-stack-item", this).each(function () {
+          processedPanels.push({
+            element: this,
+            x: Number($(this).attr("data-gs-x")),
+            y: Number($(this).attr("data-gs-y")),
+            width: Number($(this).attr("data-gs-width")),
+            height: Number($(this).attr("data-gs-height"))
+          });
+        });
+
+        return processedPanels;
+      }
+    }); </script> </dom-module> 

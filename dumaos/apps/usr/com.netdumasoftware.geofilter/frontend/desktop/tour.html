@@ -1,0 +1,158 @@
+<!--
+  (C) 2017 Kian Cross
+  Kian Cross
+--> <link rel="import" href="/libs/tour.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script> var ___tourIs = null;
+
+function __geofilter__setToNormalTour__(){
+  ___tourIs = "normal";
+  duma.tour.setTour("com.netdumasoftware.geofilter", function () {
+    return {
+      id: "geofilter",
+      steps: [
+        {
+          title: "<%= i18n.step1Title %>",
+          content: "<%= i18n.step1Content %>",
+          target: "#add-device",
+          placement: "right",
+          onNext: function(){
+            if($("#geofilter-devices").children().length === 0){
+              $("#add-device").click();
+              var devsel = $("geofilter-device-selector");
+              devsel.on("iron-overlay-closed",function(){
+                devsel.off("iron-overlay-closed");
+                hopscotch.startTour(duma.tour.getTour()(0), 1);
+              });
+              hopscotch.endTour();
+            }else{
+              hopscotch.startTour(duma.tour.getTour()(0), 1);
+            }
+          }
+        },
+        {
+          title: "<%= i18n.step2Title %>",
+          content: "<%= i18n.step2Content %>",
+          target: function(){
+            return $(".geo-menu #home:not(:hidden), #filtering-mode")[0];
+          },
+          placement: "top"
+        },
+        {
+          title: "<%= i18n.step3Title %>",
+          content: "<%= i18n.step3Content %>",
+          target: "#distance-slider",
+          placement: "top"
+        },
+        {
+          title: "<%= i18n.step4Title %>",
+          content: "<%= i18n.step4Content %>",
+          target: "#ping-assist",
+          placement: "top"
+        },
+        {
+          title: "<%= i18n.step5Title %>",
+          content: "<%= i18n.step5Content %>",
+          target: "#filtering-mode",
+          placement: "top"
+        },
+        {
+          title: "<%= i18n.step6Title %>",
+          content: "<%= i18n.step6Content %>",
+          target: function () {
+            return $("duma-panel#geo-map-panel")[0].getDrawerButton();
+          },
+          placement: "right",
+          onShow: function(){
+            duma.storage("com.netdumasoftware.geofilter","step6touronwards","true");
+          }
+        },
+        {
+          title: "<%= i18n.step7Title %>",
+          content: "<%= i18n.step7Content %>",
+          target: "#allow-deny-panel",
+          placement: "top",
+          xOffset: "center",
+        }
+      ]
+    }
+  });
+}
+
+function __geofilter__setToPolygonTour__(){
+  ___tourIs = "poly"
+  duma.tour.setTour("com.netdumasoftware.geofilter", function () {
+    return {
+      id: "geofilter",
+      steps: [
+        {
+          title: "<%= i18n.stepPoly1Title %>",
+          content: "<%= i18n.stepPoly1Content %>",
+          target: "#add-polygon",
+          placement: "top",
+          nextOnTargetClick: true,
+          xOffset: -20
+        },
+        {
+          title: "<%= i18n.stepPoly2Title %>",
+          content: "<%= i18n.stepPoly2Content %>",
+          target: function () {
+            return $("duma-panel#geo-map-panel duma-map").parent()[0];
+          },
+          placement: "top",
+          nextOnTargetClick: true,
+          xOffset: "center",
+          yOffset: "center"
+        },
+        {
+          title: "<%= i18n.stepPoly3Title %>",
+          content: "<%= i18n.stepPoly3Content %>",
+          target: "#delete-polygon",
+          placement: "top",
+          nextOnTargetClick: true,
+          xOffset: -20
+        },
+        {
+          title: "<%= i18n.stepPoly4Title %>",
+          content: "<%= i18n.stepPoly4Content %>",
+          target: ".polygon-count",
+          placement: "top"
+        }
+      ].concat(duma.storage("com.netdumasoftware.geofilter","step6touronwards") !== "true" ? [
+        {
+          title: "<%= i18n.step6Title %>",
+          content: "<%= i18n.step6Content %>",
+          target: function () {
+            return $("duma-panel#geo-map-panel")[0].getDrawerButton();
+          },
+          placement: "right",
+          onShow: function(){
+            duma.storage("com.netdumasoftware.geofilter","step6touronwards","true");
+          }
+        },
+        {
+          title: "<%= i18n.step7Title %>",
+          content: "<%= i18n.step7Content %>",
+          target: "#allow-deny-panel",
+          placement: "top",
+          xOffset: "center",
+        }
+      ] : [])
+    }
+  });
+}
+
+function __onTourEnd(closeType){
+  var doneStep6 = duma.storage("com.netdumasoftware.geofilter","step6touronwards");
+  var polyTour = duma.storage("com.netdumasoftware.geofilter","polytour");
+  if(closeType === "close"){
+    duma.storage("com.netdumasoftware.geofilter","step6touronwards","true");
+    duma.tour.fireTourFoundHere();
+  }
+  if(doneStep6 !== "true" && polyTour === "true"){
+
+  }else{
+    duma.tour.fireTourFoundHere();
+  }
+}
+
+hopscotch.listen("end",__onTourEnd.bind(this,"end"));
+hopscotch.listen("close",__onTourEnd.bind(this,"close")); </script> 
