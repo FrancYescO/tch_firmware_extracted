@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+
+# Must start up after syslogd service.
+START=11
+APP=luasyslog
+PID_FILE=/var/run/$APP.pid
+LOG_DIR="/root/log/"
+LOG_TYPE=""
+LOG_FILE=""
+
+. /lib/functions.sh
+
+log_cfg_handler() {
+  local cfg="$1"
+  config_get LOG_TYPE "$cfg" log_type circular
+  config_get LOG_FILE "$cfg" log_file "/var/log/messages"
+}
+
+start() {
+  config_load system
+  config_foreach log_cfg_handler system
+  [ -d "$LOG_DIR" ] || mkdir -p "$LOG_DIR"
+  if [ "$LOG_TYPE" = "file" ]; then
+     LOG_CMD="tail -F -n +1 "$LOG_FILE""
+  else
+     LOG_CMD="logread -f"
+  fi
+  $LOG_CMD | $APP &
+  log_cmd_pid=$(jobs -p)
+  [ -n "$log_cmd_pid" ] && echo "$log_cmd_pid" > $PID_FILE
+}
+
+stop() {
+  [ -f "$PID_FILE" ] && kill -9 `cat $PID_FILE` && rm -rf $PID_FILE
+}

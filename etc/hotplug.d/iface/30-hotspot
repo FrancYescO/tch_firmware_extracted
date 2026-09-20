@@ -1,0 +1,20 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+. $IPKG_INSTROOT/usr/lib/hotspot/functions.sh
+
+[ "$(hotspot_state_get hotspotdaemon)" = "up" ] || exit 0
+
+_hotplug_hotspot() {
+   hotspot_hotplug "$ACTION" "$INTERFACE" "$DEVICE"
+}
+
+case "$ACTION" in
+    ifup)
+        [ "$(hotspot_state_get wan)" != "up" ] && _hotplug_hotspot
+    ;;
+    ifdown)
+        [ "$(hotspot_state_get wan)" = "down" ] || _hotplug_hotspot
+    ;;
+esac
+

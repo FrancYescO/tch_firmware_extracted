@@ -1,0 +1,266 @@
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'Normal'
+	option weight '5'
+
+config class 'FON'
+	option weight '5'
+
+config class 'User'
+	option weight '10'
+
+config class 'DNS'
+	option weight '20'
+
+config class 'Management'
+	option weight '40'
+
+config class 'DHCP'	
+	option priority '1'
+	option weight '40'
+
+config class 'Voice'
+	option priority '1'
+	option weight '40'
+
+config class 'PPP'
+	option priority '1'
+	option weight '40'
+
+#TO_LAN
+config class 'Interactive_lan'
+	option priority '0'
+
+config class 'Video_lan'
+	option priority '1'
+
+config class 'Management_lan'
+	option priority '2'
+
+config class 'Voice_lan'
+	option priority '3'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'Normal FON User DNS Management DHCP Voice PPP'
+	option policy 'wfq'
+
+config classgroup 'TO_LAN'
+	option classes 'Interactive_lan Video_lan Management_lan Voice_lan'
+	option policy 'sp'
+
+
+#WAN QoS Class Instantiation
+config device 'atm_8_35'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'eth0'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth1'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth2'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config device 'eth3'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+config interface 'wan'
+	option classgroup 'TO_WAN'
+	option enabled '1'
+
+config interface 'lan'
+	option classgroup 'TO_LAN'
+	option enabled '1'
+
+#TO_WAN QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+
+config reclassify
+        option target 'Voice'
+        option dscp 'EF'
+
+config reclassify
+        option target 'Voice'
+        option proto 'tcp'
+        option ports '2195'
+
+config reclassify
+        option target 'Voice'
+        option proto 'tcp'
+        option ports '2195'
+        option DSCP '0'
+
+config reclassify
+        option target 'DHCP'
+        option proto 'udp'
+        option ports '67,68,546,547'
+
+config reclassify
+        option target 'DHCP'
+        option proto 'udp'
+        option ports '67,68,546,547'
+        option DSCP '0'
+
+config reclassify
+        option target 'Management'
+        option ports '7547,51007'
+
+config reclassify
+        option target 'Management'
+        option ports '7547,51007'
+        option DSCP '0'
+
+config reclassify
+        option target 'Management'
+        option proto 'udp'
+        option ports '500,4500'
+
+config reclassify
+        option target 'Management'
+        option proto 'udp'
+        option ports '500,4500'
+        option DSCP '0'
+
+config reclassify
+        option target 'Management'
+        option proto 'icmp'
+
+config reclassify
+        option target 'Management'
+        option proto 'icmp'
+        option DSCP '0'
+
+config reclassify
+        option target 'Management'
+        option proto 'gre'
+
+config reclassify
+        option target 'Management'
+        option proto 'gre'
+        option DSCP '0'
+		
+config reclassify
+        option target 'Management'
+        option proto 'esp'
+
+config reclassify
+        option target 'Management'
+        option proto 'esp'
+        option DSCP '0'
+
+config reclassify
+        option target 'DNS'
+        option ports '53'
+
+config reclassify
+        option target 'DNS'
+        option ports '53'
+        option DSCP '0'
+
+config reclassify
+        option target 'User'
+        option proto 'ah'
+
+config reclassify
+        option target 'User'
+        option proto 'ah'
+        option DSCP '0'
+
+config reclassify
+        option target 'User'
+        option proto 'igmp'
+
+config reclassify
+        option target 'User'
+        option proto 'igmp'
+        option DSCP '0'
+
+config reclassify
+        option target 'User'
+        option proto 'tcp'
+        option ports '25,80,109,110,143,220,443,554,587,993,995,1723,1935,3074,3658,8080'
+
+config reclassify
+        option target 'User'
+        option proto 'tcp'
+        option ports '25,80,109,110,143,220,443,554,587,993,995,1723,1935,3074,3658,8080'
+        option DSCP '0'
+
+config reclassify
+        option target 'User'
+        option proto 'udp'
+        option ports '123'
+
+config reclassify
+        option target 'User'
+        option proto 'udp'
+        option ports '123'
+        option DSCP '0'
+
+#TO_LAN QoS classification rule Definition
+
+config reclassify
+	option target 'Voice_lan'
+	option ports '5060'
+
+config reclassify
+	option target 'Management_lan'
+	option ports '53'
+
+config reclassify
+	option target 'Management_lan'
+	option proto 'udp'
+	option ports '67,68,500,4500'
+
+config reclassify
+	option target 'Management_lan'
+	option proto 'icmp'
+
+config reclassify
+	option target 'Video_lan'
+	option proto 'igmp'
+
+config reclassify
+	option target 'Video_lan'
+	option ports '554'
+
+config reclassify
+	option target 'Video_lan'
+	option helper 'rtsp'
+
+# remarking of routed traffic
+
+config remarking
+        option interface wan
+        option routed '1'
+        option DSCP '0'
+
+# WMM config for traffic goes to wl0 wl1
+
+config wmm userwlan
+	option mark_ipv4 'class'
+	option mark_ipv6 'class'
+	option mark_802_1q 'class'
+
+config device wl0
+	option enable '1'
+	option wmm 'userwlan'
+
+config device wl1
+	option enable '1'
+	option wmm 'userwlan'

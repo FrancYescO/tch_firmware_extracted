@@ -1,0 +1,205 @@
+-- Automatically generated from InternetGatewayDevice:1.8
+-- using generator version 2.1
+local InternetGatewayDevice_DeviceInfo_VendorLogFile_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.DeviceInfo.VendorLogFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorLogFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      MaximumSize = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Persistent = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      X_000E50_DeviceLogFilter = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+         enumeration = {
+         "SIP",
+         "DHCP",
+         "PPP",
+         "CWMPD",
+         "WANSENSING",
+         "FON",
+         "ALL",
+         },
+      },
+      X_000E50_DeviceLogLevel = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        enumeration = {
+        "Normal",
+        "Verbose"
+        },
+      },
+      X_000E50_Rotate = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      X_000E50_Size = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local binding = { config = "system", sectionname = "log", option = "", default = "" }
+local uci_helper = mapper("ucihelper")
+local normal_priority = { "emerg", "alert", "crit", "err", "warning" }
+local categories = {
+  ALL = { "" },
+  SIP = { "mmpbx", "mmpbxd%[%d+%]" },
+  DHCP = { "dhcp" },
+  PPP = { "ppp" },
+  CWMPD = { "cwmpd:","cwmpd%[%d+%]" },
+  WANSENSING = { "transformer: %[wansensing%]" },
+  FON = { "hotspotd" }
+}
+
+local function get_patterns(category, level)
+  local patterns = {}
+  local t = categories[category]
+
+  if not t then return nil end
+
+  for _,v in ipairs(t) do
+      if level == "Normal" then
+         for _,p in ipairs(normal_priority) do
+             -- month date hour:minute:second hostname facility.priority process: xxxxxx
+             patterns[#patterns+1] = "^%a+%s+%d+ %d+:%d+:%d+ [^%s]+ [^%s]+\."..p.."%s+"..v
+         end
+      else
+         patterns[#patterns+1] = "^%a+%s+%d+ %d+:%d+:%d+ [^%s]+ [^%s]+ "..v
+      end
+  end
+
+  return patterns
+end
+
+local function uci_set_pattern(key,category,level)
+  binding.sectionname = key
+  if(category == "ALL" and level =="Verbose" ) then
+    binding.option = "logall"
+    uci_helper.set_on_uci(binding, 1, commitapply)
+  else
+    local patterns = get_patterns(category, level) or {}
+    binding.option = "pattern"
+    uci_helper.set_on_uci(binding, patterns, commitapply)
+    binding.option = "logall"
+    uci_helper.delete_on_uci(binding, commitapply)
+  end
+end
+
+InternetGatewayDevice_DeviceInfo_VendorLogFile_i_.entries = function(mapping)
+  local logs = {}
+  binding.sectionname = "log"
+  uci_helper.foreach_on_uci(binding, function(s)
+    logs[#logs+1] = s['.name']
+  end)
+  return logs
+end
+
+InternetGatewayDevice_DeviceInfo_VendorLogFile_i_.get = {
+  Alias = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "alias"
+    binding.default = "cpe-" .. key
+    return uci_helper.get_from_uci(binding)
+  end,
+  Name = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "path"
+    return uci_helper.get_from_uci(binding)
+  end,
+  MaximumSize = "0",
+  Persistent = "0",
+  X_000E50_DeviceLogFilter = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "logfilter"
+    binding.default = "ALL"
+    return uci_helper.get_from_uci(binding)
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "loglevel"
+    binding.default = "Normal"
+    return uci_helper.get_from_uci(binding)
+  end,
+  X_000E50_Rotate = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "rotate"
+    binding.default = "0"
+    return uci_helper.get_from_uci(binding)
+  end,
+  X_000E50_Size = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "size"
+    binding.default = "0"
+    return uci_helper.get_from_uci(binding)
+  end
+}
+
+InternetGatewayDevice_DeviceInfo_VendorLogFile_i_.set = {
+  Alias = function(mapping, param, value, key)
+    binding.sectionname = key
+    binding.option = "alias"
+    return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_DeviceLogFilter = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "loglevel"
+      local level = uci_helper.get_from_uci(binding)
+      local category = value
+      uci_set_pattern(key,category,level)
+      binding.option = "logfilter"
+      return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, value, key)
+     binding.sectionname = key
+     binding.option = "logfilter"
+     local level = value
+     local category = uci_helper.get_from_uci(binding)
+     uci_set_pattern(key,category,level)
+     binding.option = "loglevel"
+     return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_Rotate = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "rotate"
+      return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_Size = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "size"
+      return uci_helper.set_on_uci(binding, value, commitapply)
+  end,
+}
+
+InternetGatewayDevice_DeviceInfo_VendorLogFile_i_.commit = function()
+  uci_helper.commit(binding)
+end
+
+InternetGatewayDevice_DeviceInfo_VendorLogFile_i_.revert = function()
+  uci_helper.revert(binding)
+end
+
+register(InternetGatewayDevice_DeviceInfo_VendorLogFile_i_)
+

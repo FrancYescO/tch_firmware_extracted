@@ -1,0 +1,32 @@
+#!/usr/bin/env lua
+
+local conn = require("ubus").connect()
+local json = require("dkjson")
+
+local filename = "/tmp/bulkadd"
+local fd = io.open(filename, "r")
+local lines = ""
+local firstname, lastname, homenumber, mobilenumber, worknumber
+if fd then
+    lines = fd:read("*a")
+
+    local obj, pos, err = lines and json.decode(lines, 1, nil)
+    for _, v in pairs(obj and obj["contacts"] or {}) do
+        firstname = v.FirstName or ""
+        lastname = v.LastName or ""
+        homenumber = v.HomeNumber and tostring(v.HomeNumber) or ""
+        mobilenumber = v.MobileNumber and tostring(v.MobileNumber) or ""
+        worknumber = v.WorkNumber and tostring(v.WorkNumber) or ""
+        local entry = conn:call("mmdbd.phonebook", "create", { FirstName = firstname, LastName = lastname,
+                                                   Numbers = {
+                                                    {Number = homenumber, TypeID = "0"},
+                                                    {Number = mobilenumber, TypeID = "1"},
+                                                    {Number = worknumber, TypeID = "2"}}
+                                                 })
+        if entry["entryID"] == -1 then   --exceed the max number of contacts
+            break
+        end
+    end
+    os.remove(filename)
+    fd:close()
+end

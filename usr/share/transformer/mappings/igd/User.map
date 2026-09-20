@@ -1,0 +1,80 @@
+----------------------------------------------------------
+-- Mapping for InternetGatewayDevice.User.{i}.
+----------------------------------------------------------
+local InternetGatewayDevice_User_i_= {
+  objectType = {
+    name = "InternetGatewayDevice.User.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Username = {
+        access = "readOnly",
+        type = "string",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        hidden = "true",
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local srp = require 'srp'
+local uci_helper = mapper("ucihelper")
+
+-- binding for uci_helper
+local binding={config="web"}
+
+--wget cmd to reload user settings
+local cmd = "/usr/bin/wget http://127.0.0.1:55555/reloadWebUsers -O - &"
+
+InternetGatewayDevice_User_i_.entries = function()
+  binding.sectionname = "default"
+  binding.option = "users"
+  local users = uci_helper.get_from_uci(binding)
+  if users == "" then
+     users={}
+  end
+  return users
+end
+
+InternetGatewayDevice_User_i_.get = {
+  Username = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "name"
+    return uci_helper.get_from_uci(binding)
+  end,
+  Password = "",
+}
+
+InternetGatewayDevice_User_i_.set = {
+  Password = function (mapping, param, value, key)
+    binding.sectionname = key
+    binding.option = "name"
+    local user = uci_helper.get_from_uci(binding)
+    if user == "" then
+      return nil, "Invalid user for password setting"
+    end
+    local srp_salt, srp_verifier = srp.new_user(user, value)
+    binding.option = "srp_salt"
+    uci_helper.set_on_uci(binding, srp_salt, commitapply)
+    binding.option = "srp_verifier"
+    uci_helper.set_on_uci(binding, srp_verifier, commitapply)
+  end,
+}
+
+InternetGatewayDevice_User_i_.commit = function ()
+   uci_helper.commit(binding)
+   os.execute(cmd)
+end
+
+InternetGatewayDevice_User_i_.revert = function ()
+   uci_helper.revert(binding)
+end
+
+register(InternetGatewayDevice_User_i_)
