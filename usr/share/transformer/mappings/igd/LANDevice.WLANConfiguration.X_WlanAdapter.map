@@ -1,0 +1,80 @@
+--- Manually generated
+local InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.X_WlanAdapter.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Band = {
+        access = "readOnly",
+        type = "string",
+        description = "Wireless device frequency band (either 2.4GHz / 5GHz)",
+        enumeration = {
+          "2",
+          "5",
+         },
+      },
+      BandWidth = {
+        access = "readWrite",
+        type = "string",
+        description = "Current Operating Bandwidth",
+        enumeration = {
+          "0",
+          "2",
+          "4",
+          "8",
+        },
+      },
+    },
+  },
+}
+
+local wlan = require("transformer.shared.WLANConfigurationCommon")
+
+local bandMap = {
+  ["radio_2G"] = "2",
+  ["radio_5G"] = "5"
+}
+
+local getBandWidthMap = {
+  ["auto"]     = "0",
+  ["20"]       = "2",
+  ["20/40"]    = "4",
+  ["20/40/80"] = "8",
+}
+
+local setBandWidthMap = {
+  ["0"]        = "auto",
+  ["2"]        = "20",
+  ["4"]        = "20/40",
+  ["8"]        = "20/40/80",
+}
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_.get = {
+  Band = function(mapping, param, key)
+    local radio = wlan.getRadioFromIface(key)
+    return bandMap[radio] or ""
+  end,
+  BandWidth = function(mapping, param, key)
+    local radio = wlan.getRadioFromIface(key)
+    local channelBandWidth = wlan.getFromUci(radio, "channelwidth")
+    return getBandWidthMap[channelBandWidth] or ""
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_.set = {
+  BandWidth = function(mapping, param, value, key)
+    local radio = wlan.getRadioFromIface(key)
+    if radio == "radio_2G" and value == "8" then
+      return nil, "Invalid BandWidth for 2.4G"
+    end
+    value = setBandWidthMap[value]
+    wlan.setOnUci(radio, "channelwidth", value, commitapply)
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_.commit = wlan.commit
+InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_.revert = wlan.revert
+
+register(InternetGatewayDevice_LANDevice_i_WLANConfiguration_i_X_WlanAdapter_)

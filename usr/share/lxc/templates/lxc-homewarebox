@@ -1,0 +1,285 @@
+#!/bin/sh
+
+# This is a lxc template for Technicolor homeware
+
+# Make sure the usual locations are in PATH
+export PATH=$PATH:/usr/sbin:/usr/bin:/sbin:/bin
+
+install_homewarebox()
+{
+    rootfs=$1
+
+    tree="\
+$rootfs/var/empty/homewarebox \
+$rootfs/var/lib/empty/homewarebox \
+$rootfs/etc/init.d \
+$rootfs/etc/rc.d \
+$rootfs/etc/config \
+$rootfs/etc/opkg/keys \
+$rootfs/etc/ssl/certs \
+$rootfs/etc/hotplug.d \
+$rootfs/dev/shm \
+$rootfs/run/homewarebox \
+$rootfs/proc \
+$rootfs/sys \
+$rootfs/bin \
+$rootfs/sbin \
+$rootfs/usr/bin \
+$rootfs/usr/sbin \
+$rootfs/usr/share/libubox \
+$rootfs/usr/lib/lua \
+$rootfs/tmp \
+$rootfs/home \
+$rootfs/root \
+$rootfs/lib/config \
+$rootfs/lib/functions"
+
+    mkdir -p $tree
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+
+    ln -s /run $rootfs/var/run
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+
+    cat <<EOF > $rootfs/etc/passwd
+root:x:0:0:root:/root:/bin/sh
+EOF
+
+    cat <<EOF > $rootfs/etc/group
+root:x:0:root
+EOF
+
+    cat <<EOF > $rootfs/etc/inittab
+::sysinit:/etc/init.d/rcS S boot
+::shutdown:/etc/init.d/rcS K shutdown
+#::askconsole:/bin/sh
+EOF
+
+    # Copy the host shadow file.
+    cp /etc/shadow $rootfs/etc/shadow
+
+    return 0
+}
+
+mount_transformercli_dependence()
+{
+    path=$1
+    rootfs=$2
+    enable_transformercli=$3
+
+    if [ $enable_transformercli = "1" ]; then
+        mkdir -p $rootfs/usr/lib/lua/transformer
+        touch $rootfs/usr/lib/lua/datamodel-bck.lua
+        touch $rootfs/usr/lib/lua/transformer/fault.lua
+        touch $rootfs/usr/lib/lua/transformer/msg.lua
+        touch $rootfs/usr/lib/lua/transformer/msg_decode.lua
+        touch $rootfs/usr/lib/lua/transformer/msg_encode.lua
+    cat <<EOF >> $path/config
+lxc.mount.entry = /usr/lib/lua/datamodel-bck.lua usr/lib/lua/datamodel-bck.lua none ro,bind 0 0
+lxc.mount.entry = /usr/lib/lua/transformer/fault.lua usr/lib/lua/transformer/fault.lua none ro,bind 0 0
+lxc.mount.entry = /usr/lib/lua/transformer/msg.lua usr/lib/lua/transformer/msg.lua none ro,bind 0 0
+lxc.mount.entry = /usr/lib/lua/transformer/msg_decode.lua usr/lib/lua/transformer/msg_decode.lua none ro,bind 0 0
+lxc.mount.entry = /usr/lib/lua/transformer/msg_encode.lua usr/lib/lua/transformer/msg_encode.lua none ro,bind 0 0
+EOF
+    fi
+}
+
+mount_homeware_libraries()
+{
+    path=$1
+    rootfs=$2
+
+    cmd="find /lib -name \"*.so*\""
+    eval $cmd >> /tmp/liblist
+    cmd="find /usr/lib -name \"*.so*\""
+    eval $cmd >> /tmp/liblist
+
+    while read -r line; do
+        if [ -d $rootfs${line%/*} ]; then
+            if test -h $line; then
+                cp -d $line $rootfs${line%/*}
+            else
+                touch $rootfs$line
+                echo "lxc.mount.entry = $line ${line#*/} none ro,bind 0 0" >> $path/config
+            fi
+        fi
+    done < /tmp/liblist
+    rm /tmp/liblist
+}
+
+mount_homeware_routines()
+{
+    path=$1
+    rootfs=$2
+    enable_transformercli=$3
+
+    # Mount homeware base routines.
+    cmd="find /bin/ -name \"*\""
+    eval $cmd >> /tmp/routines
+    cmd="find /sbin/ -name \"*\""
+    eval $cmd >> /tmp/routines
+    cmd="find /usr/bin/ -name \"*\""
+    eval $cmd >> /tmp/routines
+    cmd="find /usr/sbin/ -name \"*\""
+    eval $cmd >> /tmp/routines
+
+    while read -r line; do
+        case ${line##*/} in
+            runner|wifi|qos|fw3|hostapd*|dnsmasq|pppd|pppoe-relay|time_change_monitor.lua|tod.lua|status-led-eventing.lua|\
+            wps*|button*|wireless*|acl_button_pressed.sh|cgclear|cgconfigparser|rip-create-efu.sh|wansensing.lua|\
+            rip-write-efu.sh|scheduledreboot|scheduledreboot_helper|*_wlan_feature.sh|sfp_get.sh|ledfw.lua|\
+            sfpi2cctl|telnetd|dropbear|udhcpd|urlfilterd|watchdog-tch|wfa-testsuite-daemon|wifi_on.sh|\
+            wifionoff.sh|intfdiag|kernel-core-handler|miniupnpd*|mmpbx*|nginx|ntpd*|odhcpd*|conntrack*|network-tch.sh|\
+            hostmanager*|clash*|lxc*|'')
+                ;;
+            transformer-cli)
+                if [ $enable_transformercli = "1" ]; then
+                    touch $rootfs$line
+                    echo "lxc.mount.entry = $line ${line#*/} none ro,bind 0 0" >> $path/config
+                fi
+                ;;
+            *)
+                if test -h $line; then
+                    cp -d $line $rootfs${line%/*}
+                else
+                    touch $rootfs$line
+                    echo "lxc.mount.entry = $line ${line#*/} none ro,bind 0 0" >> $path/config
+                fi
+                ;;
+        esac
+    done < /tmp/routines
+    rm /tmp/routines
+}
+
+configure_homewarebox()
+{
+    path=$1
+    rootfs=$2
+    name=$3
+    enable_transformercli=$4
+
+    grep -q "^lxc.rootfs.path" $path/config 2>/dev/null || echo "lxc.rootfs.path = $rootfs" >> $path/config
+
+    # Mount openwrt base files.
+    touch $rootfs/etc/rc.common
+    touch $rootfs/etc/hotplug.json
+    touch $rootfs/etc/preinit
+    touch $rootfs/etc/resolv.conf
+    touch $rootfs/lib/functions.sh
+    touch $rootfs/lib/functions/preinit.sh
+    touch $rootfs/lib/functions/network.sh
+    touch $rootfs/lib/functions/service.sh
+    touch $rootfs/lib/functions/system.sh
+    touch $rootfs/lib/functions/procd.sh
+    touch $rootfs/lib/config/uci.sh
+    touch $rootfs/usr/share/libubox/jshn.sh
+
+    cat <<EOF >> $path/config
+lxc.uts.name = $name
+lxc.pty.max = 1024
+lxc.signal.halt = SIGKILL
+lxc.cap.drop = sys_module mac_admin mac_override sys_time
+
+lxc.net.0.type = veth
+lxc.net.0.flags = up
+lxc.net.0.link = br-lan
+lxc.net.0.ipv4.address = 192.168.1.201/24
+lxc.net.0.ipv4.gateway = 192.168.1.1
+
+lxc.mount.entry = /tmp/resolv.conf.auto etc/resolv.conf none ro,bind 0 0
+lxc.mount.entry = /etc/opkg/keys etc/opkg/keys none ro,bind 0 0
+lxc.mount.entry = /etc/ssl/certs etc/ssl/certs none ro,bind 0 0
+lxc.mount.entry = /etc/rc.common etc/rc.common none ro,bind 0 0
+lxc.mount.entry = /etc/hotplug.json etc/hotplug.json none ro,bind 0 0
+lxc.mount.entry = /lib/functions.sh lib/functions.sh none ro,bind 0 0
+lxc.mount.entry = /lib/functions/preinit.sh lib/functions/preinit.sh none ro,bind 0 0
+lxc.mount.entry = /lib/functions/network.sh lib/functions/network.sh none ro,bind 0 0
+lxc.mount.entry = /lib/functions/service.sh lib/functions/service.sh none ro,bind 0 0
+lxc.mount.entry = /lib/functions/system.sh lib/functions/system.sh none ro,bind 0 0
+lxc.mount.entry = /lib/functions/procd.sh lib/functions/procd.sh none ro,bind 0 0
+lxc.mount.entry = /lib/config/uci.sh lib/config/uci.sh none ro,bind 0 0
+lxc.mount.entry = /usr/share/libubox/jshn.sh usr/share/libubox/jshn.sh none ro,bind 0 0
+#lxc.mount.auto = cgroup:mixed proc:mixed sys:mixed
+EOF
+
+mount_homeware_libraries $path $rootfs
+mount_homeware_routines $path $rootfs $enable_transformercli
+mount_transformercli_dependence $path $rootfs $enable_transformercli
+}
+
+usage()
+{
+    cat <<EOF
+$1 -h|--help -p|--path=<path> [--rootfs=<path>] [-n|--name=<name>] [--transformer-cli=<0|1>]
+EOF
+    return 0
+}
+
+for i in "$@"
+do
+  case "$i" in
+    -h|--help)
+      usage $0
+      exit 0
+      ;;
+    -p=*|--path=*)
+      path="${i#*=}"
+      shift
+      ;;
+    --rootfs=*)
+      rootfs="${i#*=}"
+      shift
+      ;;
+    -n=*|--name=*)
+      name="${i#*=}"
+      shift
+      ;;
+    --transformer-cli=*)
+      enable_transformercli="${i#*=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [ "$(id -u)" != "0" ]; then
+    echo "This script should be run as 'root'"
+    exit 1
+fi
+
+if [ -z "$path" ]; then
+    echo "'path' parameter is required"
+    exit 1
+fi
+
+if [ -z "$enable_transformercli" ]; then
+    enable_transformercli="0"
+fi
+
+# detect rootfs
+config="$path/config"
+if [ -z "$rootfs" ]; then
+    if grep -q '^lxc.rootfs.path' $config 2>/dev/null ; then
+        rootfs=$(awk -F= '/^lxc.rootfs.path =/{ print $2 }' $config)
+    else
+        rootfs=$path/rootfs
+    fi  
+fi
+
+install_homewarebox $rootfs
+if [ $? -ne 0 ]; then
+    echo "failed to install homewarebox's rootfs"
+    exit 1
+fi
+
+configure_homewarebox $path $rootfs $name $enable_transformercli
+if [ $? -ne 0 ]; then
+    echo "failed to configure homewarebox template"
+    exit 1
+fi
+

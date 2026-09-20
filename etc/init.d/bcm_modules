@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+
+START=10
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+boot_4_1_38() {
+    insmod bdmf
+}
+
+boot() {
+    boot_$(uname -r | tr . _) >/dev/null 2>&1 || true
+
+    insmod bdmf bdmf_chrdev_major=215 >/dev/null 2>&1 || true
+    insmod rdpa_gpl
+    insmod rdpa
+    insmod rdpa_mw
+
+    # From 4.16L.04:
+    insmod rdpa_cmd
+
+    # For 4.16L.03 or older:
+    insmod rdpa_cmd_tm
+    insmod rdpa_cmd_spdsvc
+    insmod rdpa_cmd_ds_wan_udp_filter
+    insmod rdpa_cmd_drv
+
+    /etc/rdpa_init.sh
+}
+
