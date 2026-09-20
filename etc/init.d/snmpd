@@ -1,0 +1,986 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008 OpenWrt.org
+START=50
+
+DEFAULT=/etc/default/snmpd
+LIB_D=/var/lib/snmp
+LOG_D=/var/log
+RUN_D=/var/run
+PID_F=$RUN_D/snmpd.pid
+RUN_C=$RUN_D/snmpd.conf
+
+snmpd_agent_add() {
+  local cfg="$1"
+  local agentaddress
+  local agentuser
+  local agentgroup
+  local leave_pidfile
+  local maxGetbulkRepeats
+  local maxGetbulkResponses
+  
+  config_get agentaddress "$cfg" agentaddress
+  [ -n "$agentaddress" ] && echo "agentaddress $agentaddress" >> $RUN_C
+
+  config_get agentuser "$cfg" agentuser
+  [ -n "$agentuser" ] && echo "agentuser $agentuser" >> $RUN_C
+
+  config_get agentgroup "$cfg" agentgroup
+  [ -n "$agentgroup" ] && echo "agentgroup $agentgroup" >> $RUN_C
+
+  config_get leave_pidfile "$cfg" leave_pidfile
+  [ -n "$leave_pidfile" ] && echo "leave_pidfile $leave_pidfile" >> $RUN_C
+
+  config_get maxGetbulkRepeats "$cfg" maxGetbulkRepeats
+  [ -n "$maxGetbulkRepeats" ] && echo "maxGetbulkRepeats $maxGetbulkRepeats" >> $RUN_C
+
+  config_get maxGetbulkResponses "$cfg" maxGetbulkResponses
+  [ -n "$maxGetbulkResponses" ] && echo "maxGetbulkResponses $maxGetbulkResponses" >> $RUN_C
+}
+
+snmpd_authcommunity_add(){
+  local cfg="$1"
+  local authtypes
+  local community
+  local source
+  local oid
+  local view
+  local context
+  
+  config_get authtypes "$cfg" authtypes
+  [ -n "$authtypes" ] || return 0
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  config_get source "$cfg" source
+  config_get oid "$cfg" oid
+  config_get view "$cfg" view
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  if [ -n "$oid" ]; then
+    echo "authcommunity $authtypes $community $source $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "authcommunity $authtypes $community $source -V $view $context">>$RUN_C
+  else
+    echo "authcommunity $authtypes $community $source">>$RUN_C
+  fi
+}
+
+snmpd_authuser_add(){
+  local cfg="$1"
+  local prefix
+  local authtypes
+  local secmodel
+  local name
+  local level
+  local context
+  local oid
+  local view
+
+  config_get authtypes "$cfg" authtypes
+  [ -n "$authtypes" ] || return 0
+  config_get secmodel "$cfg" secmodel
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  # optional: security level
+  config_get level "$cfg" level
+
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+
+  # optional oid. oid and view cannot be set at the same time
+  config_get oid "$cfg" oid
+  # optional view 
+  config_get view "$cfg" view
+  if [ -n "$secmodel" ]; then
+    prefix="authuser "${authtypes}" -s "${secmodel}" "${name}" "${level}
+  else
+    prefix="authuser "${authtypes}" "${name}" "${level}
+  fi
+  if [ -n "$oid" ]; then
+    echo "$prefix $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "$prefix -V $view $context">>$RUN_C
+  else
+    echo "$prefix ">>$RUN_C
+  fi
+}
+snmpd_authgroup_add(){
+  local cfg="$1"
+  local prefix
+  local authtypes
+  local secmodel
+  local name
+  local level
+  local context
+  local oid
+  local view
+  
+  config_get authtypes "$cfg" authtypes
+  [ -n "$authtypes" ] || return 0
+  config_get secmodel "$cfg" secmodel
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  # optional: security level
+  config_get level "$cfg" level
+
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+
+  # optional oid. oid and view cannot be set at the same time
+  config_get oid "$cfg" oid
+  # optional view 
+  config_get view "$cfg" view
+  if [ -n "$secmodel" ]; then
+    prefix="authgroup "${authtypes}" -s "${secmodel}" "${name}" "${level}
+  else
+    prefix="authgroup "${authtypes}" "${name}" "${level}
+  fi
+  if [ -n "$oid" ]; then
+    echo "$prefix $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "$prefix -V $view $context">>$RUN_C
+  else
+    echo "$prefix ">>$RUN_C
+  fi
+}
+
+snmpd_authaccess_add(){
+  local cfg="$1"
+  local authtypes
+  local group
+  local level
+  local context
+
+  config_get authtypes "$cfg" authtypes
+  [ -n "$authtypes" ] || return 0
+  config_get group "$cfg" group
+  [ -n "$group" ] || return 0
+  config_get view "$cfg" view
+  [ -n "$view" ] || return 0
+  # optional: security level
+  config_get level "$cfg" level
+
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+
+  echo "authaccess $authtypes $group $view $level $context">>$RUN_C
+}
+
+snmpd_engine_add(){
+  local cfg="$1"
+  local engineID
+  local engineIDType
+  local engineIDNic
+
+  config_get engineID "$cfg" engineID
+  [ -n "$engineID" ] && echo "engineID $engineID">>$RUN_C
+  config_get engineIDType "$cfg" engineIDType
+  [ -n "$engineIDType" ] && echo "engineIDType $engineIDType">>$RUN_C
+  config_get engineIDNic "$cfg" engineIDNic
+  [ -n "$engineIDNic" ] && echo "engineIDNic $engineIDNic">>$RUN_C
+}
+
+snmpd_trapcommunity_add(){
+  local cfg="$1"
+  local community
+
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  echo "trapcommunity $community">>$RUN_C
+}
+
+snmpd_trapsink_add(){
+  local cfg="$1"
+  local community
+  local port
+  local host
+
+  config_get host "$cfg" host
+  [ -n "$host" ] || return 0
+  # optional community
+  config_get community "$cfg" community
+  # optional port
+  config_get port "$cfg" port
+  if [ -n "$port" ]; then
+    echo "trapsink $host:$port $community">>$RUN_C
+  else
+    echo "trapsink $host $community">>$RUN_C
+  fi
+}
+
+snmpd_trap2sink_add(){
+  local cfg="$1"
+  local community
+  local port
+  local host
+  
+  config_get host "$cfg" host
+  [ -n "$host" ] || return 0
+  # optional community
+  config_get community "$cfg" community
+  # optional port
+  config_get port "$cfg" port
+  if [ -n "$port" ]; then
+    echo "trap2sink $host:$port $community">>$RUN_C
+  else
+    echo "trap2sink $host $community">>$RUN_C
+  fi
+}
+
+snmpd_informsink_add(){
+  local cfg="$1"
+  local community
+  local port
+  local host
+  
+  config_get host "$cfg" host
+  [ -n "$host" ] || return 0
+  # optional community
+  config_get community "$cfg" community
+  # optional port
+  config_get port "$cfg" port
+  if [ -n "$port" ]; then
+    echo "informsink $host:$port $community">>$RUN_C
+  else
+    echo "informsink $host $community">>$RUN_C
+  fi
+}
+
+snmpd_authtrapenable_add(){
+  local cfg="$1"
+  local enable
+
+  config_get enable "$cfg" enable
+  [ -n "$enable" ] || return 0
+  if [ "$enable" == "0" ]; then
+    enable="2"
+  elif [ "$enable" != "1" ]; then 
+    echo "authtrapenable must be 0 or 1. 0--disable, 1--enable"
+    return 0
+  fi
+  echo "authtrapenable $enable">>$RUN_C
+}
+
+snmpd_v1trapaddress_add(){
+  local cfg="$1"
+  local host
+
+  config_get host "$cfg" host
+  [ -n "$host" ] || return 0
+  echo "v1trapaddress $host">>$RUN_C
+}
+
+snmpd_trapsess_add(){
+  local cfg="$1"
+  local host
+  local snmpcmd_args
+
+  config_get snmpcmd_args "$cfg" snmpcmd_args
+  config_get host "$cfg" host
+  [ -n "$host" ] || return 0
+  echo "trapsess $snmpcmd_args $host">>$RUN_C
+}
+
+snmpd_rocommunity_add(){
+  local cfg="$1"
+  local community
+  local source
+  local oid
+  local view
+  local context
+
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  # optional source
+  config_get source "$cfg" source
+  config_get oid "$cfg" oid
+
+  # optional view 
+  config_get view "$cfg" view
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  if [ -n "$oid" ]; then
+    echo "rocommunity $community $source $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rocommunity $community $source -V $view $context">>$RUN_C
+  else
+    echo "rocommunity $community $source">>$RUN_C
+  fi
+}
+snmpd_rocommunity6_add(){
+  local cfg="$1"
+  local community
+  local source
+  local oid
+  local view
+  local context
+
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  # optional source
+  config_get source "$cfg" source
+  config_get oid "$cfg" oid
+
+  # optional view 
+  config_get view "$cfg" view
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  if [ -n "$oid" ]; then
+    echo "rocommunity6 $community $source $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rocommunity6 $community $source -V $view $context">>$RUN_C
+  else
+    echo "rocommunity6 $community $source">>$RUN_C
+  fi
+}
+
+snmpd_rwcommunity_add(){
+  local cfg="$1"
+  local community
+  local source
+  local oid
+  local view
+  local context
+  
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  # optional source
+  config_get source "$cfg" source
+  config_get oid "$cfg" oid
+
+  # optional view 
+  config_get view "$cfg" view
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  if [ -n "$oid" ]; then
+    echo "rwcommunity $community $source $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rwcommunity $community $source -V $view $context">>$RUN_C
+  else
+    echo "rwcommunity $community $source">>$RUN_C
+  fi
+}
+
+snmpd_rwcommunity6_add(){
+  local cfg="$1"
+  local community
+  local source
+  local oid
+  local view
+  local context
+  
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  # optional source
+  config_get source "$cfg" source
+  config_get oid "$cfg" oid
+
+  # optional view 
+  config_get view "$cfg" view
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  if [ -n "$oid" ]; then
+    echo "rwcommunity6 $community $source $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rwcommunity6 $community $source -V $view $context">>$RUN_C
+  else
+    echo "rwcommunity6 $community $source">>$RUN_C
+  fi
+}
+
+snmpd_createUser_add(){
+  local cfg="$1"
+  local name
+  local engineid
+  local authtype
+  local authpassphrase
+  local privprotocol
+  local privpassphrase
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  #optional engineid
+  config_get engineid "$cfg" engineid
+  engineid=${engineid:+-e $engineid}
+  # optional authentication types
+  config_get authtype "$cfg" authtype
+  # optional authpassphrase
+  config_get authpassphrase "$cfg" authpassphrase
+  # optional privacy protocols
+  config_get privprotocol "$cfg" privprotocol
+  # optional privpassphrase. If the privacy passphrase is not specified, it is assumed to be the same as the authentication passphrase.
+  config_get privpassphrase "$cfg" privpassphrase
+  echo "createUser $engineid $name $authtype $authpassphrase $privprotocol $privpassphrase">>$RUN_C
+}
+
+snmpd_rwuser_add(){
+  local cfg="$1"
+  local name
+  local level
+  local context
+  local view
+  local oid
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  # optional: security level
+  config_get level "$cfg" level
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+
+  # optional oid. oid and view cannot be set at the same time
+  config_get oid "$cfg" oid
+  # optional view 
+  config_get view "$cfg" view
+
+  if [ -n "$oid" ]; then
+    echo "rwuser $name $level $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rwuser $name $level -V $view $context">>$RUN_C
+  else
+    echo "rwuser $name $level">>$RUN_C
+  fi
+}
+
+snmpd_host_add() {
+  local cfg="$1"
+  local ignoredisk
+  local skipNFSInHostResources
+  local storageUseNFS
+
+  config_get ignoredisk "$cfg" ignoredisk
+  [ -n "$ignoredisk" ] && echo "ignoredisk $ignoredisk" >> $RUN_C
+
+  config_get skipNFSInHostResources "$cfg" skipNFSInHostResources
+  [ -n "$skipNFSInHostResources" ] && echo "skipNFSInHostResources $skipNFSInHostResources" >> $RUN_C
+
+  config_get storageUseNFS "$cfg" storageUseNFS
+  if [ "$storageUseNFS" == "0" ]; then
+    storageUseNFS="2"
+  elif [ "$storageUseNFS" != "1" ]; then
+    echo "storageUseNFS must be 0 or 1. 0--disable, 1--enable"
+    return 0
+  fi
+
+  [ -n "$storageUseNFS" ] && echo "storageUseNFS $storageUseNFS" >> $RUN_C
+}
+
+
+snmpd_disk_add() {
+  local cfg="$1"
+  local path
+  local minspace
+  local minpercent
+
+  config_get path "$cfg" path
+  [ -n "$path" ] || return 0
+
+  config_get minspace "$cfg" minspace
+  config_get minpercent "$cfg" minpercent
+  if [ -n $minspace ]; then
+    echo "disk $path $minspace" >> $RUN_C
+  else
+    echo "disk $path $minpercent" >> $RUN_C
+  fi
+}
+
+snmpd_includeAllDisks_add() {
+  local cfg="$1"
+  local minpercent
+
+  config_get minpercent "$cfg" minpercent
+  [ -n "$minpercent" ] || return 0
+
+  echo "includeAllDisks $minpercent" >> $RUN_C
+}
+snmpd_dlmod_add() {
+  local cfg="$1"
+  local name
+  local path
+  
+  config_get name "$cfg" name
+  [ -n "name" ] || return 0
+  config_get path "$cfg" path
+  [ -n "path" ] || return 0
+
+  echo "dlmod $name $path" >> $RUN_C
+}
+
+snmpd_system_add() {
+  local cfg="$1"
+  local sysLocation
+  local sysContact
+  local sysName
+  local sysServices
+  local sysDescr
+  local sysObjectID
+  
+  config_get syslocation "$cfg" sysLocation
+  [ -n "$syslocation" ] && echo "sysLocation $syslocation" >> $RUN_C
+  config_get syscontact "$cfg" sysContact
+  [ -n "$syscontact" ] && echo "sysContact $syscontact" >> $RUN_C
+  config_get sysname "$cfg" sysName
+  [ -n "$sysname" ] && echo "sysName $sysname" >> $RUN_C
+  config_get sysservices "$cfg" sysServices
+  [ -n "$sysservices" ] && echo "sysServices $sysservices" >> $RUN_C
+  config_get sysdescr "$cfg" sysDescr
+  [ -n "$sysdescr" ] && echo "sysDescr $sysdescr" >> $RUN_C
+  config_get sysobjectid "$cfg" sysObjectID
+  [ -n "$sysobjectid" ] && echo "sysObjectID $sysobjectid" >> $RUN_C
+}
+
+snmpd_com2sec_add() {
+  local cfg="$1"
+  local context
+  local secname
+  local source
+  local community
+  
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  context=${context:+-Cn $context}
+  config_get secname "$cfg" secname
+  [ -n "$secname" ] || return 0
+  config_get source "$cfg" source
+  [ -n "$source" ] || return 0
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  echo "com2sec $context $secname $source $community" >> $RUN_C
+}
+
+snmpd_com2sec6_add() {
+  local cfg="$1"
+  local context
+  local secname
+  local source
+  local community
+  
+  # optional context
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  context=${context:+-Cn $context}
+  config_get secname "$cfg" secname
+  [ -n "$secname" ] || return 0
+  config_get source "$cfg" source
+  [ -n "$source" ] || return 0
+  config_get community "$cfg" community
+  [ -n "$community" ] || return 0
+  echo "com2sec6 $context $secname $source $community" >> $RUN_C
+}
+
+snmpd_group_add() {
+  local cfg="$1"
+  local group
+  local version
+  local secname
+  
+  config_get group "$cfg" group
+  [ -n "$group" ] || return 0
+  config_get version "$cfg" version
+  [ -n "$version" ] || return 0
+  config_get secname "$cfg" secname
+  [ -n "$secname" ] || return 0
+  echo "group $group $version $secname" >> $RUN_C
+}
+snmpd_view_add() {
+  local cfg="$1"
+  local viewname
+  local type
+  local oid
+  local mask
+  
+  config_get viewname "$cfg" viewname
+  [ -n "$viewname" ] || return 0
+  config_get type "$cfg" type
+  [ -n "$type" ] || return 0
+  config_get oid "$cfg" oid
+  [ -n "$oid" ] || return 0
+  # optional mask
+  config_get mask "$cfg" mask
+  echo "view $viewname $type $oid $mask" >> $RUN_C
+}
+snmpd_access_add() {
+  local cfg="$1"
+  local group
+  local context
+  local version
+  local level
+  local prefix
+  local read
+  local write
+  local notify
+  
+  config_get group "$cfg" group
+  [ -n "$group" ] || return 0
+  config_get context "$cfg" context
+  [ -n $context ] || return 0
+  [ "$context" == "none" ] && context='""'
+  config_get version "$cfg" version
+  [ -n "$version" ] || return 0
+  config_get level "$cfg" level
+  [ -n "$level" ] || return 0
+  config_get prefix "$cfg" prefix
+  [ -n "$prefix" ] || return 0
+  config_get read "$cfg" read
+  [ -n "$read" ] || return 0
+  config_get write "$cfg" write
+  [ -n "$write" ] || return 0
+  config_get notify "$cfg" notify
+  [ -n "$notify" ] || return 0
+  echo "access $group $context $version $level $prefix $read $write $notify" >> $RUN_C
+}
+snmpd_setaccess_add() {
+  local cfg="$1"
+  local group
+  local context
+  local model
+  local level
+  local prefix
+  local viewname
+  local viewval
+  
+  config_get group "$cfg" group
+  [ -n "$group" ] || return 0
+  config_get context "$cfg" context
+  [ -n $context ] || return 0
+  [ "$context" == "none" ] && context='""'
+  config_get model "$cfg" model
+  [ -n "$model" ] || return 0
+  config_get level "$cfg" level
+  [ -n "$level" ] || return 0
+  config_get prefix "$cfg" prefix
+  [ -n "$prefix" ] || return 0
+  config_get viewname "$cfg" viewname
+  [ -n "$viewname" ] || return 0
+  config_get viewval "$cfg" viewval
+  [ -n "$viewval" ] || return 0
+  echo "setaccess $group $context $model $level $prefix $viewname $viewval" >> $RUN_C
+}
+snmpd_pass_add() {
+  local cfg="$1"
+  local pass='pass'
+  local priority
+  local miboid
+  local prog
+  
+  config_get miboid "$cfg" miboid
+  [ -n "$miboid" ] || return 0
+  config_get prog "$cfg" prog
+  [ -n "$prog" ] || return 0
+  config_get_bool persist "$cfg" persist 0
+  [ $persist -ne 0 ] && pass='pass_persist'
+  config_get priority "$cfg" priority
+  priority=${priority:+-p $priority}
+  echo "$pass $priority $miboid $prog" >> $RUN_C
+}
+
+snmpd_rouser_add(){
+  local cfg="$1"
+  local name
+  local level
+  local context
+  local view
+  local oid
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  # optional: security level
+  config_get level "$cfg" level
+  
+  # optional context can be set when view is set
+  config_get context "$cfg" context
+  [ "$context" == "none" ] && context='""'
+  
+  # optional oid. oid and view cannot be set at the same time
+  config_get oid "$cfg" oid
+  # optional view 
+  config_get view "$cfg" view
+  
+  if [ -n "$oid" ]; then
+    echo "rouser $name $level $oid $context">>$RUN_C
+  elif [ -n "$view" ]; then
+    echo "rouser $name $level -V $view $context">>$RUN_C
+  else
+    echo "rouser $name $level">>$RUN_C
+  fi
+}
+
+snmpd_exec_add() {
+  local cfg="$1"
+  local name
+  local prog
+  local args
+  local miboid
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get prog "$cfg" prog
+  [ -n "$prog" ] || return 0
+  config_get args "$cfg" args
+  config_get miboid "$cfg" miboid
+  echo "exec $miboid $name $prog $args" >> $RUN_C
+}
+
+snmpd_sh_add() {
+  local cfg="$1"
+  local name
+  local prog
+  local args
+  local miboid
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get prog "$cfg" prog
+  [ -n "$prog" ] || return 0
+  config_get args "$cfg" args
+  config_get miboid "$cfg" miboid
+  echo "sh $miboid $name $prog $args" >> $RUN_C
+}
+
+snmpd_execfix_add() {
+  local cfg="$1"
+  local exec_or_sh_name
+  local prog
+  local args
+  
+  config_get exec_or_sh_name "$cfg" exec_or_sh_name
+  [ -n "$exec_or_sh_name" ] || return 0
+  config_get prog "$cfg" prog
+  [ -n "$prog" ] || return 0
+  config_get args "$cfg" args
+  echo "execfix $exec_or_sh_name $prog $args" >> $RUN_C
+}
+
+snmpd_load_add() {
+  local cfg="$1"
+  local max1
+  local max5
+  local max15
+  
+  config_get max1 "$cfg" max1
+  config_get max5 "$cfg" max5
+  config_get max15 "$cfg" max15
+  echo "load $max1 $max5 $max15" >> $RUN_C
+}
+
+snmpd_swap_add() {
+  local cfg="$1"
+  local min
+
+  config_get min "$cfg" min
+  echo "swap $min" >> $RUN_C
+}
+
+snmpd_proc_add() {
+  local cfg="$1"
+  local name
+  local max
+  local min
+
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get max $cfg max
+  config_get min $cfg min
+  echo "proc $name $max $min" >> $RUN_C
+}
+
+snmpd_procfix_add() {
+  local cfg="$1"
+  local name
+  local program
+  local arguments
+  
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get program "$cfg" program
+  [ -n "$program" ] || return 0
+  config_get arguments "$cfg" arguments
+  echo "procfix $name $program $arguments" >> $RUN_C
+}
+
+snmpd_interface_fadeout_add() {
+  local cfg="$1"
+  local seconds
+
+  config_get seconds "$cfg" seconds
+  [ -n "$seconds" ] || return 0
+  echo "interface_fadeout $seconds" >> $RUN_C
+}
+snmpd_interface_replace_old_add() {
+  local cfg="$1"
+  local value
+
+  config_get value "$cfg" value
+  [ -n "$value" ] || return 0
+  echo "interface_replace_old $value" >> $RUN_C
+}
+
+snmpd_interface_add() {
+  local cfg="$1"
+  local name
+  local type
+  local speed
+
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get type "$cfg" type
+  [ -n "$type" ] || return 0
+  config_get speed "$cfg" speed
+  [ -n "$speed" ] || return 0
+  echo "interface $name $type $speed" >> $RUN_C
+}
+
+snmpd_defDomain_add() {
+  local cfg="$1"
+  local application
+  local domain
+
+  config_get application "$cfg" application
+  [ -n "$application" ] || return 0
+  config_get domain "$cfg" domain
+  [ -n "$domain" ] || return 0
+  echo "defDomain $application $domain" >> $RUN_C
+}
+snmpd_defTarget_add() {
+  local cfg="$1"
+  local application
+  local domain
+  local target
+  
+  config_get application "$cfg" application
+  [ -n "$application" ] || return 0
+  config_get domain "$cfg" domain
+  [ -n "$domain" ] || return 0
+  config_get target "$cfg" target
+  [ -n "$target" ] || return 0
+  echo "defTarget $application $domain $target" >> $RUN_C
+}
+snmpd_dontLogTCPWrappersConnects_add(){
+  local cfg="$1"
+  local value
+
+  config_get value "$cfg" value
+  [ -n "$value" ] || return 0
+  echo "dontLogTCPWrappersConnects $value">>$RUN_C
+}
+
+snmpd_injectHandler_add(){
+  local cfg="$1"
+  local handler
+  local name
+  local intoname
+
+  config_get handler "$cfg" handler
+  [ -n "$handler" ] || return 0
+  config_get name "$cfg" name
+  [ -n "$name" ] || return 0
+  config_get intoname "$cfg" intoname
+  [ -n "$intoname" ] || return 0
+
+  echo "injectHandler $handler $name $intoname">>$RUN_C
+}
+
+snmpd_quit_add(){
+  local cfg="$1"
+  local value
+
+  config_get value "$cfg" value
+  [ -n "$value" ] || return 0
+  echo "quit $value">>$RUN_C
+}
+
+snmpd_bridgename_add(){
+  local cfg="$1"
+  local bridge
+
+  config_get bridge "$cfg" bridge
+  [ -n "$bridge" ] && echo "bridge $bridge" >> $RUN_C
+}
+
+start() {
+  [ -d $LIB_D ] || mkdir -p $LIB_D
+  [ -d $LOG_D ] || mkdir -p $LOG_D
+  [ -d $RUN_D ] || mkdir -p $RUN_D
+  [ -f $RUN_C ] && rm -f $RUN_C
+
+  config_load snmpd
+  
+  config_get_bool snmp_enable general enable 0
+  if [ "$snmp_enable" == "0" ]; then
+  	return
+  fi
+
+  config_foreach snmpd_agent_add agent
+  config_foreach snmpd_engine_add engine
+  config_foreach snmpd_system_add system
+  config_foreach snmpd_rocommunity_add rocommunity
+  config_foreach snmpd_rocommunity6_add rocommunity6
+  config_foreach snmpd_rwcommunity_add rwcommunity
+  config_foreach snmpd_rwcommunity6_add rwcommunity6
+  config_foreach snmpd_com2sec_add com2sec
+  config_foreach snmpd_com2sec6_add com2sec6
+  config_foreach snmpd_group_add group
+  config_foreach snmpd_view_add view
+  config_foreach snmpd_rouser_add rouser
+  config_foreach snmpd_rwuser_add rwuser
+  config_foreach snmpd_createUser_add createUser
+  config_foreach snmpd_access_add access
+  config_foreach snmpd_setaccess_add setaccess
+  config_foreach snmpd_authcommunity_add authcommunity 
+  config_foreach snmpd_authuser_add authuser
+  config_foreach snmpd_authgroup_add authgroup
+  config_foreach snmpd_authaccess_add authaccess
+  config_foreach snmpd_trapcommunity_add trapcommunity
+  config_foreach snmpd_trapsink_add trapsink
+  config_foreach snmpd_trap2sink_add trap2sink
+  config_foreach snmpd_informsink_add informsink
+  config_foreach snmpd_authtrapenable_add authtrapenable
+  config_foreach snmpd_v1trapaddress_add v1trapaddress
+  config_foreach snmpd_trapsess_add trapsess
+  config_foreach snmpd_dontLogTCPWrappersConnects_add dontLogTCPWrappersConnects
+  config_foreach snmpd_injectHandler_add injectHandler
+  config_foreach snmpd_host_add host 
+  config_foreach snmpd_disk_add disk
+  config_foreach snmpd_includeAllDisks_add includeAllDisks
+  config_foreach snmpd_dlmod_add dlmod
+  config_foreach snmpd_sh_add sh
+  config_foreach snmpd_execfix_add execfix
+  config_foreach snmpd_load_add load
+  config_foreach snmpd_swap_add swap
+  config_foreach snmpd_proc_add proc
+  config_foreach snmpd_procfix_add procfix
+  config_foreach snmpd_interface_fadeout_add interface_fadeout
+  config_foreach snmpd_interface_replace_old_add interface_replace_old
+  config_foreach snmpd_interface_add interface
+  config_foreach snmpd_defDomain_add defDomain
+  config_foreach snmpd_defTarget_add defTarget
+  config_foreach snmpd_pass_add pass
+  config_foreach snmpd_exec_add exec
+  config_foreach snmpd_quit_add quit
+  config_foreach snmpd_bridgename_add bridgename
+
+  fw3 -q reload
+
+  [ -f $DEFAULT ] && . $DEFAULT
+  $DEBUG /usr/sbin/snmpd $OPTIONS
+}
+
+stop() {
+  [ -f $PID_F ] && kill $(cat $PID_F)
+  [ -f $RUN_C ] && rm -f $RUN_C
+}
+
+restart(){
+       stop
+       sleep 1
+       start
+}
+

@@ -1,0 +1,52 @@
+#!/bin/sh /etc/rc.common
+START=99
+
+configure_crontab () {
+    local interface
+    local minute
+    local hour
+    local day
+    local month
+    local weekday
+
+    config_get interface $1 interface
+    [ -n "$interface" ] || return
+
+    config_get minute $1 minute '*'
+    config_get hour $1 hour '*'
+    config_get day $1 day '*'
+    config_get month $1 month '*'
+    config_get weekday $1 weekday '*'
+
+    echo "$minute $hour $day $month $weekday /usr/bin/trafficmon-ubus $interface"
+}
+
+start () {
+    local username=trafficmon-ubus
+    user_exists $username || user_add $username 0 0 "" "/var" "/bin/ash"
+
+    config_load system
+    config_foreach configure_crontab trafficmon | awk '
+        BEGIN{
+            mul[1]=60; offset[1]=0
+            mul[2]=23; offset[2]=0
+            mul[3]=30; offset[3]=1
+            mul[4]=11; offset[4]=1
+            mul[5]=7;  offset[5]=0
+            srand()
+        }
+        {
+            for (i=1; i<=5; i++)
+            {
+                if ($i == "*")
+                {
+                    $i=int(rand()*mul[i]+offset[i])
+                }
+                else
+                {
+                    break
+                }
+            }
+            print $0
+        }' | crontab -u $username -
+}
