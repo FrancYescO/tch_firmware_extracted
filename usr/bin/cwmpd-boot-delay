@@ -1,0 +1,50 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+wait_for_voice_up() {
+  config_load mmpbx
+  config_get mmpbxenabled global enabled 0
+  [ "$mmpbxenabled" == "0" ] && return
+  count=0
+  while [ $count -lt 15 ]
+  do
+    local mmpbx_state=$(uci_get_state mmpbx state "")
+    if [ "$mmpbx_state" == "RUNNING" ] ; then
+      break
+    fi
+    logger -t cwmpd " Voice not up yet ... delaying startup"
+    sleep 5
+    count=`expr $count + 1`
+  done
+}
+
+
+wait_for_wan_up() {
+  config_load cwmpd
+  config_get ip_preference cwmpd_config ip_preference prefer_v6
+
+  if [ "$ip_preference" == "prefer_v6" -o "$ip_preference" == "v6_only" ]; then 
+    config_get intf cwmpd_config interface6 wan6
+  else
+    config_get intf cwmpd_config interface wan
+  fi
+
+  [ "$intf" == "" ] && return
+
+  count=0
+  while [ $count -lt 30 ]
+  do
+    logger -t cwmpd " waiting for $intf up ..." 
+    local up=$(ifstatus $intf | grep '"up":' | awk '{print $2}' |  sed 's/,//g')
+    if [ "$up" == "true" ] ; then
+      break
+    fi
+    sleep 5
+    count=`expr $count + 1`
+  done
+}
+
+wait_for_voice_up
+wait_for_wan_up
+
