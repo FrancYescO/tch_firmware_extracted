@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+
+START=12
+STOP=36
+APP=ledfw.lua
+STATUSLED_APP=status-led-eventing.lua
+PID_FILE=/var/run/$APP.pid
+STATUSLED_PID_FILE=/var/run/$STATUSLED_APP.pid
+LED_ETHERNET_EXIST=`uci get ledfw.ethernet 2>/dev/null`
+
+start() {
+        insmod /lib/modules/`uname -r`/technicolor_led.ko 2>/dev/null
+#       Disable bootloader/kernel startup i2c LED pattern before starting ledfw (Telus GCNT-K/GCNT-P)
+        [ -f /sys/bus/i2c/devices/0-0030/led_pattern ] && echo 0 > /sys/bus/i2c/devices/0-0030/led_pattern
+#       Invoke led_control.sh to enable external PHY LED since it is under user-control by default.
+        if [ "${LED_ETHERNET_EXIST}" ] && [ -x /usr/share/transformer/scripts/led_control.sh ]; then
+            /usr/share/transformer/scripts/led_control.sh
+        fi
+        if [ -x /sbin/$STATUSLED_APP ]; then
+            start-stop-daemon -S -x $STATUSLED_APP -p $STATUSLED_PID_FILE -m -b
+        fi
+        start-stop-daemon -S -x $APP -p $PID_FILE -m -b
+}
+
+stop() {
+#        start-stop-daemon -K -n $APP -p $PID_FILE -s TERM
+        killall -KILL $APP
+        if [ -x /sbin/$STATUSLED_APP ]; then
+#           long process name : start-stop-daemon fails to stop the daemon; replace with ' killall'
+#           start-stop-daemon -K -n $STATUSLED_APP -p $STATUSLED_PID_FILE -s TERM
+            killall -KILL $STATUSLED_APP
+        fi
+        rm -rf $PID_FILE
+        rm -rf $STATUSLED_PID_FILE
+}

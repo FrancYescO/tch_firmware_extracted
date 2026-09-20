@@ -1,0 +1,75 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Device_Profiles.{i}.',
+		numEntriesParameter = "DeviceProfilesNumberOfEntries",
+		access = 'readOnly',
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			Name = {
+				access = "readOnly",
+				type = "string"
+			},
+			ID = {
+				access = "readOnly",
+				type = "string"
+			},
+			APN = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PDP_Type = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Authentication = {
+				 access = "readOnly",
+				 type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+function obj.getall(mapping, key, parentKey)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	key = tonumber(key)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.device", "profiles", parentKey)
+	if data and data.profiles and data.profiles[key] then
+		local profile = data.profiles[key]
+		result.Name = profile.name
+		result.ID = profile.id
+		result.APN = profile.apn
+		result.PDP_Type = profile.pdptype
+		result.Authentication = profile.authentication
+	end
+
+	return result
+end
+
+function obj.get(mapping, paramName, key, parentKey)
+	return obj.getall(mapping, key, parentKey)[paramName]
+end
+
+function obj.entries(_, parentKey)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.device", "profiles", parentKey)
+	local profiles_indexes = {}
+
+	if type(data.profiles) == "table" then
+		for profile_index in ipairs(data.profiles) do
+			table.insert(profiles_indexes, tostring(profile_index))
+		end
+	end
+	return profiles_indexes
+end
+
+register(obj)
+

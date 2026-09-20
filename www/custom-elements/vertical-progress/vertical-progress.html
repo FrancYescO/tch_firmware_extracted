@@ -1,0 +1,332 @@
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-range-behavior/iron-range-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-styles/color.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!--
+Fork of [&lt;paper-progress&gt;](https://github.com/PolymerElements/paper-progress) with vertical layout.
+
+Material design: [Progress & activity](https://www.google.com/design/spec/components/progress-activity.html)
+
+The progress bars are for situations where the percentage completed can be
+determined. They give users a quick sense of how much longer an operation
+will take.
+
+Example:
+
+    <vertical-progress value="10"></vertical-progress>
+
+There is also a secondary progress which is useful for displaying intermediate
+progress, such as the buffer level during a streaming playback progress bar.
+
+Example:
+
+    <vertical-progress value="10" secondary-progress="30"></vertical-progress>
+
+### Styling progress bar:
+
+To change the active progress bar color:
+
+    vertical-progress {
+       --vertical-progress-active-color: #e91e63;
+    }
+
+To change the secondary progress bar color:
+
+    vertical-progress {
+      --vertical-progress-secondary-color: #f8bbd0;
+    }
+
+To change the progress bar background color:
+
+    vertical-progress {
+      --vertical-progress-container-color: #64ffda;
+    }
+
+Add the class `transiting` to a vertical-progress to animate the progress bar when
+the value changed. You can also customize the transition:
+
+    vertical-progress {
+      --vertical-progress-transition-duration: 0.08s;
+      --vertical-progress-transition-timing-function: ease;
+      --vertical-progress-transition-transition-delay: 0s;
+    }
+
+To change the duration of the indeterminate cycle:
+
+    vertical-progress {
+      --vertical-progress-indeterminate-cycle-duration: 2s;
+    }
+
+The following mixins are available for styling:
+
+Custom property                                  | Description                                 | Default
+-------------------------------------------------|---------------------------------------------|--------------
+`--vertical-progress-container`                     | Mixin applied to container                  | `{}`
+`--vertical-progress-transition-duration`           | Duration of the transition                  | `0.008s`
+`--vertical-progress-transition-timing-function`    | The timing function for the transition      | `ease`
+`--vertical-progress-transition-delay`              | delay for the transition                    | `0s`
+`--vertical-progress-container-color`               | Color of the container                      | `--google-grey-300`
+`--vertical-progress-active-color`                  | The color of the active bar                 | `--google-green-500`
+`--vertical-progress-secondary-color`               | The color of the secondary bar              | `--google-green-100`
+`--vertical-progress-disabled-active-color`         | The color of the active bar if disabled     | `--google-grey-500`
+`--vertical-progress-disabled-secondary-color`      | The color of the secondary bar if disabled  | `--google-grey-300`
+`--vertical-progress-indeterminate-cycle-duration`  | Duration of an indeterminate cycle          | `2s`
+
+@group Paper Elements
+@element vertical-progress
+@hero hero.svg
+@demo demo/index.html
+--> <dom-module id="vertical-progress"> <template> <style> :host {
+        display: block;
+        height: 200px;
+        width: 4px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      :host([hidden]), [hidden] {
+        display: none !important;
+      }
+
+      #progressContainer {
+        @apply --vertical-progress-container;
+        position: relative;
+      }
+
+      #progressContainer,
+      /* the stripe for the indeterminate animation*/
+      .indeterminate::after {
+        height: 100%;
+      }
+
+      #primaryProgress,
+      #secondaryProgress,
+      .indeterminate::after {
+        @apply --layout-fit;
+      }
+
+      #progressContainer,
+      .indeterminate::after {
+        background: var(--vertical-progress-container-color, var(--google-grey-300));
+      }
+
+      :host(.transiting) #primaryProgress,
+      :host(.transiting) #secondaryProgress {
+        -webkit-transition-property: -webkit-transform;
+        transition-property: transform;
+
+        /* Duration */
+        -webkit-transition-duration: var(--vertical-progress-transition-duration, 0.08s);
+        transition-duration: var(--vertical-progress-transition-duration, 0.08s);
+
+        /* Timing function */
+        -webkit-transition-timing-function: var(--vertical-progress-transition-timing-function, ease);
+        transition-timing-function: var(--vertical-progress-transition-timing-function, ease);
+
+        /* Delay */
+        -webkit-transition-delay: var(--vertical-progress-transition-delay, 0s);
+        transition-delay: var(--vertical-progress-transition-delay, 0s);
+      }
+
+      #primaryProgress,
+      #secondaryProgress {
+        @apply --layout-fit;
+        -webkit-transform-origin: bottom center;
+        transform-origin: bottom center;
+        -webkit-transform: scaleY(0);
+        transform: scaleY(0);
+        will-change: transform;
+      }
+
+      #primaryProgress {
+        background: var(--vertical-progress-active-color, var(--google-green-500));
+      }
+
+      #secondaryProgress {
+        background: var(--vertical-progress-secondary-color, var(--google-green-100));
+      }
+
+      :host([disabled]) #primaryProgress {
+        background: var(--vertical-progress-disabled-active-color, var(--google-grey-500));
+      }
+
+      :host([disabled]) #secondaryProgress {
+        background: var(--vertical-progress-disabled-secondary-color, var(--google-grey-300));
+      }
+
+      :host(:not([disabled])) #primaryProgress.indeterminate {
+        -webkit-transform-origin: top center;
+        transform-origin: top center;
+        -webkit-animation: indeterminate-bar var(--vertical-progress-indeterminate-cycle-duration, 2s) linear infinite;
+        animation: indeterminate-bar var(--vertical-progress-indeterminate-cycle-duration, 2s) linear infinite;
+      }
+
+      :host(:not([disabled])) #primaryProgress.indeterminate::after {
+        content: "";
+        -webkit-transform-origin: center center;
+        transform-origin: center center;
+
+        -webkit-animation: indeterminate-splitter var(--vertical-progress-indeterminate-cycle-duration, 2s) linear infinite;
+        animation: indeterminate-splitter var(--vertical-progress-indeterminate-cycle-duration, 2s) linear infinite;
+      }
+
+      @-webkit-keyframes indeterminate-bar {
+        0% {
+          -webkit-transform: scaleY(1) translateY(100%);
+        }
+        50% {
+          -webkit-transform: scaleY(1) translateY(0%);
+        }
+        75% {
+          -webkit-transform: scaleY(1) translateY(0%);
+          -webkit-animation-timing-function: cubic-bezier(.28,.62,.37,.91);
+        }
+        100% {
+          -webkit-transform: scaleY(0) translateY(0%);
+        }
+      }
+
+      @-webkit-keyframes indeterminate-splitter {
+        0% {
+          -webkit-transform: scaleY(.75) translateY(125%);
+        }
+        30% {
+          -webkit-transform: scaleY(.75) translateY(125%);
+          -webkit-animation-timing-function: cubic-bezier(.42,0,.6,.8);
+        }
+        90% {
+          -webkit-transform: scaleY(.75) translateY(-125%);
+        }
+        100% {
+          -webkit-transform: scaleY(.75) translateY(-125%);
+        }
+      }
+
+      @keyframes indeterminate-bar {
+        0% {
+          transform: scaleY(1) translateY(100%);
+        }
+        50% {
+          transform: scaleY(1) translateY(0%);
+        }
+        75% {
+          transform: scaleY(1) translateY(0%);
+          animation-timing-function: cubic-bezier(.28,.62,.37,.91);
+        }
+        100% {
+          transform: scaleY(0) translateY(0%);
+        }
+      }
+
+      @keyframes indeterminate-splitter {
+        0% {
+          transform: scaleY(.75) translateY(125%);
+        }
+        30% {
+          transform: scaleY(.75) translateY(125%);
+          animation-timing-function: cubic-bezier(.42,0,.6,.8);
+        }
+        90% {
+          transform: scaleY(.75) translateY(-125%);
+        }
+        100% {
+          transform: scaleY(.75) translateY(-125%);
+        }
+      } </style> <div id="progressContainer"> <div id="secondaryProgress" hidden$="[[_hideSecondaryProgress(secondaryRatio)]]"></div> <div id="primaryProgress"></div> </div> </template> </dom-module> <script> Polymer({
+    is: 'vertical-progress',
+
+    behaviors: [
+      Polymer.IronRangeBehavior
+    ],
+
+    properties: {
+      /**
+       * The number that represents the current secondary progress.
+       */
+      secondaryProgress: {
+        type: Number,
+        value: 0
+      },
+
+      /**
+       * The secondary ratio
+       */
+      secondaryRatio: {
+        type: Number,
+        value: 0,
+        readOnly: true
+      },
+
+      /**
+       * Use an indeterminate progress indicator.
+       */
+      indeterminate: {
+        type: Boolean,
+        value: false,
+        observer: '_toggleIndeterminate'
+      },
+
+      /**
+       * True if the progress is disabled.
+       */
+      disabled: {
+        type: Boolean,
+        value: false,
+        reflectToAttribute: true,
+        observer: '_disabledChanged'
+      }
+    },
+
+    observers: [
+      '_progressChanged(secondaryProgress, value, min, max)'
+    ],
+
+    hostAttributes: {
+      role: 'progressbar'
+    },
+
+    _toggleIndeterminate: function(indeterminate) {
+      // If we use attribute/class binding, the animation sometimes doesn't translate properly
+      // on Safari 7.1. So instead, we toggle the class here in the update method.
+      this.toggleClass('indeterminate', indeterminate, this.$.primaryProgress);
+    },
+
+    _transformProgress: function(progress, ratio) {
+      var transform = 'scaleY(' + (ratio / 100) + ')';
+      progress.style.transform = progress.style.webkitTransform = transform;
+    },
+
+    _mainRatioChanged: function(ratio) {
+      this._transformProgress(this.$.primaryProgress, ratio);
+    },
+
+    _progressChanged: function(secondaryProgress, value, min, max) {
+      secondaryProgress = this._clampValue(secondaryProgress);
+      value = this._clampValue(value);
+
+      var secondaryRatio = this._calcRatio(secondaryProgress) * 100;
+      var mainRatio = this._calcRatio(value) * 100;
+
+      this._setSecondaryRatio(secondaryRatio);
+      this._transformProgress(this.$.secondaryProgress, secondaryRatio);
+      this._transformProgress(this.$.primaryProgress, mainRatio);
+
+      this.secondaryProgress = secondaryProgress;
+
+      this.setAttribute('aria-valuenow', value);
+      this.setAttribute('aria-valuemin', min);
+      this.setAttribute('aria-valuemax', max);
+    },
+
+    _disabledChanged: function(disabled) {
+      this.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    },
+
+    _hideSecondaryProgress: function(secondaryRatio) {
+      return secondaryRatio === 0;
+    }
+  }); </script> 

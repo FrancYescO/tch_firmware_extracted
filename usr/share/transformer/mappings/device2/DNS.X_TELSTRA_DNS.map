@@ -1,0 +1,162 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DNS_X_TELSTRA_DNS_i_ = {
+  objectType = {
+    name = "Device.DNS.X_TELSTRA_DNS.{i}.",
+    access = "readOnly", -- readWrite not supported
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      DNSServer = {
+        access = "readOnly",
+        type = "string",
+      },
+      Success = {
+        access = "readOnly",
+        type = "string",
+      },
+      Timeout = {
+        access = "readOnly",
+        type = "string",
+      },
+      Errors = {
+        access = "readOnly",
+        type = "string",
+      },
+      AverageResponseTime = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local ipairs = ipairs
+local inet = require "tch.inet"
+local mapper = mapper
+local resolve = resolve
+local pairs = pairs
+local nwCommon = mapper('nwcommon')
+local uciHelper = mapper("ucihelper")
+local ubusConnection = mapper("ubus").connect()
+local networkBinding = { config = "network" }
+local keyMap = {}
+
+local function ifExists(interface, dnsValue)
+  for _,v in pairs(keyMap) do
+    if v and v.interface == interface and v.dnsServer == dnsValue then
+      return true
+    end
+  end
+  return false
+end
+
+local function getStaticDNSServers()
+  local dnsServers = {}
+  local interface
+  local wanInterfaces = nwCommon.findLanWanInterfaces(true)
+  wanInterfaces[#wanInterfaces + 1] = "loopback"
+  for _, v in ipairs(wanInterfaces) do
+    wanInterfaces[v] = true
+  end
+  networkBinding.sectionname = "interface"
+  uciHelper.foreach_on_uci(networkBinding, function(s)
+    interface = s[".name"]
+    if wanInterfaces[interface] then
+      dnsServers[interface] = s.dns
+    end
+  end)
+  return dnsServers
+end
+
+local function updateKeyMap(interface, dnsServerEntry, count, dnsClientServerEntries)
+  local keyEntry
+  if not ifExists(interface, dnsServerEntry) then
+    keyEntry = interface..count
+    count = count + 1
+    dnsClientServerEntries[#dnsClientServerEntries+1] = keyEntry
+    keyMap[keyEntry] = { interface = interface, dnsServer = dnsServerEntry }
+  end
+  return count
+end
+
+
+Device_DNS_X_TELSTRA_DNS_i_.entries = function()
+  keyMap = {}
+  local count = 0
+  local dnsClientServerEntries = {}
+  local wanInterfaces = nwCommon.findLanWanInterfaces(true)
+  local dnsServers = getStaticDNSServers()
+
+  -- Populating static dns entries from uci
+  for interface, dnsServerEntry in pairs(dnsServers) do
+    if dnsServerEntry then
+      for _, dnsServerUciEntry in ipairs(dnsServerEntry) do
+        count = updateKeyMap(interface, dnsServerUciEntry, count, dnsClientServerEntries)
+      end
+    end
+  end
+
+  -- Populating dynamic dns entries from ubus
+  for _, interface in pairs(wanInterfaces) do
+    local ubusStatus = ubusConnection:call("network.interface." .. interface, "status", {})
+    if ubusStatus and ubusStatus["dns-server"] then
+      for _, dnsServerEntry in pairs(ubusStatus["dns-server"]) do
+        count = updateKeyMap(interface, dnsServerEntry, count, dnsClientServerEntries)
+      end
+    end
+    -- Populate inactive dns entries from ubus
+    if ubusStatus and ubusStatus.inactive and ubusStatus.inactive["dns-server"] then
+      for _, dnsServerEntry in pairs(ubusStatus.inactive["dns-server"]) do
+        count = updateKeyMap(interface, dnsServerEntry, count, dnsClientServerEntries)
+      end
+    end
+  end
+  return dnsClientServerEntries
+end
+
+local counterMap = {
+  ["Success"] = "_success",
+  ["Timeout"] = "_timeout",
+  ["Errors"] = "_fail",
+  ["AverageResponseTime"] = "_average",
+}
+
+local function getQuery(mapping,param,key)
+  local dns =  keyMap[key].dnsServer or ""
+  local tailPath = counterMap[param] or ""
+  local path = "/tmp/dnsqueries/" .. dns .. tailPath
+  local val = "0"
+  local f = io.open(path, "r")
+  if f then
+    val = f:read()
+    if param == "AverageResponseTime" then
+      local _ , average = string.match(val, "^([^|]*)|(.*)")
+      val = average
+    end
+    f:close()
+  end
+  return val
+end
+
+Device_DNS_X_TELSTRA_DNS_i_.get = {
+  DNSServer = function(mapping, param, key)
+    return keyMap[key].dnsServer or ""
+  end,
+  Success = getQuery,
+  Timeout = getQuery,
+  Errors = getQuery,
+  AverageResponseTime = getQuery,
+}
+
+Device_DNS_X_TELSTRA_DNS_i_.getall = function(mapping, key)
+  return  {
+    DNSServer = keyMap[key].dnsServer or "",
+    Success = getQuery(mapping, "Success", key) or "0",
+    Timeout = getQuery(mapping, "Timeout", key) or "0",
+    Errors = getQuery(mapping, "Errors", key) or "0",
+    AverageResponseTime = getQuery(mapping, "AverageResponseTime", key) or "0",
+   }
+end
+
+register(Device_DNS_X_TELSTRA_DNS_i_)

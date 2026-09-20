@@ -1,0 +1,179 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/sampler.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/connection-processor.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script> function networkMonitor() {
+    var packageId = "com.netdumasoftware.networkmonitor";
+    var maximumVisibleConnections = 10;
+    var connectionHistory = sampler_circular_array_create(maximumVisibleConnections);
+    var classifications;
+
+    function processConnection(newConnection, oldConnection) {
+      if (oldConnection) {
+        return {
+          transmitted: newConnection.sbytes - oldConnection.sbytes,
+          received: newConnection.dbytes - oldConnection.dbytes
+        }
+      } else {
+        return {
+          transmitted: newConnection.sbytes,
+          received: newConnection.dbytes
+        }
+      }
+
+      return output;
+    }
+
+    function getMaximumVisibleConnections() {
+      return maximumVisibleConnections;
+    }
+
+    function convertToCorrectUnit(bytes) {
+      //var unit = $("#unit-radio")[0].selected;
+      var unit = "mbps";
+      switch (unit) {
+        case "mbps":
+          return bytes * 8 / (1024 * 1024);
+        case "kbps":
+          return bytes * 8 / 1024;
+        default:
+          throw "Unmatched unit.";
+      }
+    }
+
+    function collectConnections() {
+      var connections = [];
+      var devices = {};
+      function processor(newConnection, oldConnection, deviceMap) {
+        connections.push(newConnection);
+        devices = deviceMap;
+      }
+
+      function callback(duration) {
+        sampler_circular_array_add(connectionHistory, {
+          connections: connections,
+          devices: devices,
+          interval: duration
+        });
+
+        connections = [];
+        devices = {};
+      }
+
+      connectionProcessor.add(processor, callback);
+    }
+
+    function getConnectionHistory() {
+      return sampler_circular_array_get(connectionHistory);
+    }
+
+    function getPackageId() {
+      return packageId;
+    }
+
+    function addPanel(file, data, options) {
+      return $("duma-panels")[0].add(
+        "/apps/" + packageId + "/desktop/" + file,
+        packageId,
+        data,
+        options
+      );  
+    }
+
+    function removePanel(e) {
+      return $("duma-panels")[0].remove(e);
+    }
+
+    function updatePanel(e, options) {
+      return $("duma-panels")[0].update(e, options);
+    }
+
+    function getCmarkMask() {
+      return Q.promise(function (resolve) {
+        long_rpc(
+          "com.netdumasoftware.devicemanager",
+          "get_cmark_mask", [], function (shift, mask) {
+            resolve({
+              shift: shift,
+              mask: mask
+            });
+          }
+        );
+      });
+    }
+
+    function roundArray(array, p) {
+      for (var i = 0; i < array.length; i++) {
+        var v = array[i];
+        var multiplier;
+
+        if (v < p && v !== 0) {
+          multiplier = Math.pow(10, p - Math.floor(Math.log(v) / Math.LN10) - 1);
+        } else {
+          multiplier = Math.pow(10, p);
+        }
+
+        array[i] = Math.round(v * multiplier) / multiplier;
+      }
+
+      return array;
+    }
+
+    function roundGraph(graph, p) {
+      for (var i = 0; i < graph.datasets.length; i++) {
+        var set = graph.datasets[i];
+        set.data = roundArray(set.data, p);
+      }
+      return graph;
+    }
+    
+    function setChartTitle(devices, deviceId, chart, download, ariaHeaders) {
+      var name;
+      if (deviceId === "<%= i18n.totalUsage %>") {
+        name = deviceId;
+      } else {
+        var device = devices[deviceId];
+        name = device ? device.name : "<%= i18n.unknownDevice %>";
+      }
+
+      if (download) {
+        name = "<%= i18n.withDownload %>".format(name);
+      } else {
+        name = "<%= i18n.withUpload %>".format(name);
+      }
+
+      $(chart)[0].options = {
+        ariaHeaders: ariaHeaders,
+        title: {
+          display: true,
+          text: name
+        },
+        legend: {
+          display: false
+        },
+        tooltips: {
+          callbacks: {
+            label: function(tx, ctx){
+              return ctx.labels[tx.index] + ": " + format_bps(ctx.datasets[tx.datasetIndex].data[tx.index] * 1000 * 1000,1,1000);
+            }
+          }
+        },
+      };
+    }
+    
+    collectConnections();
+    connectionProcessor.start();
+
+    return {
+      processConnection: processConnection,
+      getMaximumVisibleConnections: getMaximumVisibleConnections,
+      convertToCorrectUnit: convertToCorrectUnit,
+      getConnectionHistory: getConnectionHistory,
+      getCmarkMask: getCmarkMask,
+      addPanel: addPanel,
+      removePanel: removePanel,
+      updatePanel: updatePanel,
+      roundArray: roundArray,
+      roundGraph: roundGraph,
+      setChartTitle: setChartTitle
+    };
+  }; </script> 

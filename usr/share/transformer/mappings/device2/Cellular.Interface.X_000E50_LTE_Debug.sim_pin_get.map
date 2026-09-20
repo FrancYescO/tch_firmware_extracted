@@ -1,0 +1,46 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.SIM_PIN_Get.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			PIN_State = {
+				access = "readOnly",
+				type = "string"
+			},
+			Unlock_Retries_Left = {
+				access = "readOnly",
+				type = "string"
+			},
+			Unblock_Retries_Left = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+
+function obj.getall(_, key)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.sim.pin", "get", key)
+	if data then
+		result.PIN_State = data.pin_state
+		result.Unlock_Retries_Left = data.unlock_retries_left
+		result.Unblock_Retries_Left = data.unblock_retries_left
+	end
+	return result
+end
+
+function obj.get(_, paramName, key)
+	return obj.getall(_, key)[paramName]
+end
+
+register(obj)
+

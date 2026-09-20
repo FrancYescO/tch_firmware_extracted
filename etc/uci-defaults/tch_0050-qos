@@ -1,0 +1,24 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+set_ethX_qos() {
+  local ethX="$1"
+  [ -z "$(uci_get qos ${ethX})" ] && uci_add qos device ${ethX}
+  local classgroup='TO_LAN'
+  [ "$(uci_get ethernet ${ethX} wan)" = 1 ] && classgroup='TO_WAN'
+  uci_set qos ${ethX} classgroup ${classgroup}
+  _UCI_COMMIT=1
+}
+
+for idx in $(seq 0 9)
+do
+  # Find missing qos.eth${idx}.classgroup entries and add them using ethernet.eth${idx} configuration
+  [ "$(uci_get ethernet eth${idx})" = port -a -z "$(uci_get qos eth${idx} classgroup)" ] && set_ethX_qos "eth${idx}"
+done
+
+[ "${_UCI_COMMIT}" != 1 ] || uci_commit qos
+
+# Make sure that this script will be run only once
+exit 0
+

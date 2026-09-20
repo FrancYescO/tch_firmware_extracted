@@ -1,0 +1,8 @@
+^multiap_reboot read type < /tmp/.reboottype ; ubus call mapVendorExtensions.controller triggerAction '{"Action":"Reboot","Mode":"'$type'"}' ; rm /tmp/.reboottype;
+^multiap_deploy_software_now ubus call mapVendorExtensions.controller triggerAction '{"Action":"DeploySoftwareNow"}'
+^multiap%..+%..+%.enabled /etc/init.d/multiap_controller restart; /etc/init.d/multiap_agent restart
+^vendorextensions%..+%.agent_software_deployment%.deployment_window_start read line < /tmp/.setDeploymentWindowOpen ; /usr/share/transformer/scripts/setMultiAPAgentDeploymentWindow.lua $line "deployment_window_start"; rm -f /tmp/.setDeploymentWindowOpen
+^vendorextensions%..+%.agent_software_deployment%.deployment_window_end read line < /tmp/.setDeploymentWindowClose ; /usr/share/transformer/scripts/setMultiAPAgentDeploymentWindow.lua $line "deployment_window_end"; rm -f /tmp/.setDeploymentWindowClose
+^multiap_factoryreset read type < /tmp/.resettype ; ubus call mapVendorExtensions.controller triggerAction '{"Action":"RTFD","Mode":"'$type'"}' ; rm /tmp/.resettype; ubus send multiap.controller.bandlock '{"state":"0"}'
+^multiap_setledbrightess while IFS=, read -r brightness mac; do ubus call mapVendorExtensions.agent set_led_status '{"Mac":"'$mac'", "Brightness":"'$brightness'"}'; done < /tmp/.ledbrightness; rm /tmp/.ledbrightness;
+^vendorextensions%..+%.multiap_vendorextensions%.MulticastHandler read line < /tmp/.multicast_handler ;/usr/share/transformer/scripts/multicast_handler.sh $line ; rm /tmp/.multicast_handler;

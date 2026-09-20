@@ -1,0 +1,94 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-legend-item"> <template> <style> :host  {
+        @apply(--layout-vertical);
+        @apply(--layout-flex);
+        @apply(--layout-center);
+        @apply(--layout-center-justified);
+      }
+      .box {
+        width: 12px;
+        height: 12px;
+        margin-right: 5px;
+        flex-shrink: 0;
+      }
+      .non-canvas {
+        outline: 3px solid;
+        outline-offset: -3px;
+      }
+      .pointer { cursor: pointer; }
+      .strike-through { opacity: 0.39; }
+      .label {
+        @apply(--paper-font-caption);
+      }
+      .duma-legend-label-div {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+      }
+      .duma-legend-result-div {
+        font-size: 16px;
+        opacity: 0.75;
+      } </style> <!-- Legend Item Start --> <div class$="duma-legend-label-div [[pointerClass]]"> <template is="dom-if" if="[[stat.visible]]"> <template is="dom-if" if="[[useCanvas(colourData)]]"> <canvas class="duma-legend-canvas-box box" width="12" height="12"></canvas> </template> <template is="dom-if" if="[[!useCanvas(colourData)]]"> <div class="box non-canvas" style$="outline-color: [[stat.colour]]; background-color: [[stat.bgColour]];"></div> </template> </template> <span class="label"> [[stat.label]] </span> </div> <template is="dom-if" if="[[!hideStats]]"> <div class="duma-legend-result-div"> [[stat.result]][[stat.suffix]] </div> </template> </template> <script> Polymer(
+    {
+      is: 'duma-legend-item',
+      properties:
+      {
+        stat: Object,
+        index: Number,
+        pointerClass:
+        {
+          type: Number,
+          computed: "GetPointerClass(stat)",
+        },
+        hideStats: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+        colourData: {
+          type: Object,
+          observer: "setCanvas"
+        },
+      },
+
+      get $labelDiv() {
+        return this.__$labelDiv || (this.__$labelDiv = this.$$(".duma-legend-label-div"));
+      },
+
+      ready: function ()
+      {
+        this.$labelDiv.addEventListener("tap", function ()
+        {
+          if (typeof this.stat.disableClick == "undefined" || !this.stat.disableClick)
+          {
+            // Notify listeners a legend item has been clicked
+            this.fire("legendItemSelect", this.index);
+
+            // Toggle strikethrough for the label on the legend item
+            $(this.$labelDiv).toggleClass("strike-through");
+          }
+        }.bind(this));
+      },
+      //if it should use a canvas or not to display the pattern
+      useCanvas: function(cData){
+        return cData && cData instanceof CanvasPattern && top.accessibility_mode;
+      },
+      //Draw the pattern
+      setCanvas: function(cData,stat){
+        if(cData && cData instanceof CanvasPattern){
+          Polymer.dom.flush();
+          var canvas = this.$$(".duma-legend-canvas-box");
+          if(canvas){
+            var ctx = canvas.getContext('2d');
+            ctx.translate(1,1); //translate to centre the patterns in the square
+            ctx.fillStyle = cData;
+            ctx.fillRect(-1,-1,canvas.width,canvas.height);
+            ctx.translate(-1,-1);
+          }else{
+            setTimeout(this.setCanvas.bind(this,cData,stat),10);
+          }
+        }
+      },
+      GetPointerClass(stat)
+      {
+        return (stat.disableClick) ? "" : "pointer";
+      }
+    }); </script> </dom-module> 
