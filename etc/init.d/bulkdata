@@ -1,0 +1,32 @@
+#!/bin/sh /etc/rc.common
+START=20
+
+CRONPATH=/etc/crontabs
+CRONROOT=$CRONPATH/root
+PROFILE=""
+
+configure_profile () {
+  PROFILE="$PROFILE $1"
+}
+
+start () {
+    local enabled
+    config_load bulkdata
+    config_get_bool enabled global enabled 0
+    [ $enabled -eq 0 ] && exit
+
+    mkdir -p /etc/bulkdata/
+    mkdir -p /var/bulkdata/
+    config_foreach configure_profile profile
+    /usr/bin/bulkdata update $PROFILE
+    if !(grep -q "crond" $(ps) 2>/dev/null); then
+      /etc/init.d/cron start
+    fi
+}
+
+stop () {
+    [ -f $CRONROOT ] && {
+      sed -i "/bulkdata/d" $CRONROOT
+      crontab -c $CRONPATH $CRONROOT
+    }
+}
