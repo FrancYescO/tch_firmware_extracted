@@ -1,0 +1,136 @@
+local Multi_Services_X_TELSTRA_Geolocation_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_GEOLOCATION.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            ServerURL = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+            },
+            Latitude = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            Longitude = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            Accuracy = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            LastUpdated = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+        }
+    }
+}
+
+local uci_helper = mapper("ucihelper")
+local transactions = {}
+local binding = { config = "geolocation" }
+
+Multi_Services_X_TELSTRA_Geolocation_.getall = function(mapping, key)
+    local data = {
+	  Enable = "0",
+	  ServerURL = "",
+	  Latitude = "",
+	  Longitude = "",
+	  Accuracy = "",
+	  LastUpdated = "",
+    }
+    binding.sectionname = "result"
+    local result = uci_helper.getall_from_uci(binding)
+    if result then
+        data.Latitude = result.latitude or data.Latitude
+        data.Longitude = result.longitude or data.Longitude
+        data.Accuracy = result.accuracy or data.Accuracy
+        data.LastUpdated = result.last_updated or data.LastUpdated
+    end
+
+    binding.sectionname = "global"
+    local configuration = uci_helper.getall_from_uci(binding)
+    if configuration then
+      data.Enable = configuration.enabled or data.Enable
+      data.ServerURL = configuration.server_url or data.ServerURL
+    end
+    return data
+end
+
+local result_param_map = {
+  Latitude = "latitude",
+  Longitude = "longitude",
+  Accuracy = "accuracy",
+  LastUpdated = "last_updated",
+  latitude = "Latitude",
+  longitude = "Longitude",
+  accuracy = "Accuracy",
+  last_updated = "LastUpdated",
+}
+
+local config_param_map = {
+  Enable = "enabled",
+  ServerURL = "server_url",
+  enabled = "Enable",
+  server_url = "ServerURL",
+}
+
+Multi_Services_X_TELSTRA_Geolocation_.get = function(mapping, param, key)
+  if result_param_map[param] then
+	binding.sectionname = "result"
+	binding.option = result_param_map[param]
+    return uci_helper.get_from_uci(binding)
+  elseif config_param_map[param] then
+	binding.sectionname = "global"
+	binding.option = config_param_map[param]
+    return uci_helper.get_from_uci(binding)
+  end
+  return ""
+end
+
+Multi_Services_X_TELSTRA_Geolocation_.set = function(mapping, param, value, key)
+  if config_param_map[param] then
+	binding.sectionname = "global"
+	binding.option = config_param_map[param]
+	uci_helper.set_on_uci(binding, value, commitapply)
+	transactions[binding.config] = true
+  end
+end
+
+Multi_Services_X_TELSTRA_Geolocation_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+      binding.config = config
+      uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+Multi_Services_X_TELSTRA_Geolocation_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+      binding.config = config
+      uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_Geolocation_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
