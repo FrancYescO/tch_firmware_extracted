@@ -1,0 +1,273 @@
+#!/usr/bin/env lua
+
+local signal = require("signal").signal
+local cursor = require("uci").cursor()
+local json = require("dkjson")
+local ubus = require("ubus")
+local uloop = require("uloop")
+local lfs = require("lfs")
+
+local ipairs = ipairs
+local pairs = pairs
+local concat = table.concat
+local format = string.format
+local tonumber = tonumber
+local date = os.date
+local open = io.open
+local popen = io.popen
+
+local nwcommon = require("transformer.mapper.nwcommon")
+local logger = require("transformer.logger")
+local log = logger.new("geolocation", 2)
+
+-- for content saving and transferring
+local path_var = "/var/geolocation"
+local curl_cmd = 'curl %s %s -d @%s -H "Content-Type: application/json" -i "%s"'
+local status_timer, transfer_timer, data_collection_timer, signal_timer
+
+local max_attempts = tonumber(cursor:get("geolocation", "global", "max_attempts")) or 10
+local server_url =  cursor:get("geolocation", "global", "server_url")
+local enabled =  cursor:get("geolocation", "global", "enabled")
+local ca_path = ""
+local verify_server_ca = ""
+
+if not server_url then
+  log:error("server url is not defined")
+  return
+elseif enabled ~= "1" then
+  return
+elseif server_url:match("^https") or server_url:match("^HTTPS") then
+  verify_server_ca =  cursor:get("geolocation", "global", "verify_server_ca")
+  if verify_server_ca == "0" then
+    verify_server_ca = "-k"
+  else
+    verify_server_ca = ""
+    ca_path =  cursor:get("geolocation", "global", "ca_path")
+    ca_path = ca_path and "--capath " .. ca_path or ""
+    local ca_cert =  cursor:get("geolocation", "global", "ca_cert")
+    ca_cert = ca_cert and " --cacert " .. ca_cert or ""
+    ca_path = ca_path .. ca_cert
+  end
+end
+
+local ubus_conn
+ubus_conn = ubus.connect()
+
+if not ubus_conn then
+  log:error("Failed to connect to ubus")
+  return
+end
+
+uloop.init()
+
+local function cleanup()
+  signal_timer:cancel()
+  uloop.cancel()
+end
+
+signal("SIGTERM", cleanup)
+signal("SIGINT", cleanup)
+
+local function get_wan_status()
+   local ip6_default_routes = nwcommon.getip6DefaultRoutes()
+   if nwcommon.loadRoutes(true) or ip6_default_routes[1] then
+     return true
+   end
+end
+
+local function get_ouisn()
+  local oui = cursor:get("env", "var", "oui")
+  local sn = cursor:get("env", "var", "serial")
+  if oui and sn then
+    return oui .. "-" .. sn
+  end
+end
+
+local function get_mobile_info()
+   local content_mobile = {}
+   local cell = ubus_conn:call("mobiled.network", "serving_system", {})
+   if not cell or not cell.plmn_info then
+      return
+   else
+      content_mobile.cellId = cell.cell_id
+      local plmn_info = cell.plmn_info
+      content_mobile.locationAreaCode = cell.tracking_area_code
+      if plmn_info then
+        content_mobile.mobileCountryCode = plmn_info.mcc
+        content_mobile.mobileNetworkCode = plmn_info.mnc
+        content_mobile.carrier = plmn_info.description
+      end
+   end
+   local signal = ubus_conn:call("mobiled.radio", "signal_quality", {})
+   if signal then
+      content_mobile.signalStrength = signal.rssi
+      if signal.radio_interface == "umts" then
+        content_mobile.radioType = "wcdma"
+      else
+        content_mobile.radioType = signal.radio_interface
+      end
+   else
+      return
+   end
+   content_mobile.age = 0
+   return content_mobile
+end
+
+local function get_cell_tower_info(content_mobile)
+   local content_cell_tower = {}
+   local params = { "signalStrength", "locationAreaCode", "mobileCountryCode", "mobileNetworkCode", "cellId" }
+   for _,v in pairs(params) do
+     content_cell_tower[v] = content_mobile[v]
+   end
+   return content_cell_tower
+end
+
+local function get_ap_info()
+   local content_ap = {}
+   local ap = ubus_conn:call("wireless.radio.bsslist", "get", {})
+   local radios = { "radio_2G", "radio_5G"}
+   if ap then
+     for _,radio in ipairs(radios) do
+        if ap[radio] then
+          for k,v in pairs(ap[radio]) do
+            content_ap[#content_ap+1] = {
+              macAddress = k,
+              signalStrength = tonumber(v.rssi) or '',
+              age = 0,
+              channel = v.channel,
+              --signalToNoiseRatio = 0,
+            }
+          end
+        end
+     end
+   end
+   if #content_ap > 0 then
+     return content_ap
+   end
+end
+
+local function generate_transfer_file()
+  lfs.mkdir(path_var)
+  local mobile_info = get_mobile_info()
+  local request = {
+    wifiAccessPoints = get_ap_info(),
+    cellTowers = mobile_info and {get_cell_tower_info(mobile_info)},
+    homeMobileCountryCode = mobile_info and mobile_info.mobileCountryCode,
+    homeMobileNetworkCode = mobile_info and mobile_info.mobileNetworkCode,
+    radioType = mobile_info and mobile_info.radioType,
+    carrier = mobile_info and mobile_info.carrier,
+    OUIserialNumber = get_ouisn(),
+    considerIP = "false",
+  }
+  local buffer = {}
+  local success = json.encode (request, { indent = true, buffer = buffer })
+  if success then
+    local transfer_file = format("%s/%s", path_var, "geolocation")
+    local file = open(transfer_file, "w")
+    if file then
+        file:write(concat(buffer,""))
+        file:close()
+        return transfer_file
+    end
+  end
+end
+
+local function set_uci(binding, value)
+  if binding.option then
+    os.execute(format("uci -P /var/state set %s.%s.%s='%s'", binding.config, binding.sectionname, binding.option, value))
+  else
+    os.execute(format("uci -P /var/state set %s.%s='%s'", binding.config, binding.sectionname, value))
+  end
+end
+
+local function save_result(reply)
+  local binding = { config = "geolocation" }
+  binding.option = nil
+  if reply.location then
+    binding.sectionname = "result"
+    set_uci(binding, "result")
+    binding.option = "latitude"
+    set_uci(binding, reply.location.lat)
+    binding.option = "longitude"
+    set_uci(binding, reply.location.lng)
+    binding.option = "last_updated"
+    set_uci(binding, reply.lastUpdated or date("!%Y-%m-%dT%TZ"))
+    binding.option = "accuracy"
+    set_uci(binding, reply.accuracy)
+  elseif reply.error then
+    binding.sectionname = "error"
+    set_uci(binding, "error")
+    binding.option = "message"
+    set_uci(binding, reply.error.message)
+    binding.option = "code"
+    set_uci(binding, reply.error.code)
+  end
+end
+
+local transfer_file
+local postdata
+
+local function data_collection()
+  transfer_file = generate_transfer_file()
+  status_timer:set(100)
+end
+
+local function check_wan_status()
+  if not get_wan_status() then
+    log:info("Internet is not available. Delaying transmission for 5 sec")
+    status_timer:set(5000)
+  else
+    transfer_timer:set(500)
+  end
+end
+
+local attempt = 0
+local interval = 1
+
+local function transfer()
+  local pipe = popen(format(curl_cmd, verify_server_ca, ca_path, transfer_file, server_url), "r")
+
+  local reply
+  if pipe then
+    reply = {}
+    for line in pipe:lines() do
+      if #reply > 0 then
+         reply[#reply+1] = line
+      elseif line:match("^%{") then
+         reply[#reply+1] = line
+      end
+    end
+    pipe:close()
+  end
+
+  if reply and #reply > 0 then
+    reply = concat(reply, "")
+    log:info("Reply from server: " .. reply)
+
+    local reply, pos, err = json.decode(reply, 1, nil)
+    if not err then
+      save_result(reply)
+    end
+  elseif attempt < max_attempts then
+    log:info("transmission failed. Retry after " .. interval .. " sec")
+    interval = interval*2
+    attempt = attempt + 1
+    transfer_timer:set(interval*1000)
+    return
+  end
+  os.exit(0)
+end
+
+local function signal_monitor()
+  signal_timer:set(1000)
+end
+
+signal_timer = uloop.timer(signal_monitor, 1000)
+-- collect data 120 seconds after reboot
+local data_collection_delay = lfs.attributes(path_var) and 500 or 120000
+data_collection_timer = uloop.timer(data_collection, data_collection_delay)
+-- wait for internet is up before transmission
+status_timer = uloop.timer(check_wan_status)
+transfer_timer = uloop.timer(transfer)
+
+uloop.run()
