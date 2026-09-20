@@ -1,0 +1,130 @@
+#!/usr/bin/env lua
+
+-- ************* COPYRIGHT AND CONFIDENTIALITY INFORMATION **********************
+-- **                                                                          **
+-- ** Copyright (c) 2016 Technicolor                                           **
+-- ** All Rights Reserved                                                      **
+-- **                                                                          **
+-- ** This program contains proprietary information which is a trade           **
+-- ** secret of TECHNICOLOR and/or its affiliates and also is protected as     **
+-- ** an unpublished work under applicable Copyright laws. Recipient is        **
+-- ** to retain this program in confidence and is not permitted to use or      **
+-- ** make copies thereof other than as permitted in a written agreement       **
+-- ** with TECHNICOLOR, UNLESS OTHERWISE EXPRESSLY ALLOWED BY APPLICABLE LAWS. **
+-- **                                                                          **
+-- ******************************************************************************
+local logger = require("transformer.logger")
+local log = logger.new("thermalProtection", 2)
+local proxy = require("datamodel")
+local ubus = require("ubus")
+local uci_cursor = require("uci").cursor(nil, "/var/state")
+local radio_thermal_map = require("thermal-protection.radio_thermal_map")
+
+local ubus_conn
+ubus_conn = ubus.connect()
+
+if not ubus_conn then
+  log:error("Failed to connect to ubus")
+end
+
+local admin_state,oper_state
+--the function to get the Temperature
+-- this is the board-specific variables
+-- we will check the thermal for each tmp75 chip separately, and shutdown the
+-- wireless chipset separately
+-- !!! Note: for the other boards, please update the corresponding radio
+--           and address mapping . if you don't know the address, please check
+--           with hardware team
+
+local function getTemperature(wifi_radio)
+	local temp_file = io.open("/sys/devices/i2c-0/"..radio_thermal_map[wifi_radio].."/temp1_input", r)
+	if not temp_file then
+		return nil
+	end
+	local tmp75_output = temp_file:read("*all")
+	temp_file:close()
+	return string.sub(tmp75_output, 1, 2)
+end
+
+-- end of get the temperature
+
+local function setThermalProtectState(state)
+	os.execute("uci -P /var/state set thermal_protection.thermalprotection.state=" .. state)
+end
+
+local function getThermalProtectState()
+  local config = "thermal_protection"
+  local ret = uci_cursor:load(config)
+  if not ret then
+    log:error("could not load " .. config)
+    return false
+  end
+  local thermalProtectState = uci_cursor:get(config,"thermalprotection","state")
+  uci_cursor:unload(config)
+  if thermalProtectState == nil or thermalProtectState:len() == 0 then
+	setThermalProtectState("0")
+	return "0"
+  else
+	return thermalProtectState
+  end
+end
+
+local thermal = "uci.thermal_protection.thermalprotection."
+local thermal_enabled = thermal .. "enabled"
+local thermal_upper_threshold = thermal .. "upperthreshold"
+local thermal_lower_threshold = thermal .. "lowerthreshold"
+
+local thermal_protection_enabled  = proxy.get(thermal_enabled)[1].value
+local thermalState = getThermalProtectState()
+local function switchOperState(state)
+    for radio in pairs(radio_thermal_map) do
+        local curr_radio_eco_force_radio_down = "rpc.wireless.radio.@" .. radio ..".eco.force_radio_down"
+        proxy.set(curr_radio_eco_force_radio_down, state)
+	end
+	proxy.apply()
+	setThermalProtectState(state)
+end
+
+if thermal_protection_enabled == "1" then
+    local upper_threshold  = proxy.get(thermal_upper_threshold)[1].value
+    local lower_threshold  = proxy.get(thermal_lower_threshold)[1].value
+    local overheat_2G, overheat_5G = false , false
+	if thermalState == "1" then
+        overheat_2G = true
+        overheat_5G = true
+	end
+    for radio in pairs(radio_thermal_map) do
+        local temp = getTemperature(radio)
+        local curr_radio_admin_state = "rpc.wireless.radio.@" .. radio ..".admin_state"
+        local curr_radio_oper_state = "rpc.wireless.radio.@" .. radio ..".oper_state"
+        local state = proxy.get(curr_radio_admin_state, curr_radio_oper_state)
+        if state ~= nil then
+            admin_state = state[1].value
+            oper_state = state[2].value
+        end
+		-- if the current temperature is higher then pre-defined threshold
+		-- then shutdown the wireless radio
+		if (temp ~= nil and tonumber(temp) > tonumber(upper_threshold)) then
+            overheat_2G = true
+            overheat_5G = true
+			if (admin_state == "1" and oper_state == "1" and thermalState == "0") then
+                switchOperState("1")
+            end
+		elseif (temp ~= nil and tonumber(temp) < tonumber(lower_threshold)) then
+            if radio == "radio_2G" then
+                overheat_2G = false
+            else
+                overheat_5G = false
+            end
+			if (admin_state == "1" and oper_state == "0" and thermalState == "1" and overheat_5G == false and overheat_2G == false) then
+                switchOperState("0")
+            end
+        end
+    end
+	-- send out the ubus event for thermalProtection
+	if (overheat_5G == true or overheat_2G == true) then
+        ubus_conn:send("thermalProtection",{ state="overheat" })
+	elseif (overheat_5G == false and overheat_2G == false) then
+        ubus_conn:send("thermalProtection",{ state="operational" })
+    end
+end

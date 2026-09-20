@@ -1,0 +1,98 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_ManagementServer_ManageableDevice_i_ = {
+  objectType = {
+    name = "Device.ManagementServer.ManageableDevice.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ManageableDeviceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+--[[ Alias parameter is removed as the status is deprecated
+      Alias = {
+        access = "readWrite",
+        status = "deprecated",
+        type = "string",
+        max = "64",
+      },
+--]]
+      ManufacturerOUI = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        min = "6",
+        max = "6",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      ProductClass = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Host = {
+        access = "readOnly",
+        list = true,
+        max = "1024",
+        type = "string",
+        pathRef = true,
+        targetParent = "Device.Hosts.Host.{i}.",
+      },
+    }
+  }
+}
+
+local ubusConnection = mapper("ubus").connect()
+local ipModes = {"ipv4", "ipv6"}
+local allValues = {}
+
+local paramMap = {
+  ["ManufacturerOUI"] = "manufacturer-oui",
+  ["SerialNumber"] = "serial-number",
+  ["ProductClass"] = "product-class"
+}
+
+Device_ManagementServer_ManageableDevice_i_.entries = function(mapping)
+  local manageableDeviceEntries = {}
+  local deviceFound =false
+  local getDevices = ubusConnection:call("hostmanager.device", "get", { })
+  if type(getDevices) == "table" then
+    for host,device in pairs(getDevices) do
+      deviceFound =false
+      for _,mode in pairs(ipModes) do
+        if device["mac-address"] and type(device[mode]) == "table" then
+          for _,v in pairs(device[mode]) do
+            if v.dhcp and v.state == "connected" and v.dhcp.tags and v.dhcp.tags:match("cpewan%-id") then
+              local macAddress = device["mac-address"]
+              manageableDeviceEntries[#manageableDeviceEntries + 1] = macAddress
+              allValues[macAddress] = { }
+              allValues[macAddress]["Host"] = resolve("Device.Hosts.Host.{i}.",host) or ""
+              for parameter,value in pairs(paramMap) do
+                allValues[macAddress][parameter] = v.dhcp[value] or ""
+              end
+              deviceFound = true
+              break
+            end
+          end
+        end
+        if deviceFound then break end
+      end
+    end
+  end
+  return manageableDeviceEntries
+end
+
+Device_ManagementServer_ManageableDevice_i_.get = function(mapping, param, key)
+  return allValues[key][param]
+end
+
+Device_ManagementServer_ManageableDevice_i_.getall = function(mapping, key)
+  return allValues[key]
+end
+
+register(Device_ManagementServer_ManageableDevice_i_)
