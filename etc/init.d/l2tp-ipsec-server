@@ -1,0 +1,83 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+
+UCI_CONFIG="vpn"
+
+SETUP_SCRIPT="/usr/lib/l2tpipsecserver/setup.sh"
+XL2TPD_INIT="/etc/init.d/xl2tpd"
+
+__init_state() {
+  uci_set_state ${UCI_CONFIG} state "" state
+  __state_set_active 0
+}
+
+__state_set_active() {
+  uci_toggle_state ${UCI_CONFIG} state l2tpipsecserver_active $1
+}
+
+__state_is_active() {
+  [ "$(uci_get_state ${UCI_CONFIG} state l2tpipsecserver_active 0 )" == 1 ]
+}
+
+__enabled() {
+  local enabled
+  config_load "${UCI_CONFIG}"
+  config_get_bool enabled l2tpipsecserver enable 0
+
+  [ ${enabled} -eq 1 ]
+}
+
+__xl2tpd_init() {
+  echo "xl2tpd $* .."
+  ${XL2TPD_INIT} "$@"
+}
+
+__start() {
+  # First setup conf files, then start daemon
+  (. ${SETUP_SCRIPT} ; setup)
+  __xl2tpd_init start
+  __state_set_active 1
+  /etc/init.d/firewall reload
+}
+
+start() {
+  [ "$(uci_get_state ${UCI_CONFIG} state)" = "state" ] || __init_state
+  # When enabled in UCI, always do a start regardless state
+  __enabled && __start
+}
+
+stop() {
+  # Always do a stop regardless UCI 'enable' value or state
+  __xl2tpd_init stop
+  __state_set_active 0
+  /etc/init.d/firewall reload
+}
+
+restart() {
+  # When enabled in UCI, always do a stop+start regardless state
+   if __enabled ; then
+    __xl2tpd_init stop
+    __start
+  else
+    # Always do a stop regardless state
+    stop
+  fi   
+}
+
+reload() {
+  if __enabled ; then
+    # When enabled in UCI, do a reload when already active
+    if __state_is_active ; then
+      # First update conf files again, then reload daemon
+      (. ${SETUP_SCRIPT} ; setup)
+      __xl2tpd_init reload
+    else
+      __start
+    fi
+  else
+    # When not enabled in UCI, do a stop only when active
+    ! __state_is_active || stop
+  fi
+}
+

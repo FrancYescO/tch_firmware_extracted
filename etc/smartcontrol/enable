@@ -1,0 +1,93 @@
+local switch_port
+local configure_switch
+local eth_port
+do
+	-- we assume the default switch_vlan ports are "1* 2* 3* 4* 8t"
+	-- of which "1*" is is moved by smart control enable/disable
+	-- Platform (like VANT-W family) where this is different should add
+	-- a smartcontrol section in uci naming the port to switch instead.
+	-- The config can be added in the network-lan firstboot script.
+	-- for VANT-W network.smartcontrol.switch_port should be "0*"
+	local uci = require('uci').cursor()
+	switch_port = uci:get('network', 'smartcontrol', 'switch_port') or '1*'
+	uci:close()
+	configure_switch = switch_port ~= "none"
+	eth_port = configure_switch and "vlan_eth0" or "eth0"
+end
+
+return {
+	{
+		config = "network",
+		section = "lan",
+		{ "ifname",
+				enable = {del=eth_port},
+				disable = {add=eth_port},
+		},
+	},
+	{
+		config = "network",
+		section = "vlan_fas",
+		add = {
+			['.type'] = "device",
+			type = "8021q",
+			ifname = "eth4",
+			name = "vlan_fas",
+			vid = "865"
+		},
+	},
+	{
+		config = "network",
+		section = "fas",
+		add = {
+			['.type'] = "interface",
+			proto = "static",
+			initboot = "1",
+			iface6rd = "0",
+			type = "bridge",
+			ifname = "vlan_fas",
+		},
+		{ "ifname",
+				enable = { add=eth_port },
+				disable = { del=eth_port },
+		},
+	},
+	{
+	  execute = configure_switch,
+	  config = "network",
+	  section = "vlan_eth0",
+	  {
+	    "vid",
+	      enable = { set="865"},
+	      disable = {set="1"},
+	  }
+	},
+	{
+	  execute = configure_switch,
+		config = "network",
+		section_where = {
+			['.type'] = "switch_vlan",
+			vlan = '1',
+		},
+		{ "ports",
+				enable = {del=switch_port},
+				disable = {add=switch_port},
+		}
+	},
+	{
+	  execute = configure_switch,
+		config = "network",
+		section_where = {
+			['.type'] = "switch_vlan",
+			vlan = "865"
+		},
+		add = {
+			device = "bcmsw_ext",
+			vlan = "865",
+			ports = switch_port.." 8t",
+		},
+		{ "ports",
+				enable = {add=switch_port},
+				disable = {del=switch_port},
+		},
+	},
+}

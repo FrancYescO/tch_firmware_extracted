@@ -1,0 +1,93 @@
+local switch_port
+local configure_switch
+local eth_port
+do
+	-- we assume the default switch_vlan ports are "1* 2* 3* 4* 8t"
+	-- of which "3*" is is moved by DMZ enable/disable
+	-- Platform (like VANT-W family) where this is different should add
+	-- a smartcontrol section in uci naming the port to switch instead.
+	-- The config can be added in the network-lan firstboot script.
+	-- for VANT-W network.dmzcontrol.switch_port should be "3*"
+	local uci = require('uci').cursor()
+	switch_port = uci:get('network', 'dmzcontrol', 'switch_port') or '4*'
+	uci:close()
+	configure_switch = switch_port ~= "none"
+	eth_port = configure_switch and "vlan_eth3" or "eth3"
+end
+
+
+return {
+  {
+    execute = configure_switch,
+    config = "network",
+    section_where = {
+      ['.type'] = "switch_vlan",
+      vlan = "1",
+    },
+    {
+      "ports",
+        enable = {del=switch_port},
+        disable = {add=switch_port},
+    }
+  },
+  {
+    execute = configure_switch,
+    config = "network",
+    section_where = {
+      ['.type'] = "switch_vlan",
+      vlan = "2",
+    },
+    add = {
+      device = "bcmsw_ext",
+      vlan = "2",
+      ports = "8t "..switch_port,
+    },
+    {
+      "ports",
+        enable = {add=switch_port},
+        disable = {del=switch_port},
+    }
+  },
+  {
+    execute = configure_switch,
+    config = "network",
+    section = "vlan_eth3",
+    {
+      "vid",
+        enable = {set="2"},
+        disable = {set="1"},
+    },
+  },
+  {
+    config = "network",
+    section = "lan",
+    {
+      "ifname",
+        enable = {del=eth_port},
+        disable = {add=eth_port},
+    }
+  },
+  {
+    config = "network",
+    section = "wan",
+    {
+      "ifname",
+        enable = {add=eth_port},
+        disable = {del=eth_port},
+    },
+    {
+      "type",
+        enable = {add="bridge"},
+        disable = {del="bridge"},
+    },
+  },
+  {
+    config = "network",
+    section = "phy_eth3",
+    {
+      "mtu",
+        enable = {set="1538"},
+        disable = {set=1500},
+    }
+  }
+}
