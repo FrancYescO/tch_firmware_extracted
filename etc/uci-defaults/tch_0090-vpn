@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# l2tp user passwords + ipsec PSK
+. /lib/functions/l2tp-ipsec-secrets.sh
+
+generate_and_install_chap_secret() {
+  local user="$1"
+  uci_set "vpn" "${user}" "password" "$(generate_chap_secret)"
+}
+
+generate_and_install_ipsec_PSK() {
+  uci_set "ipsec" "l2tp" "pre_shared_key" "$(generate_ipsec_PSK)"
+}
+
+config_load "vpn"
+
+config_foreach generate_and_install_chap_secret l2tp_user
+generate_and_install_ipsec_PSK
+
+# network + firewall
+add_firewall_zone() {
+
+  local vpn_remote_ip_start vpn_remote_ip_end
+
+  config_get vpn_remote_ip_start l2tpipsecserver remote_ip_start
+  config_get vpn_remote_ip_end l2tpipsecserver remote_ip_end
+
+  # default value for vpn subnet is 192.168.0.0/16
+  vpn_subnet="192.168.0.0/16"
+  if [ -n "${vpn_remote_ip_start}" -a -n "${vpn_remote_ip_end}" ]; then
+    vpn_subnet="${vpn_remote_ip_start}-${vpn_remote_ip_end}"
+  fi
+
+  uci set firewall.$1=zone
+  uci set firewall.$1.name="$1"
+  uci set firewall.$1.input='ACCEPT'
+  uci set firewall.$1.output='ACCEPT'
+  uci set firewall.$1.forward='ACCEPT'
+  uci set firewall.$1.wan='0'
+  uci set firewall.$1.masq='0'
+  uci set firewall.$1.mtu_fix='1'
+  uci set firewall.$1.device='ppp+'
+  uci set firewall.$1.subnet="${vpn_subnet}"
+}
+
+add_firewall_forwarding() {
+  uci add firewall forwarding
+  uci set firewall.@forwarding[-1].src="$1"
+  uci set firewall.@forwarding[-1].dest="$2"
+}
+
+add_firewall_zone vpn
+add_firewall_forwarding lan vpn
+add_firewall_forwarding vpn lan
+add_firewall_forwarding vpn wan
+
+# Save all config changes
+uci commit
+

@@ -1,0 +1,463 @@
+#Internal Classification Labels
+
+config label 'Best_Effort'
+	option trafficid '0'
+
+config label 'Normal'
+	option trafficid '1'
+
+config label 'Interactive'
+	option trafficid '2'
+
+config label 'Network_Control'
+	option trafficid '3'
+
+config label 'Management'
+	option trafficid '4'
+
+config label 'Video_Data'
+	option trafficid '5'
+	option dscp 'CS4'
+
+config label 'Video_Sig'
+	option trafficid '6'
+
+config label 'Voice_Data'
+	option trafficid '7'
+
+config label 'Voice_Sig'
+	option trafficid '8'
+
+config label 'Hotspot'
+	option trafficid '9'
+
+config label 'Hotspot_Mgmt'
+	option trafficid '10'
+
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'W_Q0'
+	list trafficid '9'
+	option priority '0'
+	option weight '7'
+
+config class 'W_Q1'
+	list trafficid '1'
+	option priority '1'
+	option weight '7'
+
+config class 'W_Q2'
+	list trafficid '2'
+	option priority '1'
+	option weight '7'
+
+config class 'W_Q3'
+	list trafficid '3'
+	list trafficid '10'
+	option priority '1'
+	option weight '14'
+
+config class 'W_Q4'
+	list trafficid '4'
+	list trafficid '5'
+	option priority '1'
+	option weight '27'
+
+config class 'W_Q5'
+	list trafficid '6'
+	option priority '1'
+	option weight '27'
+
+config class 'W_Q6'
+	list trafficid '7'
+	option priority '2'
+	option weight '52'
+
+config class 'W_Q7'
+	list trafficid '8'
+	option priority '2'
+	option weight '52'
+
+#TO_IPTV_ADSL
+config class 'WIA_Q0'
+	list trafficid '0'
+	list trafficid '1'
+	list trafficid '2'
+	option weight '1'
+	option priority '0'
+
+config class 'WIA_Q1'
+	list trafficid '3'
+	option weight '7'
+	option priority '0'
+
+#IMPORTANT NOTE: WIA_Q2, WIA_Q3 shall not be used, because used by priority upshif TCP-ACK
+config class 'WIA_Q2'
+	option weight '14'
+	option priority '1'
+
+#IMPORTANT NOTE: WIA_Q3 will not be used, because of depencency TCP-ACK config
+# which is common for ALL queues (TO_WAN).
+# TCP_ACK_MAX=3, TCP_ACK_INC=1
+config class 'WIA_Q3'
+	option weight '27'
+	option priority '1'
+
+#IMPORTANT NOTE: WIA_Q4 is RT traffic
+config class 'WIA_Q4'
+	list trafficid '4'
+	list trafficid '5'
+	list trafficid '6'
+	option weight '64'
+	option priority '1'
+
+#TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '5'
+	list trafficid '6'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '4'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '3'
+
+#TO_WLAN
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	list trafficid '5'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '6'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '4'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q1'
+	option policy 'sp_wfq'
+
+config classgroup 'TO_IPTV_ADSL'
+	option classes 'WIA_Q0 WIA_Q1 WIA_Q2 WIA_Q3 WIA_Q4'
+	option default 'WIA_Q0'
+	option policy 'sp_wrr'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+	option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN_GUEST'
+	option classes 'WMM_BE_Q0'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_HOTSPOT'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0'
+	option default 'WMM_BK_Q0'
+	option policy 'sp'
+
+# LAN
+config interface 'lan'
+	option classgroup 'TO_LAN'
+	option enable '1'
+
+# WAN
+config device 'atm_wan'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'atm_mgmt'
+	option enable '0'
+
+config device 'atm_iptv'
+	option classgroup 'TO_IPTV_ADSL'
+	option enable '1'
+
+config device 'atm_voip'
+	option enable '0'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+	option enable '1'
+
+#WLAN
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+	option enable '1'
+
+config device 'wl1'
+	option classgroup 'TO_WLAN'
+	option enable '1'
+
+#WLAN GUEST
+config device 'wl0_1'
+	option classgroup 'TO_WLAN_GUEST'
+	option enable '1'
+
+config device 'wl1_1'
+	option classgroup 'TO_WLAN_GUEST'
+	option enable '1'
+
+#WLAN HOTSPOT
+config interface 'hotspot'
+	option enable '1'
+
+config device 'wl0_2'
+	option classgroup 'TO_HOTSPOT'
+	option enable '1'
+
+
+#QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+#IMPORTANT NOTE: Make sure that the order in which the rules are defined is from Lowest Priority to Highest Priority!
+
+config classify
+	option target 'Interactive'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+	option proto 'tcp'
+
+#NOTE: ftp helper is not needed because ftp is already covered over here and predicted connection will inherit target (class) of parent connection
+config classify
+	option target 'Interactive'
+	option dstports '20,21,25,80,109,110,143,201,202,203,204,205,206,220,387'
+	option proto 'udp'
+
+config classify
+	option target 'Interactive'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option proto 'tcp'
+
+config classify
+	option target 'Interactive'
+	option dstports '443,500,993,995,1701,1935,3074,3478,3479,3480,3658,4500,8080,37483'
+	option proto 'udp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'icmp'
+	option proto_option 'icmp-type=redirect'
+
+config classify
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+	option proto 'tcp'
+
+config classify
+	option target 'Network_Control'
+	option dstports '22,23,53,67,68,123'
+	option proto 'udp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'esp'
+
+config classify
+	option target 'Network_Control'
+	option proto 'ah'
+
+config classify
+	option target 'Network_Control'
+	option proto 'gre'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '213.64.59.0/24'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.22.194.0/24'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.197.185.0/25'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.109'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.129'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.130'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.131'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.135'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.236.188.136'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '194.23.1.64/26'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '195.67.199.0/24'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.58.43'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.58.45'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.58.18'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.58.19'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.63.56'
+
+config classify
+	option target 'Network_Control'
+	option dsthost '81.236.63.36'
+
+config classify
+	option target 'Video_Sig'
+	option proto 'igmp'
+
+config classify
+	option target 'Video_Sig'
+	option dstports '554,5055'
+	option proto 'tcp'
+
+#Saveguard VoD Portal in case of congestion
+
+config classify
+	option target 'Video_Sig'
+	option dstif 'iptv'
+	option dstports '80,12698'
+	option proto 'tcp'
+
+#NOTE: reclassify is needed for a helper if the predicted connection should have another target (class) as the parant connection
+config reclassify
+	option target 'Video_Data'
+	option helper 'rtsp'
+
+#IMPORTANT NOTE: Static config of dport 7547 for cwmpd is broken once acs url is provisioned using another port via dhcpv4 option 43
+config classify
+	option target 'Management'
+	option dstports '53,7547'
+	option proto 'tcp'
+
+config classify
+	option target 'Management'
+	option dstports '53,67,68,500,4500,7547'
+	option proto 'udp'
+
+config classify
+	option target 'Management'
+	option proto 'icmp'
+
+config reclassify
+	option target 'Voice_Data'
+	option helper 'sip'
+
+config classify
+	option target 'Voice_Data'
+	list dscp '0x2e'
+
+config classify
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option proto 'tcp'
+
+config classify
+	option target 'Voice_Sig'
+	option dstports '5060'
+	option proto 'udp'
+
+config classify
+	option target 'Voice_Sig'
+	list dscp '0x24'
+
+# Rules with srcif/dstif are applied after rules without srcif/dstif, effectively overruling them
+config classify
+	option target 'Best_Effort'
+	list srcif 'Guest1'
+	list srcif 'Guest1_5GHz'
+	list dstif 'wan'
+
+config classify
+	option target 'Hotspot'
+	list srcif 'loopback'
+	list dstif 'wan'
+	option proto 'gre'
+
+config classify
+	option target 'Hotspot'
+	list srcif 'loopback'
+	list dstif 'wan'
+	option proto 'esp'
+
+config classify
+	option target 'Hotspot'
+	list srcif 'loopback'
+	list dstif 'wan'
+	option proto 'ah'
+
+# IPSec/IKE
+config classify
+	option target 'Hotspot_Mgmt'
+	list srcif 'loopback'
+	list dstif 'wan'
+	option proto 'udp'
+	option dstports '500'
+# QoS: DSCP marking doesn't affect accelerated multicast traffic - Telia Customization
+config reclassify
+	option target 'Video_Data'
+	option proto 'udp'
+	option ports '5555,5055'
