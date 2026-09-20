@@ -1,0 +1,59 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local commitapply = commitapply
+local Device_DNS_ = {
+  objectType = {
+    name = "Device.DNS.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      SupportedRecordTypes = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "A",
+          "AAAA",
+          "SRV",
+          "PTR",
+        },
+      },
+      X_TELECOMITALIA_IT_EDNS0Enabled = {
+        description = "Enable/Disable  the EDNS0 feature",
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local dhcpBinding = { config = "dhcp" , sectionname = "dnsmasq_lan" }
+local uci_helper = mapper("ucihelper")
+Device_DNS_.get = {
+  SupportedRecordTypes = "A,AAAA,SRV,PTR",
+  X_TELECOMITALIA_IT_EDNS0Enabled = function(mapping, param, key)
+     dhcpBinding.option = "addmac"
+     return uci_helper.get_from_uci(dhcpBinding) == "text" and "1" or "0"
+  end,
+}
+
+Device_DNS_.set = {
+  X_TELECOMITALIA_IT_EDNS0Enabled = function(mapping, param, value)
+    if value == "1" then
+      dhcpBinding.option = "addmac"
+      uci_helper.set_on_uci(dhcpBinding, "text", commitapply)
+      dhcpBinding.option = "cachesize"
+      uci_helper.set_on_uci(dhcpBinding, "0", commitapply)
+    else
+      dhcpBinding.option = "addmac"
+      uci_helper.set_on_uci(dhcpBinding, value, commitapply)
+      dhcpBinding.option = "cachesize"
+      uci_helper.set_on_uci(dhcpBinding, "", commitapply)
+    end
+    uci_helper.commit(dhcpBinding)
+  end
+}
+
+
+register(Device_DNS_)
