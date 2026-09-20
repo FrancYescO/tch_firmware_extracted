@@ -1,0 +1,45 @@
+<%
+  require("libos")
+  
+  local platform_information = os.platform_information()
+
+  local lang = os.get_gui_language() or "English"
+  local langpath = string.format("/www/language/dumaos/%s/ready", lang)
+
+  local ap_mode = os.get_ap_mode()
+  local hijack_mode = os.get_hijack_mode()
+  local firmware_version = os.firmware_version()
+  local hardware_version =  platform_information.model
+  local translationReady = os.load(langpath) == "true"
+  local notificationRefresh = os.load("/tmp/NotificationRefreshCounter") or 0
+  local accessibility_mode = os.config_get("accessibility_mode") == "1"
+
+  -- The router field in this JSON file used to always be set to true. We 
+  -- then ran into an issue with the first firmware after translation. DumaOS
+  -- would reload the frame as soon as server responeded poll.json after 
+  -- upgrading. This is usually before the router has compiled the language 
+  -- support. So the pages would load with CGI errors because i18n table was
+  -- not loaded. This is even worse because the pages are cached with that 
+  -- issue forever. Luckily the router field at this point is redundant. I
+  -- think it was originally used to verify that JSON was parsed before we 
+  -- had any other fields. Anyway we can use this field to indicate if the 
+  -- router is ready. This is very important because we cant change the
+  -- exisiting js on the prior version and thus cant use a new field to 
+  -- signal translation is complete.  -@Netduma_Iain
+  -- Another gotcha! If factory reset for whatever reason (after upgade) the
+  -- user needs to be redirected by routerlogin.net. This is signalled by
+  -- setting hijack_mode to true. The problem is that translationReady maybe
+  -- false meaning that it never evaulates hijack_mode. This issue is 
+  -- compounded further because DumaOS will not start until they go through
+  -- the termsn and conditions. So we must redirect them ASAP.
+  local ready = translationReady or hijack_mode
+%>
+{
+  "router": <%= ready %>,
+  "ap_mode" : <%= ap_mode %>,
+  "hijack_mode" : <%= hijack_mode %>,
+  "firmwareVersion" : "<%= firmware_version %>",
+  "translationReady" : <%= translationReady %>,
+  "notificationRefresh" : <%= notificationRefresh %>,
+  "accessibilityMode": <%= accessibility_mode %>
+}

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# do not run during /etc/init.d/network boot()
+# rules will be set once iso for each interface in /etc/init.d/mwan
+[ -f /var/state/bootnetwork ] && exit 0
+# do not run if mwan is not enabled
+/etc/init.d/mwan enabled || exit 0
+# do not run if there is no mwan config
+[ -f /etc/config/mwan ] && [ "$(wc -l /etc/config/mwan | cut -d ' ' -f 1)" -gt 0 ] || exit 0
+
+[ "$ACTION" = ifup -o "$ACTION" = ifdown ] && $IPKG_INSTROOT/usr/lib/mwan/setup.sh $ACTION $INTERFACE $DEVICE

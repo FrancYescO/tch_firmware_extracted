@@ -1,0 +1,355 @@
+local uci_helper = mapper("ucihelper")
+local transactions = {}
+local binding = { config = "lot" }
+local wireless_binding = { config = "wireless"}
+local cvtBoolean = setmetatable({
+    ["true"] = "1",
+    ["false"] = "0",
+    ["1"] = "true",
+    ["0"] = "false",
+}, { __index = function() return "0" end })
+
+local Multi_Services_X_TELSTRA_LOT_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_LOT.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            ServerURL = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+            },
+            Interval = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "0",
+            },
+            BandwidthThreshold = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            BandwidthHysteresis = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            Retries = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "2",
+            },
+            RetryDelay = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "1",
+            },
+            VendorSpecificIE = {
+            access = "readWrite",
+            type = "string",
+            default = "24f128",
+            },
+            -- End of Configuration paramters
+            -- Diagnostic parameters
+            Status = {
+                access = "readOnly",
+                type = "string",
+                max = "32",
+		default = "Disabled",
+            },
+            -- End of Diagnostic parameters
+        }
+    }
+}
+
+
+
+
+Multi_Services_X_TELSTRA_LOT_.getall = function(mapping, key)
+    local data = {
+	Enable = "0",
+	ServerURL = "",
+	Interval = "60",
+	Retries = "2",
+	RetryDelay = "1",
+	VendorSpecificIE = "24f128",
+	BandwidthThreshold = "",
+	BandwidthHysteresis = "",
+	Status = "Disabled",
+    }
+    binding.sectionname = "state"
+    local v = uci_helper.getall_from_uci(binding)
+    data.Enable = v and v.deploy and cvtBoolean[v.deploy] or data.Enable
+
+    data.Status = v and v.extendedstatus or data.Status
+
+    binding.sectionname = "lot_config"
+    local v = uci_helper.getall_from_uci(binding)
+    data.BandwidthThreshold = v.bandwidth_threshold and string.match(v.bandwidth_threshold, "%d+") and v.bandwidth_threshold or data.BandwidthThreshold
+    data.BandwidthHysteresis = v.bandwidth_hysteresis and string.match(v.bandwidth_hysteresis, "%d+") and v.bandwidth_hysteresis or data.BandwidthHysteresis
+    data.ServerURL = v.server_url or data.ServerURL
+    data.Interval = v.interval and string.match(v.interval, "%d+") and v.interval or data.Interval
+    data.Retries = v.retries and string.match(v.retries, "%d+") and v.retries or data.Retries
+    data.RetryDelay = v.retrydelay and string.match(v.retrydelay, "%d+") and v.retrydelay or data.RetryDelay
+    data.VendorSpecificIE = v.vendorspecificie or data.VendorSpecificIE
+    return data
+end
+
+
+Multi_Services_X_TELSTRA_LOT_.get = {
+    Enable = function(mapping, param, key)
+	binding.sectionname = "state"
+	binding.option = "deploy"
+	return cvtBoolean[uci_helper.get_from_uci(binding)]
+    end,
+    ServerURL = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "server_url"
+	return uci_helper.get_from_uci(binding)
+    end,
+    Interval = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "interval"
+	return uci_helper.get_from_uci(binding)
+    end,
+    Retries = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "retries"
+	return uci_helper.get_from_uci(binding)
+    end,
+    RetryDelay = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "retrydelay"
+	return uci_helper.get_from_uci(binding)
+    end,
+     VendorSpecificIE = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "vendorspecificie"
+	return uci_helper.get_from_uci(binding)
+    end,
+    BandwidthThreshold = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "bandwidth_threshold"
+	return uci_helper.get_from_uci(binding)
+    end,
+    BandwidthHysteresis = function(mapping, param, key)
+	binding.sectionname = "lot_config"
+	binding.option = "bandwidth_hysteresis"
+	return uci_helper.get_from_uci(binding)
+    end,
+    Status = function(mapping, param, key)
+	binding.sectionname = "state"
+	binding.option = "extendedstatus"
+	return uci_helper.get_from_uci(binding)
+    end,
+}
+
+local function getIntPart(x)
+    if x <= 0 then
+        return math.ceil(x);
+    end
+    if math.ceil(x) ~= x then
+        x = math.ceil(x) - 1
+    end
+    return x
+end
+
+-- Workaround for missing functionality in ucihelper
+local uci = require("uci")
+local function set_on_uci_state(binding, value, commitapply)
+  local cursor = uci.cursor(UCI_CONFIG, "/var/state")
+  cursor:add_delta("/var/state")
+  -- simplified copy from ucihelper.set_on_uci
+  local config = binding.config
+  local section = binding.sectionname
+  local option = binding.option
+  local stype = binding.sectiontype or "?"
+  if not config then
+    error("No config could be found in the given binding", 2)
+  end
+  if not section then
+    error("No section name could be found in the given binding", 2)
+  end
+  if not value then
+    error("No value given to be set on UCI", 2)
+  end
+  local result = cursor:load(config)
+  if result then
+    if binding.extended then
+      if option then
+        result = cursor:set(config .. "." .. section .. "." .. option .. "=" .. value)
+      else
+        result = cursor:set(config .. "." .. section                  .. "=" .. value)
+      end
+    else
+      if option then
+        result = cursor:set(config, section, option, value)
+      else
+        result = cursor:set(config, section,         value)
+      end
+    end
+  end
+  if result then
+    -- We save here so the set is persisted to file, although it is not
+    -- yet committed! We persist to file, so if we lose or reload our cursor for
+    -- some reason, the set won't be lost.
+    result = cursor:save(config)
+  end
+  if result and commitapply then
+    if option then
+      commitapply:newset(config .. "." .. stype .. '.' .. section .. "." .. option)
+    else
+      commitapply:newadd(config .. "." .. stype .. '.' .. section)
+    end
+  end
+  cursor:unload(config)
+end
+
+
+-- check the value of Interval ---
+local function isInterval (value)
+    if not value then
+        return false
+    end
+   local retries = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "retries"})
+   local retrydelay = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "retrydelay"})
+    local result = (tonumber(retries) * tonumber(retrydelay))
+    if tonumber(value) < tonumber(result) then
+	return false
+    end
+	return true
+end
+
+local function isRetries (value)
+    if not value then
+        return false
+    end
+    local interval = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "interval"})
+    local retrydelay = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "retrydelay"})
+    local result = (tonumber(interval) / tonumber(retrydelay))
+    if tonumber(value) > tonumber(result) then
+	return false
+    end
+	return true
+end
+
+local function isRetryDelay (value)
+    if not value then
+        return false
+    end
+    local retries = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "retries"})
+    local interval = uci_helper.get_from_uci({config = "lot", sectionname = "lot_config", option = "interval"})
+    local result = (tonumber(interval) / tonumber(retries))
+    if tonumber(value) > tonumber(result) then
+	return false
+    end
+	return true
+end
+
+
+
+Multi_Services_X_TELSTRA_LOT_.set = {
+    Enable = function(mapping, param, value, key)
+	binding.sectionname = "state"
+	binding.option = "deploy"
+	local old_value = cvtBoolean[uci_helper.get_from_uci(binding)]
+        if value ~= old_value then
+          set_on_uci_state(binding, cvtBoolean[value], commitapply)
+          transactions[binding.config] = true
+        end
+    end,
+    BandwidthThreshold = function(mapping, param, value, key)
+	binding.sectionname = "lot_config"
+	binding.option = "bandwidth_threshold"
+	uci_helper.set_on_uci(binding, value, commitapply)
+	transactions[binding.config] = true
+    end,
+    BandwidthHysteresis = function(mapping, param, value, key)
+	binding.sectionname = "lot_config"
+	binding.option = "bandwidth_hysteresis"
+	uci_helper.set_on_uci(binding, value, commitapply)
+	transactions[binding.config] = true
+    end,
+    ServerURL = function(mapping, param, value, key)
+	binding.sectionname = "lot_config"
+	binding.option = "server_url"
+	uci_helper.set_on_uci(binding, value, commitapply)
+	transactions[binding.config] = true
+     end,
+    Interval = function(mapping, param, value, key)
+	local result = isInterval(value)
+	if result then
+	  binding.sectionname = "lot_config"
+          binding.option = "interval"
+          uci_helper.set_on_uci(binding, value, commitapply)
+          transactions[binding.config] = true
+	else
+          return nil, "Invalid Interval, it must be marge than retires multiply retrydelay"
+	end
+    end,
+
+    Retries = function(mapping, param, value, key)
+	local result = isRetries(value)
+	if result then
+          binding.sectionname = "lot_config"
+          binding.option = "retries"
+          uci_helper.set_on_uci(binding, value, commitapply)
+          transactions[binding.config] = true
+	else
+	  return nil, "Invalid Retries, it must be less than interval divide retrydelay"
+	end
+    end,
+    RetryDelay = function(mapping, param, value, key)
+	local result = isRetryDelay(value)
+	if result then
+	  binding.sectionname = "lot_config"
+          binding.option = "retrydelay"
+          uci_helper.set_on_uci(binding, value, commitapply)
+          transactions[binding.config] = true
+	else
+	  return nil, "Invalid RetryDelay, it must be less than interval divide retries"
+	end
+    end,
+
+    VendorSpecificIE = function(mapping, param, value, key)
+	binding.sectionname = "lot_config"
+	binding.option = "vendorspecificie"
+	uci_helper.set_on_uci(binding, value, commitapply)
+	transactions[binding.config] = true
+	wireless_binding.sectionname = "radio_2G"
+	wireless_binding.option = "probe_monitor_vsie_oui"
+	uci_helper.set_on_uci(wireless_binding, value, commitapply)
+	transactions[wireless_binding.config] = true
+    end,
+
+}
+
+Multi_Services_X_TELSTRA_LOT_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+      binding.config = config
+      uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+Multi_Services_X_TELSTRA_LOT_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+      binding.config = config
+      uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_LOT_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

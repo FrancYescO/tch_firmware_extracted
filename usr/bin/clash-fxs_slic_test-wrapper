@@ -1,0 +1,81 @@
+#!/usr/bin/env lua
+-- Functions made available from the CLI environment
+local print = print
+local ubus = require("ubus")
+local uloop = require("uloop")
+uloop.init()
+local ubusConnection = ubus.connect()
+local logger = require('transformer.logger')
+
+-- Create a logger instance to log messages
+local log = logger.new("clash")
+
+if not ubusConnection then
+  return
+end
+
+local status
+
+local function errHandler(err)
+  log:critical(err)
+  for line in string.gmatch(debug.traceback(), "([^\n]*)\n") do
+    log:critical(line)
+  end
+end
+
+-- To get the fxs status
+-- Parameters:
+-- - device  : [string] fxs device name
+local function getFxsState(device)
+  local fxsState = ubusConnection:call("mmpbxbrcmfxs.state", "get", {["device"] = device}) or {}
+  if fxsState and fxsState[device] then
+    status = fxsState[device]["hookState"] or "error"
+  else
+    status = "error"
+  end
+end
+
+-- To Display the test result obtained via ubus event/call
+-- Parameters:
+-- - msg  : [table] the UBUS message
+local function testResult(msg)
+  if next(msg) then
+    local test = msg["test"]
+    local state = msg["state"]
+    print("\n Test : " .. test .. "  State : " .. state)
+    if state == "finished" then
+      local dev = msg["device"]
+      local cursor = require("uci").cursor()
+      local port = cursor:get("mmpbxbrcmfxsdev." .. dev .. ".fxs_port")
+      cursor:close()
+      print("\n FXS port " .. port .. ":")
+      for key, value in pairs(msg) do
+        if key ~= "state" and key ~= "test" and key ~= "device" then
+          print("\t " .. key .. " : " .. value)
+        end
+      end
+    end
+  end
+  -- need to break the uloop.run once execution completed
+  -- uloop.timer of 10ms is used to cancel the loop when multiple event or no event is captured
+  uloop.timer(function() uloop.cancel() end, 10)
+end
+
+-- Register event listener
+ubusConnection:listen({ ["mmbrcmfxs.debug.slic.test.event"] = testResult })
+
+local fxsDevice = arg[1]
+local slicTest = arg[2]
+getFxsState(fxsDevice)
+-- REN Slic Test is possible only when device is OnHook, other tests can be executed if mmpbx is up
+if status ~= "error" then
+  -- uloop.timer of 10ms is used to delay the successive receiving of ubus event
+  uloop.timer(function() ubusConnection:call("mmbrcmfxs.debug.slic.test", "set", {["device"] = fxsDevice, ["cmdparms"]= slicTest})
+  end, 10)
+else
+  -- to cancel the uloop incase of error i.e mmpbx down
+  uloop.timer(function() uloop.cancel() end, 10)
+end
+
+-- Idle loop
+xpcall(uloop.run, errHandler)

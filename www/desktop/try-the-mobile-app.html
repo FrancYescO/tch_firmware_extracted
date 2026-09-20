@@ -1,0 +1,114 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="try-the-mobile-app"> <template> <style is="custom-style" include="duma-theme iron-flex iron-flex-alignment"> .mobile-overlay {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        bottom: 0;
+        background-color: var(--primary-background-color);
+        opacity: 0.75;
+        transition: opacity 0.3s ease-in;
+        z-index: 99;
+      }
+      .mobile-popup {
+        position: fixed;
+        width: 100%;
+        height: 24%;
+        bottom: 0;
+        background-color: var(--primary-background-color);
+        transition: height 0.3s ease-in;
+        z-index: 100;
+      }
+      .mobile-popup[collapsed] {
+        height: 0%;
+      }
+      .mobile-overlay[collapsed] {
+        opacity: 0;
+        height: 0;
+        transition: opacity 0.3s ease-in, height 0s ease-in 0.3s;
+      }
+
+      .mobile-popup > div {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        padding-top: 14%;
+      }
+      .mobile-popup > div > .close {
+        position: absolute;
+        right: 10px;
+        top: 10px;
+      }
+      .mobile-popup paper-button {
+        width: 80%;
+        margin-top: 1em;
+      }
+      @media only screen and (orientation: landscape) {
+        .mobile-popup:not([collapsed]) {
+          height: 42%;
+        }
+        .mobile-popup > div {
+          padding-top: 4%;
+        }
+      } </style> <div id="overlay" class="mobile-overlay" collapsed on-click="hide"></div> <div id="popup" class="mobile-popup" collapsed> <div> <div class="close"> <paper-icon-button icon="close" on-click="hide"></paper-icon-button> </div> <div class="layout vertical center"> <span><%= i18n.useMobileApp %></span> <paper-button background on-click="link_to"><%= i18n.useTheApp %></paper-button> </div> </div> </div> </template> <script> Polymer({
+      is: "try-the-mobile-app",
+
+      properties: {
+        includeTablets: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      toggle: function(){
+        if(!this.$.popup || !this.$.overlay){
+          setTimeout(this.hide.bind(this),100);
+          return;
+        }
+        if($(this.$.popup).attr("collapsed")){
+          this.show();
+        }else{
+          this.hide();
+        }
+      },
+
+      show: function(){
+        if(!this.$.popup || !this.$.overlay){
+          // if the elements cannot be found, retry show in 100ms
+          setTimeout(this.show.bind(this),100);
+          return;
+        }
+        $(this.$.popup).add(this.$.overlay).attr("collapsed",null);
+      },
+
+      hide: function(){
+        if(!this.$.popup || !this.$.overlay){
+          // if the elements cannot be found, retry hide in 100ms
+          setTimeout(this.hide.bind(this),100);
+          return;
+        }
+        $(this.$.popup).add(this.$.overlay).attr("collapsed",true);
+        setTimeout(this._setHiddenAttr.bind(this),310); //310 because the transition is 0.3s, and 310 is 0.31s
+      },
+      _setHiddenAttr: function(){
+        $(this).attr("hidden",true);
+      },
+      
+      ready: function(){
+        if(this._shouldShowPopup()){
+          setTimeout(this.show.bind(this),3000);
+        }else{
+          this._setHiddenAttr();
+        }
+      },
+
+      link_to: function(){
+        window.open("http://mobile.dumaos.com/");
+      },
+
+      _shouldShowPopup: function(){
+        return this.includeTablets ? _isMobileOrTablet() : _isMobile();
+      },
+    }); </script> </dom-module> 

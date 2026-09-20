@@ -1,0 +1,245 @@
+-- Manuall generated
+local multiap = {
+  objectType = {
+    name = "rpc.multiap.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {},
+  }
+}
+
+register(multiap)
+
+local multiap_device_i_ = {
+  objectType = {
+    name = "rpc.multiap.device.@.",
+    numEntriesParameter = "ExtenderNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      al_mac = {
+        access = "readOnly",
+        type = "string"
+      },
+      ip_address = {
+        access = "readOnly",
+        type = "string"
+      },
+      state = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      backhaul_interface_type = {
+        access = "readOnly",
+        type = "string"
+      },
+      parent = {
+        access = "readOnly",
+        type = "string"
+      },
+      neighbors = {
+        access = "readOnly",
+        type = "string"
+      },
+      manufacturer_name = {
+        access = "readOnly",
+        type = "string"
+      },
+      serial_number = {
+        access = "readOnly",
+        type = "string"
+      },
+      rssi = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      phyrate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      radio_count = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      device_name = {
+        access = "readOnly",
+        type = "string"
+      },
+      software_version = {
+        access = "readOnly",
+        type = "string"
+      },
+      model_number = {
+        access = "readOnly",
+        type = "string"
+      },
+      UpTime = {
+        access = "readOnly",
+        type = "string"
+      },
+      LED = {
+        access = "readWrite",
+        type = "string",
+        default = "Normal",
+        enumeration = {
+          "Normal",
+          "Dim",
+          "Off"
+        },
+      },
+      Alias = {
+        access = "readWrite",
+        type = "string",
+        max = 64,
+        description = "Multi-AP Agent/Device's name. Like Kitchen, living room.",
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local get_from_uci = uciHelper.get_from_uci
+local lower = string.lower
+local upper = string.upper
+local multiapBinding = { config = "multiap" }
+local mapveBinding = { config = "vendorextensions" }
+local concat = table.concat
+local data
+local agentsInfo = {}
+local commitapply = commitapply
+local configChanged
+
+local paramMap = {
+  state = "status",
+  backhaul_interface_type = "backhaul_info",
+  parent = "parent",
+  neighbors = "neighbors",
+  manufacturer_name = "manufacturer_name",
+  rssi = "rssi",
+  phyrate = "phyrate",
+  radio_count = "radio_count",
+}
+
+local paramInVendorextension = {
+  serial_number = "SerialNumber",
+  software_version = "SoftwareVersion",
+  model_number = "ModelNumber",
+  UpTime = "UpTime",
+}
+
+local function getUciParam(sectionName)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = "macaddress"
+  return uciHelper.get_from_uci(multiapBinding)
+end
+
+multiap_device_i_.entries = function()
+  local entries = {}
+  data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  agentsInfo = conn:call("mapVendorExtensions.agent", "get", {}) or {}
+  local agentMac = lower(getUciParam("agent"))
+  local controllerMac = lower(getUciParam("controller"))
+  for mac in pairs(data) do
+    if mac ~= agentMac and mac ~= controllerMac then
+      entries[#entries + 1] = mac
+    end
+  end
+  return entries
+end
+
+multiap_device_i_.get = function(mapping, param, key)
+  if param == "al_mac" then
+    return key
+  elseif param == "device_name" then
+    local agentMac = key:match("([^%:]+)$") or ""
+    return "agent_" .. agentMac
+  elseif param == "Alias" then
+    local agentMac = key:match("([^%:]+)$") or ""
+    return agentsInfo[upper(key)] and agentsInfo[upper(key)]["Alias"] and tostring(agentsInfo[upper(key)]["Alias"]) or "agent_" .. agentMac
+  elseif param == "ip_address" then
+    local interfaces = data[key]["local_interfaces"] or {}
+    local ipaddr = {}
+    if next(interfaces) then
+      for _, mac in ipairs(interfaces) do
+        local host_data = conn:call("hostmanager.device", "get", { ["mac-address"] = mac }) or {}
+        if next(host_data) then
+          for ip,_ in pairs(host_data) do
+            for _, idx in pairs(host_data[ip]["ipv4"]) do
+              ipaddr[#ipaddr+1] = idx["address"] or ""
+            end
+          end
+        end
+      end
+    end
+    return concat(ipaddr,",")
+  elseif param == "LED" then
+    if agentsInfo[upper(key)] and agentsInfo[upper(key)]["IEEE1905Id"] then
+      conn:call("mapVendorExtensions.agent", "get_led_status", {["Mac"] = agentsInfo[upper(key)]["IEEE1905Id"]})
+    end
+    return agentsInfo[upper(key)] and agentsInfo[upper(key)].LEDBrightness or ""
+  elseif paramInVendorextension[param] then
+    return agentsInfo[upper(key)] and agentsInfo[upper(key)][paramInVendorextension[param]] and tostring(agentsInfo[upper(key)][paramInVendorextension[param]]) or ""
+  elseif paramMap[param] then
+    local result = data[key] and data[key][paramMap[param]] or ""
+    if param == "state" then
+      return result == "ONBOARDED" and "1" or "0"
+    elseif param == "backhaul_interface_type" and result then
+      return result["interface_type"] or ""
+    end
+    return type(result) == "table" and table.concat(result, ",") or tostring(result)
+  end
+end
+
+local brightness = {
+  ["Normal"] = "2",
+  ["Dim"] = "1",
+  ["Off"] = "0"
+}
+
+multiap_device_i_.set = function(mapping, param, value, key)
+  if param == "LED" then
+    if agentsInfo[upper(key)] and agentsInfo[upper(key)]["IEEE1905Id"] then
+      local fd = io.open("/tmp/.ledbrightness", "a")
+      if fd then
+          fd:write(brightness[value] .. "," .. agentsInfo[upper(key)]["IEEE1905Id"], "\n")
+          fd:close()
+          commitapply:newset("multiap_setledbrightess")
+      else
+        return nil, "internal write error"
+      end
+    else
+      return nil, "No agent is onboarded for this instance"
+    end
+  end
+  if param == "Alias" then
+    if agentsInfo[upper(key)] then
+      local sectionname = string.gsub(upper(key), "%:", "") .."_alias"
+      mapveBinding.sectionname = sectionname
+      mapveBinding.option = "Alias"
+      if get_from_uci(mapveBinding) == "" then
+        mapveBinding.sectionname = sectionname
+        mapveBinding.option = nil
+        uciHelper.set_on_uci(mapveBinding, "alias_name")
+        configChanged = true
+      end
+      mapveBinding.sectionname = sectionname
+      mapveBinding.option = "Alias"
+      uciHelper.set_on_uci(mapveBinding, value)
+      configChanged = true
+    else
+      return nil, "This agent is not onboarded"
+    end
+  end
+end
+
+multiap_device_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(mapveBinding)
+    configChanged = false
+  end
+end
+
+register(multiap_device_i_)

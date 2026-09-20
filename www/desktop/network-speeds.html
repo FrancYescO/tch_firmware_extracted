@@ -1,0 +1,245 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+local libos = require("libos")
+local platform_information = os.platform_information()
+%> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toast/paper-toast.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="network-speeds"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host .row {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .labelled {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-evenly;
+        align-items: center;
+      }
+      .labelled > div {
+        display: flex;
+        flex-direction: column;
+        min-width: 5em;
+      }
+      .labelled > div > *:first-child {
+        opacity: 0.75;
+        font-size: 12px;
+      }
+
+      :host iron-icon[icon=arrow-circle-down] {
+        fill: var(--primary-color);
+        margin-right: 0.5em;
+      }
+      :host iron-icon[icon=arrow-circle-up] {
+        fill: var(--accent-color);
+        margin-right: 0.5em;
+      }
+
+      .gap-left {
+        margin-left: 4em;
+      }
+
+      paper-dialog div.inner div p {
+        max-width: 25em;
+      }
+      paper-dialog .buttons paper-spinner-lite {
+        margin-right: 2em;
+      }
+
+      paper-input.isp-speed-input paper-input-container input[type=number]::-webkit-inner-spin-button,
+      paper-input.isp-speed-input paper-input-container input[type=number]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        margin: 0; 
+        display: none;
+      }
+
+      #tchWait > div {
+        text-align: center;
+      }
+
+      .border-top {
+        border-top: var(--divider-color) solid thin;
+      }
+
+      .spinner-container {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        flex-grow: 1;
+        padding: 1em;
+      }
+
+      #confirm-table tr:not(:nth-child(2)) td {
+        border-top-color: transparent;
+      }
+      #confirm-table tr:nth-child(2) td {
+        padding-top: 16px;
+      }
+      #confirm-table tr td:last-child {
+        padding-right: 0;
+      }
+      /* make first and last 2 columns of rows white */
+      #confirm-table tr:not(:first-child) td:not(:nth-child(2)) {
+        color: var(--primary-text-color);
+      } </style> <paper-dialog id="startDialog" modal on-iron-overlay-closed="onClosed"> <h2 dialog-label><%= i18n.networkSpeeds %></h2> <paper-dialog-scrollable> <div class="inner"> <div> <p> <%= i18n.yourCurrentSpeeds %> </p> </div> <div class="row"> <div class="labelled"> <iron-icon icon="arrow-circle-down"></iron-icon> <div> <span><%= i18n.download %></span> <span>[[newDownloadSpeed]] <%= i18n.mbpsUnit %></span> </div> </div> <div class="labelled gap-left"> <iron-icon icon="arrow-circle-up"></iron-icon> <div> <span><%= i18n.upload %></span> <span>[[newUploadSpeed]] <%= i18n.mbpsUnit %></span> </div> </div> </div> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button on-click="_toEdit"><%= i18n.changeSpeeds %></paper-button> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> <paper-dialog id="editDialog" modal> <h2 dialog-label><%= i18n.networkSpeeds %></h2> <paper-dialog-scrollable> <div class="inner"> <div> <p> <%= i18n.networkSpeedsDialogContent %> </p> </div> <div class="row"> <div class="labelled"> <iron-icon icon="arrow-circle-down"></iron-icon> <paper-input label="<%= i18n.download %>" type="number" prevent-invalid-input disabled="[[_loading]]" step="10" value="{{newDownloadSpeed}}" min="0" max="1000" class="isp-speed-input"> <div suffix><%= i18n.mbpsUnit %></div> </paper-input> </div> <div class="labelled gap-left"> <iron-icon icon="arrow-circle-up"></iron-icon> <paper-input label="<%= i18n.upload %>" type="number" prevent-invalid-input disabled="[[_loading]]" step="10" value="{{newUploadSpeed}}" min="0" max="1000" class="isp-speed-input"> <div suffix><%= i18n.mbpsUnit %></div> </paper-input> </div> </div> </div> </paper-dialog-scrollable> <div class="buttons"> <template is="dom-if" if="[[_loading]]"> <paper-spinner-lite active></paper-spinner-lite> </template> <paper-button on-click="_toStart"><%= i18n.cancel %></paper-button> <paper-button on-click="_doTest" disabled="[[_loading]]"><%= i18n.testSpeed %></paper-button> <paper-button on-click="_toSave" disabled="[[_loading]]"><%= i18n.next %></paper-button> </div> </paper-dialog> <paper-dialog id="waitDialog" modal> <h2 dialog-label><%= i18n.detectingYourSpeeds %></h2> <paper-dialog-scrollable> <div class="inner"> <p> <%= i18n.autoDesc1 %> </p> <p> <%= i18n.autoDesc2 %> </p> </div> <div class="spinner-container"> <paper-spinner-lite active></paper-spinner-lite> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button on-click="_toStart"><%= i18n.cancel %></paper-button> </div> </paper-dialog> <paper-dialog id="saveDialog" modal> <h2 dialog-label><%= i18n.confirmSpeeds %></h2> <paper-dialog-scrollable> <div class="inner"> <div> <p> <%= i18n.networkSpeedsConfirm %> </p> </div> <table id="confirm-table"> <tbody> <tr> <td></td> <td><%= i18n.old %></td> <td></td> <td><%= i18n.new %></td> </tr> <tr> <td> <iron-icon icon="arrow-circle-down"></iron-icon> <span><%= i18n.download %></span> </td> <td>[[oldDownloadSpeed]]</td> <td> <iron-icon icon="arrow-right"></iron-icon> </td> <td>[[newDownloadSpeed]]</td> <td><%= i18n.mbpsUnit %></td> </tr> <tr> <td> <iron-icon icon="arrow-circle-up"></iron-icon> <span><%= i18n.upload %></span> </td> <td>[[oldUploadSpeed]]</td> <td> <iron-icon icon="arrow-right"></iron-icon> </td> <td>[[newUploadSpeed]]</td> <td><%= i18n.mbpsUnit %></td> </tr> </tbody> </table> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button on-click="_toStart"><%= i18n.cancel %></paper-button> <paper-button on-click="_toEdit"><%= i18n.changeManually %></paper-button> <paper-button on-click="save" disabled="[[_loading]]"><%= i18n.confirm %></paper-button> </div> </paper-dialog> <paper-dialog id="errorDialog" modal> <h2 dialog-label><%= i18n.networkSpeeds %></h2> <paper-dialog-scrollable> <div class="inner"> [[errorText]] </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button on-click="_toStart"><%= i18n.back %></paper-button> </div> </paper-dialog> <% if platform_information.model == "DJA0231" or platform_information.model == "DJA0230" then %> <paper-dialog id="tchWait" modal> <div> <p>DumaOS is applying your changes now. Your internet will be unavailable while this is happening, but don’t worry: you’ll be back online within 2 minutes.</p> <paper-spinner-lite active></paper-spinner-lite> </div> </paper-dialog> <% end %> <paper-toast id="toast"><%= i18n.networkSpeedsChanged %></paper-toast> </template> <script> Polymer({
+      is: "network-speeds",
+
+      properties: {
+        newDownloadSpeed: {
+          type: Number,
+          value: 1000
+        },
+        newUploadSpeed: {
+          type: Number,
+          value: 1000
+        },
+        oldDownloadSpeed: {
+          type: Number,
+          value: 1000
+        },
+        oldUploadSpeed: {
+          type: Number,
+          value: 1000
+        },
+        _loading: {
+          type: Boolean,
+          value: false
+        },
+        errorText: String,
+      },
+      _callback: null,
+
+      _errors: {
+        "800": "<%= i18n.noWanError %>",
+        [null]: "<%= i18n.unknownError %>"
+      },
+
+      _showError: function(errorCode){
+        if(this._errors[errorCode]){
+          this.errorText = this._errors[errorCode];
+        }else{
+          this.errorText = this._errors[null];
+        }
+        this._toError();
+      },
+
+      switchToDialog: function(switchKey){
+        var diags = {
+          start: this.$.startDialog,
+          edit: this.$.editDialog,
+          wait: this.$.waitDialog,
+          save: this.$.saveDialog,
+          error: this.$.errorDialog,
+        }
+        for(var key in diags){
+          var dialog = diags[key];
+          if(switchKey === key){
+            dialog.open();
+          }else{
+            dialog.close();
+          }
+        }
+      },
+      _toStart: function(){
+        this._resetNew();
+        this.switchToDialog("start");
+      },
+      _toEdit: function(){
+        this.switchToDialog("edit");
+      },
+      _toWait: function(){
+        this.switchToDialog("wait");
+      },
+      _toSave: function(){
+        this.switchToDialog("save");
+      },
+      _toError: function(){
+        this.switchToDialog("error");
+      },
+
+      _resetNew: function(){
+        this.newDownloadSpeed = this.oldDownloadSpeed;
+        this.newUploadSpeed = this.oldUploadSpeed;
+        this._loading = false;
+      },
+
+      _doTest: function(){
+        this._loading = true;
+        this._toWait();
+        long_rpc_promise("com.netdumasoftware.benchmark","speed_test_stage",[]).done(function(resultJson){
+          if(resultJson[0]){
+            var result = JSON.parse(resultJson[0]);
+            this.newDownloadSpeed = Math.round(parseFloat(result.Download) / 1000);
+            this.newUploadSpeed = Math.round(parseFloat(result.Upload) / 1000);
+            this._loading = false;
+            this._toSave();
+          }else{
+            this._showError(resultJson[1]);
+          }
+        }.bind(this));
+      },
+
+      save: function(){
+        this._loading = true;
+        Q.spread([
+          long_rpc_promise("com.netdumasoftware.config","set_isp_speeds",[this.newDownloadSpeed.toString(),this.newUploadSpeed.toString()]),
+          this._promiseTchWait()
+        ],function(){
+          this.oldDownloadSpeed = this.newDownloadSpeed;
+          this.oldUploadSpeed = this.newUploadSpeed;
+
+          
+          this.fire("speeds-saved",{upload: this.newUploadSpeed, download: this.newDownloadSpeed});
+          this._loading = false;
+          this.close();
+
+          this.$.toast.open();
+
+        }.bind(this));
+      },
+
+      open: function(callback){
+        //callback for closing it
+        this._callback = callback;
+        Q.spread([
+          long_rpc_promise("com.netdumasoftware.config", "isp_download_speed", []),
+          long_rpc_promise("com.netdumasoftware.config", "isp_upload_speed", [])
+        ],function(isp_down,isp_up){
+          this.oldDownloadSpeed = isp_down[0];
+          this.oldUploadSpeed = isp_up[0];
+          this._resetNew();
+          this.switchToDialog("start");
+        }.bind(this));
+      },
+
+      close: function(){
+        this.switchToDialog(null);
+      },
+
+      onClosed: function(){
+        if(this._callback){
+          this._callback(this.oldDownloadSpeed,this.oldUploadSpeed);
+          this._callback = null;
+        }
+      },
+
+      _promiseTchWait: function(){
+        return new Promise(function(resolve,reject){ <% if platform_information.model == "DJA0231" or platform_information.model == "DJA0230" then %> var func;
+          func = function(){
+            long_rpc_promise("com.netdumasoftware.qos","telstra_wan_status",[]).done(function(result){
+              if(result && result[0]){
+                this.$.tchWait.close();
+                resolve()
+              }else{
+                this.switchToDialog(null);
+                this.$.tchWait.open();
+                setTimeout(func,2000);
+              }
+            }.bind(this))
+          }.bind(this)
+          func(); <% else %> resolve(true); <% end %> }.bind(this));
+      }
+    }); </script> </dom-module> 

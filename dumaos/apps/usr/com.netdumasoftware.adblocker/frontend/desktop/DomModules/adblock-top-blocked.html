@@ -1,0 +1,158 @@
+<link rel="import" href="/custom-elements/duma-chart/duma-chart.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-legend/duma-legend.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/colours.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="adblock-top-blocked"> <template> <style include="duma-theme iron-flex"> :host {
+        display: block;
+        width: 100%;
+      }
+      ::content iron-pages > div,
+      ::content iron-pages {
+        height: 100%;
+      }
+      ::content .radioButtons {
+        margin: auto;
+      }
+
+      ::content #noDataWrapper {
+        padding-top: 10em;
+        text-align: center;
+      } </style> <iron-pages selected="[[dataPresent]]"> <div id="noDataWrapper"> <h2><%= i18n.noData %></h2> </div> <div class="chart-wrapper"> <duma-legend id="legend" vertical></duma-legend> <duma-chart id="graph" type="doughnut"></duma-chart> </div> </iron-pages> </template>  <script> Polymer(
+    {
+      is: 'adblock-top-blocked',
+      properties:
+      {
+        disableButton:
+        {
+          type: Boolean,
+          value: false,
+        },
+        selectedType:
+        {
+          type: String,
+          value: "hits",
+          observer: "selectedTypeChanged",
+        },
+        data:
+        {
+          type: Object,
+          value: [],
+        },
+        dataPresent:
+        {
+          type: Number,
+          value: 0,
+        }
+      },
+      ready: function()
+      {
+        long_rpc_promise("com.netdumasoftware.burstwatch", "popular_domains", ["true", "86400.0", "true", "0.0"]).done(this.PopularDomainsCallback.bind(this));
+      },
+      PopularDomainsCallback: function(data)
+      {
+        var topBlocked = data[0].popular;
+
+        // If no data present just return now
+        if (topBlocked.length == 0)
+        {
+          // Tell panel finished loading
+          $(this).closest("duma-panel").prop("loaded", true);
+          return;
+        }
+
+        // Show graph instead of no data
+        this.dataPresent = 1;
+
+        // Go through top domains converting them to a dataset and counting total after top 10
+        var otherDomains = 0;
+
+        for(var i = 0; i < topBlocked.length; i ++)
+        {
+          if (i < 10)
+          {
+            this.data.push(
+            {
+              domain: topBlocked[i].name,
+              hits: topBlocked[i].count,
+            });
+          }
+          else
+            otherDomains += topBlocked[i].count;
+        }
+
+        // If other domains counted add as own entry
+        if (otherDomains != 0)
+        {
+          this.data.unshift(
+          {
+            domain: "<%= i18n.allOtherDomains %>",
+            hits: otherDomains,
+          });
+        }
+
+        // Convert dataset into something the graph can consume
+        this.hits   = [];
+        var labels  = [];
+        var colours = [];
+        var legend = [];
+        var cgen = getColourGenerator();
+
+        this.rawData = [];
+
+        for (var i = 0; i < this.data.length; i++)
+        {
+          var colour = cgen();
+          colours.push(colour);
+          labels.push(this.data[i].domain);
+          this.hits.push(this.data[i].hits);
+          legend.push({
+            label: this.data[i].domain,
+            colour: colour,
+            bgColour: colour,
+            visible: true
+          });
+        }
+
+        for (var i = 0; i < this.hits.length; i++)
+          this.rawData.push(this.hits[i]);
+
+        var config =
+        {
+          data:
+          {
+            datasets:
+            [
+              {
+                data: this.rawData,
+                backgroundColor: colours,
+                borderColor: "#00000000",
+                label: 'Dataset 1',
+                hoverBorderWidth: 0,
+              },
+            ],
+            labels: labels,
+          },
+          options:
+          {
+            ariaHeaders: ["<%= i18n.domainName %>", "<%= i18n.blockedAmount %>"],
+            responsive: true,
+            legend:
+            {
+              display: false,
+            },
+            title:
+            {
+              display: false,
+            },
+            animation:
+            {
+              animateScale: true,
+              animateRotate: true
+            }
+          }
+        };
+
+        this.$.graph.options = config.options;
+        this.$.graph.data = config.data;
+        this.$.legend.legendStats = legend;
+        this.$.legend.bindToChart(this.$.graph);
+
+        $(this).closest("duma-panel").prop("loaded", true);
+      },
+    }); </script> </dom-module> 

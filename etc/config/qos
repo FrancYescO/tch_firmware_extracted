@@ -1,0 +1,513 @@
+#Internal Classification Labels
+config label 'dscp_Zero'
+	option dscp '0'
+
+config label 'Normal'
+	option trafficid '1'
+
+config label 'FON'
+	option trafficid '2'
+
+config label 'LoT'
+	option trafficid '2'
+
+config label 'User'
+	option trafficid '3'
+
+config label 'Video'
+	option trafficid '4'
+
+config label 'DNS'
+	option trafficid '5'
+
+config label 'Management'
+	option trafficid '6'
+
+config label 'DHCP'
+	option trafficid '7'
+
+config label 'BFD'
+	option trafficid '7'
+
+config label 'VoWiFi'
+	option trafficid '8'
+	option dscp '36'
+
+config label 'Voice'
+	option trafficid '8'
+
+config label 'DNSGW'
+	option trafficid '7'
+
+config label 'PPP'
+	option trafficid '9'
+#Qos Class Definition (queue's)
+
+#TO_WAN
+config class 'W_Q0'
+	option priority '0'
+	option weight '10'
+
+config class 'W_Q1'
+	list trafficid '2'
+	list trafficid_tcpack '0'
+	list trafficid_tcpack '1'
+	option priority '0'
+	option weight '10'
+
+config class 'W_Q2'
+	list trafficid '3'
+	list trafficid '4'
+	list trafficid_tcpack '2'
+	option priority '0'
+	option weight '30'
+	option swprio '1'
+
+config class 'W_Q3'
+	list trafficid '6'
+	list trafficid_tcpack '3'
+	list trafficid_tcpack '4'
+	option priority '0'
+	option weight '50'
+	option swprio '1'
+
+config class 'W_Q4'
+	option priority '4'
+	option swprio '2'
+
+config class 'W_Q5'
+	list trafficid '5'
+	list trafficid_tcpack '5'
+	list trafficid_tcpack '6'
+	option priority '5'
+	option swprio '3'
+
+config class 'W_Q6'
+	list trafficid '8'
+	option priority '6'
+	option swprio '4'
+
+config class 'W_Q7'
+	list trafficid '9'
+	list trafficid '7'
+	option priority '7'
+	option swprio '5'
+
+#TO_LAN
+config class 'L_Q0'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '4'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '5'
+	list trafficid '6'
+	list trafficid '7'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '8'
+	option priority '3'
+
+#TO_WLAN
+config class 'WMM_BK_Q0'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '4'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '5'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '6'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q0'
+	option policy 'sp_wrr'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+	option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+# Since QoSv2.1 it's preferred to set classgroup on device level
+config device 'atm_8_35'
+	option classgroup 'TO_WAN'
+
+config device 'ptm0'
+	option classgroup 'TO_WAN'
+	option swshaper 'vdsl_swshaper'
+
+config swshaper 'vdsl_swshaper'
+	option enable '0'
+	option max_bit_rate '40000'
+
+config device 'eth4'
+	option classgroup 'TO_WAN'
+
+config device 'eth0'
+	option classgroup 'TO_LAN'
+
+config device 'eth1'
+	option classgroup 'TO_LAN'
+
+config device 'eth2'
+	option classgroup 'TO_LAN'
+
+config device 'eth3'
+	option classgroup 'TO_LAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+config device 'wl1'
+	option classgroup 'TO_WLAN'
+
+#QoS classification rules (only IPv4 classification present due to lack of IPv6 configuration plane)
+#IMPORTANT NOTE: Make sure that the order in which the rules are defined is from Lowest Priority to Highest Priority!
+
+config reclassify 'reclassify_1'
+	option order '0'
+	option target 'dscp_Zero'
+	list srcif 'lan'
+	list srcif 'Guest1'
+	list srcif 'Guest1_5GHz'
+	list srcif 'fonopen'
+	list dstif 'wan'
+	list dstif 'wan6'
+
+config reclassify 'reclassify_2'
+	option order '0'
+	option target 'dscp_Zero'
+	list dscp '!EF'
+	list dstif 'wan'
+	list dstif 'wan6'
+
+config classify 'classify_1'
+	option target 'FON'
+	option proto 'udp'
+	option dstports '1701'
+
+config classify 'classify_2'
+	option target 'LoT'
+	option dstports '5683'
+	option proto 'udp'
+
+config classify 'classify_3'
+	option target 'User'
+	option proto 'tcp'
+	option dstports '25,109,110,143,220,587,993,995,1723,1935,3074,3658,8080,2195'
+
+config classify 'classify_4'
+	option target 'User'
+	option proto 'tcp'
+	list srcif 'lan'
+	list srcif 'Guest1'
+	list srcif 'Guest1_5GHz'
+	option dstports '443,80'
+
+config classify 'classify_5'
+	option target 'User'
+	option proto 'ah'
+
+config classify 'classify_6'
+	option target 'User'
+	option proto 'udp'
+	option dstports '123'
+
+config classify 'classify_7'
+	option target 'Video'
+	option proto 'tcp'
+	option dstports '554'
+
+config classify 'classify_8'
+	option target 'Video'
+	option proto 'igmp'
+
+config classify 'classify_9'
+	option target 'DNS'
+	option dstports '53'
+	option proto 'tcp'
+
+config classify 'classify_10'
+	option target 'DNS'
+	option dstports '53'
+	option proto 'udp'
+
+config classify 'classify_11'
+	option target 'Management'
+	option proto 'icmp'
+
+config classify 'classify_12'
+	option target 'Management'
+	option proto 'gre'
+
+config classify 'classify_13'
+	option target 'Management'
+	option proto 'esp'
+
+config classify 'classify_14'
+	option target 'Management'
+	option proto 'udp'
+	option dstports '7547,51007,500,4500'
+
+config classify 'classify_15'
+	option target 'Management'
+	option dstports '7547,51007'
+	option proto 'tcp'
+
+config classify 'classify_16'
+	option target 'Management'
+	option dstports '443,80'
+	list srcif 'loopback'
+	option proto 'tcp'
+
+config reclassify 'reclassify_3'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '203.38.195.108'
+
+config reclassify 'reclassify_4'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '203.38.195.25'
+
+config reclassify 'reclassify_5'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '144.135.83.104'
+
+config reclassify 'reclassify_6'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '144.135.83.125'
+
+config reclassify 'reclassify_7'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '149.135.136.135'
+
+config reclassify 'reclassify_8'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '149.135.138.120'
+
+config reclassify 'reclassify_9'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '149.135.140.7'
+
+config reclassify 'reclassify_10'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '144.135.83.235'
+
+config reclassify 'reclassify_11'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '144.135.83.107'
+
+config reclassify 'reclassify_12'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '149.135.136.48'
+
+config reclassify 'reclassify_13'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:FF00:09C9:7:E1C0::1'
+
+config reclassify 'reclassify_14'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:FF00:09C9:7:E1C0::2'
+
+config reclassify 'reclassify_15'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:AE04:7:E1C0::1'
+
+config reclassify 'reclassify_16'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:AE04:7:E1C0::2'
+
+config reclassify 'reclassify_17'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:AE04:7:E1C0::3'
+
+config reclassify 'reclassify_18'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:E04:7:E1C0::1'
+
+config reclassify 'reclassify_19'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:E04:7:E1C0::2'
+
+config reclassify 'reclassify_20'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:6E04:7:E1C0::1'
+
+config reclassify 'reclassify_21'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:8E04:7:E1C0::1'
+
+config reclassify 'reclassify_22'
+	option order '1'
+	option target 'VoWiFi'
+	option dsthost '2001:8004:0:EE04:7:E1C0::1'
+
+config reclassify 'reclassify_23'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '203.38.195.108'
+
+config reclassify 'reclassify_24'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '203.38.195.25'
+
+config reclassify 'reclassify_25'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '144.135.83.104'
+
+config reclassify 'reclassify_26'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '144.135.83.125'
+
+config reclassify 'reclassify_27'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '149.135.136.135'
+
+config reclassify 'reclassify_28'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '149.135.138.120'
+
+config reclassify 'reclassify_29'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '149.135.140.7'
+
+config reclassify 'reclassify_30'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '144.135.83.235'
+
+config reclassify 'reclassify_31'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '144.135.83.107'
+
+config reclassify 'reclassify_32'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '149.135.136.48'
+
+config reclassify 'reclassify_33'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:FF00:09C9:7:E1C0::1'
+
+config reclassify 'reclassify_34'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:FF00:09C9:7:E1C0::2'
+
+config reclassify 'reclassify_35'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:AE04:7:E1C0::1'
+
+config reclassify 'reclassify_36'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:AE04:7:E1C0::2'
+
+config reclassify 'reclassify_37'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:AE04:7:E1C0::3'
+
+config reclassify 'reclassify_38'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:E04:7:E1C0::1'
+
+config reclassify 'reclassify_39'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:E04:7:E1C0::2'
+
+config reclassify 'reclassify_40'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:6E04:7:E1C0::1'
+
+config reclassify 'reclassify_41'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:8E04:7:E1C0::1'
+
+config reclassify 'reclassify_42'
+	option order '1'
+	option target 'VoWiFi'
+	option srchost '2001:8004:0:EE04:7:E1C0::1'
+
+config classify 'classify_17'
+	option target 'Voice'
+	list srcif 'loopback'
+	list dscp 'EF'
+
+config classify 'classify_18'
+	option target 'BFD'
+	option dstports '3785'
+	option proto 'udp'
+
+config host 'host_1'
+	option target 'BFD'
+	option path '/usr/sbin/bfdecho'
+
+config host 'host_2'
+	option target 'DNSGW'
+	option path '/usr/bin/dig'
+
+config classify 'classify_19'
+	option target 'DHCP'
+	option proto 'udp'
+	option dstports '67,68,546,547'

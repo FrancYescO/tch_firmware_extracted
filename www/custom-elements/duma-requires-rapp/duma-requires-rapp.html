@@ -1,0 +1,124 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module is="duma-requires-rapp"> <template> <template is="dom-if" if="[[_show(_showState,'running')]]" restamp> <content select="[running]"></content> </template> <template is="dom-if" if="[[_show(_showState,'stopped')]]" restamp> <content select="[stopped]"></content> </template> <template is="dom-if" if="[[_show(_showState,'pre')]]" restamp> <content select="[pre]"></content> </template> </template> <script> Polymer({
+      is: "duma-requires-rapp",
+      
+      properties: {
+        rapp: {
+          type: String,
+          value: null
+        },
+
+        imports: {
+          type: Array,
+          value: []
+        },
+
+        _showState: {
+          type: String,
+          value: "pre"
+        },
+
+        _states: {
+          type: Object,
+          value: {
+            [null]: "pre",
+            [true]: "running",
+            [false]: "stopped"
+          }
+        },
+
+        _cacheSuffix: {
+          type: String,
+          value: "??v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"
+        },
+
+        callback: {
+          type: Function,
+          value: null,
+          observer: "_callbackChanged"
+        }
+      },
+
+      observers: [
+        '_change(rapp,imports)'
+      ],
+
+      _show: function(currentShow,match){
+        return currentShow === match;
+      },
+
+      _setState: function(state){
+        if(this._states && typeof this._states[state] !== "undefined"){
+          this._showState = this._states[state];
+        }else{
+          this._showState = this._states ? this._states[null] : "pre";
+        }
+      },
+
+      _importPromise: function(href){
+        return Q.promise(function(resolve,reject){
+          this.importHref(href, function(e) {
+            resolve(true)
+          }, function(e) {
+            reject(e)
+          },true);
+        }.bind(this));
+      },
+
+      _doImports: function(imports){
+        var promises = [];
+        for(var i = 0; i < imports.length; i++){
+          var full = location.protocol + "//" + document.domain + imports[i] + this._cacheSuffix;
+          promises.push(this._importPromise(full));
+        }
+        return Q.all(promises);
+      },
+
+      _doCallback: function(rapp,imports){
+        if(typeof this.callback === "function"){
+          this.callback.call(this,rapp,imports);
+        }
+      },
+
+      _callbackChanged: function(){
+        if(this._show(this._showState,"running") || this._show(this._showState,true)){
+          this._doCallback();
+        }
+      },
+
+      _change: function(rapp,imports){
+        if(!Array.isArray(imports)) return;
+        this._setState(null)
+        long_rpc_promise("com.netdumasoftware.procmanager","running",[rapp]).then(function(result){
+          result = result && !!result[0];
+          if(result){
+            this._doImports(imports).done(function(){
+              this._setState(true);
+              Polymer.dom.flush();
+              this._doCallback();
+            }.bind(this));
+          }else{
+            this._setState(false);
+          }
+        }.bind(this)).fail(function(){
+          this._setState(false);
+        }.bind(this));
+      },
+
+      promise: function(){
+        return new Promise(function(resolve,reject){
+          var testTimeout = 100;
+          var func;
+          func = function(){
+            if( !( this._show(this._showState,"pre") || this._show(this._showState,null) ) ){
+              // Has completed rpc
+              resolve(this._showState);
+            }
+            setTimeout(func,testTimeout);
+          }.bind(this);
+          setTimeout(func,testTimeout);
+        }.bind(this));
+      }
+    }); </script> </dom-module> 

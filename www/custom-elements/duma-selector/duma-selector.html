@@ -1,0 +1,204 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-tabs/paper-tabs.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-tabs/paper-tab.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-device-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-tree-service-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-flat-service-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-port-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-schedule-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="duma-data-selector.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/devices.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-selector"> <style is="custom-style" include="duma-theme"></style> <template> <paper-dialog modal> <paper-dialog-scrollable> <template is="dom-if" if="[[_shouldShowTabs(_loadedConfig.pages)]]"> <paper-tabs selected="{{_selectedPage}}" attr-for-selected="page" on-selected-changed="_onTabChange"> <template is="dom-repeat" items="[[_loadedConfig.pages]]" as="page"> <paper-tab page="[[page]]">[[page.title]]</paper-tab> </template> </paper-tabs> </template> <iron-pages selected="[[_selectedPageIndex]]"> <div> <duma-device-selector value="{{_devices.value}}" valid="{{_devices.valid}}" multiple="[[_devices.multiple]]"></duma-device-selector> </div> <div> <duma-tree-service-selector value="{{_services.tree.value}}" valid="{{_services.tree.valid}}"></duma-tree-service-selector> </div> <div> <duma-flat-service-selector value="{{_services.flat.value}}" valid="{{_services.flat.valid}}" multiple="[[_services.multiple]]"></duma-flat-service-selector> </div> <div> <duma-port-selector value="{{_ports.value}}" valid="{{_ports.valid}}"></duma-port-selector> </div> <div> <duma-schedule-selector></duma-schedule-selector> </div> <div> <duma-data-selector></duma-data-selector> </div> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss>Cancel</paper-button> <paper-button on-tap="_onNextButtonClick" disabled="[[_nextButtonDisabled(_selectedPageIndex, _devices.valid, _services.flat.valid, _services.tree.valid)]]"> [[_nextButtonText]]</paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "duma-selector",
+
+      observers: [
+        "_onPageChange(_devices.value.splices)",
+        "_onPageChange(_services.flat.value.splices)",
+        "_onPageChange(_services.tree.value.splices)"
+      ],
+
+      properties: {
+        _services: {
+          type: Object,
+          value: {
+            flat: { valid: false },
+            tree: { valid: false }
+          }
+        },
+
+        _devices: {
+          type: Object,
+          value: {
+            valid: false,
+          }
+        },
+
+        _ports: {
+          type: Object,
+          value: {
+            valid: false
+          }
+        }
+      },
+
+      _onTabChange: function () {
+        this._selectedPageIndex = this._selectedPage.index; 
+      },
+
+      _shouldShowTabs: function (pages) {
+        return pages.length > 1;
+      },
+
+      _setNextButtonText: function () {
+        this._nextButtonText = this._loadedConfig.getNextButtonText
+          .apply(null, arguments);
+      },
+
+      _onPageChange: function () {
+        if (this._selectedPage) {
+          this._setNextButtonText(
+            this[this._selectedPage.value]
+          );
+        }
+      },
+
+      _setSelectedPage: function () {
+        this._selectedPage = this._loadedConfig.pages[0];
+        this._selectedPageIndex = this._selectedPage.index;
+      },
+
+      _onNextButtonClick: function () {
+        var pageValue = this.get(this._selectedPage.valueKey);
+        this._pageData.push(pageValue);
+
+        if (this._loadedConfig.getNextPageConfig) {
+
+          var config = this._loadedConfig.getNextPageConfig(pageValue);
+
+          this._loadConfig(config);
+
+          this._setSelectedPage();
+
+        } else {
+
+          this._loadedConfig.onDone.apply(null, this._pageData);
+          this.close();
+        }
+      },
+
+      _nextButtonDisabled: function (
+        selectedPageIndex, devicesValid,
+        servicesFlatValid, servicesTreeValid
+      ) {
+        return !this.get(this._selectedPage.validKey);
+      },
+
+      _configurePage: function (pageIndex, config) {
+        switch (pageIndex) {
+          case this.pageMap.devices:
+            this._multipleDevices = config.multiple;
+            break;
+
+          case this.pageMap.services.tree:
+          case this.pageMap.services.flat:
+            this._multipleServices = config.multiple;
+        }
+      },
+
+      _getPageConfig: function (page) {
+        switch(page.id) {
+          case "devices":
+            return {
+              index: 0,
+              id: page.id,
+              title: "Devices",
+              multiple: page.multiple ? true : false,
+              validKey: "_devices.valid",
+              valueKey: "_devices.value"
+            };
+
+          case "services":
+            var multiple = page.multiple ? true : false;
+            return {
+              index: page.tree ? 1 : 2,
+              id: page.id,
+              title: "Services",
+              multiple: multiple,
+              tree: page.tree,
+              validKey: page.tree ? "_services.tree.valid" : "_services.flat.valid",
+              valueKey: page.tree ? "_services.tree.value" : "_services.flat.value",
+              flat: { multiple: multiple },
+              tree: { multiple: multiple }
+            };
+
+          case "ports":
+            return {
+              index: 3,
+              id: page.id,
+              title: "Ports",
+              validKey: "_ports.valid",
+              valueKey: "_ports.value"
+            };
+        }
+      },
+
+      _setPageConfig: function (pageConfig) {
+        switch(pageConfig.id) {
+          case "devices":
+            this._devices = pageConfig;
+            break;
+
+          case "services":
+            this._services = pageConfig;
+            break;
+
+          case "ports":
+            this._ports = pageConfig;
+            break;
+        }
+      
+      },
+
+      _loadConfig: function (config) {
+        var pages = []
+
+        for (var i = 0; i < config.pages.length; i++) {
+          var page = config.pages[i];
+          var pageConfig = this._getPageConfig(page);
+
+          this._setPageConfig(pageConfig)
+
+          pages.push(pageConfig);
+        }
+        
+        this._loadedConfig = {
+          getNextPageConfig: config.getNextPageConfig,
+
+          getNextButtonText: config.getNextButtonText || function () {
+            return "Next";
+          },
+
+          onDone: config.onDone,
+
+          pages: pages
+        };
+      },
+      
+      _reset: function () {
+        this.$$("duma-device-selector").reset();
+        this.$$("duma-flat-service-selector").reset();
+        this.$$("duma-tree-service-selector").reset();
+
+        this._pageData = [];
+      },
+
+      open: function (config) {
+
+        this._loadConfig(config);
+
+        this._setSelectedPage();
+
+        this._reset();
+
+        this._setNextButtonText();
+
+        this.$$("paper-dialog").open();
+      },
+
+      close: function () {
+        this.$$("paper-dialog").close();
+      }
+    }); </script> </dom-module> 

@@ -1,0 +1,517 @@
+-- Automatically generated from InternetGatewayDevice:1.3 and Device:2.10
+-- using generator version 2.3
+local Multi_DeviceInfo_ = {
+  objectType = {
+    name = "#ROOT.DeviceInfo.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DeviceCategory = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+      },
+      Manufacturer = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      ManufacturerOUI = {
+        access = "readOnly",
+        type = "string",
+        min = "6",
+        max = "6",
+      },
+      ModelName = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      ModelNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Description = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "256",
+      },
+      ProductClass = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      HardwareVersion = {
+        access = "readOnly",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      SoftwareVersion = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      AdditionalHardwareVersion = {
+        access = "readOnly",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      AdditionalSoftwareVersion = {
+        access = "readOnly",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      ProvisioningCode = {
+        access = "readWrite",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "64",
+      },
+      UpTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      FirstUseDate = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "dateTime",
+      },
+      X_000E50_NewSoftwareBank = {
+        access = "readWrite",
+        type = "string",
+        description = "Switch over to the specified software bank",
+        pathRef = true,
+      },
+      ModemFirmwareVersion = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      EnabledOptions = {
+        access = "readOnly",
+        list = true,
+        max = "1024",
+        type = "string",
+      },
+      DeviceLog = {
+        access = "readOnly",
+        type = "string",
+        max = "32768",
+      },
+      SpecVersion = {
+        access = "readOnly",
+        status = "deprecated",
+        forcedInform = "true",
+        type = "string",
+        max = "16",
+        default = "1.0",
+      },
+      X_000E50_DeviceLogFilter = {
+        access = "readWrite",
+        type = "string",
+        description = "Set a filter for DeviceLog",
+        enumeration = {
+          "SIP",
+          "DHCP",
+          "PPP",
+          "CWMPD",
+          "WANSENSING",
+          "ERROR",
+          "ALL",
+        },
+      },
+      X_000E50_SoftwareVersionPassiveBank = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        description = "Set the SWversion for firmware in the passive bank",
+        max = "64",
+      },
+      X_000E50_SwitchtoPassiveBank = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Control to switch to passive bank",
+      },
+      X_000E50_ReturnToFactoryDefaultsSoft = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Control to set the default configurations in the device",
+      },
+      -- VendorConfigFileNumberOfEntries
+      -- automatically created when Device.DeviceInfo.VendorConfigFile.{i}. is loaded
+      -- SupportedDataModelNumberOfEntries
+      -- automatically created when Device.DeviceInfo.SupportedDataModel.{i}. is loaded
+      -- ProcessorNumberOfEntries
+      -- automatically created when Device.DeviceInfo.Processor.{i}. is loaded
+      -- VendorLogFileNumberOfEntries
+      -- automatically created when Device.DeviceInfo.VendorLogFile.{i}. is loaded
+      -- LocationNumberOfEntries
+      -- automatically created when Device.DeviceInfo.Location.{i}. is loaded
+      -- VendorConfigFileNumberOfEntries
+      -- automatically created when InternetGatewayDevice.DeviceInfo.VendorConfigFile.{i}. is loaded
+    }
+  }
+}
+
+local floor = math.floor
+local open = io.open
+local process = require 'tch.process'
+local tostring = tostring
+local uci = mapper("ucihelper")
+local banktable = require "transformer.shared.banktable"
+local switchover = false
+local isConfigChanged = false
+
+
+local function firstline(filename, nb)
+  local fd = open(filename)
+  if not fd then
+    -- you could return nil and and error message but that will abort
+    -- iterating over all parameters.
+    -- so here I opt to just return an empty string.
+    return ""
+  end
+  local result = fd:read(nb or "*l")
+  fd:close()
+  return result
+end
+
+--[
+local function friendly_name()
+  local binding = { config = "env", sectionname = "var", option = "friendly_name" }
+  local value = uci.get_from_uci(binding)
+  if value == "" then
+    value = firstline("/proc/rip/0040")
+  end
+  Multi_DeviceInfo_.get.ModelName = value
+  Multi_DeviceInfo_.get.Description = value
+  return value
+end
+--]
+local function PassiveBankVersion()
+  local value = ""
+  local f = io.open("/proc/banktable/passiveversion", "r")
+  if not f then
+    return "Unknown"
+  else
+    value = f:read()
+    f:close()
+  end
+  if value == "" then
+    return "Unknown"
+  end
+  value = value:match("([^%-]+)%-")
+  if value == nil then
+    return "Unknown"
+  end
+  return value
+end
+
+local envBinding = {config = "env", sectionname = "var"}
+local rtfdsBinding = { config = "env", sectionname = "var", option = "rtfds", default = "0" }
+local cwmpBinding = {config = "cwmpd", sectionname = "cwmpd_config", option = "firstusedate"}
+local provcode_binding = { config = "env", sectionname = "var", option = "provisioning_code" }
+local logfilter_binding = { config = "env", sectionname = "var", option = "logfilter" }
+local network_binding = {config="network",sectionname="interface"}
+local sip_reqpattern = "SIP/2.0^M^M$"
+local sip_statepattern = "mmpbxd%[%d+%]: SIP/2.0"
+local interfaces = {}
+uci.foreach_on_uci(network_binding, function(s)
+  -- iterate over the network interface and take those that have proto set to DHCP
+  if s['proto'] == "dhcp" then
+     interfaces[#interfaces+1] = s['.name']
+  end
+end)
+local patterns = {
+  ERROR = "daemon.err",
+  PPP = "pppd%[%d+%]:",
+  CWMPD = "cwmpd%[%d+%]:",
+  WANSENSING = "daemon.err*%[wansensing%]:",
+}
+
+local function getDhcpLog(line)
+  local log
+  if string.match(line, "dnsmasq%-dhcp") then
+    log = line
+  else
+    for i=1,#interfaces do
+      if string.match(line, "netifd: " .. interfaces[i]) then
+        log = line
+      end
+    end
+  end
+  return log
+end
+
+Multi_DeviceInfo_.get = {
+  DeviceCategory = "",
+  Manufacturer = function()
+    local binding = { config = "env", sectionname = "var", option = "company", default = "Technicolor" }
+    local override_binding = { config = "env", sectionname = "var", option = "company_name_override_igd" }
+    local value = uci.get_from_uci(override_binding)
+    if value == "" then
+      value = uci.get_from_uci(binding)
+    end
+    Multi_DeviceInfo_.get.Manufacturer = value
+    return value
+  end,
+  ManufacturerOUI = function()
+    local override_binding = { config = "env", sectionname = "var", option = "oui_override_igd" }
+    local value = uci.get_from_uci(override_binding)
+    if value == "" then
+      value = firstline("/proc/rip/0032", 6)
+      if value ~= "" then
+        local m1 = value:sub(1, 1):byte()
+        local m2 = value:sub(2, 2):byte()
+        local m3 = value:sub(3, 3):byte()
+        value = ("%02X%02X%02X"):format(m1, m2, m3)
+      end
+    end
+    Multi_DeviceInfo_.get.ManufacturerOUI = value
+    return value
+  end,
+  ModelName = function()
+    local binding = { config = "env", sectionname = "var", option = "prod_friendly_name" }
+    local value = uci.get_from_uci(binding)
+    Multi_DeviceInfo_.get.ModelName = value
+    return value
+  end,
+  ModelNumber = function()
+    local binding = { config = "env", sectionname = "var", option = "prod_number" }
+    local value = uci.get_from_uci(binding)
+    Multi_DeviceInfo_.get.ModelNumber = value
+    return value
+  end,
+  Description = "Technicolor Internet Gateway Device",
+  ProductClass = function()
+    local binding = { config = "env", sectionname = "var", option = "prod_friendly_name" }
+    local value = uci.get_from_uci(binding)
+    Multi_DeviceInfo_.get.ProductClass = value
+    return value
+  end,
+  SerialNumber = function()
+    local value = firstline("/proc/rip/003c") .. firstline("/proc/rip/0012")
+    Multi_DeviceInfo_.get.SerialNumber = value
+    return value
+  end,
+  HardwareVersion = function()
+    local value = firstline("/proc/rip/0040")
+    Multi_DeviceInfo_.get.HardwareVersion = value
+    return value
+  end,
+  SoftwareVersion = function()
+    local binding = { config = "version", sectionname = "@version[0]", option = "version", extended = true }
+    local value = uci.get_from_uci(binding)
+    value = value:match("([^%-]+)%-")
+    binding = { config = "versioncusto", sectionname = "override", option = "fwversion_prefix" }
+    local fwp = uci.get_from_uci(binding)
+    binding.option = "fwversion_suffix"
+    local fws = uci.get_from_uci(binding)
+    value = fwp .. value .. fws
+    Multi_DeviceInfo_.get.SoftwareVersion = value
+    return value
+  end,
+  AdditionalSoftwareVersion = function()
+    local binding = { config = "version", sectionname = "@version[0]", option = "config", extended = true }
+    local value = uci.get_from_uci(binding)
+    Multi_DeviceInfo_.get.AdditionalSoftwareVersion = value
+    return value
+  end,
+  UpTime = function()
+    local fd, msg = open("/proc/uptime")
+    if not fd then
+      return fd, msg
+    end
+    local uptime = fd:read("*n")
+    fd:close()
+    return tostring(floor(uptime))
+  end,
+  -- Related to the deprecated voucher system, and can thus be ignored
+  EnabledOptions = "",
+  -- Vendor-specific, currently deemed unimportant and might be adapted when specifically requested
+  AdditionalHardwareVersion = "",
+  -- Obsolute, must be set to 1.0 by TR-098-Amdt2
+  SpecVersion = "1.0",
+  ProvisioningCode = function()
+    local value = uci.get_from_uci(provcode_binding)
+    return value
+  end,
+  X_000E50_NewSoftwareBank = "",
+  -- Applicable only when the modem firmware is separable from the overall CPE software
+  ModemFirmwareVersion = function()
+    local dsl_supported, dsl = pcall(require,"transformer.shared.xdslctl")
+    local version = ""
+    if dsl_supported then
+        version = dsl.infoValue('firmware_version')
+    end
+    Multi_DeviceInfo_.get.ModemFirmwareVersion = version
+    return version
+  end,
+  FirstUseDate = function()
+    local binding = { config = "cwmpd", sectionname = "cwmpd_config", option = "firstusedate" }
+    local value = uci.get_from_uci(binding)
+    if value == "" then
+      value = "0001-01-01T00:00:00Z" --Unknown Time value
+    end
+    return value
+  end,
+  DeviceLog = function()
+    local log = process.popen("/sbin/logread")
+    if log == nil then
+      return ""
+    end
+    local filter = uci.get_from_uci(logfilter_binding)
+    if filter == "" then
+      local logString = log:read("*a")
+      if logString == nil then
+        return ""
+      end
+      log:close()
+      return string.sub(logString, -32768)
+    end
+    local res = {}
+    for line in log:lines() do
+        if filter == "SIP" and (string.match(line, sip_reqpattern) or string.match(line, sip_statepattern)) then
+          res[#res+1] = string.match(line,"(.*)^M^M$")
+        elseif filter == "DHCP" then
+          res[#res+1] = getDhcpLog(line)
+        elseif patterns[filter] and string.match(line, patterns[filter]) then
+          res[#res+1] = line
+        elseif filter == "ALL" then
+          if string.match(line, sip_reqpattern) or string.match(line, sip_statepattern) then
+            res[#res+1] = string.match(line,"(.*)^M^M$")
+          elseif string.match(line, "dnsmasq%-dhcp") or string.match(line, "netifd: ") then
+            res[#res+1] = getDhcpLog(line)
+          else
+            for i, v in pairs(patterns) do
+              if i ~= "ERROR" and string.match(line, v) then
+                res[#res+1] = line
+              end
+            end
+          end
+        end
+    end
+    log:close()
+    return string.sub(table.concat(res, "\n"),-32768)
+  end,
+  X_000E50_DeviceLogFilter = function()
+    return uci.get_from_uci(logfilter_binding)
+  end,
+  X_000E50_SoftwareVersionPassiveBank = function()
+    local value = PassiveBankVersion()
+    if value ~= "Unknown" then
+      local binding = { config = "versioncusto", sectionname = "override", option = "fwversion_prefix" }
+      local fwp = uci.get_from_uci(binding)
+      binding.option = "fwversion_suffix"
+      local fws = uci.get_from_uci(binding)
+      value = fwp .. value .. fws
+    end
+    return value
+  end,
+  X_000E50_SwitchtoPassiveBank = "0",
+  X_000E50_ReturnToFactoryDefaultsSoft = function()
+    local value = uci.get_from_uci(rtfdsBinding)
+    return value
+  end
+}
+
+Multi_DeviceInfo_.set = {
+  ProvisioningCode = function(mapping,param,value)
+    local binding = { config = "env", sectionname = "var", option = "_provisioning_code" }
+    local default_provcode = uci.get_from_uci(binding)
+    local provcode = uci.get_from_uci(provcode_binding)
+
+    if provcode == default_provcode then
+        envBinding.option = "provisioning_code"
+        uci.set_on_uci(envBinding, value, commitapply)
+    end
+    envBinding.option = "_provisioning_code"
+    uci.set_on_uci(envBinding, value, commitapply)
+    isConfigChanged = true
+  end,
+  X_000E50_DeviceLogFilter = function(mapping,param,value)
+    uci.set_on_uci(logfilter_binding, value, commitapply)
+  end,
+  X_000E50_SwitchtoPassiveBank = function(mapping,param,value)
+    if banktable.isOtherBankValid() then
+      switchover = true
+      commitapply:newset("switchOver")
+    else
+      return nil, "No software in passive bank"
+    end
+  end,
+  X_000E50_ReturnToFactoryDefaultsSoft = function(mapping,param,value)
+    uci.set_on_uci(rtfdsBinding, value, commitapply)
+    isConfigChanged = true
+  end,
+  X_000E50_NewSoftwareBank = function(mapping,param,value)
+    local error
+    error, value = pcall(tokey, value, "Device.DeviceInfo.X_000E50_SoftwareBank.{i}.")
+    if not error then
+      return nil, "invalid value"
+    end
+    if value ~= "notbooted" then
+      return nil, "Cannot Switch Over"
+    end
+    switchover = true
+    commitapply:newset("switchOver")
+  end,
+}
+
+Multi_DeviceInfo_.commit = function()
+  if switchover then
+    banktable.prepareSwitchOver()
+    switchover = false
+  end
+  if isConfigChanged then
+    uci.commit(envBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_DeviceInfo_.revert = function()
+  switchover = false
+  if isConfigChanged then
+    uci.revert(envBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DeviceInfo_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match("^InternetGatewayDevice.") then
+    dupli.objectType.parameters["X_000E50_NewSoftwareBank"] = nil
+    dupli.objectType.parameters["SupportedDataModelNumberOfEntries"] = nil
+    dupli.objectType.parameters["X_000E50_SoftwareBankNumberOfEntries"] = nil
+  else
+    -- Remove igd-specific parameters from device2
+    dupli.objectType.parameters["ModemFirmwareVersion"] = nil
+    dupli.objectType.parameters["EnabledOptions"] = nil
+    dupli.objectType.parameters["DeviceLog"] = nil
+    dupli.objectType.parameters["X_000E50_DeviceLogFilter"] = nil
+    dupli.objectType.parameters["X_000E50_ReturnToFactoryDefaultsSoft"] = nil
+    dupli.objectType.parameters["X_000E50_SoftwareVersionPassiveBank"] = nil
+    dupli.objectType.parameters["SpecVersion"] = nil
+  end
+  register(dupli)
+end
+
+

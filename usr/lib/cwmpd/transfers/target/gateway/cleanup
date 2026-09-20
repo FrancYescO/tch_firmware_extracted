@@ -1,0 +1,18 @@
+#!/bin/sh
+
+transfer_id="$3"
+
+# Remove RAW storage information if coming from legacy SW (transfer ID is hexadecimal)
+if [ -f /proc/banktable/legacy_upgrade/key ]; then
+	if cat /proc/banktable/legacy_upgrade/key | hexdump -v -e '/1 "%02X"' | grep -Fqx "$transfer_id"; then
+		echo 1 >/proc/banktable/erase_upgrade_info
+	fi
+fi
+
+# Upgrade finished succesfully, remove database and transfer information from passive bank (for dual bank platform)
+if grep -Fq '"bank_2"' /proc/mtd || grep -Fq "bank_2" /proc/partitions; then
+	notbooted="$(cat /proc/banktable/notbooted)"
+	if [ -n "$notbooted" ]; then
+		/usr/lib/cwmpd/transfers/rm_old_transfer $transfer_id /overlay/$notbooted
+	fi
+fi

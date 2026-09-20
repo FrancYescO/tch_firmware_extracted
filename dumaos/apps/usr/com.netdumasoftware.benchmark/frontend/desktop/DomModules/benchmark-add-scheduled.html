@@ -1,0 +1,360 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/moment.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/time.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="benchmark-add-scheduled"> <template> <style include="duma-theme iron-flex iron-flex-alignment"> paper-listbox {
+        overflow-x: hidden;
+      }
+      .horizontal-drop {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+      }
+      .horizontal-drop > * {
+        margin-right: 1em;
+      }
+      .horizontal-drop > paper-input,
+      .horizontal-drop > paper-dropdown-menu {
+        max-width: 10em;
+      }
+
+      :host paper-listbox paper-item {
+        margin-right: 1em;
+      }
+
+      :host paper-checkbox {
+        text-transform: capitalize;
+      }
+      .next{
+        margin-top: 1em;
+      } </style> <paper-dialog id="dialog" modal on-iron-overlay-closed="onClose"> <h2 dialog-label>[[_getHeader(existing_rule)]]</h2> <div> <paper-dropdown-menu> <paper-listbox class="dropdown-content" selected="{{selectedMain}}"> <template is="dom-repeat" items="[[mainOptions]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> <iron-pages selected="[[selectedMain]]"> <iron-page name="<%= i18n.oneTime %>" class="layout horizontal"> <div class="horizontal-drop"> <paper-input type="number" value="{{hour}}" label="<%= i18n.hour %>" min="0" max="23"></paper-input> <paper-input type="number" value="{{minute}}" label="<%= i18n.minute %>" min="0" max="59"></paper-input> </div> <div class="horizontal-drop"> <paper-dropdown-menu label="<%= i18n.date %>"> <paper-listbox class="dropdown-content" selected="{{selectedMainValues.day}}"> <template is="dom-repeat" items="[[daysInMonths]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="horizontal-drop"> <paper-dropdown-menu id="monthDropdown" label="<%= i18n.month %>"> <paper-listbox class="dropdown-content" selected="{{selectedMainValues.month}}"> <template is="dom-repeat" items="[[months]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </iron-page> <iron-page name="<%= i18n.repeating %>" class="layout vertical"> <paper-dropdown-menu> <paper-listbox class="dropdown-content" selected="{{selectedPreset}}"> <template is="dom-repeat" items="[[presets]]"> <paper-item cron="[[item.cron]]">[[item.display]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> <template is="dom-if" if="[[_showCustomRepeating(selectedPreset,selectedMain)]]" restamp> <div class="layout horizontal justified"> <div class="layout vertical"> <template is="dom-repeat" items="[[days]]"> <paper-checkbox checked="{{item.checked}}" on-tap="_checkUp">[[item.display]]</paper-checkbox> </template> </div> <div class="layout vertical"> <div class="horizontal-drop"> <paper-input type="number" value="{{hour}}" label="<%= i18n.hour %>" min="0" max="23"></paper-input> <paper-input type="number" value="{{minute}}" label="<%= i18n.minute %>" min="0" max="59"></paper-input> </div> </div> </div> </template> </iron-page> </iron-pages> <div class="layout vertical"> <label class="next"><%= i18n.nextTest %>: [[_getNext(selectedPreset,selectedMain,checked_update,selectedMainValues.day,selectedMainValues.month,hour,minute)]]</label> <label class="next"><%= i18n.currentTime %>: [[_getCurrentTimeDisplay(checked_update)]]</label> </div> </div> <div class="tech-buttons"> <paper-checkbox checked="{{options.internet}}"><%= i18n.allowWhileInternet %></paper-checkbox> <!-- TODO QOS temp removal --> <!-- <h3>Disable QoS During:</h3>
+        <paper-checkbox checked="{{options.speed}}">Speed Test</paper-checkbox>
+        <paper-checkbox checked="{{options.ping}}">Ping Test</paper-checkbox>
+        <paper-checkbox checked="{{options.buffer}}">Bufferbloat Test</paper-checkbox> --> </div> <div class="buttons"> <template is="dom-if" if="[[_showDelete(existing_rule)]]"> <paper-button on-tap="deleteConfirm"><%= i18n.delete %></paper-button> </template> <paper-button dialog-dismiss><%= i18n.close %></paper-button> <paper-button background on-tap="save">[[_saveText(existing_rule)]]</paper-button> </div> </paper-dialog> </template> <script> Polymer(
+    {
+      is: 'benchmark-add-scheduled',
+      properties: 
+      {
+        hour: {
+          type: Number,
+          value: 12
+        },
+        minute: {
+          type: Number,
+          value: 0
+        },
+        times: {
+          type: Array,
+          value: function(){return new Array(24).fill(0).map(function(val,index){return index + ":00"})}
+        },
+        mainOptions: {
+          type: Array,
+          value: [
+            "<%= i18n.oneTime %>",
+            "<%= i18n.repeating %>"
+          ]
+        },
+        months: {
+          type: Array,
+          value: ["<%= i18n.january %>","<%= i18n.february %>","<%= i18n.march %>","<%= i18n.april %>","<%= i18n.may %>","<%= i18n.june %>","<%= i18n.july %>","<%= i18n.august %>","<%= i18n.september %>","<%= i18n.october %>","<%= i18n.november %>","<%= i18n.december %>"]
+        },
+        selectedMainValues: {
+          type: Object,
+          value:{
+            day: 1,
+            month: 0
+          }
+        },
+        daysInMonths: {
+          type: Array,
+          computed: "_daysInMonth(selectedMainValues.month)"
+        },
+        presets: {
+          type: Array,
+          value: [
+            {cron:false, display:"<%= i18n.custom %>"},
+            {cron:new Cron("0 * * * *"), display:"<%= i18n.every_hour %>"},
+            {cron:new Cron("0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"), display:"<%= i18n.every_2_hour %>"},
+            {cron:new Cron("0 0,4,8,12,16,20 * * *"), display:"<%= i18n.every_4_hour %>"},
+            {cron:new Cron("0 0,6,12,18 * * *"), display:"<%= i18n.every_6_hour %>"},
+            {cron:new Cron("0 0,12 * * *"), display:"<%= i18n.every_12_hour %>"},
+            {cron:new Cron("0 12 * * *"), display:"<%= i18n.every_24_hour %>"}
+          ]
+        },
+        selectedMain: {
+          type: Number,
+          value: 0
+        },
+        selectedPreset: {
+          type: Number,
+          value: 1
+        },
+        checked_update: {
+          type: Boolean,
+          value: false
+        },
+        days: {
+          type: Array,
+          value: [
+            {display: "<%= i18n.sunday %>", checked: true},
+            {display: "<%= i18n.monday %>", checked: true},
+            {display: "<%= i18n.tuesday %>", checked: true},
+            {display: "<%= i18n.wednesday %>", checked: true},
+            {display: "<%= i18n.thursday %>", checked: true},
+            {display: "<%= i18n.friday %>", checked: true},
+            {display: "<%= i18n.saturday %>", checked: true}
+          ]
+        },
+        existing_rule: {
+          type: Object,
+          value: null
+        },
+        options: {
+          type: Object,
+          value: {
+            speed: true,
+            ping: true,
+            buffer: true,
+            internet: true
+          }
+        }
+      },
+
+      //get add or edit header
+      _getHeader: function(rule){
+        return rule ? "<%= i18n.editScheduledTest %>" : "<%= i18n.addScheduledTest %>";
+      },
+
+      //get how many days in a given month
+      monthDayCount:[31,28,31,30,31,30,31,31,30,31,30,31],
+      _daysInMonth: function(month){
+        var days = new Array(this.monthDayCount[month]).fill(0).map(function(val,index){return index + 1});
+        if(this.selectedMainValues.day >= days.length){
+          this.set("selectedMainValues.day", days.length-1);
+        }
+        return days;
+      },
+
+      //force update checked_update
+      _checkUp: function(){
+        this.set('checked_update',!this.checked_update);
+      },
+
+      //should show the delete button?
+      _showDelete: function(){
+        return this.existing_rule !== null;
+      },
+
+      //clamp hour and minutes
+      _clampHourAndMin: function(){
+        this.minute = Math.max(0,Math.min(59,parseInt(this.minute)));
+        this.hour = Math.max(0,Math.min(23,parseInt(this.hour)));
+      },
+
+      //get the cron of what the user has set/configured
+      _getCron: function(){
+        Polymer.dom.flush();
+        //create an array, where 1 value is true, and all others are false
+        var arr_with_one_true = function(index,length){
+          var arr = new Array(length || (index + 1)).fill(false);
+          arr[index] = true;
+          return arr;
+        }
+        if(this.selectedPreset === 0 || this.selectedMain === 0){
+          var cron = new Cron("0 * * * *");
+          this._clampHourAndMin();
+          cron.setMinutes(arr_with_one_true(this.minute,60));
+          cron.setHours(arr_with_one_true(this.hour,24));
+          if(this.selectedMain === 0){
+            cron.setDays(arr_with_one_true(this.selectedMainValues.day,31));
+            cron.setMonths(arr_with_one_true(this.selectedMainValues.month,12));
+          }else{
+            cron.setWeekdays(new Array(7).fill(true).map(function(val,index){ return this.days[index].checked; }, this));
+            cron.setMonths(new Array(12).fill(true));
+          }
+          return cron;
+        }else{
+          return this.presets[this.selectedPreset].cron;
+        }
+      },
+
+      //get the next time the cron will fire, in user's time, not router's time, as a human-friendly string
+      _getNext: function(selectedPreset){
+        var cron = this._getCron();
+        var next = cron.next(null,null,this.__currentDate);
+        if(next){
+          return moment(next).from(this.__currentDate || new Date());
+        }else{
+          return "<%= i18n.overAYear %>";
+        }
+      },
+
+      //get the current user's time
+      _getCurrentTimeDisplay: function(){
+        return (new Date()).toLocaleString({},{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit",year:"2-digit",timeZone:(duma.time.current_router_time_zone ? duma.time.current_router_time_zone.iana : undefined)});
+      },
+
+      ready: function(){
+        // this.$.monthDropdown.$.menuButton.ignoreSelect = true;
+        // this.$.monthDropdown.$.menuButton.closeOnActivate = false;
+        //create a loop, where it updates the current time every second
+        duma.time.currentTimeLoop(function(timedata){
+          this.__currentDate = duma.time.date_with_offset(null,duma.time.current_router_time_zone.time);
+          this._checkUp();
+        }.bind(this),function(){
+          return this.$.dialog.opened;
+        }.bind(this));
+      },
+
+      //show save or add
+      _saveText: function(exist){
+        return exist ? "<%= i18n.save %>" : "<%= i18n.add %>";
+      },
+
+      //should the customisation options for repeating schedule be shown
+      _showCustomRepeating: function(selectedPreset,selectedMain){
+        return this.selectedMain === 0 || selectedPreset === 0;
+      },
+
+      //open the dialog
+      open: function(existing_id, callback, finalCallback){
+        if(existing_id){
+          this.existing_rule = null;
+          long_rpc_promise("com.netdumasoftware.benchmark","get_cron_rules",[]).done(function(result){
+            result = result[0] ? JSON.parse(result[0]) : [];
+            var keys = Object.keys(result);
+            for(var i = 0; i < keys.length; i ++){
+              var rule = result[keys[i]];
+              if(rule.id === existing_id){
+                this.existing_rule = rule;
+                this.open(false, callback, finalCallback);
+                break;
+              }
+            }
+          }.bind(this));
+        }else{
+          if(existing_id !== false) this.existing_rule = null;
+          if(this.existing_rule){
+            var cron = new Cron(this.existing_rule.schedule);
+            this.selectedMain = this.existing_rule.one_time ? 0 : 1;
+            for(var i = 0; i < cron.minutes.length; i ++){
+              if(cron.minutes[i]){
+                this.minute = i;
+                break;
+              }
+            }
+            for(var i = 0; i < cron.hours.length; i ++){
+              if(cron.hours[i]){
+                this.hour = i;
+                break;
+              }
+            }
+            if(this.selectedMain === 0){
+              // One time
+              for(var i = 0; i < cron.days.length; i ++){
+                if(cron.days[i]){
+                  this.set("selectedMainValues.day",i);
+                  break;
+                }
+              }
+              for(var i = 0; i < cron.months.length; i ++){
+                if(cron.months[i]){
+                  this.set("selectedMainValues.month",i);
+                  break;
+                }
+              }
+
+            }else{
+              // Repeating
+              // Dont test 0
+              this.selectedPreset = 0;
+              for(var p = 1; p < this.presets.length; p++){
+                var pcron = this.presets[p].cron;
+                var matches = cron.matches(pcron);
+                if(matches.hours && matches.days && matches.weekdays){
+                  this.selectedPreset = p;
+                  break;
+                }
+              }
+              if(this.selectedPreset === 0){
+                for(var i = 0; i < cron.weekdays.length; i ++){
+                  this.set("days."+i+".checked", cron.weekdays[i]);
+                }
+              }
+            }
+            this.set("options",{
+              speed:this.existing_rule.qos_speed_on === "true",
+              buffer:this.existing_rule.qos_bbloat_on === "true",
+              ping:this.existing_rule.qos_ping_on === "true",
+              internet:this.existing_rule.perform_with_internet_in_use === true
+            });
+          }else{
+            this.selectedMain = 0;
+            this.selectedPreset = 1;
+            var today = duma.time.date_with_offset(null,duma.time.current_router_time_zone.time);
+            var roundTo = 15;
+            var minutes = today.getMinutes();
+            var setMinutes = (Math.ceil((today.getMinutes()+1)/roundTo)*roundTo) % 60;
+            this.set("minute",setMinutes);
+            this.set("hour",(today.getHours()+(minutes > setMinutes ? 1 : 0)) % 24);
+            this.set("selectedMainValues.day",today.getDate()-1);
+            this.set("selectedMainValues.month",today.getMonth());
+            this.set("options.internet",true);
+            this.set("options.speed",true);
+            this.set("options.ping",true);
+            this.set("options.buffer",true);
+            for(var i = 0; i < this.days.length; i ++){
+              this.set("days."+i+".checked", true);
+            }
+          }
+          this._callback = undefined;
+          if(callback) this._callback = callback;
+          //callback to be fired on both close, cancel or whatever
+          this._finalCallback = undefined;
+          if(finalCallback) this._finalCallback = finalCallback;
+          this.$.dialog.open();
+        }
+      },
+
+      //open confirm delete dialog
+      deleteConfirm: function(){
+        $("duma-alert")[0].show(
+          "<%= i18n.confirmDelete %>",
+          [
+            { text: "<%= i18n.cancel %>", action: "dismiss" },
+            { text: "<%= i18n.confirm %>", action: "confirm", callback: function () {
+              this.delete(true)
+              }.bind(this)
+            }
+          ]
+        );
+      },
+
+      //delete the rule
+      delete: function(close){
+        if(this.existing_rule){
+          long_rpc_promise("com.netdumasoftware.benchmark","delete_cron_rule",[this.existing_rule.id]).done();
+        }
+        if(close){
+          this.$.dialog.close();
+          if(this._callback) this._callback();
+        }
+      },
+
+      //save and close
+      save: function(){
+        var cron = this._getCron();
+        this.delete(false);
+        long_rpc_promise("com.netdumasoftware.benchmark","add_cron_rule",[cron.toString(),
+          this.options.speed,
+          this.options.ping,
+          this.options.buffer,
+          this.options.internet,
+          this.selectedMain === 0]).done(function(e){
+            this.$.dialog.close();
+            if(this._callback) this._callback();
+          }.bind(this)
+        );
+      },
+
+      onClose: function(){
+        if(this._finalCallback) this._finalCallback();
+      }
+    }); </script> </dom-module> 

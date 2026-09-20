@@ -1,0 +1,343 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+require("libos")
+
+local platform_information = os.platform_information()
+%> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-ripple/paper-ripple.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-menu/paper-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-menu/duma-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/q.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/applications.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/nd-css/duma-application-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="services-info"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning iron-flex-alignment"> :host #dialog paper-dialog-scrollable {
+        --paper-dialog-scrollable: {
+          height: 60vh;
+          width: 20vw;
+        }
+      }
+      :host duma-menu { <% if platform_information.vendor == "TELSTRA" then %> --duma-menu-hover-color: var(--primary-color);
+        --duma-menu-not-color: var(--primary-background-color); <% end %> }
+      .category-header {
+        position: relative;
+        margin-top: 0;
+        margin-bottom: 0;
+      }
+      .category .category-header {
+        cursor: pointer;
+        width: 100%; <% if platform_information.vendor == "TELSTRA" then %> opacity: 0.75; <% else %> color: var(--secondary-text-color); <% end %> }
+      .category .category-header:hover {
+        color: var(--primary-text-color);
+      }
+      .service {
+        margin-left: 1em;
+        margin-top: 0.2em; <% if platform_information.vendor == "TELSTRA" then %> color: var(--primary-background-color); <% end %> }
+      .category-content {
+        overflow: hidden;
+        margin-top: 0.25em;
+        padding-top: 0.25em;
+        list-style: none;
+        padding-inline-start: 2em;
+      }
+      .category-content.collapsed {
+        height: 0px;
+        margin-bottom: 0px;
+      }
+      .service-list {
+        list-style: none;
+        padding-left: 0.7em;
+      }
+      .search-input {
+        width: auto;
+      } </style> <paper-dialog id="dialog" with-backdrop> <h2 dialog-label>[[_getHeader(filter,search)]]</h2> <paper-input class="search-input" value="{{search}}" label="<%= i18n.search %>"> <template is="dom-if" if="[[search]]"> <paper-icon-button suffix icon="close" on-click="_clearSearch"></paper-icon-button> </template> </paper-input> <paper-dialog-scrollable> <duma-menu selected="[[_getPage(filter,search)]]" attr-for-selected="name" on-selected-changed="onMenuPageChanged" reset-on-overlay-close> <iron-page name="all"> <paper-menu> <template is="dom-repeat" items="[[formatted_list]]" as="cat"> <paper-item goto$="[[_getCatIdName(cat.name)]]"> <paper-ripple></paper-ripple> <iron-icon icon="[[getCategoryIcon(cat)]]"></iron-icon> [[cat.name]] <iron-icon icon="chevron-right"></iron-icon> </paper-item> </template> </paper-menu> </iron-page> <template is="dom-repeat" items="[[formatted_list]]" as="cat"> <iron-page name$="[[_getCatIdName(cat.name)]]"> <div> <div class="count-label" not-a-button> [[_getCount(cat)]] </div> <ul class="service-list"> <template is="dom-repeat" items="[[cat.services]]" as="serv"> <li class="service"> [[serv.application]] </li> </template> </ul> <template is="dom-if" if="[[cat.advanced.length]]"> <div not-a-button> <%= i18n.advancedApplications %> </div> <ul class="service-list"> <template is="dom-repeat" items="[[cat.advanced]]" as="serv"> <li class="service"> [[serv.application]] </li> </template> </ul> </template> </div> </iron-page> </template> <iron-page name="search"> <div class="category-search"> <template is="dom-repeat" items="[[formatted_list]]" filter="[[_genCategoryFilter(filter,search)]]" as="cat" notify-dom-changes on-dom-change="_domChanged"> <div id="cat-[[cat.id]]" class="category layout vertical start" category="[[cat]]" not-a-button> <div class="category-header" on-click="_collapse"> <paper-ripple></paper-ripple> <iron-icon icon="[[getCategoryIcon(cat)]]"></iron-icon> [[cat.name]] <iron-icon class="expand-icon" icon="expand-more"></iron-icon> </div> <ul class="category-content collapsed"> <template is="dom-repeat" items="[[cat.services]]" as="serv" filter="[[_genServiceFilter(search)]]"> <li class="service indent"> [[serv.application]] </li> </template> </ul> </div> </template> </div> </iron-page> </duma-menu> </paper-dialog-scrollable> <div class="buttons"> <template is="dom-if" if="[[filter]]"> <paper-button on-click="goBack"><%= i18n.otherCategories %></paper-button> </template> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "services-info",
+
+      properties: {
+        formatted_list: {
+          type: Array,
+          value: []
+        },
+        filter: {
+          type: String,
+          value: ""
+        },
+        search: {
+          type: String,
+          value: "",
+          observer: "_onSearchChanged"
+        }
+      },
+
+      _postChange: [],
+
+      _getCount: function(category){
+        return "<%= i18n.categoryContains %>".format(category.services.length);
+      },
+
+      onMenuPageChanged: function(e){
+        var newFilt = e.detail.value;
+        this.filter = newFilt === "all" || newFilt === "search" ? "" : newFilt;
+      },
+
+      goBack: function(){
+        if(this.search){
+          this.search = "";
+          return
+        }else{
+          this.filter = "";
+        }
+      },
+
+      _getHeader: function(filter,search){
+        if(search) return "<%= i18n.search %>";
+        if(filter) return "<%= i18n.categoryHeader %>".format(filter);
+        return "<%= i18n.servicesHeader %>";
+      },
+
+      _getCatIdName: function(catName){
+        return catName;
+      },
+
+      _getPage: function(filter,search){
+        if(search) return 'search';
+        if(filter) return this._getCatIdName(filter);
+        return 'all';
+      },
+
+      _domChanged: function(event){
+        for(var i = 0; i < this._postChange.length; i++){
+          this._postChange[i].call();
+        }
+        this._postChange.length = 0;
+      },
+      _addPostChanged: function(func){
+        this._postChange.push(func)
+      },
+
+      getCategoryIcon: function(category){
+        return duma.applications.get_application_icon(category.name);
+      },
+
+      toggleCategoryCollapse: function(catName,overrideClosed){
+        var exists = this.getCategory(catName);
+        if(exists && exists[0]){
+          var category = exists[0];
+          var catElem = $("#cat-{0}".format(category.id),this);
+          var content = catElem.find(".category-content");
+          var expandIcon = catElem.find(".expand-icon");
+
+          var is_collapsed = content.hasClass("collapsed");
+          var doToggle = function(){
+            content.toggleClass("collapsed");
+            expandIcon.attr("icon",is_collapsed ? "expand-less" : "expand-more");
+          }.bind(this);
+
+          if(typeof overrideClosed === "boolean"){
+            if(is_collapsed !== overrideClosed){
+              doToggle();
+            }
+          }else{
+            doToggle();
+          }
+        }
+      },
+      setAllCollapseState: function(state){
+        state = !!state;
+        for(var i = 0; i < this.formatted_list.length;i++){
+          this.toggleCategoryCollapse(this.formatted_list[i].name,state);
+        }
+      },
+
+      _collapse: function(event){
+        this.toggleCategoryCollapse($(event.target).closest(".category-header").parent()[0].category);
+      },
+
+      _splitCommaArray: function(str){
+        return str.split(",").filter(function(v) { 
+          return v.trim();
+        });
+      },
+
+      /**
+       * Match search against all potentially matching values.
+       * @param {String || Array[String]} searchString - The search query / queries
+       * @param {String || Array[String]} matches - All the potential matches
+       * @returns {Boolean} - returns `true` if all the search strings are substrings of at least 1 of the matches
+       */
+      _matchSearch: function(searchString,matches){
+        function doesMatch(search,str){
+          return str && str.toString().toLowerCase().indexOf(search) >= 0;
+        }
+        //split by , and remove empty entries
+        var searches;
+        if(Array.isArray(searchString)){
+          searches = searchString;
+        }else{
+          searches = this._splitCommaArray(searchString);
+        }
+        if(!Array.isArray(matches)) matches = [matches];
+
+        for(var s = 0; s < searches.length; s++){
+          var search = searches[s].toLowerCase().trim();
+
+          var has = false;
+
+          for(var i = 0; i < matches.length; i++){
+            var match = matches[i];
+
+            if(match && doesMatch(search,match)){
+              has = true;
+              break;
+            };
+          }
+          if(!has) return false;
+        }
+        return true;
+      },
+
+      _searchInServices: function(services,search){
+        var splitSearch = this._splitCommaArray(search);
+        for(var i = 0; i < services.length; i++){
+          var serv = services[i];
+          if(this._matchSearch(splitSearch,[
+            serv.id,
+            serv.name,
+            serv.application,
+            serv.long_name,
+            serv.short_name,
+            serv.category || "Uncatagorized",
+          ].concat(serv.tags))){
+            return true;
+          }
+        }
+        return false;
+      },
+
+      _genCategoryFilter: function(filter,search){
+        return function(category){
+          if(!filter && !search) return true;
+          var showCat = category.id === filter || category.name === filter || this._searchInServices(category.services,search);
+          this._addPostChanged(this.toggleCategoryCollapse.bind(this,category,!(!!search && showCat)));
+          return showCat;
+        }.bind(this);
+      },
+      _genServiceFilter: function(search){
+        return function(service){
+          return !search || this._searchInServices([service],search);
+        }.bind(this);
+      },
+      _onSearchChanged: function(newVal,oldVal){
+        if(oldVal && !newVal){
+          this._addPostChanged(this.setAllCollapseState.bind(this,true));
+        }
+      },
+
+      JSONPromise: function(path){
+        return new Promise(function(resolve,reject){
+          $.getJSON(path,resolve);
+        });
+      },
+
+      getCategory: function(category,categories){
+        for(var i = 0; i < this.formatted_list.length; i++){
+          var test = this.formatted_list[i];
+          if(test === category || test.id === category || test.name === category){
+            return [this.formatted_list[i],i];
+          }
+        }
+      },
+
+      getOrInitCategory: function(category,categories){
+        var exists = this.getCategory(category);
+        if(exists){
+          return exists;
+        }
+        var newCat = {
+          id: categories[category] || this.formatted_list.length + 20,
+          name: category,
+          services: [],
+          advanced: []
+        }
+        this.push('formatted_list',newCat);
+        return [newCat,this.formatted_list.length - 1];
+      },
+
+      _shouldAddService: function(service){
+        var exclude_tags = ["gfprofile"];
+        if(service.tags.length !== 1) return true;
+        for(var i = 0; i < service.tags.length; i++){
+          var s = service.tags[i];
+          for(var t = 0; t < exclude_tags.length; t++){
+            if(s === exclude_tags[t])
+              return false;
+          }
+        }
+        return true;
+      },
+
+      _isServiceAdvanced: function(service){
+        var advanced_tags = ["advanced-app","advanced-info"];
+        for(var i = 0; i < service.tags.length; i++){
+          var s = service.tags[i];
+          for(var t = 0; t < advanced_tags.length; t++){
+            if(s === advanced_tags[t])
+              return true;
+          }
+        }
+        return false;
+      },
+
+      addToCategory: function(service,category,categories){
+        var existing = this.getOrInitCategory(category,categories);
+        var cat = existing[0];
+        var index = existing[1];
+        if(this._isServiceAdvanced(service)){
+          this.push('formatted_list.{0}.advanced'.format(index),service);
+        }else{
+          this.push('formatted_list.{0}.services'.format(index),service);
+        }
+      },
+
+      format: function(services,categories){
+        for(var i = 0; i < services.length; i++){
+          var service = services[i];
+          var catUse = service.category;
+          var catMatch = categories.includes(catUse);
+          if(!this._shouldAddService(service)) continue;
+          if(!catMatch){
+            catUse = "Uncategorized";
+          }
+          this.addToCategory(service,catUse,categories);
+        }
+      },
+
+      _clearSearch: function(){
+        this.search = "";
+      },
+
+      ready: function(){
+        Q.spread([
+          this.JSONPromise("/json/_services_.json?cache=0"),
+          this.JSONPromise("/json/qos_categories.json?cache=0")
+        ],function(services,categories){
+          this.format(services,categories)
+        }.bind(this));
+      },
+
+      open: function(filterOrSearch){
+        var setFilter = "";
+        var setSearch = "";
+        if(filterOrSearch){
+          for(var i = 0; i < this.formatted_list.length; i ++){
+            var service = this.formatted_list[i];
+            if(service.id === filterOrSearch || service.name.toLowerCase() === filterOrSearch.toLowerCase()){
+              setFilter = filterOrSearch;
+              break;
+            }
+          }
+          if(!setFilter) setSearch = filterOrSearch;
+        }
+        this.filter = setFilter;
+        this.search = setSearch;
+        this.$.dialog.open();
+      },
+      close: function(){
+        this.$.dialog.close();
+      }
+
+    }); </script> </dom-module> 
