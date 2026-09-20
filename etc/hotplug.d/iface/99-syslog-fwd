@@ -1,0 +1,53 @@
+#[ ifup = "$ACTION" ] || exit
+
+. $IPKG_INSTROOT/lib/config/uci.sh
+. $IPKG_INSTROOT/lib/functions.sh
+
+. $IPKG_INSTROOT/usr/lib/mwan/functions.sh
+. $IPKG_INSTROOT/lib/functions/syslog.sh
+
+slfwp=''
+
+stop_fwd_process () {
+	slfwp=$(ps | grep -v awk | awk '/\/etc\/syslog_fwd\/start_fwd_process/ {print $1}')
+	echo "fwdproc '$slfwp' stopping... " >>/var/log/slfwd.err
+	[ "$slfwp" ] && kill -9 $slfwp
+	slfwp=''
+	tail_pid=$(ps | grep -v awk | awk '/(tail -[fF]|cat).*filt_msg/ {print $1}')
+	nc_pid=$(ps | grep -v awk | awk '/nc -vu/ {print $1}')
+	if [ -n "${tail_pid}" ] ; then kill -9 ${tail_pid} ; fi
+	if [ -n "${nc_pid}" ] ; then kill -9 ${nc_pid} ; fi
+}
+
+fwd_syslog_filt_msg_to_nc() {
+		local log_filter_ip  log_port
+		local log_filter_ip=$(uci_get system @system[0] log_filter_ip)
+		local log_port=$(uci_get system @system[0] log_port)
+		[ -z "$log_port" ] && log_port=514
+
+		stop_fwd_process
+		if [ -r /var/log/filt_msg ] ; then
+#			echo "iface up; /var/log/filt_msg readable; syslog_fwd running processes (will be restarted if needed): tail_pid='${tail_pid}', nc_pid='${nc_pid}'" >>/var/log/slfwd.txt
+				/etc/syslog_fwd/start_fwd_process ${log_filter_ip} ${log_port} &
+				slfwp=$!
+#				echo "fwdproc_bckgnd started; shell_pid exit_status background_pid : '$$' '$?' '$!'" >>/var/log/slfwd.err
+				tail_pid=$(ps | grep -v awk | awk '/(tail -[fF]|cat).*filt_msg/ {print $1}')
+				nc_pid=$(ps | grep -v awk | awk '/nc -vu/ {print $1}')
+				echo "syslog_fwd running processes: tail_pid='${tail_pid}', nc_pid='${nc_pid}'" >>/var/log/slfwd.err
+		fi
+}
+
+local syslog_iface
+
+get_syslog_iface syslog_iface
+#syslog_iface="lan"
+[ "$syslog_iface" == "$INTERFACE" ] && {
+	case "$ACTION" in
+		ifup)
+			fwd_syslog_filt_msg_to_nc
+			;;
+		ifdown)
+			stop_fwd_process
+			;;
+	esac
+}
