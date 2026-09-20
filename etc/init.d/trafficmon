@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+APP=trafficmon
+DATA_DIR=/root/$APP
+CRONTABS=/etc/crontabs
+CRONRULE=$CRONTABS/root
+
+start_service() {
+    mkdir -p $DATA_DIR
+    trafficmon.lua -i
+    if !(grep -q "/sbin/trafficmon.lua" $CRONRULE 2>/dev/null); then
+        mkdir -p $CRONTABS
+        echo "*/2 * * * * /sbin/trafficmon.lua" >> $CRONRULE
+        if !(grep -q "crond" $(ps) 2>/dev/null); then
+            /etc/init.d/cron start
+        fi
+    fi
+}
+
+stop_service() {
+    sed -i '/trafficmon/d' $CRONRULE
+    rm -rf $DATA_DIR
+}

@@ -1,0 +1,34 @@
+#!/bin/sh
+
+RTFD_MARK=/overlay/remove_due_to_rtfd
+
+keep_persistent_files_rtfd() {
+	current_bank=$1
+	mkdir -p $current_bank
+	if [ -d /overlay/rtfd_persistent_files -a -f /overlay/rtfd_persistent_filelist.conf ]; then
+		while read file_to_copy directory; do
+			if [[ -n "$file_to_copy" ]]; then
+				if [[ -z "$directory" ]]; then
+					directory=$(dirname "$file_to_copy")
+				fi
+				if [[ ! -d "$current_bank/$directory" ]]; then
+					mkdir -p "$current_bank/$directory"
+				fi
+				if [[ -f "/overlay/rtfd_persistent_files/$(basename $file_to_copy)" ]]; then
+					cp "/overlay/rtfd_persistent_files/$(basename $file_to_copy)" "$current_bank/$directory"
+				fi
+			fi
+		done < /overlay/rtfd_persistent_filelist.conf
+	fi
+
+	rm -f /overlay/rtfd_persistent_filelist.conf
+	rm -rf /overlay/rtfd_persistent_files
+}
+
+if [ -d /proc/banktable ]; then
+	keep_persistent_files_rtfd $1
+else
+	echo "No RTFD restore for single bank"
+fi
+
+rm -f $RTFD_MARK
