@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys, struct, zlib
-from git import Repo
+import sys, struct, zlib, subprocess, re
 import glob, os, shutil
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-import binwalk
 
 try:			
 	assert sys.version_info >= (3,0)
@@ -89,33 +87,130 @@ def decrypt( file ):
 		print("Decrypting Failed: "+str(e))
 
 		
+VOL_NAME="TCHXTRACT"
+
+def fs_is_case_sensitive(path):
+	test_a=os.path.join(path,"CaseSensitiveTest")
+	test_b=os.path.join(path,"casesensitivetest")
+	try:
+		open(test_a,"w").close()
+		insensitive=os.path.exists(test_b)
+		os.remove(test_a)
+		return not insensitive
+	except OSError:
+		return True
+
+def attach_case_sensitive_volume(size="4g"):
+	# on case-insensitive filesystems (default APFS on macOS) files that differ
+	# only by case (e.g. xt_DSCP.ko/xt_dscp.ko) overwrite each other during the
+	# extraction, so extract inside a case-sensitive sparse image
+	dmg=os.path.abspath("extract_case_sensitive.sparse")
+	if os.path.exists(dmg):
+		os.remove(dmg)
+	create=subprocess.run(["hdiutil","create","-type","SPARSE","-fs","Case-sensitive APFS","-size",size,"-volname",VOL_NAME,"-ov",dmg],capture_output=True,text=True)
+	if create.returncode!=0:
+		print("Cannot create case-sensitive volume: "+create.stderr)
+		return None,None
+	created=re.search(r"created: (.+)",create.stdout)
+	if created:
+		dmg=created.group(1).strip()
+	attach=subprocess.run(["hdiutil","attach","-nobrowse",dmg],capture_output=True,text=True)
+	if attach.returncode!=0:
+		print("Cannot attach case-sensitive volume: "+attach.stderr)
+		return None,None
+	mountpoint=attach.stdout.strip().split("\n")[-1].split("\t")[-1].strip()
+	return mountpoint,dmg
+
+def find_rootfs(binfile):
+	# find squashfs superblocks in the decrypted image and return the biggest
+	# one (the rootfs) as (offset,size)
+	with open(binfile,"rb") as f:
+		data=f.read()
+	best=None
+	pos=0
+	while True:
+		pos=data.find(b"hsqs",pos)
+		if pos<0:
+			break
+		major,=struct.unpack_from("<H",data,pos+0x1c)
+		bytes_used,=struct.unpack_from("<Q",data,pos+0x28)
+		if major==4 and 0x400<bytes_used<=len(data)-pos:
+			if best is None or bytes_used>best[1]:
+				best=(pos,bytes_used)
+		pos+=4
+	return best
+
+def squashfs_inodes(sqsh):
+	out=subprocess.run(["unsquashfs","-s",sqsh],capture_output=True,text=True).stdout
+	m=re.search(r"Number of inodes (\d+)",out)
+	return int(m.group(1)) if m else None
+
+def extract_rootfs(dec_filename):
+	found=find_rootfs(dec_filename)
+	if not found:
+		print("No squashfs found in "+dec_filename)
+		return None,None,None,None
+	offset,size=found
+	sqsh=dec_filename+".sqsh"
+	with open(dec_filename,"rb") as src,open(sqsh,"wb") as dst:
+		src.seek(offset)
+		dst.write(src.read(size))
+	inodes=squashfs_inodes(sqsh)
+	mountpoint,dmg=(None,None)
+	outdir=dec_filename+".extracted"
+	if sys.platform=="darwin" and not fs_is_case_sensitive("."):
+		mountpoint,dmg=attach_case_sensitive_volume()
+		if mountpoint:
+			outdir=os.path.join(mountpoint,dec_filename+".extracted")
+		else:
+			print("WARNING: extracting on a case-insensitive filesystem, files differing only by case will collide")
+	print("Unsquashing %s (offset 0x%X, size %d, %s inodes)..."%(sqsh,offset,size,inodes))
+	proc=subprocess.run(["unsquashfs","-no-progress","-f","-d",outdir,sqsh],capture_output=True,text=True)
+	if proc.returncode!=0:
+		print("unsquashfs failed: "+proc.stdout+proc.stderr)
+		return None,mountpoint,dmg,sqsh
+	extracted=0
+	for num,kind in re.findall(r"created (\d+) (\w+)",proc.stdout):
+		if kind!="hardlinks":
+			extracted+=int(num)
+	if inodes is None or extracted<inodes:
+		print("ERROR: extraction incomplete (%d/%s inodes), keeping .rbi/.bin for debugging"%(extracted,inodes))
+		return None,mountpoint,dmg,sqsh
+	return outdir,mountpoint,dmg,sqsh
+
+NO_PUSH="--no-push" in sys.argv
+KEEP="--keep" in sys.argv
+
 os.chdir("./")
 for file in glob.glob("*.rbi"):
 	print("Decrypting %s..."%file)
 	dec_filename=decrypt(file)
 	if not dec_filename:
 		continue
-	print("Binwalking %s..."%dec_filename)
-	path_to_push=''
-	for module in binwalk.scan('--preserve-symlinks', dec_filename, signature=True, extract=True, quiet=True):
-		for result in module.results:
-			if result.file.path in module.extractor.output:
-				if result.offset in module.extractor.output[result.file.path].extracted:
-					if 'root' in module.extractor.output[result.file.path].extracted[result.offset].files[0]:
-						path_to_push=module.extractor.output[result.file.path].extracted[result.offset].files[0]
-						print("Found rootfs %s"%path_to_push)
-					#print("Extracted %d files from offset 0x%X to '%s' using '%s'" % (len(module.extractor.output[result.file.path].extracted[result.offset].files),result.offset,module.extractor.output[result.file.path].extracted[result.offset].files[0],module.extractor.output[result.file.path].extracted[result.offset].command))
-	if path_to_push != '':
-		print("Pushing to github...")
-		repo = Repo.init(path_to_push) #create repo object of the other repository
-		repo.create_remote('origin', 'https://github.com/FrancYescO/tch_firmware_extracted')
-		repo.remotes[0].fetch()
-		branch_name=dec_filename[:(dec_filename.find(".bin"))]
-		repo.git.checkout('-b', branch_name)
-		repo.git.add('.') # same as git add file
-		repo.git.commit(m = branch_name) # same as git commit -m "commit message"
-		repo.git.push('origin', branch_name) # git push remote_to_push HEAD:master
-	print("Cleaning...")
-	shutil.rmtree('_'+dec_filename+'.extracted')
-	os.remove(file)
-	os.remove(dec_filename)
+	path_to_push,mountpoint,dmg,sqsh=extract_rootfs(dec_filename)
+	if path_to_push and os.path.isdir(path_to_push):
+		if not NO_PUSH:
+			from git import Repo
+			print("Pushing to github...")
+			repo = Repo.init(path_to_push) #create repo object of the other repository
+			repo.create_remote('origin', 'https://github.com/FrancYescO/tch_firmware_extracted')
+			repo.remotes[0].fetch()
+			branch_name=dec_filename[:(dec_filename.find(".bin"))]
+			repo.git.checkout('-b', branch_name)
+			repo.git.add('.') # same as git add file
+			repo.git.commit(m = branch_name) # same as git commit -m "commit message"
+			repo.git.push('origin', branch_name) # git push remote_to_push HEAD:master
+		else:
+			print("--no-push: skipping git push, extracted at "+path_to_push)
+	else:
+		KEEP=True
+	if mountpoint:
+		subprocess.run(["hdiutil","detach",mountpoint],capture_output=True)
+	if dmg and not KEEP and os.path.exists(dmg):
+		os.remove(dmg)
+	if not KEEP:
+		print("Cleaning...")
+		if os.path.isdir(dec_filename+".extracted"):
+			shutil.rmtree(dec_filename+".extracted")
+		os.remove(file)
+		os.remove(dec_filename)
