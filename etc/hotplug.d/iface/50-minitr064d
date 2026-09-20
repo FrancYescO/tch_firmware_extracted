@@ -1,0 +1,21 @@
+#!/bin/sh
+
+if [ ! /etc/init.d/minitr064d enabled ]
+then
+    exit 0
+fi
+
+. /lib/functions/service.sh
+
+[ ! "$ACTION" = "ifup" ] && service_check /usr/sbin/minitr064d && exit 0
+
+local iface
+local tmpconf="/var/etc/minitr064d.conf"
+
+. /lib/functions/network.sh
+
+for iface in $(uci get minitr064d.config.internal_iface); do
+    network_get_device device $iface
+    [ "$DEVICE" = "$device" ] && /etc/init.d/minitr064d restart && exit 0
+done
+

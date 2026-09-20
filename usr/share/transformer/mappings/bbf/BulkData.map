@@ -1,0 +1,154 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_BulkData_ = {
+  objectType = {
+    name = "#ROOT.BulkData.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Enabled",
+          "Disabled",
+          "Error",
+        },
+      },
+      MinReportingInterval = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Protocols = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "Streaming",
+          "File",
+          "HTTP",
+        },
+      },
+      EncodingTypes = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "XML",
+          "XDR",
+          "CSV",
+          "JSON",
+        },
+      },
+      ParameterWildCardSupported = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      MaxNumberOfProfiles = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      MaxNumberOfParameterReferences = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      -- ProfileNumberOfEntries
+      -- automatically created when #ROOT.BulkData.Profile.{i}. is loaded
+    }
+  }
+}
+
+local tostring = tostring
+local uci_helper = mapper("ucihelper")
+local bulk_helper = require "transformer.shared.bulkhelper"
+local bulkdata_binding = {config = "bulkdata", sectionname = "global"}
+local commitapply = commitapply
+local register = register
+
+bulk_helper.SetProfileMap(Multi_BulkData_, nil, commitapply)
+
+local function convert_boolean_value(object, name)
+  if object then
+    return bulk_helper.convert_boolean(object[name])
+  else
+    bulkdata_binding.option = name
+    return bulk_helper.convert_boolean(uci_helper.get_from_uci(bulkdata_binding))
+  end
+end
+
+
+local map = {
+  Enable = function(object)
+    return convert_boolean_value(object, "enabled") or "false"
+  end,
+  Status = function(object)
+    local status_table = {
+      ["true"] = "Enabled",
+      ["false"] = "Disabled"
+    }
+    return status_table[convert_boolean_value(object, "enabled")] or "Disabled"
+  end,
+  MinReportingInterval = "min_report_interval",
+  Protocols = "protocols",
+  EncodingTypes = "encode_types",
+  ParameterWildCardSupported = function(object)
+    return convert_boolean_value(object, "wild_card") or "false"
+  end,
+  MaxNumberOfProfiles = "max_num_profiles",
+  MaxNumberOfParameterReferences = "max_num_parameters"
+}
+
+Multi_BulkData_.getall = function(mapping, key)
+  local data = {}
+  local binding = {config="bulkdata", sectionname="global"}
+  local content = uci_helper.getall_from_uci(binding)
+  for p in pairs (mapping.objectType.parameters) do
+    if (map[p]) then
+      if type(map[p]) == "function" then
+        data[p] = map[p](content)
+      else
+        data[p] = content[map[p]] or ""
+      end
+    end
+  end
+  return data
+end
+
+Multi_BulkData_.get = function(mapping, param, key)
+  if map[param] then
+    if type(map[param]) == "function" then
+      return map[param]()
+    else
+      bulkdata_binding.option = map[param]
+      return uci_helper.get_from_uci(bulkdata_binding) or ""
+    end
+  end
+end
+
+Multi_BulkData_.set = {
+  Enable = function (mapping, paramname, paramvalue, key)
+    bulkdata_binding.option = "enabled"
+    uci_helper.set_on_uci(bulkdata_binding, paramvalue, commitapply)
+    mapping._profile.transactions[bulkdata_binding.config] = true;
+  end
+}
+
+Multi_BulkData_.commit = bulk_helper.commit
+Multi_BulkData_.revert = bulk_helper.revert
+
+bulk_helper.register(Multi_BulkData_, register)
