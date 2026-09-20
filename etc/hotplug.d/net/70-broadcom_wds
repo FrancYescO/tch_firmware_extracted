@@ -1,0 +1,54 @@
+#!/bin/sh
+. /lib/functions/network.sh
+. /lib/functions.sh
+. /lib/network/config.sh
+
+get_network() {
+  local wl="$1"
+  logger -t Hotplug broadcom_wds_script "WDS interface wl = $wl 2 = $2"
+  if [ "$wl" = "$2" ]; then
+    config_get ntw "$wl" network
+    logger -t Hotplug broadcom_wds_script "Found section for interface $2 network = $ntw"
+    break
+  fi
+}
+
+setup_broadcom_wds() {
+
+    SUBINDEX=$(echo $INTERFACE |awk '{print substr($0,6,1)}' | head -c 1 )
+    #checking if wds is on a main interface
+    if [ "${SUBINDEX}" == "0" ]; then
+        INDEX=$(echo "${INTERFACE}" | awk '{print substr($0,4)}' | head -c -5)
+    else
+        INDEX=$(echo "${INTERFACE}" | awk '{print substr($0,4)}' | head -c -3)
+    fi
+    logger -t Hotplug broadcom_wds_script "interface = $INTERFACE Index = $INDEX subindex = $SUBINDEX"
+    wl_interface="wl$INDEX"
+    logger -t Hotplug broadcom_wds_script "New wl interface = $wl_interface"
+
+    config_load wireless
+    config_foreach get_network wifi-iface $wl_interface
+    if [ -z ${ntw} ]; then 
+        logger -t Hotplug broadcom_wds_script "WDS bridge configuration not found. Skipping. Wl interface=$wl_interface"
+        return 0
+    fi
+    logger -t Hotplug broadcom_wds_script "WDS interface ntw=$ntw"
+    setup_interface "$INTERFACE" "$ntw"
+    ifconfig $INTERFACE up
+}
+
+logger -t Hotplug broadcom_wds_script "Starting due to action=$ACTION devName=$DEVICENAME interface=$INTERFACE"
+
+case "${ACTION}" in
+    add|register)
+
+  reqsubstr="wds"
+  if [ -z "${INTERFACE##*$reqsubstr*}" ]
+  then
+      logger -t Hotplug broadcom_wds_script "WDS interface is added"
+      setup_broadcom_wds
+  else
+      logger -t Hotplug broadcom_wds_script "Not a WDS interface"
+  fi
+    ;;
+esac

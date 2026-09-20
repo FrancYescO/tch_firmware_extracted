@@ -1,0 +1,416 @@
+#!/bin/sh /etc/rc.common
+# (C) NETDUMA Software 2016
+# 
+# Start the DumaOS process manager. This takes care of running and restarting
+# R-Apps installed on the system.
+
+START=99
+PROG="/dumaos/api/cli.lua"
+APP="/dumaos/apps/system/com.netdumasoftware.procmanager"
+
+
+# Notes - Some platforms (at this point in time non netgear
+# platforms) utilise procd.
+#
+# Procd daemonizes processes, handles retries, killing, stdin
+# stdout redirection, jailing, etc.
+#
+# Procd has a default handler for stopping the service. However
+# we cannot use this as it uses SIGTERM to signal shutdown. This
+# would cause Lua to just quit, instead we signal to the procmanager
+# R-App it needs to cleanup by sending SIGINT.
+#
+# There we need to override the procd shutdown, in future versions
+# there is a function called procd_send_signal that lets you send
+# different signals to the instance. We could then replicate the
+# non procd shutdown.
+#
+# However this is not implemented, so we have three options:
+#   1) Patch procd to have the function
+#   2) Acquire the pid via another procd method
+#   3) Use same code as Netgear which searches ps output for
+#      com.netdumasoftware.procmanager to get the PID
+#
+# I choose 3) as it took the least time, works and has been tested
+# extensively on other platforms. However in researching this I learnt
+# a little how procd is implemented so I'll share here.
+#
+# Procd commnuicates with a ubus object called service. There are are
+# a bunch of wrapper functions in /lib/function.sh which simply cli
+# ubus communication with the ubus object. For example if you'd like to
+# fulfull option 2) then run ubus call service list and you'll see the
+# dumaos PID in the response.   -@Netduma_Iain
+
+# Use procd if available otherwise revert to old method
+if type procd > /dev/null; then 
+  USE_PROCD=1
+else
+  SERVICE_DAEMONIZE=1
+  SERVICE_WRITE_PID=1
+fi
+
+create_themes_symbolic_link() {
+  THEMES_SYMBOLIC_LINK=/www/themes
+  THEMES_CLOUD_PATH=/dumaos/themes/cloud
+
+  #-- @depends test
+  #-- @test test 1
+  if [ ! -L "$THEMES_SYMBOLIC_LINK" ]; then
+    #-- @depends ln
+    #-- @test which ln
+    ln -s "$THEMES_CLOUD_PATH" "$THEMES_SYMBOLIC_LINK"
+  fi
+}
+
+start_service(){
+  create_themes_symbolic_link
+  echo "Starting DumaOS"
+
+  #-- @depends lua
+  #-- @test lua -v
+  lua /dumaos/set-theme-defaults-if-null.lua
+
+  if [ "$(cat /dumaossystem/model)" != "DJA0231" ]; then
+  if /dumaos/setup_done.sh
+	  
+  then
+    /dumaos/intercept.sh stop
+  else
+    /dumaos/intercept.sh start
+    /dumaos/ipv6.sh enable
+    INIT_FROM_CLI=true lua /dumaos/apps/system/com.netdumasoftware.procmanager/translation.lua
+    lua /dumaos/reset-initialise-themes.lua
+    
+    return 0
+  fi
+  elif [ "$(cat /dumaossystem/model)" = "DJA0231" ];then
+	
+	if [ ! "$(which fc)" ];then
+		ln -sn /usr/bin/fcctl /usr/bin/fc && sync
+	fi
+	
+	# Only for trial testing, DumaOS set to be enabled
+	DUMA_STATUS=$(uci show dumaos | grep "dumaos_enabled" | wc -l)	
+        if [ "$DUMA_STATUS" = "0" ];then
+                echo -e "\nconfig  tr69 'tr69'\n\toption 'dumaos_enabled' '0'\n\toption 'dumaos_started' '0'" >> /etc/config/dumaos		
+		uci set dumaos.tr69.dumaos_enabled=1;uci commit dumaos
+	fi
+        #On DJA0231, Only initiate DumaOS if enabled
+        #-- @depends chrt
+        #-- @test -e $(which chrt)
+        if [ ! "$(which chrt)" ];then
+                echo "chrt command not available"
+        fi
+        DUMAOS_STATUS=$(uci get dumaos.tr69.dumaos_enabled | grep 0)
+        if [ "$DUMAOS_STATUS" = 0 ];then
+                echo "DumaOS is disabled"
+                #Testing Mode only, remove hotplug call for production
+                return 0
+        fi
+	if [ "$(ps ww | grep "connwatch" | grep -v grep | wc -l)" ];then
+		/etc/init.d/uhttpd enable && /etc/init.d/uhttpd start
+                /etc/init.d/ctwatch enable && /etc/init.d/ctwatch start
+                /etc/init.d/connwatch enable && /etc/init.d/connwatch start
+                /etc/init.d/arpwatch enable && /etc/init.d/arpwatch start
+	fi	
+  fi
+
+  DUMA_LOADED=$(ps ww | grep "cleaner.lua" | grep -v grep | wc -l)
+  if [ "$DUMA_LOADED" = "1" ];then
+        echo "DumaOS already started"
+        return 1
+  fi 
+
+  procd_open_instance
+  procd_set_param command "$PROG"
+  procd_append_param command -p "/dumaos/apps/system/com.netdumasoftware.procmanager"
+  procd_append_param command "backend"
+  if [ "$(cat /dumaossystem/model)" = "R2" ];then                         
+          #Set core files size to unlimited                                                   
+        procd_set_param limits core="unlimited"  # Set ulimit core files blocks
+        sysctl -w "kernel.core_pattern=/tmp/%e.%p.%s.%t.core"                                                                      
+        if [ ! -e "/.init_enable_core"  ];then                        
+                touch /.init_enable_core                                                
+                sync                                                      
+        fi                                                                                    
+  fi
+#  procd_set_param respawn # respawn on crash
+  procd_set_param stdout 0 # forward stdout of the command to logd
+  procd_set_param stderr 1 # same for stderr
+
+  # jail it - notice it needs no mount points as no files read/written
+  # No jailing system, this will be part of overall sandbox strategy so
+  # pointless doing half hearted attempt here because all R-Apps are developed
+  # by us and therefore are trusted.
+#  procd_add_jail arpwatchubus log                                                   
+#  procd_add_jail_mount_rw
+  procd_close_instance
+}
+
+# procd not available
+start() {
+  run=1       # default to running DumaOS on boot
+  create_themes_symbolic_link
+  
+  if [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+	#On LH1000, Only initiate DumaOS if enabled
+	#-- @depends chrt
+	#-- @test -e $(which chrt)
+	if [ ! "$(which chrt)" ];then
+		echo "chrt command not available"
+		chmod +x /usr/bin/chrt
+	fi	
+	DSTATUS=$(uci show dumaos | grep "dumaos_enabled" | wc -l)
+	if [ "$DSTATUS" = "0" ];then
+		echo -e "\nconfig  tr69 'tr69'\n\toption 'dumaos_enabled' '0'\n\toption 'dumaos_started' '0'" >> /etc/config/dumaos
+		uci set dumaos.tr69.dumaos_enabled=1;uci commit dumaos
+	fi
+	DUMAOS_STATUS=$(uci get dumaos.tr69.dumaos_enabled | grep 0)
+	if [ "$DUMAOS_STATUS" = 0 ];then
+		echo "DumaOS is disabled"
+		#Testing Mode only, remove hotplug call for production
+		return 0
+	fi	
+  fi
+  DUMA_LOADED=$(ps ww | grep "cleaner.lua" | grep -v grep | wc -l)
+  if [ "$DUMA_LOADED" = "1" ];then
+  	echo "DumaOS already started"
+	return 1
+  fi
+
+  if [ -f "/dumaos/core_dump.sh"  ];then
+	  #Set core files size to unlimited
+	  ulimit -c unlimited
+	  sh /dumaos/core_dump.sh
+  fi	  
+  if [ "$(cat /dumaossystem/model)" = "LH1000" ]; then
+	 /etc/init.d/ngcompat restart 
+  	 sleep 1	 
+  fi
+  #-- @depends lua
+  #-- @test lua -v
+  lua /dumaos/set-theme-defaults-if-null.lua
+
+  # detect a factory reset on netgear (dumaos key will be unset)
+  
+  #-- @depends test
+  #-- @test test 1
+  if [ -x /bin/config ]; then
+    #-- @depends config
+    #-- @test config show
+    user_signed=$(/bin/config get user_signed)
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$user_signed" == "0" ]; then
+
+      #-- @depends ndtech1-api
+      #-- @test test -e /dumaos/clear-device-manager.sh
+      /dumaos/clear-device-manager.sh
+    fi
+
+    #-- @depends config
+    #-- @test config show
+    x=$(/bin/config get dumaos)
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$x" != "1" ]; then
+
+      #-- @depends ndtech-www-firstparty
+      #-- @test test -e /dumaos/reset.sh
+      /bin/sh /dumaos/reset.sh                                              
+
+      #-- @depends config
+      #-- @test config show
+      /bin/config set dumaos=1 
+    fi
+  else # setup logging if not on NETGEAR platform
+    #-- @depends test
+    #-- @test test 1
+    if [ ! -f /tmp/dumaoslogstarted ]; then
+      #-- @depends syslogd
+      #-- @test which syslogd
+      if [ "$(cat /dumaossystem/model)" != "LH1000" ]; then
+        syslogd -V NETDUMA -C1024
+      fi
+
+      #-- @depends echo
+      #-- @test echo procmanager
+      echo "1" > /tmp/dumaoslogstarted
+    fi
+  fi
+
+
+  # Do not start DumaOS if in access point mode
+
+  #-- @depends test
+  #-- @test test 1
+  if [ -x /bin/config ]; then
+
+    #-- @depends config
+    #-- @test config show
+    access_point_mode=`/bin/config get ap_mode`
+
+    #-- @depends test
+    #-- @test test 1
+    if [ "$access_point_mode" = "1" ]; then
+
+      #-- @depends lua
+      #-- @test lua -v
+      INIT_FROM_CLI=true lua /dumaos/apps/system/com.netdumasoftware.procmanager/translation.lua
+      lua /dumaos/reset-initialise-themes.lua
+      run=0
+    fi
+  fi
+  
+  if [ "$run" = "1" ]; then
+    service_start $PROG -p $APP backend
+  fi
+}
+
+do_stop() {
+  #-- @depends ps; grep; awk; tr
+  #-- @test which ps && which grep && which awk && which tr
+  echo "Stopping DumaOS"
+    DUMA_RAPPS=$(ps ww | grep 'netdumasoftware' | grep -v grep | awk '{print $1}')
+
+   for rapp in $DUMA_RAPPS
+   do
+        kill -9 "$rapp"
+   done
+   return 0
+  #x=$( ps ww | grep procman | grep lua | awk '{print $1}' | tr -d '\n' )
+  #if [ "$x" ];then
+  #  kill -2 $x
+  #fi
+  # Wait a while for DumaOS to shutdown gracefully otherwise exit. We 
+  # shouldn't wait indefinitely as factory resets wait for stop to complete
+  # before rebooting. If we have some issue that stops DumaOS from shutting
+  # down correctly then factory reset will complete, needless to say that is
+  # an unmitigated disaster. 
+  #
+  # Furthermore we have a plan B if things go wrong. After factory reset in the
+  # DumaOS start function we check if we just reset. If so we delete all the
+  # files again.
+  #
+  # Extra note on why I've choosen 48s. Procmanager gives each cycle 15 seconds
+  # to cleanup after itself. There are three cycles, so shutdown should not
+  # take longer than 45s. I've padded a few seconds to handle unexpected delays.
+  #for i in `seq 1 48`; do
+    #kill -0 $x || return 0
+
+    #-- @depends sleep
+    #-- @test sleep 0
+    #sleep 1
+  #done
+
+  # Force reset
+
+  #-- @depends echo
+  #-- @test echo procmanager
+  echo "DumaOS failed to shutdown in 20 seconds"
+
+  #-- @depends killall; pgrep; wc
+  #-- @test which killall && which pgrep && which wc
+  if [ "$(pgrep dpiclass | wc -l)" != "0" ];then  
+    killall -9 dpiclass
+  fi
+  if [ "$(pgrep datahistory | wc -l)" != "0" ];then
+    /etc/init.d/datahistory stop
+  fi
+  /etc/init.d/firewall restart && ipset destroy
+  return 1
+}
+
+
+stop() {
+  if ! do_stop; then
+    #-- @depends net-wall; ipset
+    #-- @test net-wall && ipset help
+    if [ "$(cat /dumaossystem/model)" != "LH1000" ];then
+	net-wall start && ipset destroy
+    fi	    
+  fi
+    #-- @depends ngcompat
+    #-- @test test -e /etc/init.d/ngcompat
+   #if [ "$(pgrep lua | wc -l)" != "0" ];then                                                                  
+   #   killall -9 lua                                                                          
+   #fi
+   #Only kill DumaOS related processes as other processes unrelated to DumaOS are using lua
+
+   DUMA_RAPPS=$(ps ww | grep 'netdumasoftware' | grep -v grep | sed 's/^[ \t]*//' | cut -d' ' -f 1)
+
+   for rapp in $DUMA_RAPPS
+   do
+   	kill -9 "$rapp"
+   done
+
+   if [ "$(ps ww | grep -v grep | grep dpiclass | wc -l)" != "0" ];then                                                             
+      killall -9 dpiclass                                                                     
+   fi                                                                                        
+   if [ "$(ps ww | grep -v grep | grep datahistory | wc -l)" != "0" ];then                                                            
+      /etc/init.d/datahistory stop                                                                  
+   fi    
+    if [ "$(cat /dumaossystem/model)" != "LH1000" ];then
+	while [ "$(ip rule show | grep fwmark)" ];
+        do
+                ip rule show | grep fwmark | awk -F":" '{print $1}' | xargs -n1 ip rule del pref
+        done
+    elif [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+        #Clean iptables rules
+        T="nat filter mangle"; for t in $T ; do iptables -t $t -F && iptables -t $t -X; done
+        #Clean ip sets
+        for set in $(ipset list | grep -Eo "aaipset[0-9]*")
+        do
+                ipset destroy "$set"
+        done 
+	ACTION=cleanup /sbin/hotplug-call dumaos
+    fi
+	/etc/init.d/ngcompat restart
+	return 1
+}
+
+stop_service() {
+  if ! do_stop; then
+    #-- @depends firewall; ipset
+    #-- @test test -e /etc/init.d/firewall && ipset help
+    if [ "$(cat /dumaossystem/model)" != "DJA0231" ];then
+	    /etc/init.d/firewall restart && ipset destroy
+    fi	    
+  fi
+   #Only kill DumaOS related processes as other processes unrelated to DumaOS are using lua
+
+   DUMA_RAPPS=$(ps ww | grep 'netdumasoftware' | grep -v grep | sed 's/^[ \t]*//' | cut -d' ' -f 1)
+
+   for rapp in $DUMA_RAPPS
+   do
+        kill -9 "$rapp"
+   done
+
+   if [ "$(pgrep dpiclass | wc -l)" != "0" ];then
+      killall -9 dpiclass
+   fi
+   if [ "$(pgrep datahistory | wc -l)" != "0" ];then
+      /etc/init.d/datahistory stop
+   fi
+   if [ "$(cat /dumaossystem/model)" != "DJA0231" ];then  
+  	/etc/init.d/firewall restart && ipset destroy
+        while [ "$(ip rule show | grep fwmark)" ];                                                                                 
+        do                                                                                                                         
+                ip rule show | grep fwmark | awk -F":" '{print $1}' | xargs -n1 ip rule del pref
+        done	
+   elif [ "$(cat /dumaossystem/model)" = "DJA0231" ];then
+	/etc/init.d/firewall restart
+	for set in $(ipset list | grep -Eo "aaipset[0-9]*")
+	do
+       		ipset destroy "$set"
+	done
+	ACTION=cleanup /sbin/hotplug-call dumaos
+        #if [ -e "/etc/nginx/dumaos.conf" ];then
+        #        cp -f /dumaos/ngnx-fp/nginx.cnf.orig  /etc/nginx/nginx.conf && sync
+        #        /etc/init.d/nginx restart
+        #fi
+   fi	
+   return 1	
+}

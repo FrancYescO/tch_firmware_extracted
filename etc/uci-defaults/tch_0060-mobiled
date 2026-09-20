@@ -1,0 +1,17 @@
+#!/bin/sh
+
+if uci -q get network.wwan; then
+	uci set network.wwan.proto='mobiled'
+	uci set network.wwan.session_id='0'
+	uci set network.wwan.profile='1'
+	uci set network.wwan.iface_464xlat='1'
+	uci commit network
+fi
+
+if uci -q get mobiled_device_specific.@device[0]; then
+	build_version=`uci get version.@version[0].version`
+	short_build_version=${build_version:0:11}
+	#sip_user_agent format: Telstra_Hybrid <manufacturer> <model> <hardware_version> <software_version> <gateway_prod_name> <gateway_prod_number> <gateway_friendly_sw_version_activebank> <gateway_serial>
+	uci set mobiled_device_specific.@device[0].sip_user_agent="Telstra_Hybrid <manufacturer> <model> <hardware_version> <software_version> <gateway_prod_name> <gateway_prod_number> $short_build_version$(uci get versioncusto.override.fwversion_suffix) <gateway_serial>"
+	uci commit mobiled_device_specific
+fi

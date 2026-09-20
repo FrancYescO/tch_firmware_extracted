@@ -1,0 +1,369 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <!DOCTYPE HTML> <html> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width,minimum-scale=1,initial-scale=1,user-scalable=yes"> <meta name="mobile-web-app-capable" content="yes"> <meta name="apple-mobile-web-app-capable" content="yes"> <meta http-equiv="cache-control" content="max-age=0"> <meta http-equiv="cache-control" content="no-cache"> <meta http-equiv="expires" content="0"> <meta http-equiv="expires" content="Tue, 01 Jan 1980 1:00:00 GMT"> <meta http-equiv="pragma" content="no-cache"> <%
+  require("libos")
+  
+  local json = require("json")
+  local dumaos_manifest = json.load("/dumaos/dumaos.json")
+  local platform_information = os.platform_information()
+  
+  local ap_mode = os.get_ap_mode()
+  local firmware_version = os.firmware_version()
+  local hardware_version =  platform_information.model
+  local translation_ready = os.load(string.format("/www/language/dumaos/%s/ready", lang)) == "true"
+  local theme_ready = os.load("/dumaos/themes/ready") == "true"
+
+  if platform_information.sdk == "OpenWRT" and os.execute("/dumaos/setup_done.sh") ~= 0 then
+%> <script> location.replace("/desktop/setup.html"); </script> </head> <%
+  elseif not translation_ready or not theme_ready then
+%> <h2>DumaOS not loaded yet!</h2> <p>Don't worry we will redirect you shortly.</p> <script> setTimeout(function() { location.reload(); }, 5000); </script> <%
+  else
+%> <noscript> <meta http-equiv="refresh" content="0;URL='index.htm'"> </noscript> <title>DumaOS</title> <script src="/nd-js/browser-setup.js"></script> <style> <%in /www/desktop/preloader.css %> </style> <link rel="import" href="/custom-elements/app-layout/app-drawer-layout/app-drawer-layout.html"> <link rel="import" href="/custom-elements/app-layout/app-drawer/app-drawer.html"> <link rel="import" href="/custom-elements/app-layout/app-header/app-header.html"> <link rel="import" href="/custom-elements/app-layout/app-scroll-effects/app-scroll-effects.html"> <link rel="import" href="/custom-elements/app-layout/app-header-layout/app-header-layout.html"> <link rel="import" href="/custom-elements/app-layout/app-toolbar/app-toolbar.html"> <link rel="import" href="/custom-elements/iron-icons/social-icons.html"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/iron-icons/image-icons.html"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html"> <link rel="import" href="/custom-elements/paper-badge/paper-badge.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-item/paper-icon-item.html"> <link rel="import" href="/custom-elements/paper-item/paper-item-body.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-menu-button/paper-menu-button.html"> <link rel="import" href="/custom-elements/paper-menu/paper-menu.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/file-upload/file-upload.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/libs/cycle.html"> <link rel="import" href="/libs/util.html"> <link rel="import" href="/desktop/application-sidebar.html"> <link rel="import" href="/desktop/language-selector.html"> <link rel="import" href="/desktop/time-selector.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="apple-touch-icon" sizes="180x180" href="favicons/apple-touch-icon.png"> <link rel="icon" type="image/png" href="favicons/favicon-32x32.png" sizes="32x32"> <link rel="icon" type="image/png" href="favicons/favicon-16x16.png" sizes="16x16"> <link rel="manifest" href="favicons/manifest.json"> <link rel="mask-icon" href="favicons/safari-pinned-tab.svg" color="#da333c"> <meta name="theme-color" content="#ffffff"> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> body {
+        overflow: hidden;
+        min-height: 100%;
+      }
+
+      body[unresolved] {
+        height: 100vh;
+        background: #120203;
+        margin: 0;
+        opacity: 1;
+      }
+
+      .top-nav {
+        flex-shrink: 0;
+        height: 40px;
+      }  
+
+      .top-nav ::content paper-tooltip {
+        top: 56px !important;
+      }
+      
+      .notification-icon {
+        display: inline-block;
+        box-sizing: border-box;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+      }
+
+      .notification-timestamp {
+	text-align: center;
+        font-size: 10px;
+	margin: 0px;
+      }
+
+      .notification-background {
+	position: absolute;
+	z-index: -1;
+      }
+      
+      .logo {
+        padding-right: 16px;
+      }
+
+      .logo img {
+        display: block;
+      }
+
+      .logo.dumaos {
+      }
+      
+      .logo.border {
+        padding-left: 16px;
+        border-left: thin solid var(--map-color);
+      }
+
+      .logo.netduma > img,
+      .logo.dumaos > img,
+      .logo.vendor > img {
+        height: 24px;
+        margin: 0;
+      }
+
+      .logo.dumaos > img {
+        width: 128px;
+      }
+            
+      .logo.netduma > img {
+        width: 148px;
+      }
+
+      .logo.vendor > img  {
+        width: 177px;
+      }
+
+      .logo.nighthawk > img {
+        height: 40px;
+      }
+
+      .logo-os {
+        fill: var(--primary-text-color);
+      }
+
+      .logo-duma,
+      .logo-head {
+        fill: var(--primary-color);
+      }  
+
+      @media (max-width: 900px) {
+        .logo {
+          display: none;
+        }
+      }      
+
+      span.version {
+        display: block;
+        font-size: 12px;
+        text-transform: uppercase;            
+        opacity: 0.75;
+        font-weight: 400;
+        line-height: 12px;
+        height: 12px;
+        margin-top: 4px;
+      }
+      
+      paper-icon-item ::content .notification-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 0;
+        margin: 8px;
+      }
+
+      .disconnected {
+        padding: 32px 0;
+        text-align: center;
+        max-width: 720px;
+      }
+			
+      body[collapsed] #application {
+        margin-left:  64px;
+      }
+
+      body:not([collapsed]) #application {
+        margin-left: 272px;
+      }			
+
+      #application iframe, #application #disconnection-page {
+        border: none;
+        position: relative;
+        display: block;
+        transition: all 250ms ease;
+        -webkit-transition: all 250ms ease;
+        -moz-transition: all 250ms ease;
+        -ms-transition: all 250ms ease;
+        -o-transition: all 250ms ease;
+        opacity: 1;
+        visibility: visible;
+        padding: 0; 
+        width: 100%;
+        min-height: calc(100vh - 64px);
+      }
+
+      .loading.hidden {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity ease 250ms, visibility ease 250ms;
+      }
+
+      .loading {
+        display: block;
+        height: 100vh;
+        width: 100vw;
+        background-color: #120203;
+        background-size: cover;
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        z-index: 100;
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .loading .loader {
+        margin: 0 auto;
+        position: relative;
+        margin-top: -14px;
+        top: 50%;
+        text-align: center;
+      }
+
+      .loading.application-loader {
+        height: calc(100vh - 64px);
+        width: calc(100vw - 256px);
+        background-color: transparent;
+        background-image: none;
+        z-index: 99;
+      }
+      body[collapsed=true] .loading.application-loader {
+        width: calc(100vw - 64px);
+      }
+
+      .loading.application-loader + #main-wrapper #application {
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 1500ms ease, visibility 1500ms ease;
+      }
+
+      .loading.application-loader.hidden + #main-wrapper #application {
+        visibility: visible;
+        opacity: 1;
+      }      
+
+      .main-wrapper {
+        position: relative;
+        display: block;
+        height: 100vh;
+        background-color: var(--primary-background-color);        
+        color: var(--primary-text-color);
+        @apply(--paper-font-body1);
+      }
+
+      .main-wrapper::before {
+        content: "";
+        display: block;
+        background: var(--background-image) no-repeat center center;
+        background-position: 50% 50%;
+        background-size: cover;
+        height: 101%;
+        left: -0.5%;
+        position: absolute;
+        top: -0.5%;
+        width: 101%;    
+      }
+
+      .notifications {
+        position: relative;
+      }
+      
+      paper-dialog ::content table.dialog {
+        margin-bottom: 16px;
+      }
+
+      td:first-child,
+      th:first-child {
+        padding-left: 24px;
+      }
+
+      td:last-child,
+      th:last-child {
+        padding-right: 24px;
+      }
+			
+      #sidebar-wrapper {
+        @apply(--layout-horizontal);
+        height: calc(100% - 64px);
+      }
+      
+      /* app-drawer */
+      app-drawer {
+        --app-drawer-width: 320px;
+        --app-drawer-content-container: {
+            background-color: var(--transparent-background-color);
+            color: var(--primary-text-color);
+        };
+        
+        --app-drawer-scrim-background: var(--transparent-background-color);
+      }
+
+      app-drawer ::content paper-listbox {
+        --paper-listbox-color: var(--primary-text-color);
+      }
+
+      app-drawer#app-drawer {
+        top: 56px;
+        --app-drawer-width: 256px;
+        --app-drawer-content-container: {
+          background-color: transparent;  
+          color: var(--primary-text-color);
+          padding: 0;
+        };
+        /*@apply(--shadow-elevation-2dp);*/
+      }
+
+      app-drawer#app-drawer app-toolbar {
+        padding: 0 14px;
+      }
+			
+			app-drawer#notification-drawer {
+        z-index: 1;
+				text-align: left;
+        --app-drawer-content-container: {
+          background-color: var(--primary-background-color);
+        };				
+			}
+            
+      /* app-toolbar */
+      app-toolbar {
+        --app-toolbar-font-size: 16px;
+        padding-left: 12px;
+      }
+
+      app-toolbar ::content paper-icon-button {
+        --paper-icon-button: {
+          flex-shrink: 0;
+        };
+      }
+
+      app-toolbar ::content div[main-title] {
+        white-space: nowrap;
+        display: inline-block;
+        flex: 0 0 auto;
+      }
+
+      app-toolbar paper-icon-button#sidebar-toggle {
+        margin-right: 12px;
+      }    
+
+      #update-container {
+        display: inline-block;
+      }
+
+      .app-help {
+        display: flex;
+        flex: 1 0 40px;
+      }
+
+      file-upload#firmware-upgrade-file {
+        --error-color: var(--primary-color);
+        --file-upload-button: {
+          display: block;
+          @apply(--paper-font-button);
+          font-size: 16px;
+          background: var(--primary-color);
+          margin: 0 0 16px;
+          width: auto;
+          text-align: center;
+        };
+
+        --file-upload-commands: {
+          float: none;
+          text-align: center;
+          margin-bottom: 4px;
+        };
+
+        --file-upload-upload-border: {
+          display: block;
+        };
+        width: 240px;
+      }
+
+      file-upload ::content .name span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+      } </style>  <body class="fullbleed" unresolved> <div class="loading" id="page-loader"> <div class="loader"> <div class="preloader-wrapper small active"> <div class="spinner-layer"> <div class="circle-clipper left"> <div class="circle"></div> </div><div class="gap-patch"> <div class="circle"></div> </div><div class="circle-clipper right"> <div class="circle"></div> </div> </div> </div> </div> </div> <div class="loading application-loader hidden" id="application-loader"> <div class="loader"> <div class="preloader-wrapper small active"> <div class="spinner-layer"> <div class="circle-clipper left"> <div class="circle"></div> </div><div class="gap-patch"> <div class="circle"></div> </div><div class="circle-clipper right"> <div class="circle"></div> </div> </div> </div> </div> </div> <div class="main-wrapper"> <app-toolbar> <paper-icon-button id="sidebar-toggle" icon="icons:menu"></paper-icon-button> <% if platform_information.vendor == "NETGEAR" then %> <div class="logo vendor"> <img src="netgear.svg" class="nighthawk-logo" alt="Netgear Nighthawk"> <%
+              local router_title = "GAMING ROUTER"
+              if platform_information.model == "R7000" then
+                router_title = "SingleOS Router"
+              end
+            %> <span class="version"><%= hardware_version %>&nbsp;<%= router_title %></span> </div> <% if platform_information.model ~= "R7000" then %> <div class="logo nighthawk"> <img src="netgear-nighthawk.svg" class="nigthhawk-logo"> </div> <% end %> <% elseif platform_information.vendor == "NETDUMA" then %> <div class="logo netduma"> <img src="netduma.svg" class="netduma-logo"> <span class="version"><%= hardware_version %> GAMING ROUTER</span> </div> <% elseif platform_information.vendor == "TELSTRA" then %> <div class="logo telstra"> <img src="telstra.svg" alt="Telstra "> </div> <% end %> <div class="logo dumaos border"> <img src="dumaos.svg" class="dumaos-logo"> </div> <div main-title id="app-name"></div> <div class="app-help"> <paper-icon-button id="app-help-button" icon="icons:help-outline"></paper-icon-button> <paper-tooltip position="bottom" for="app-help-button" animation-delay="0" offset="0"><%= i18n.appHelp %></paper-tooltip> </div> <div class="top-nav"> <paper-icon-button id="dumaos-information-button" icon="icons:info-outline"></paper-icon-button> <paper-tooltip position="bottom" for="dumaos-information-button" animation-delay="0" offset="0"><%= i18n.information %></paper-tooltip> <% if os.implements_netgear_specification() then %> <language-selector id="language-selector" disabled="disabled"></language-selector> <% end %> <paper-tooltip position="bottom" for="language-selector" animation-delay="0" offset="0"><%= i18n.language %></paper-tooltip> <% if platform_information.vendor ~= "TELSTRA" then %> <div id="update-container"> <paper-icon-button id="update-button" icon="icons:update" disabled="disabled"></paper-icon-button> </div> <% end %> <paper-tooltip position="bottom" for="update-container" animation-delay="0" offset="0"><%= i18n.noUpdateAvailable %></paper-tooltip> <% if platform_information.vendor ~= "TELSTRA" then %> <paper-icon-button id="logout-button" icon="icons:exit-to-app"></paper-icon-button> <paper-tooltip position="bottom" for="logout-button" animation-delay="0" offset="0"><%= i18n.logout %></paper-tooltip> <% end %> <% if platform_information.sdk == "OpenWRT" then %> <paper-icon-button id="account-settings-button" icon="social:person"></paper-icon-button> <paper-tooltip position="bottom" for="account-settings-button" animation-delay="0" offset="0"><%= i18n.accountSettings %></paper-tooltip> <% end %> <!-- <paper-icon-button id="theme-selection-button" icon="image:palette"></paper-icon-button>
+          <paper-tooltip
+            position="bottom"
+            for="theme-selection-button"
+            animation-delay="0"
+            offset="0"><%= i18n.themeSelection %></paper-tooltip> --> <% if platform_information.vendor ~= "TELSTRA" then %> <paper-icon-button id="time-settings-button" icon="schedule"></paper-icon-button> <paper-tooltip position="bottom" for="time-settings-button" animation-delay="0" offset="0"><%= i18n.timeSettings %></paper-tooltip> <% end %> <paper-icon-button id="notifications-open" icon="social:notifications" alt="inbox"></paper-icon-button> <paper-badge for="notifications-open" id="notification-number"></paper-badge> </div> </app-toolbar> <app-drawer id="notification-drawer" align="end"> <app-toolbar> <div main-title><%= i18n.notifications %></div> <paper-icon-button icon="close" id="notifications-close"></paper-icon-button> </app-toolbar> <div class="drawer-content" role="listbox" id="notifications"> <paper-item id="no-notifications-message" style="display: none;" disabled="disabled"> <%= i18n.noNotifications %> </paper-item> </div> </app-drawer> <div id="sidebar-wrapper"> <application-sidebar></application-sidebar> <div id="application" class="flex"> <div id="disconnection-page" style="display: none;"> <div class="layout horizontal center-justified"> <div class="layout vertical flex-none disconnected"> <div class="flex-none"> <p> <%= i18n.disconnectionMessage %> </p> </div> <div class="flex-none"> <paper-spinner-lite></paper-spinner-lite> </div> </div> </div> </div> </div> </div> </div> <paper-dialog id="dumaos-information-dialog" modal> <h2><%= i18n.information %></h2> <paper-dialog-scrollable> <div class="inner"> <paper-button background id="launch-dumaos-tour-button"><%= i18n.launchDumaosTour %> </paper-button> <paper-button background id="reboot-button"><%= i18n.reboot %> </paper-button> <% if platform_information.sdk == "OpenWRT" then %> <paper-button background id="factory-reset-button"><%= i18n.factoryReset %></paper-button> <% end %> <% if platform_information.vendor == "TELSTRA" then %> <paper-button background id="restore-defaults-button"><%= i18n.restoreDefaults %></paper-button> <% end %> </div> <table class="dialog"> <tbody> <tr> <td><%= i18n.firmwareVersion %></td> <td><%= hardware_version %>&nbsp;<%= firmware_version %></td> </tr> </tbody> </table> <div class="inner"> <% if platform_information.vendor == "NETGEAR" then %> <a target="_blank" href="http://downloadcenter.netgear.com/" tabindex="-1"> <paper-button flat><%= i18n.documentation %></paper-button> </a> <a target="_blank" href="http://support.netgear.com" tabindex="-1"> <paper-button flat><%= i18n.onlineSupport %></paper-button> </a> <a target="_blank" href="http://kb.netgear.com/app/answers/detail/a_id/12923" tabindex="-1"> <paper-button flat><%= i18n.routerFaq %></paper-button> </a> <a target="_blank" href="/license.htm#" tabindex="-1"> <paper-button flat><%= i18n.gnuGpl %></paper-button> </a> <% elseif platform_information.vendor == "NETDUMA" then %> <a target="_blank" href="https://netduma.com/#" tabindex="-1"> <paper-button flat>netduma.com</paper-button> </a> <a target="_blank" href="https://dumaos.com" tabindex="-1"> <paper-button flat>dumaos.com</paper-button> </a> <a target="_blank" href="http://forum.netduma.com" tabindex="-1"> <paper-button flat>Forum</paper-button> </a> <a target="_blank" href="http://support.netduma.com/support/home" tabindex="-1"> <paper-button flat>Help Center</paper-button> </a> <a target="_blank" href="https://netduma.com/eula/" tabindex="-1"> <paper-button flat>EULA</paper-button> </a> <a target="_blank" href="https://netduma.com/privacy-policy/" tabindex="-1"> <paper-button flat>Privacy Policy</paper-button> </a> <a target="_blank" href="https://netduma.com/rapp-standard-terms-conditions/" tabindex="-1"> <paper-button flat>Terms and Conditions</paper-button> </a> <% end %> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss autofocus><%= i18n.done %></paper-button> </div> </paper-dialog> <% if os.implements_netgear_specification() then %> <paper-dialog id="update-progress-dialog" modal> <h1><%= i18n.upgradeInProgress %></h1> <p> <%= i18n.routerAboutToUpdate %> </p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="update-confirmation-alert"> <h2><%= i18n.updateFirmwareTitle %></h2> <div class="inner"> <div><b><%= i18n.currentVersion %>:</b> <span id="update-current-version"></span></div> <div><b><%= i18n.newVersion %>:</b> <span id="update-new-version"></span></div> <div><b><%= i18n.releaseNotes %>:</b></div> <ul id="update-release-notes"></ul> </div> </duma-alert> <% elseif platform_information.sdk == "OpenWRT" then %> <paper-dialog id="firmware-upgrade-dialog" modal> <h2><%= i18n.firmwareUpgradeHeader %></h2> <paper-dialog-scrollable> <div class="inner"> <file-upload id="firmware-upgrade-file" droppable="true" raised="true" drop-text="<%= i18n.firmwareUpgradeDropFileLabel %>" error-text="<%= i18n.firmwareUpgradeErrorLabel %>" target="/cgi-bin/manupgrade.has" method="POST" file-data-name="uploadfile" manual-upload><%= i18n.firmwareUpgradeSelectUpgradeFile %></file-upload> </div> </paper-dialog-scrollable> <div class="horizontal center-justified layout" hidden> <paper-spinner-lite active></paper-spinner-lite> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button id="firmware-upgrade-button"><%= i18n.upgrade %></paper-button> </div> </paper-dialog> <paper-dialog id="confirmation-dialog" modal> <h1><%= i18n.upgradeInProgress %></h1> <p><%= i18n.upgradeInProgressMessage %></p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <% end %> <duma-alert id="adblocker-alert"> <h2><%= i18n.adblockerDetectedTitle %></h2> <p> <%= i18n.adblockerDetected1 %> </p> <p> <%= i18n.adblockerDetected2 %> </p> </duma-alert> <paper-dialog id="langauge-change-in-progress" modal> <p><%= i18n.languageChangingHeader %></p> <p><%= i18n.languageChangingMessage %></p> <div class="horizontal center-justified layout"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="language-update-error"> <h2><%= i18n.languageChangeErrorHeader %></h2> <%= i18n.languageChangeErrorMessage %> </duma-alert> <duma-alert id="generic-duma-alert"></duma-alert> <% if platform_information.vendor == "TELSTRA" then %> <paper-dialog id="restore-defaults-dialog" modal> <h2><%= i18n.restoreDefaults %></h2> <div class="inner"> <p><%= i18n.restoreDefaultsConfirmation %></p> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button id="restore-confirm"><%= i18n.restoreDefaults %></paper-button> </div> </div> </paper-dialog> <% end %> <paper-dialog id="theme-selection-dialog" modal> <h2><%= i18n.themeSelection %></h2> <paper-dialog-scrollable> <div class="inner"> <p><%= i18n.themeSelectionText %></p> <input id="selected-theme" hidden> <paper-dropdown-menu label="Theme"> <paper-listbox class="dropdown-content" attr-for-selected="value" id="theme-dropdown"></paper-listbox> </paper-dropdown-menu> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button background autofocus id="save-theme-button"> <%= i18n.save %> </paper-button> </div> </paper-dialog> <% if platform_information.vendor ~= "TELSTRA" then %> <time-selector id="time-settings"></time-selector> <% end %> <% if platform_information.sdk == "OpenWRT" then %> <paper-dialog id="account-settings-dialog" modal> <h2>Account Settings</h2> <paper-dialog-scrollable> <div class="inner"> <p> You can change the username or password used to login to the router </p> <paper-input id="account-settings-username" label="<%= i18n.username %>" required minlength="1" maxlength="16" error-message="<%= i18n.usernameError %>" pattern="^[a-zA-Z0-9]+$" auto-validate></paper-input> <paper-input id="account-settings-password" label="<%= i18n.password %>" type="password" required minlength="1" maxlength="16" error-message="<%= i18n.passwordError %>" pattern="^[a-zA-Z0-9]+$" auto-validate></paper-input> <paper-input id="account-settings-password-confirmation" label="<%= i18n.passwordConfirmation %>" type="password" required error-message="<%= i18n.passwordConfirmationError %>"></paper-input> </div> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.cancel %></paper-button> <paper-button background autofocus id="save-account-settings-button"> <%= i18n.save %> </paper-button> </div> </paper-dialog> <% end %> <script> var apMode = <%= ap_mode %>;
+      var firmwareVersion = "<%= firmware_version %>"; </script> <script src="/nd-js/blockadblock.js"></script> <script src="/desktop/index.js"></script> </body> <%
+  end
+%> </html> 

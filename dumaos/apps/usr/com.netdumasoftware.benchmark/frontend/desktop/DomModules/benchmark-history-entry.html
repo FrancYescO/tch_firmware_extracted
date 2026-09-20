@@ -1,0 +1,86 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/benchmark-rating-icon.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-speed-rating.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-ping-rating.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-bloat-rating.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html"> <script src="/apps/com.netdumasoftware.benchmark/desktop/Scripts/shared.js"></script> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="benchmark-history-entry"> <template> <style include="duma-theme iron-flex"> :host  {
+        min-width: 96px;
+        padding: 16px 8px;
+        @apply(--layout-self-stretch);
+        @apply(--layout-vertical);
+        @apply(--layout-center);
+        text-align: center;
+      }
+      .history-header {
+        height: 48px;
+      }
+      .history-row {
+        height: 48px;
+        display: block;
+      }
+      .history-time {
+        color: var(--secondary-text-color);
+      }
+      .bg {
+        background-color: rgba(var(--primary-background-rgb), 0.25);
+      }
+      .history-row paper-icon-button#deleteTest {
+        margin: 4px;
+      } </style> <!-- History Rating Entry dom start --> <div class="history-header"> <div class="history-time"> <div>[[time]]</div> </div> <div class="history-date">[[date]]</div> </div> <iron-pages selected="[[failed]]"> <iron-page> <duma-speed-rating id="speed" class="history-row"></duma-speed-rating> <duma-ping-rating id="ping" class="history-row"></duma-ping-rating> <duma-bloat-rating id="bloat" class="history-row" thresholds$="[[bloatThreshold]]"></duma-bloat-rating> </iron-page> <iron-page> <div class="history-row"></div> <div class="history-row"></div> <div class="history-row"> <paper-icon-button id="deleteTest" icon="delete-forever"></paper-icon-button> </div> </iron-page> </iron-pages> </template> <script> Polymer({
+      is: 'benchmark-history-entry',
+      properties:
+      {
+        date: String,
+        time: String,
+        speedThreshold: Object,
+        pingThreshold: Object,
+        bloatTreshold: Object,
+        failed:
+        {
+          type: Boolean,
+          value: true,
+        },
+        id:
+        {
+          type: Number,
+          value: 0,
+        }
+      },
+      pass: function(index, speedUpload, expectedUpload, speedDownload, expectedDownload, ping, jitter, dropRate, bloatUp, bloatDown, bloatIdle)
+      {
+        this.id = index;
+        this.failed = false;
+
+        // Speed
+        var speedRating = this.$$("#speed");
+
+        speedRating.set("tooltip.line0", FormatBytes(speedDownload * 1000, 1000));
+        speedRating.set("tooltip.line1", FormatBytes(speedUpload * 1000, 1000));
+        speedRating.set("tooltip.line2", GetNetflixRating(speedDownload));
+
+        speedRating.setRating(speedUpload / expectedUpload, speedDownload / expectedDownload);
+
+        // Ping
+        var pingRating = this.$$("#ping");
+
+        pingRating.set("tooltip.line0", ping.toFixed(1) + " ms");
+        pingRating.set("tooltip.line1", jitter.toFixed(1) + " ms");
+        pingRating.set("tooltip.line2", dropRate.toFixed(1) + "%");
+        pingRating.setRating(ping, jitter, dropRate);
+
+        // Bloat
+        var bloatRating = this.$$("#bloat");
+
+        bloatRating.set("tooltip.line0", bloatDown.toFixed(1) + " ms");
+        bloatRating.set("tooltip.line1", bloatUp.toFixed(1) + " ms");
+        bloatRating.set("tooltip.line2", bloatIdle.toFixed(1) + " ms");
+
+        bloatRating.setRating(bloatUp, bloatDown, bloatIdle);
+      },
+      fail: function(index)
+      {
+        this.id = index;
+        this.failed = true;
+
+        this.$.deleteTest.addEventListener("tap", this.deleteTest.bind(this));
+      },
+      deleteTest: function()
+      {
+        long_rpc_promise("com.netdumasoftware.benchmark", "delete_entry",[this.id]).done(function() { this.fire("reload-history")}.bind(this));
+      },
+    }); </script> </dom-module> 

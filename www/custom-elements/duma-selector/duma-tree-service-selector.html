@@ -1,0 +1,256 @@
+<!--
+  (C) 2018 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../paper-checkbox/paper-checkbox.html"> <link rel="import" href="../iron-collapse/iron-collapse.html"> <dom-module id="duma-tree-service-selector"> <template> <array-selector id="categoriesSelector" items="[[_categories]]" multi></array-selector> <paper-checkbox id="allCheckbox" checked="{{_allChecked}}" role="menuitemcheckbox" on-change="_onAllUserCheckedChanged">All</paper-checkbox> <template is="dom-repeat" items="[[_categories]]" as="category"> <array-selector class="services-selector" id="x-[[_stringHash(category.name)]]-services-selector" items="{{category.services}}" multi></array-selector> <paper-checkbox id="x-[[_stringHash(category.name)]]-category-checkbox" class="category" role="menuitemcheckbox" on-change="_onCategoryCheckedChanged" on-checked-changed="_onCategoryUserCheckedChanged"></paper-checkbox> <span on-tap="_onCategoryTap">[[category.name]]</span> <iron-collapse opened="[[category.opened]]"> <template is="dom-repeat" items="[[category.services]]" as="service"> <paper-checkbox class$="service service-[[_stringHash(category.name)]]" on-checked-changed="_onServiceCheckedChanged">[[service.name]]</paper-checkbox> </template> </iron-collapse> </template> </template> <script> Polymer({
+      is: "duma-tree-service-selector",
+
+      properties: {
+        valid: {
+          value: false,
+          type: Boolean,
+          notify: true
+        },
+
+        value: {
+          type: Array,
+          notify: true
+        },
+
+        _categories: Object
+      },
+
+      ready: function () {
+        this._refreshServices();
+      },
+
+      _refreshServices: function () {
+        $.getJSON(
+          "/json/_services_.json?cache=0",
+          function (services) {
+
+            this._categories = this._processServices(services);
+
+          }.bind(this)
+        );
+      },
+
+      // https://stackoverflow.com/a/7616484/3250233
+      _stringHash: function(str) {
+        var hash = 0, i, chr;
+
+        if (str.length === 0) return hash;
+
+        for (i = 0; i < str.length; i++) {
+          chr = str.charCodeAt(i);
+          hash = ((hash << 5) - hash) + chr;
+          hash |= 0;
+        }
+
+        return hash;
+      },
+
+      _isAllChecked: function () {
+        return this._categories.length === this.$.categoriesSelector.selected.length;
+      },
+
+      _isCategoryChecked: function (categoryName) {
+        var category = this._categories.find(function (category) {
+          return category.name === categoryName;
+        });
+
+        var serviceSelector = this._getServicesSelectorByCategory(categoryName);
+
+        return category.services.length === serviceSelector.selected.length;
+      },
+
+      _onServiceCheckedChanged: function (event) {
+        var service = event.model.get("service");
+
+        if (!service) {
+          return;
+        }
+
+        var category = service.category ? service.category : "Uncategorised";
+
+        var serviceSelector = this._getServicesSelectorByCategory(category);
+
+        if (event.target.checked) {
+          serviceSelector.select(service);
+
+        } else {
+          serviceSelector.deselect(service);
+        }
+
+        this._getCategoryCheckboxByCategory(category).checked = this._isCategoryChecked(category);
+
+        this._setValue();
+        this._setValid();
+      },
+
+      _getCategoriesServicesCheckboxes: function (categoryName) {
+        return Polymer.dom(this.root).querySelectorAll(
+          "paper-checkbox.service-" + this._stringHash(categoryName)
+        );
+      },
+
+      _getServicesSelectorByCategory: function (category) {
+        return this.$$("#x-" + this._stringHash(category) + "-services-selector");
+      },
+
+      _getCategoryCheckboxByCategory: function (category) {
+        return this.$$("#x-" + this._stringHash(category) + "-category-checkbox");
+      },
+
+      _getServicesSelectors: function () {
+        return Polymer.dom(this.root).querySelectorAll(
+          "array-selector.services-selector"
+        );
+      },
+
+      _getCheckboxes: function (selector) {
+        return Polymer.dom(this.root).querySelectorAll("paper-checkbox" + selector);
+      },
+
+      _onCategoryUserCheckedChanged: function (event) {
+        var category = event.model.get("category");
+
+        if (!category) {
+          return;
+        }
+
+        var checked = event.target.checked;
+
+        if (checked) {
+          this.$.categoriesSelector.select(category);
+
+        } else {
+          this.$.categoriesSelector.deselect(category);
+        }
+
+        this._allChecked = this._isAllChecked();
+      },
+
+      _onCategoryCheckedChanged: function (event) {
+        var category = event.model.get("category");
+
+        if (!category) {
+          return;
+        }
+
+        var checked = event.target.checked;
+
+        var servicesCheckboxes = this._getCategoriesServicesCheckboxes(category.name);
+
+        for (var i = 0; i < servicesCheckboxes.length; i++) {
+          servicesCheckboxes[i].checked = checked;
+        }
+
+      },
+
+      _onAllUserCheckedChanged: function (event) {
+        var categoryCheckboxes = this._getCheckboxes(".category");
+        var serviceCheckboxes = this._getCheckboxes(".service");
+
+        var checked = event.target.checked;
+
+        for (var i = 0; i < categoryCheckboxes.length; i++) {
+          categoryCheckboxes[i].checked = checked;
+        }
+
+        for (var i = 0; i < serviceCheckboxes.length; i++) {
+          serviceCheckboxes[i].checked = checked;
+        }
+      },
+
+      _onCategoryTap: function (event) {
+        var state = event.model.get("category.opened");
+        event.model.set("category.opened", !state);
+      },
+
+      _processServices: function (services) {
+        var categories = [];
+
+        for (var i = 0; i < services.length; i++) {
+          var service = services[i];
+
+          var category = categories.find(function (category) {
+            return category.name === (service.category ? service.category : "Uncategorised");
+          });
+
+          if (!category) {
+            category = {
+              name: service.category ? service.category : "Uncategorised",
+              services: [],
+              opened: false
+            };
+
+            categories.push(category);
+          }
+
+          category.services.push(service);
+        }
+
+        return categories;
+      },
+
+      _sortServices: function (service1, service2) {
+        if (service1.application < service2.application) {
+          return -1;
+        }
+
+        if (service1.application > service2.application) {
+          return 1;
+        };
+
+        return 0;
+      },
+
+      _setValid: function () {
+
+        var servicesSelectors = this._getServicesSelectors();
+
+        for (var i = 0; i < servicesSelectors.length; i++) {
+          if (servicesSelectors[i].selected.length > 0) {
+            this.valid = true;
+            return;
+          }
+        }
+
+        this.valid = false;
+
+      },
+
+      _setValue: function () {
+        var servicesSelectors = this._getServicesSelectors();
+
+        var selectedServices = [];
+
+        for (var i = 0; i < servicesSelectors.length; i++) {
+          selectedServices = selectedServices.concat(servicesSelectors[i].selected);
+        }
+
+        this.value = selectedServices;
+      },
+
+      _resetSelectedServices: function () {
+        this._allChecked = true;
+        this._onAllUserCheckedChanged({
+          target: this.$.allCheckbox
+        });
+      },
+
+      // TODO
+      _resetExpandedCategories: function () {
+        var categories = this._categories;
+
+        for (var i = 0; i < categories.length; i++) {
+          this.set("_categories." + i + ".opened", false);
+        }
+      },
+
+      reset: function () {
+        this._resetSelectedServices();
+        this._resetExpandedCategories();
+        this._allChecked = true;
+      }
+    }); </script> </dom-module> 

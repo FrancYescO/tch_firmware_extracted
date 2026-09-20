@@ -1,0 +1,36 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <% require "libos" %> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/duma-icon-tree/duma-icon-tree.html"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/custom-elements/iron-data-table/iron-data-table.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/devices.html"> <link rel="import" href="/libs/cycle.html"> <link rel="import" href="/nd-css/duma-icons.html"> <style is="custom-style" include="iron-flex iron-positioning iron-flex-layout duma-theme"> :host {
+    display: block;
+  }
+  #table-wrapper {
+    width: 100%;
+    height: 100%;
+    @apply(--layout-vertical);
+  }  
+  :root ::content iron-data-table {
+    @apply(--layout);
+    @apply(--layout-flex-auto); 
+  }
+  #offline-delete {
+    margin-top: 1em;
+  } </style> <duma-panel id="device-tree-panel" header="<%= i18n.header %>" show-pin show-help show-help-tip show-drawer drawer-header="<%= i18n.options %>"> <div drawer> <paper-radio-group selected="tree" id="mode-selector"> <paper-radio-button name="tree"><%= i18n.tree %></paper-radio-button> <paper-radio-button name="table"><%= i18n.table %></paper-radio-button> </paper-radio-group> <paper-button id="offline-delete" background>Remove Offline Devices</paper-button> </div> <div help-content> <p> <%= i18n.helpContent %> </p> </div> <div help-tip><%= i18n.helpTip %></div> <div main class="vertical"> <duma-icon-tree class="svg-container" id="device-tree"></duma-icon-tree> <div id="table-wrapper"> <template is="dom-bind" id="table-binder"> <style is="custom-style"> :root ::content data-table-cell {
+            padding: 0 16px;
+          }
+          :root ::content #header data-table-row {
+            border: none;
+          }
+          :root {
+            --iron-data-table-header: {
+              z-index: auto;
+            }
+            --iron-data-table-row: {
+              border-top: thin solid var(--divider-color);            
+            }
+            --iron-data-table-row-odd: {}
+            --iron-data-table-row-even: {}
+            --iron-data-table-row-hover: {}
+            --iron-data-table-row-selected: {}
+            --iron-data-table-row-after: {}
+          } </style> <div class="content" style="font-size:20px;font-weight:400;line-height:28px;"><%= i18n.portsTable %></div> <iron-data-table items="[[ports]]" id="ports-table"> <data-table-column name="<%= i18n.portNumber %>" sort-by="portNumber"> <template>[[item.portNumber]]</template> </data-table-column> <data-table-column name="<%= i18n.connectionStatus %>" sort-by="connectionStatus"> <template>[[item.connectionStatus]]</template> </data-table-column> <data-table-column name="<%= i18n.duplex %>" sort-by="duplex"> <template>[[item.duplex]]</template> </data-table-column> <data-table-column name="<%= i18n.linkSpeed %>" sort-by="speed"> <template>[[item.speed]]</template> </data-table-column> </iron-data-table> <div class="content" style="font-size:20px;font-weight:400;line-height:28px;"><%= i18n.devicesTable %></div> <iron-data-table items="[[devices]]" selection-enabled id="devices-table"> <data-table-column name="<%= i18n.name %>" sort-by="nameIndex" on-tap="onDeviceClick"> <template>[[item.name]]</template> </data-table-column> <data-table-column name="<%= i18n.type %>" sort-by="typeIndex"> <template>[[item.type]]</template> </data-table-column> <data-table-column name="<%= i18n.macAddress %>"> <template>[[item.mac]]</template> </data-table-column> <data-table-column name="<%= i18n.ipAddresses %>"> <template>[[item.ips]]</template> </data-table-column> <data-table-column name="<%= i18n.connectionType %>" sort-by="connectionTypeIndex"> <template>[[item.connectionType]]</template> </data-table-column> <data-table-column name="<%= i18n.connectionStatus %>" sort-by="connectionStatusIndex"> <template>[[item.connectionStatus]]</template> </data-table-column> <data-table-column name="<%= i18n.ssid %>" sort-by="ssidIndex"> <template>[[item.ssid]]</template> </data-table-column> <data-table-column name="<%= i18n.frequency %>" sort-by="frequency"> <template>[[item.frequency]]</template> </data-table-column> <% if os.board() ~= "rb-951g-2hnd" then %> <data-table-column name="<%= i18n.signalStrength %>" sort-by="signalStrength"> <template>[[item.signalStrength]]</template> </data-table-column> <% end %> <template is="dom-if" if="[[arlTableAvailable]]"> <data-table-column name="<%= i18n.portNumber %>" sort-by="portNumber"> <template>[[item.portNumber]]</template> </data-table-column> <data-table-column name="<%= i18n.duplex %>" sort-by="duplexIndex"> <template>[[item.duplex]]</template> </data-table-column> <data-table-column name="<%= i18n.linkSpeed %>" sort-by="speed"> <template>[[item.speed]]</template> </data-table-column> </template> </iron-data-table> </template> </div> </div> </duma-panel> <duma-alert id="device-alert"></duma-alert> <script src="/apps/com.netdumasoftware.devicemanager/desktop/device-tree.js"></script> 

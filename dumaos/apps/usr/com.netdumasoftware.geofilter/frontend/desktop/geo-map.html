@@ -1,0 +1,82 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <%
+require "libos"
+local platform = os.platform_information()
+%> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/duma-map/duma-map.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html"> <link rel="import" href="/custom-elements/paper-progress/paper-progress.html"> <link rel="import" href="/custom-elements/paper-toast/paper-toast.html"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html"> <link rel="import" href="/custom-elements/iron-icons/maps-icons.html"> <link rel="import" href="/custom-elements/iron-icons/editor-icons.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/sampler.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/libs/svg-util.html"> <link rel="import" href="/nd-css/duma-icons.html"> <link rel="import" href="/apps/com.netdumasoftware.geofilter/desktop/geo-filter.html"> <link rel="import" href="/apps/com.netdumasoftware.geofilter/desktop/geofilter-device-selector.html"> <style is="custom-style" include="iron-flex iron-flex-alignment iron-positioning duma-theme"> .flex-svg {
+    min-height: 200px;
+    position:relative;
+  }
+
+  .profiles {
+    margin: 18px 16px 0 0;
+  }
+
+  #geo-unit {
+    margin-right: 16px;
+    margin-top: 18px;		
+  }
+
+  .geo-menu {
+    margin: 8px;
+  }
+
+  .geo-distance {
+    margin: 0 8px;
+  }
+
+  .ping-unit  {
+    margin-left: 8px;
+  }
+
+  .flex-1 {
+    flex: 1 1 auto;
+  }
+  .flex-2 {
+    flex: 2 1 auto;
+  }
+  .flex-3 {
+    flex: 3 1 auto;
+  }
+
+  duma-map.home-cursor {
+    cursor: url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-home.svg") 12 22, url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-home.cur"), crosshair;
+  }
+  
+  duma-map.zoom-cursor {
+    cursor: url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-zoom.svg") 9.5 9.5, url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-zoom.cur"), zoom-in;
+  }
+  
+  duma-map.zoomed-cursor {
+    cursor: url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-zoomed.svg") 9.5 9.5, url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-zoomed.cur"), zoom-out;
+  }
+
+  duma-map.add-polygon-cursor {
+    cursor: url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-edit.svg") 3 21, url("/apps/com.netdumasoftware.geofilter/shared/icons/cursor-edit.cur"), crosshair;
+  }
+  duma-map.delete-polygon-cursor ::content #polygons polygon:hover {
+    cursor: pointer;
+    fill-opacity: 0.3 !important;
+  }
+
+  .polygon-count paper-progress {
+    margin-top: 1.3em;
+  }
+  paper-tooltip ::content #tooltip {
+    background-color: var(--primary-background-color);
+    opacity: 1;
+    padding-left: 1em;
+    padding-right: 1em;
+    @apply(--paper-font-caption);
+  }
+  paper-slider ::content paper-input ::content paper-input-container ::content input[type="number"] {
+    -moz-appearance:textfield;
+  }
+  .polygon-toggle {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    min-height: 60px;
+  } </style> <duma-panel header="<%= i18n.header %>" drawer-header="<%= i18n.drawerHeader %>" show-pin show-drawer show-help show-drawer-help show-help-tip id="geo-map-panel"> <div help-content> <p> <%= i18n.helpContent %> </p> <figure> <img src="/apps/com.netdumasoftware.geofilter/desktop/help-images/geofilter.svg"> </figure> <p> <%= platform.vendor ~= "TELSTRA" and i18n.helpContentTwo or "" %> </p> </div> <div help-tip> <%= i18n.helpTip %> </div> <div drawer-help-content> <p> <%= platform.vendor == "TELSTRA" and i18n.drawerHelpContentMinFast or i18n.drawerHelpContent %> </p> </div> <div drawer> <paper-radio-group selected="km" id="distance-unit"> <paper-radio-button name="km"><%= i18n.kilometres %></paper-radio-button> <paper-radio-button name="miles"><%= i18n.miles %></paper-radio-button> </paper-radio-group> <paper-checkbox id="strict-mode"><%= i18n.strictMode %></paper-checkbox> <paper-checkbox id="auto-ping"><%= i18n.autoPingHost %></paper-checkbox> <paper-button background id="flush-cloud"><%= i18n.flushCloud %></paper-button> <paper-dropdown-menu id="zoomf" class="flex gap-left" label="Zoom Factor" required> <paper-listbox slot="dropdown-content" class="dropdown-content"> <paper-item value="2.5">2.5</paper-item> <paper-item value="5">5</paper-item> <paper-item value="8">8</paper-item> <paper-item value="10">10</paper-item> <paper-item value="15">15</paper-item> </paper-listbox> </paper-dropdown-menu> <% if platform.vendor ~= "TELSTRA" then %> <paper-checkbox id="allow-false-positives"><%= i18n.fastSearch %></paper-checkbox> <% end %> </div> <div main class="layout vertical"> <div class="flex-none"> <div class="layout horizontal inner"> <div class="polygon-toggle"> <paper-toggle-button id="filtering-mode"></paper-toggle-button> <span>Polygon Mode</span> </div> <div class="flex-none geo-menu"> <paper-icon-button icon="maps:person-pin-circle" id="home"></paper-icon-button> <paper-tooltip position="bottom" for="home" animation-delay="0" offset="0"><%= i18n.buttonHome %></paper-tooltip> <paper-icon-button icon="editor:mode-edit" id="add-polygon"></paper-icon-button> <paper-tooltip position="bottom" for="add-polygon" animation-delay="0" offset="0"><%= i18n.buttonDraw %></paper-tooltip> <paper-icon-button icon="icons:delete-forever" id="delete-polygon"></paper-icon-button> <paper-tooltip position="bottom" for="delete-polygon" animation-delay="0" offset="0"><%= i18n.buttonDelete %></paper-tooltip> <paper-icon-button icon="zoom-in" id="zoom"></paper-icon-button> <paper-tooltip position="bottom" for="zoom" animation-delay="0" offset="0"><%= i18n.buttonZoom %></paper-tooltip> </div> <template class="template-when-circle" is="dom-if" if="true"> <div class="flex flex-3 geo-distance"> <div><%= i18n.setDistance %></div> <paper-slider pin editable class="flex-none" id="distance-slider"></paper-slider> </div> <div class="flex-none self-center" id="geo-unit"><%= i18n.kmUnit %></div> </template> <template class="template-when-polygon" is="dom-if" if="true"> <div class="flex flex-3 geo-distance polygon-count"> <div><%= i18n.pointsRemaining %>: <span id="polygon-text-count">0</span></div> <paper-progress class="flex-none transiting" id="polygon-count" max="50" min="0"></paper-progress> </div> </template> <% if platform.vendor ~= "TELSTRA" then %> <div class="flex flex-2 geo-distance"> <div><%= i18n.pingAssist %></div> <paper-slider id="ping-assist" min="0" max="200" editable></paper-slider> </div> <% end %> <template class="template-when-circle" is="dom-if" if="true"> <div class="flex-none self-center profiles"> <paper-button background id="profiles"><%= i18n.profiles %></paper-button> </div> </template> </div> </div> <div class="flex flex-svg"> <duma-map></duma-map> </div> <paper-toast duration="0" text="<%= i18n.unableToAccessCloudError %>"></paper-toast> <paper-dialog id="geo-map-loader-dialog" modal> <h2><%= i18n.loaderDialogHeading %></h2> <div class="layout horizontal center-justified"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="geofilter-duma-alert"></duma-alert> </div> </duma-panel> <geofilter-device-selector></geofilter-device-selector> <script src="/apps/com.netdumasoftware.geofilter/desktop/geo-map.js"></script> 

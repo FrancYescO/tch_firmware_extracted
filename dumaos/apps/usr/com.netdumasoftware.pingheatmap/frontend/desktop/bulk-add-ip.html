@@ -1,0 +1,105 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-input/paper-input.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-input/paper-textarea.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="bulk-add-ip"> <style is="custom-style" include="duma-theme"> .buttons {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-around;
+    } </style> <template> <paper-dialog id="dialog" modal> <div class="inner layout vertical"> <label>Input ip addresses, one on each line. Any text after a space seperator will be it's name.</label> <label>Example: "127.0.0.1 Local"</label> <div> <paper-textarea id="textArea" max-rows="8" rows="8"></paper-textarea> </div> <div class="buttons"> <paper-button id="cancel" on-click="cancel">Cancel</paper-button> <paper-button id="saveButton" background on-click="save">Save</paper-button> </div> </div> </paper-dialog> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "bulk-add-ip",
+
+      properties: {
+        ips: {
+          type: Array,
+          value: []
+        }
+      },
+
+      open: function(existing, callback,ipvalid,nameRegex){
+        this.ips = {};
+        this.$.textArea.value = "";
+        if(existing){
+          this.addFromExisting(existing);
+        }
+        this._callback = callback;
+        this._ipValid = ipvalid;
+        this._nameRegex = new RegExp(nameRegex);
+        this.$.dialog.open();
+      },
+      addFromExisting: function(exists){
+        var eips = [];
+        forObject(exists, function(ip,value){
+          eips.push(ip + (value.display ? " " + value.display : ""));
+        });
+        this.ips = exists;
+        this.$.textArea.value = eips.join("\n");
+      },
+
+      _getIp: function(ip){
+        return this.ips[ip];
+      },
+
+      _addOrUpdateIP: function(obj, ip, name){
+        var new_ip = {};
+        var eip = this._getIp(ip);
+        if(eip){
+          Object.assign(new_ip, eip);
+        }
+        new_ip.ip = ip;
+        new_ip.display = name;
+        obj[ip] = new_ip;
+        return true;
+      },
+      ipRegex: /\b(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b/,
+      _isIPValid: function(ip){
+        return ip.match(this.ipRegex) !== null;
+      },
+      _isNameValid: function(name){
+        return name.match(this._nameRegex);
+      },
+
+      _sepLine: function(line){
+        var ret = {ip:"",name:""};
+        var space = line.indexOf(' ');
+        var hasName = space > 0;
+        if(hasName){
+          ret.ip = line.substr(0,space);
+          ret.name = line.substr(space+1)
+        }else{
+          ret.ip = line;
+          ret.name = "";
+        }
+        return ret;
+      },
+      _getValues: function(){
+        var ret = {};
+        var lines = this.$.textArea.value.split("\n");
+        for(var i = 0; i < lines.length; i ++){
+          var line = this._sepLine(lines[i]);
+          var valid = this._isIPValid(line.ip);
+          if(!this._isNameValid(line.name)){
+            name = "";
+          }
+          if(valid){
+            this._addOrUpdateIP(ret, line.ip,line.name);
+          }
+        }
+        return ret;
+      },
+
+      save: function(){
+        if(this._callback){
+          this._callback(this._getValues());
+        }
+        this.$.dialog.close();
+      },
+      cancel: function(){
+        if(this._callback){
+          this._callback(this.ips);
+        }
+        this.$.dialog.close();
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

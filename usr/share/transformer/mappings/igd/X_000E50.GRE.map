@@ -1,0 +1,230 @@
+local InternetGatewayDevice_Services_GRE_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_Wifi.GRE.",
+    access = "readOnly",
+    description = "ONO-Wifi GRE protocol service related parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Server = {
+        access = "readWrite",
+        list = true,
+        type = "string",
+        default = "10.110.4.15",
+        description = "List of tunnel servers separated by commas (TGW).The first one is the primary GRE tunnel endpoint.The second one is the backup GRE tunnel endpoint.",
+      },
+      VLAN_SSID = {
+        access = "readWrite",
+        type = "int",
+        default = "104",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        description = "VLAN for SSID.",
+      },
+      VLAN_EAPSSID = {
+        access = "readWrite",
+        type = "int",
+        default = "105",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        description = "VLAN for EAPSSID.",
+      },
+      Location = {
+        access = "readOnly",
+        type = "string",
+        default = "VodESP:ES",
+	description = "Location in Radius messages.",
+      },
+      PingPeer = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "Keepalive mechanism Interval (ICMP PING packets)",
+      },
+      PingCount = {
+        access = "readWrite",
+        type = "int",
+        default = "0",
+        description = "Number of ICMP PING sent to deem the GRE tunnel endpoint address as unreachable.",
+      },
+      PingRetryInterval = {
+        access = "readWrite",
+        type = "int",
+        default = "0",
+        description = "Interval between ICMP PING packets sent to the GRE tunnel endpoint address",
+      },
+      PingSilentPeerInterval  = {
+        access = "readWrite",
+        type = "int",
+        default = "0",
+        description = "Idle timeout for active peer",
+      }
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local fon_helper = require('transformer.shared.fon_helper')
+local greBinding = { config = "gre_hotspotd", sectionname = "gt0" }
+local posix = require 'tch.posix'
+local commitapply, ipairs, AF_INET, AF_INET6, pairs= commitapply, ipairs, posix.AF_INET, posix.AF_INET6, pairs
+local transactions = {}
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local conn = mapper("ubus").connect()
+
+
+local ParamsTable = {
+  "PingPeer",
+  "PingSilentPeerInterval",
+  "PingCount",
+  "PingRetryInterval",
+}
+
+-- This is to map corresponding section name or interface to each parameters
+local interfaces = {
+  VLAN_SSID		= "hotspot0",
+  VLAN_EAPSSID		= "hotspot1"
+}
+
+-- This is to map corresponding uciOption to each parameters
+local uciOptions = {
+  Server		= "peers",
+  VLAN_SSID		= "vid",
+  VLAN_EAPSSID		= "vid",
+  PingPeer               = "ping_peer",
+  PingSilentPeerInterval = "ping_silent_peer_interval",
+  PingCount              = "ping_count",
+  PingRetryInterval      = "ping_retry_interval",
+}
+
+local function getServer(mapping, param, key)
+    local server
+    greBinding.option = uciOptions[param]
+    local value = getFromUci(greBinding)
+    if type(value) == "string" then
+      return value
+    end
+    for _,ip in ipairs(value) do
+      server = server and server .. "," .. ip or ip
+    end
+    return server
+end
+
+local function getHotspotVLANID(mapping, param, key)
+  local sectionName = interfaces[param]
+  local greTable = conn:call("gre-hotspotd", "get", { name = sectionName }) or {}
+  return greTable[sectionName] and greTable[sectionName]["vlan-id"]
+end
+
+local function getGREConfig(mapping, param, key)
+  greBinding.option = uciOptions[param]
+  return getFromUci(greBinding)
+end
+
+InternetGatewayDevice_Services_GRE_.get = {
+  Server = function(mapping, param, key)
+    return getServer(mapping, param, key)
+  end,
+  VLAN_SSID = function(mapping, param, key)
+    return getHotspotVLANID(mapping, param, key) or ""
+  end,
+  VLAN_EAPSSID = function(mapping, param, key)
+    return getHotspotVLANID(mapping, param, key) or ""
+  end,
+  Location = "VodESP:ES",
+  PingPeer = function(mapping, param, key)
+   return getGREConfig(mapping, param, key)
+  end,
+  PingSilentPeerInterval = function(mapping, param, key)
+   return getGREConfig(mapping, param, key)
+  end,
+  PingCount = function(mapping, param, key)
+   return getGREConfig(mapping, param, key)
+  end,
+  PingRetryInterval = function(mapping, param, key)
+   return getGREConfig(mapping, param, key)
+  end,
+}
+
+local function splitIPAddrs(value)
+  local address = {}
+  for ip in value:gmatch("([^,]+)") do
+    address[#address + 1] = ip
+  end
+  return address
+end
+
+local function setServer(mapping, param, value, key)
+  local server = {}
+  local address = splitIPAddrs(value)
+  for _, ip in ipairs(address) do
+    local rc = posix.inet_pton(AF_INET, ip) or posix.inet_pton(AF_INET6, ip) or fon_helper.validateStringIsDomainName(ip)
+    if not rc then
+      return nil, "Invalid value"
+    end
+    server[#server + 1] = ip
+  end
+  greBinding.optior = uciOptions[param]
+  setOnUci(greBinding, server, commitapply)
+  transactions[greBinding.config] = true
+end
+
+local function setGREConfig(mapping, param, value, key)
+  greBinding.option = uciOptions[param]
+  setOnUci(greBinding, value, commitapply)
+  transactions[greBinding.config] = true
+end
+
+local function setHotspotVLANID(mapping, param, value, key)
+  conn:call("gre-hotspotd", "set", {["name"]=interfaces[param],["vlan-id"]=tostring(value)})
+end
+
+InternetGatewayDevice_Services_GRE_.set = {
+  Server = function(mapping, param, value, key)
+    return setServer(mapping, param, value, key)
+  end,
+  VLAN_SSID = function(mapping, param, value, key)
+    setHotspotVLANID(mapping, param, value, key)
+  end,
+  VLAN_EAPSSID = function(mapping, param, value, key)
+    setHotspotVLANID(mapping, param, value, key)
+  end,
+  PingPeer = function(mapping, param, value, key)
+    setGREConfig(mapping, param, value, key)
+  end,
+  PingSilentPeerInterval = function(mapping, param, value, key)
+    setGREConfig(mapping, param, value, key)
+  end,
+  PingCount = function(mapping, param, value, key)
+    setGREConfig(mapping, param, value, key)
+  end,
+  PingRetryInterval = function(mapping, param, value, key)
+    setGREConfig(mapping, param, value, key)
+  end,
+}
+
+InternetGatewayDevice_Services_GRE_.commit = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+InternetGatewayDevice_Services_GRE_.revert = function()
+  for config in pairs(transactions) do
+    uciHelper.revert({config = config})
+  end
+  transactions = {}
+end
+
+register(InternetGatewayDevice_Services_GRE_)

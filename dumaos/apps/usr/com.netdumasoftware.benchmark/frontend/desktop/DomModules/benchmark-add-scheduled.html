@@ -1,0 +1,285 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/moment.html"> <link rel="import" href="/libs/cron.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="benchmark-add-scheduled"> <template> <style include="duma-theme iron-flex iron-flex-alignment"> paper-listbox {
+        overflow-x: hidden;
+      }
+      .horizontal-drop {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+      }
+      .horizontal-drop > * {
+        margin-right: 1em;
+      }
+      .horizontal-drop > paper-dropdown-menu {
+        max-width: 10em;
+      }
+
+      :host paper-listbox paper-item {
+        margin-right: 1em;
+      }
+
+      :host paper-checkbox {
+        text-transform: capitalize;
+      }
+      .next{
+        margin-top: 1em;
+      } </style> <paper-dialog id="dialog" modal> <h2>Add Scheduled Test</h2> <div> <paper-dropdown-menu> <paper-listbox class="dropdown-content" selected="{{selectedMain}}"> <template is="dom-repeat" items="[[mainOptions]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> <iron-pages selected="[[selectedMain]]"> <iron-page name="One Time" class="layout horizontal"> <div class="horizontal-drop"> <paper-dropdown-menu label="Time"> <paper-listbox class="dropdown-content" selected="{{selectedTime}}"> <template is="dom-repeat" items="[[times]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="horizontal-drop"> <paper-dropdown-menu label="Date"> <paper-listbox class="dropdown-content" selected="{{selectedMainValues.day}}"> <template is="dom-repeat" items="[[daysInMonths]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> <div class="horizontal-drop"> <paper-dropdown-menu id="monthDropdown" label="Month"> <paper-listbox class="dropdown-content" selected="{{selectedMainValues.month}}"> <template is="dom-repeat" items="[[months]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </iron-page> <iron-page name="Repeating" class="layout vertical"> <paper-dropdown-menu> <paper-listbox class="dropdown-content" selected="{{selectedPreset}}"> <template is="dom-repeat" items="[[presets]]"> <paper-item cron="[[item.cron]]">[[item.display]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> <template is="dom-if" if="[[_showCustomRepeating(selectedPreset,selectedMain)]]"> <div class="layout horizontal justified"> <div class="layout vertical"> <template is="dom-repeat" items="[[days]]"> <paper-checkbox checked="{{item.checked}}" on-tap="_checkUp">[[item.display]]</paper-checkbox> </template> </div> <div class="layout vertical"> <div class="horizontal-drop"> <paper-dropdown-menu label="Time"> <paper-listbox class="dropdown-content" selected="{{selectedTime}}"> <template is="dom-repeat" items="[[times]]"> <paper-item>[[item]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div> </div> </template> </iron-page> </iron-pages> <label class="next">Next test: [[_getNext(selectedPreset,selectedTime,selectedMain,checked_update,selectedMainValues.day,selectedMainValues.month)]]</label> </div> <div class="tech-buttons"> <paper-checkbox checked="{{options.internet}}">Allow test while internet is in use</paper-checkbox> <!-- TODO QOS temp removal --> <!-- <h3>Disable QoS During:</h3>
+        <paper-checkbox checked="{{options.speed}}">Speed Test</paper-checkbox>
+        <paper-checkbox checked="{{options.ping}}">Ping Test</paper-checkbox>
+        <paper-checkbox checked="{{options.buffer}}">Bufferbloat Test</paper-checkbox> --> </div> <div class="buttons"> <template is="dom-if" if="[[_showDelete(existing_rule)]]"> <paper-button on-tap="delete">Delete</paper-button> </template> <paper-button dialog-dismiss>Close</paper-button> <paper-button background on-tap="save">[[_saveText(existing_rule)]]</paper-button> </div> </paper-dialog> </template> <script> Polymer(
+    {
+      is: 'benchmark-add-scheduled',
+      properties: 
+      {
+        times: {
+          type: Array,
+          value: function(){return new Array(24).fill(0).map(function(val,index){return index + ":00"})}
+        },
+        selectedTime: {
+          type: Number,
+          value: 12
+        },
+        mainOptions: {
+          type: Array,
+          value: [
+            "One Time",
+            "Repeating"
+          ]
+        },
+        months: {
+          type: Array,
+          value: ["January","February","March","April","May","June","July","August","September","October","November","December"]
+        },
+        selectedMainValues: {
+          type: Object,
+          value:{
+            day: 1,
+            month: 0
+          }
+        },
+        daysInMonths: {
+          type: Array,
+          computed: "_daysInMonth(selectedMainValues.month)"
+        },
+        presets: {
+          type: Array,
+          value: [
+            {cron:false, display:"Custom"},
+            {cron:new Cron("0 * * * *"), display:"Every Hour"},
+            {cron:new Cron("0 0,2,4,6,8,10,12,14,16,18,20,22 * * *"), display:"Every 2 Hours"},
+            {cron:new Cron("0 0,4,8,12,16,20 * * *"), display:"Every 4 Hours"},
+            {cron:new Cron("0 0,6,12,18 * * *"), display:"Every 6 Hours"},
+            {cron:new Cron("0 0,12 * * *"), display:"Every 12 Hours"},
+            {cron:new Cron("0 12 * * *"), display:"Every 24 Hours"}
+          ]
+        },
+        selectedMain: {
+          type: Number,
+          value: 0
+        },
+        selectedPreset: {
+          type: Number,
+          value: 1,
+          observer: "_onPresetChange"
+        },
+        checked_update: {
+          type: Boolean,
+          value: false
+        },
+        days: {
+          type: Array,
+          value: [
+            {display: "sunday", checked: true},
+            {display: "monday", checked: true},
+            {display: "tuesday", checked: true},
+            {display: "wednesday", checked: true},
+            {display: "thursday", checked: true},
+            {display: "friday", checked: true},
+            {display: "saturday", checked: true}
+          ]
+        },
+        existing_rule: {
+          type: Object,
+          value: null
+        },
+        options: {
+          type: Object,
+          value: {
+            speed: true,
+            ping: true,
+            buffer: true,
+            internet: false
+          }
+        }
+      },
+
+      observers: [
+        "_multiDropdownConfig(selectedMain,selectedPreset,selectedMainValues.*,selectedTime)"
+      ],
+
+      monthDayCount:[31,28,31,30,31,30,31,31,30,31,30,31],
+      _daysInMonth: function(month){
+        var days = new Array(this.monthDayCount[month]).fill(0).map(function(val,index){return index + 1});
+        if(this.selectedMainValues.day >= days.length){
+          this.set("selectedMainValues.day", days.length-1);
+        }
+        return days;
+      },
+
+      _checkUp: function(){
+        this.set('checked_update',!this.checked_update)
+      },
+
+      _showDelete: function(){
+        return this.existing_rule !== null;
+      },
+
+      _getCron: function(){
+        Polymer.dom.flush();
+        if(this.selectedPreset === 0 || this.selectedMain === 0){
+          var cron = new Cron("0 * * * *");
+          if(this.selectedMain === 0){
+            cron.setHours(new Array(24).fill(true).map(function(val,index){ return index === this.selectedTime; }, this));
+            cron.setDays(new Array(31).fill(true).map(function(val,index){ return index === this.selectedMainValues.day; }, this));
+            cron.setMonths(new Array(12).fill(true).map(function(val,index){ return index === this.selectedMainValues.month; }, this));
+          }else{
+            cron.setWeekdays(new Array(7).fill(true).map(function(val,index){ return this.days[index].checked; }, this));
+            cron.setHours(new Array(24).fill(true).map(function(val,index){ return index === this.selectedTime; }, this));
+            cron.setMinutes(new Array(60).fill(true).map(function(val,index){ return index === 0; }, this));
+            cron.setMonths(new Array(12).fill(true));
+          }
+          return cron;
+        }else{
+          return this.presets[this.selectedPreset].cron;
+        }
+      },
+
+      _getNext: function(selectedPreset){
+        var cron = this._getCron();
+        return cron.next(24 * 3600 * 366 * 1000).toLocaleString({},{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
+      },
+
+      ready: function(){
+        // this.$.monthDropdown.$.menuButton.ignoreSelect = true;
+        // this.$.monthDropdown.$.menuButton.closeOnActivate = false;
+      },
+
+      _saveText: function(exist){
+        return exist ? "Save" : "Add";
+      },
+
+      _showCustomRepeating: function(selectedPreset,selectedMain){
+        return this.selectedMain === 0 || selectedPreset === 0;
+      },
+
+      open: function(existing_id, callback){
+        if(existing_id){
+          this.existing_rule = null;
+          long_rpc_promise("com.netdumasoftware.benchmark","get_cron_rules",[]).done(function(result){
+            result = result[0] ? JSON.parse(result[0]) : [];
+            var keys = Object.keys(result);
+            for(var i = 0; i < keys.length; i ++){
+              var rule = result[keys[i]];
+              if(rule.id === existing_id){
+                this.existing_rule = rule;
+                this.open(false, callback);
+                break;
+              }
+            }
+          }.bind(this));
+        }else{
+          if(existing_id !== false) this.existing_rule = null;
+          if(this.existing_rule){
+            var cron = new Cron(this.existing_rule.schedule);
+            this.selectedMain = this.existing_rule.one_time ? 0 : 1;
+            for(var i = 0; i < cron.hours.length; i ++){
+              if(cron.hours[i]){
+                this.selectedTime = i;
+                break;
+              }
+            }
+            if(this.selectedMain === 0){
+              // One time
+              for(var i = 0; i < cron.days.length; i ++){
+                if(cron.days[i]){
+                  this.set("selectedMainValues.day",i);
+                  break;
+                }
+              }
+              for(var i = 0; i < cron.months.length; i ++){
+                if(cron.months[i]){
+                  this.set("selectedMainValues.month",i);
+                  break;
+                }
+              }
+
+            }else{
+              // Repeating
+              // Dont test 0
+              this.selectedPreset = 0;
+              for(var p = 1; p < this.presets.length; p++){
+                var pcron = this.presets[p].cron;
+                var matches = cron.matches(pcron);
+                if(matches.hours && matches.days && matches.weekdays){
+                  this.selectedPreset = p;
+                  break;
+                }
+              }
+              if(this.selectedPreset === 0){
+                for(var i = 0; i < cron.weekdays.length; i ++){
+                  this.set("days."+i+".checked", cron.weekdays[i]);
+                }
+              }
+            }
+            this.set("options",{
+              speed:this.existing_rule.qos_speed_on === "true",
+              buffer:this.existing_rule.qos_bbloat_on === "true",
+              ping:this.existing_rule.qos_ping_on === "true",
+              internet:this.existing_rule.perform_with_internet_in_use === true
+            });
+          }else{
+            this.selectedMain = 0;
+            this.selectedPreset = 1;
+            var today = new Date();
+            this.set("selectedTime",today.getHours()+1);
+            this.set("selectedMainValues.day",today.getDate()-1);
+            this.set("selectedMainValues.month",today.getMonth());
+            this.set("options.internet",false);
+            this.set("options.speed",true);
+            this.set("options.ping",true);
+            this.set("options.buffer",true);
+            for(var i = 0; i < this.days.length; i ++){
+              this.set("days."+i+".checked", true);
+            }
+          }
+          this._callback = undefined;
+          if(callback) this._callback = callback;
+          this.$.dialog.open();
+        }
+      },
+
+      delete: function(close){
+        if(this.existing_rule){
+          long_rpc_promise("com.netdumasoftware.benchmark","delete_cron_rule",[this.existing_rule.id]).done();
+        }
+        if(close){
+          this.$.dialog.close();
+          if(this._callback) this._callback();
+        }
+      },
+
+      save: function(){
+        var cron = this._getCron();
+        this.delete(false);
+        long_rpc_promise("com.netdumasoftware.benchmark","add_cron_rule",[cron.toString(),
+          this.options.speed,
+          this.options.ping,
+          this.options.buffer,
+          this.options.internet,
+          this.selectedMain === 0]).done(function(e){
+            this.$.dialog.close();
+            if(this._callback) this._callback();
+          }.bind(this)
+        );
+      }
+    }); </script> </dom-module> 

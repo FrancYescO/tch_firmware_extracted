@@ -1,0 +1,391 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-range-slider/paper-range-slider.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/libs/devices.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-bubble-chart.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-device-entry.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-queries-blocked-entry.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-device-key.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-pause-button.html"> <dom-module id="adblock-chart-wrapper"> <template> <style include="duma-theme iron-flex"> :host ::content > div {
+        width: 100%;
+        height: 100%;
+      }
+
+      ::content #topBar {
+        width: 100%;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+      }
+      ::content .topButton {
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+      }
+
+      ::content #slider {
+        flex: 1;
+        margin-top: 13px;
+        margin-right: 8px;
+      }
+      ::content #historySlider {
+        --paper-range-slider-width: 100%;
+        --paper-range-slider-knob-start-color: var(--primary-color);
+        --paper-range-slider-knob-start-border-color: var(--primary-color);
+        --paper-single-range-slider-font-color: var(--primary-text-color);        
+      }
+      ::content #historySlider ::content #sliderKnob .slider-knob-inner:before {
+        display: none;
+      }
+      ::content #historySlider ::content #sliderKnob .slider-knob-inner:after {
+        width: auto;
+        white-space: nowrap;
+        margin-left: 0;
+        @apply(--paper-font-caption);
+        transform: scale(1) translate(-50%, -50%);
+      }
+      ::content #mainTableBody > tr > td,
+      ::content #mainTableBody > tr {
+        padding: 0;
+      }
+      ::content #mainTableBody td#tableGraph {
+        width: 100%;
+      }
+      ::content tr:nth-of-type(1) td.rowHeight {
+        height: 64px;
+        vertical-align: middle;
+      }
+      ::content tr:nth-of-type(n+2) td.rowHeight {
+        height: 63px;
+        vertical-align: middle;
+      }
+      ::content .smallColumn {
+        width: 1px;
+        white-space: nowrap;
+      } </style> <!-- Adblock bubble chart dom start --> <div> <div class="layout vertical"> <!-- Top bar --> <div id="topBar" class="inner"> <div class="topButton"> <paper-button id="enableDisableAdblockerButton" on-tap="EnableDisableAdblock" background>[[AdblockEnableDisableButtonText]]</paper-button> <adblock-pause-button disable-button adblock-enabled="{{AdblockEnabled}}" disabled-remainder="{{GlobalDisabledRemainder}}"></adblock-pause-button> </div> <div id="slider"> <paper-range-slider id="historySlider" always-show-pin min="0" max="[[SliderMax]]" value-diff-min="60" immediate-value="{{historySliderPosition}}"></paper-range-slider> </div> <paper-dropdown-menu label="Display" on-selected-item-changed="TimeDropdownChanged"> <paper-listbox class="dropdown-content" selected="{{TimeDropdownSelection}}"> <paper-item>5 Min</paper-item> <paper-item>15 Mins</paper-item> <paper-item>30 Mins</paper-item> <paper-item>1 Hour</paper-item> <paper-item>24 Hours</paper-item> </paper-listbox> </paper-dropdown-menu> </div> <!-- Body --> <div class="layout vertical"> <!-- Table header --> <table style="padding: 0px;"> <thead> <tr> <td class="smallColumn"> Pause </td> <td class="smallColumn"> Devices ([[DeviceCount]] Total) </td> <td> <div id="deviceLegend" class="layout horizontal" style="justify-content: center; flex-wrap: wrap;"> </div> </td> <td class="smallColumn"> Queries Blocked </td> </tr> </thead> <tbody id="mainTableBody"> <tr> <td id="tableGraph" rowspan$="[[DeviceCount]]" style="overflow: visible;"> <div id="chartWrap" style="width: 100%; height: 100%; overflow: visible;"> </div> </td> </tr> </tbody> </table> </div> </div> </div> <adblock-domain-burst-dialog id="domainDialog" devices="[[Devices]]" lists="[[Lists]]"></adblock-domain-burst-dialog> </template> <script> Polymer(
+    {
+      is: 'adblock-chart-wrapper',
+      properties:
+      {
+        LineHeight:
+        {
+          type: Number,
+          value: 200,
+        },
+        historySliderPosition:
+        {
+          type: Number,
+          observer: '_sliderPositionChanged',
+        },
+        Devices:
+        {
+          type: Object,
+          value: [],
+        },
+        DeviceCount:
+        {
+          type: Number,
+        },
+        SliderMax:
+        {
+          type: Number,
+          value: 60,
+        },
+        TimeDropdownSelection:
+        {
+          type: Number,
+          value: 2,
+        },
+        AdblockEnabled:
+        {
+          type: Boolean,
+          value: false,
+          observer: "AdblockEnabledObserver"
+        },
+        AdblockEnableDisableButtonText:
+        {
+          type: String,
+          computed: "GetAdblockEnableDisableButtonText(AdblockEnabled, GlobalDisabledRemainder)",
+        },
+        Lists:
+        {
+          type: Array,
+          value: [],
+        },
+        GlobalDisabledRemainder:
+        {
+          type: Number,
+          value: -1,
+        }
+      },
+      AdblockEnabledObserver: function (newValue, oldValue)
+      {
+        $("adblock-pause-button").each(function(index, button)
+        {
+          button.adblockEnabled = newValue;
+        }.bind(this));
+      },
+      ready: function ()
+      {
+        // Bind slider
+        this.$.historySlider.displayFunction = function (value)
+        {
+          return FormatTimeAgo(this.SliderMax - value, true);
+        }.bind(this);
+
+        this.$.historySlider.addEventListener('updateValues', this.sliderPositionChanged.bind(this));
+
+        this.$.mainTableBody.addEventListener("burstRangeClicked", function(event)
+        {
+          var slider = this.$.historySlider;
+          this.$.domainDialog.ShowRange(this.SliderMax - slider.valueMin, this.SliderMax - slider.valueMax, event.detail);
+        }.bind(this));
+
+        // Get theme colours
+        var cgen = getColourGenerator();
+        this.colours = [];
+        for (var i = 0; i < 20; i++)
+          this.colours.push(cgen());
+
+          this.$.enableDisableAdblockerButton.disabled = true;
+
+        long_rpc_promise("com.netdumasoftware.adblocker", "enable", []).done(function(result)
+        {
+          this.$.enableDisableAdblockerButton.disabled = false;
+          this.AdblockEnabled = result[0].enabled;
+
+          if (result[0].disabled_for)
+            this.GlobalDisabledRemainder = result[0].disabled_for;
+          else
+            this.GlobalDisabledRemainder = -1;
+
+          long_rpc_promise("com.netdumasoftware.adblocker", "get_devices", []).done(this.GetDevicesCallback.bind(this));
+        }.bind(this));
+      },
+      ReloadLists()
+      {
+        // Update lists
+        long_rpc_promise("com.netdumasoftware.adblocker", "get_lists", [false]).done(this.GetListsCallback.bind(this, true));
+      },
+      EnableDisableAdblock()
+      {
+        this.$.enableDisableAdblockerButton.disabled = true;
+        long_rpc_promise("com.netdumasoftware.adblocker", "enable", [(!this.AdblockEnabled && this.GlobalDisabledRemainder <= 0), 0]).done(function(result)
+        {
+          this.$.enableDisableAdblockerButton.disabled = false;
+          this.AdblockEnabled = result[0].enabled;
+
+          if (result[0].disabled_for)
+            this.GlobalDisabledRemainder = result[0].disabled_for;
+          else
+            this.GlobalDisabledRemainder = -1;
+        }.bind(this));
+      },
+      GetAdblockEnableDisableButtonText(AdblockEnabled, GlobalDisabledRemainder)
+      {
+        return (!(!AdblockEnabled && GlobalDisabledRemainder <= 0)) ? "Disable Adblocker" : "Enable Adblocker";
+      },
+      GetListsCallback(reload, result)
+      {
+        $(this.$.deviceLegend).empty();
+
+        var lists = [];
+        for (var old = 0; old < 2; old++)
+        {
+          for (var i = 0; i < result[0].length; i++)
+          {
+            // Sort new entries first, old second
+            if ((old == 1) == (typeof result[0][i].old != "undefined"))
+            {
+              if (result[0][i].old)
+                result[0][i].name += " (Deleted)";
+
+              this.AddLegendKey(this.colours, i, result[0][i].name);
+              lists.push(
+                {
+                  visible: true,
+                  id: result[0][i].id,
+                  name: result[0][i].name,
+                }
+              );
+            }
+          }
+        }
+
+        this.$.domainDialog.SetLists(lists);
+        this.chartHandle.SetLists(lists);
+        Polymer.RenderStatus.afterNextRender(this, () =>
+        {
+          this.chartHandle.ResizeEvent();
+          if (!reload)
+            this.chartHandle.Begin();
+        });
+      },
+      GetDevicesCallback(result)
+      {
+        this.Devices.length = 0;
+
+        for (var i = 0; i < result[0].length; i++)
+        {
+          var type = ((!result[0][i].utype) ? ((!result[0][i].interfaces[0].dtype) ? result[0][i].interfaces[0].gtype : result[0][i].interfaces[0].dtype) : result[0][i].utype).toLowerCase();
+          var disabledTime = (result[0][i].enabled == false) ? result[0][i].disabled_remainder : -1;
+          this.push("Devices",
+            {
+              Name: (!result[0][i].uhost) ? ((!result[0][i].interfaces[0].dhost) ? result[0][i].interfaces[0].ghost : result[0][i].interfaces[0].dhost) : result[0][i].uhost,
+              Enabled: result[0][i].enabled,
+              DeviceID: result[0][i].devid,
+              disabledRemainder: disabledTime,
+              Icon: duma.devices.get_devices_icon(type)
+            }
+          );
+        }
+
+        this.DeviceCount = this.Devices.length;
+
+        var removable = $(".removableGraphPart");
+        for (var i = 0; i < removable.length; i++)
+          removable[i].remove();
+
+        // Rows
+        for (var i = 0; i < this.Devices.length; i++)
+          this.AddRow(i, this.Devices[i]);
+
+        this.CreateGraph();
+      },
+      CreateGraph()
+      {
+        var chartWrap = this.$.chartWrap;
+        $(chartWrap).empty();
+
+        var html = document.createElement("adblock-bubble-chart");
+        var jQueryHtml = $(html);
+
+        this.chartHandle = jQueryHtml[0];
+        jQueryHtml.prop("deviceCount", this.DeviceCount);
+        jQueryHtml.prop("devices", this.Devices);
+        jQueryHtml.prop("listColours", this.colours);
+
+        Polymer.dom(chartWrap).appendChild(html);
+
+        // Total queries binding
+        this.chartHandle.addEventListener("deviceTotalChanged", function(event)
+        {
+          this.Devices[event.detail.deviceID].html.totalQueries += event.detail.change;
+        }.bind(this));
+
+        // Update lists
+        long_rpc_promise("com.netdumasoftware.adblocker", "get_lists", [false]).done(this.GetListsCallback.bind(this, false));
+      },
+      AddRow: function(index, device)
+      {
+        var playPauseButton = this.GetPlayPauseButtonHtmlObject(device);
+        var deviceHtml = this.GetDeviceHtmlObject(device);
+        var queriesHtml = this.GetQueriesBlockedHtmlObject(device);
+        if (index == 0)
+        {
+          $(playPauseButton).addClass("removableGraphPart");
+          $(deviceHtml).addClass("removableGraphPart");
+          $(queriesHtml).addClass("removableGraphPart");
+          var dom = Polymer.dom(this.$.tableGraph.parentNode);
+          dom.insertBefore(playPauseButton, this.$.tableGraph);
+          dom.insertBefore(deviceHtml, this.$.tableGraph);
+          dom.appendChild(queriesHtml);
+        }
+        else
+        {
+          var rowHtml = document.createElement("tr");
+          $(rowHtml).addClass("removableGraphPart");
+          rowHtml.appendChild(playPauseButton);
+          rowHtml.appendChild(deviceHtml);
+          rowHtml.appendChild(queriesHtml);
+          Polymer.dom(this.$.mainTableBody).appendChild(rowHtml);
+        }
+      },
+      AddLegendKey: function(colours, index, name)
+      {
+        var html = document.createElement("adblock-device-key");
+        var jQueryHtml = $(html);
+
+        jQueryHtml.prop("label", name);
+        jQueryHtml.prop("colour", colours[index % colours.length]);
+        jQueryHtml.click(() => html.setStrikeThrough(this.chartHandle.ToggleVisibility(index)));
+
+        Polymer.dom(this.$.deviceLegend).appendChild(html);
+      },
+      GetPlayPauseButtonHtmlObject: function(device)
+      {
+        var html = document.createElement("td")
+        html.className = "rowHeight";
+
+        var buttonHtml = document.createElement("adblock-pause-button");
+        buttonHtml.DeviceID = device.DeviceID;
+        buttonHtml.DeviceEnabled = device.Enabled;
+        buttonHtml.disabledRemainder = device.disabledRemainder;
+        buttonHtml.adblockEnabled = this.AdblockEnabled;
+
+        Polymer.dom(html).appendChild(buttonHtml);
+
+        return html;
+      },
+      GetDeviceHtmlObject: function(device)
+      {
+        var html = document.createElement("td")
+        html.className = "rowHeight";
+
+        var deviceHtml = document.createElement("adblock-device-entry");
+
+        $(deviceHtml).prop("device", device);
+
+        Polymer.dom(html).appendChild(deviceHtml);
+
+        return html;
+      },
+      GetQueriesBlockedHtmlObject: function(device)
+      {
+        var html = document.createElement("td")
+        html.className = "rowHeight";
+        var entry = document.createElement("adblock-queries-blocked-entry")
+        entry.deviceIndex = device.DeviceID;
+        Polymer.dom(html).appendChild(entry);
+
+        device.html = entry;
+
+        return html;
+      },
+      sliderPositionChanged: function()
+      {
+        // Graph hasn't been initalised yet so just return
+        if (typeof this.chartHandle == "undefined")
+          return;
+
+        var slider = this.$.historySlider;
+        this.chartHandle.SetTimeRange(slider.valueMin, slider.valueMax);
+      },
+      TimeDropdownChanged: function()
+      {
+        switch (this.TimeDropdownSelection)
+        {
+          case 0:
+            this.SliderMax = 300;
+            break;
+          case 1:
+            this.SliderMax = 900;
+            break;
+          case 2:
+            this.SliderMax = 1800;
+            break;
+          case 3:
+            this.SliderMax = 3600;
+            break;
+          case 4:
+            this.SliderMax = 86400; // 24 hours in seconds
+            break;
+        }
+
+        // Force update
+        if (this.$.historySlider.valueMin == 0)
+          this.$.historySlider.valueMin = 1;
+        if (this.$.historySlider.valueMax == this.SliderMax)
+          this.$.historySlider.valueMax = 0;
+
+        this.$.historySlider.valueMin = 0;
+        this.$.historySlider.valueMax = this.SliderMax;
+
+        // Graph hasn't been initalised yet so just return
+        if (typeof this.chartHandle == "undefined")
+          return;
+
+        this.sliderPositionChanged();
+        this.chartHandle.SetTotalTimeRange(this.SliderMax);
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,63 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <%
+require "libos"
+local platform = os.platform_information()
+local showUpload = platform.vendor ~= "TELSTRA"
+%> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/paper-toast/paper-toast.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/duma-alert/duma-alert.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/q.html"> <style is="custom-style" include="iron-flex iron-flex-alignment iron-positioning duma-theme"> .qos-unit  {
+    margin-left: 2px;
+  }	
+
+  .buffer-options {
+    margin-bottom: 8px;
+  }
+
+  .buffer-options label {
+    margin-right: 16px;
+  }
+
+  .qos-bandwidth span.title {
+    @apply(--paper-font-title);
+    margin-left: 16px;
+  }
+  
+  .qos-bandwidth {
+    width: 6rem;
+  }
+
+  .qos-bandwidth span {
+    @apply(--paper-font-body1);
+  }
+
+  paper-checkbox .subtitle {
+    display: block;
+    font-size: 0.8em;
+    margin-top: 2px;
+    max-width: 150px;
+  }
+
+  .center-bar {
+    justify-content: space-between;
+  }
+
+  #upload-slider:not([disabled]) ::content .slider-knob-inner {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+  }
+  
+  #upload-slider:not([disabled]) ::content paper-progress ::content #primaryProgress {
+    background-color: var(--accent-color);
+  }
+  paper-slider ::content paper-input ::content paper-input-container ::content input[type="number"] {
+    -moz-appearance:textfield;
+  }
+  .caption.slider-caption + div {
+    margin-top: -1em;
+  } </style> <link rel="import" href="/apps/com.netdumasoftware.qos/desktop/qos.html"> <duma-panel header="<%= i18n.header %>" show-drawer show-pin drawer-header="<%= i18n.drawerHeader %>" show-help show-help-tip show-drawer-help show-drawer-help-tip id="qos-sliders-panel"> <div help-content> <p> <%= i18n.helpContent1 %> </p> <div class="layout horizontal"> <figure class="flex flex-left"> <img src="/apps/com.netdumasoftware.qos/desktop/help-images/anti-queuing-1.svg"> <figcaption> <% if showUpload then %> <%= i18n.helpContentCaption1 %> <% else %> Congestion Control is disabled when the slider is set to 100%. If something is using all your bandwidth then small applications like games will be forced to queue, causing lag. <% end %> </figcaption> </figure> <figure class="flex flex-right"> <img src="/apps/com.netdumasoftware.qos/desktop/help-images/anti-queuing-2.svg"> <figcaption> <% if showUpload then %> <%= i18n.helpContentCaption2 %> <% else %> Lower the sliders below 100% to limit the total bandwidth the greedy devices can take. This makes room for your smaller applications, eliminating the queuing problem. <% end %> </figcaption> </figure> </div> <p> <%= i18n.helpContent2 %> </p> </div> <div help-tip> <% if showUpload then %> <%= i18n.helpTip %> <% else %> Set the slider to 70% when you are gaming. <% end %> </div> <div drawer-help-content> <% if showUpload then %> <%= i18n.drawerHelpContent %> <% else %> <p><b>Optimize Upload</b> ensures your low latency traffic, like games, are prioritized. We recommend you keep this option enabled unless you have been advised to disable it by technical support.</p> <p><b>Download / Upload Bandwidth: </b> enter the total bandwidth speeds you receive from your Internet Provider. If you are unsure on the values, run a Speedtest.</p> <p>When the <b>Goodput </b> option is checked, the bandwidth values for both upload and download will more closely align to a Speedtest. We recommend you keep this option checked.</p> <p><b>Disable QoS</b> will completely prevent any of the QoS features from functioning. You should only check this if you have been advised to by technical support in order to diagnose connection problems.</p> <% end %> </div> <div drawer-help-tip> <%= i18n.drawerHelpTip %> </div> <div drawer> <!--
+    <paper-toggle-button id="auto-throttle" checked> <%= i18n.autoThrottle %> </paper-toggle-button>
+--> <% if platform.vendor == "TELSTRA" then %> <div class="layout horizontal"> <paper-checkbox id="optimiseUpload">Optimize Upload</paper-checkbox> </div> <label class="caption slider-caption">Upload Throttle</label> <div class="layout horizontal"> <div class="flex"> <paper-slider max="100" id="upload-slider" pin editable></paper-slider> </div> <div class="flex-none self-center qos-unit">%</div> </div> <% end %> <paper-input id="download-bandwidth" label="<%= i18n.downloadBandwidthLabel %>" type="number" min="0.01" max="1000" auto-validate step="0.01" error-message="<%= i18n.downloadBandwidthError %>"> <div suffix><%= i18n.mbpsUnit %></div> </paper-input> <paper-input id="upload-bandwidth" label="<%= i18n.uploadBandwidthLabel %>" type="number" min="0.01" max="1000" auto-validate step="0.01" error-message="<%= i18n.uploadBandwidthError %>"> <div suffix><%= i18n.mbpsUnit %></div> </paper-input> <% if showUpload then %> <paper-checkbox id="goodput"><%= i18n.goodputCheckbox %></paper-checkbox> <% end %> <paper-checkbox id="disableall"> <%= i18n.disableQos %> <div class="subtitle"><%= i18n.notRecommended %></div> </paper-checkbox> <!--paper-checkbox>Diurnal</paper-checkbox>
+    <paper-checkbox>Passive measurements</paper-checkbox>
+    <paper-checkbox>Anti-spike</paper-checkbox>
+    <paper-checkbox>Anti-jitter</paper-checkbox>
+    <paper-checkbox>Pre-emptive Algorithm</paper-checkbox--> </div> <div main> <% if showUpload then %> <div class="inner layout vertical"> <% else %> <div class="inner layout vertical center-bar"> <% end %> <div class="layout horizontal buffer-options"> <label class="caption self-center"><%= i18n.apply %>:</label> <paper-radio-group id="atstate"> <paper-radio-button name="1"><%= i18n.always %></paper-radio-button> <paper-radio-button name="2"><%= i18n.highPriorityDetected %></paper-radio-button> <paper-radio-button name="3"><%= i18n.never %></paper-radio-button> </paper-radio-group> </div> <div class="layout horizontal"> <div class="flex"> <% if showUpload then %><label class="caption"><%= i18n.download %></label><% end %> <div class="layout horizontal"> <div class="flex"> <paper-slider max="100" id="download-slider" pin editable></paper-slider> </div> <div class="flex-none self-center qos-unit">%</div> <div class="flex-none self-center qos-bandwidth"> <span class="title" id="download-achievable-bandwidth"></span><span><%= i18n.mbpsUnit %></span> </div> </div> <% if showUpload then %> <label class="caption"><%= i18n.upload %></label> <div class="layout horizontal"> <div class="flex"> <paper-slider max="100" id="upload-slider" pin editable></paper-slider> </div> <div class="flex-none self-center qos-unit">%</div> <div class="flex-none self-center qos-bandwidth"> <span class="title" id="upload-achievable-bandwidth"></span><span><%= i18n.mbpsUnit %></span> </div> </div> <% end %> <div class="layout horizontal"> <div class="flex"> <paper-toast duration="0" text="<%= i18n.qosApplicationFailedError %>"></paper-toast> </div> </div> </div> </div> </div> <paper-dialog id="sliders-loader-dialog" modal> <h2><%= i18n.applyingSettings %></h2> <div class="layout horizontal center-justified"> <paper-spinner-lite></paper-spinner-lite> </div> </paper-dialog> <duma-alert id="sliders-duma-alert"></duma-alert> <duma-alert id="sliders-always-100"> <h2><%= i18n.always100AlertTitle %></h2> <p> <%= i18n.always100AlertContent %> </p> </duma-alert> <duma-alert id="sliders-always-not-100"> <h2><%= i18n.alwaysNot100AlertTitle %></h2> <p> <%= i18n.alwaysNot100AlertContent %> </p> </duma-alert> <duma-alert id="sliders-hpt-100"> <h2><%= i18n.always100AlertTitle %></h2> <p> <%= i18n.always100AlertContent %> </p> </duma-alert> <duma-alert id="sliders-hpt-not-100"> <h2><%= i18n.alwaysNot100AlertTitle %></h2> <p> <%= i18n.hptNot100AlertContent %> </p> </duma-alert> <duma-alert id="sliders-never-unchanged"> <h2><%= i18n.neverUnchangedAlertTitle %></h2> <p> <%= i18n.neverUnchangedAlertContent %> </p> </duma-alert> <duma-alert id="sliders-never-changed"> <h2><%= i18n.neverUnchangedAlertTitle %></h2> <p> <%= i18n.neverChangedAlertContent %> </p> </duma-alert> <duma-alert id="disableqos-alert"> <h2><%= i18n.disableAllQoSWarningHeader %></h2> <p><%= i18n.disableAllQosWarningContent %></p> </duma-alert> <duma-alert id="disabled-on-init"> <h2><%= i18n.qosFeaturesDisabledHeader %></h2> <p><%= i18n.qosFeaturesDisabledContent %></p> </duma-alert> </div> </div></duma-panel> <script src="/apps/com.netdumasoftware.qos/desktop/sliders.js"></script> 

@@ -1,0 +1,201 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/benchmark-history-entry.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="benchmark-history"> <template> <style include="duma-theme iron-flex"> :host {
+        padding-bottom: 16px;
+      }
+      #historyTable {
+        width: 100%;
+        transform-origin: top right;
+        @apply(--layout-horizontal);
+      }
+      .historyTable-wrap {
+        @apply(--layout-horizontal);
+        border: thin solid var(--divider-color);
+        border-width: thin 0 thin 0;
+      }
+      #header {
+        background-color: rgba(var(--primary-background-rgb), 0.15);
+        z-index: 1;
+        @apply(--layout-vertical);
+      }
+      #header > div:not(:first-child) {
+        border-top: thin solid var(--divider-color);
+      }
+      .history-title {
+        @apply(--paper-font-subhead);
+        flex-grow: 1;
+      }
+      .history-header {
+        height : 64px;
+      }
+      .history-row {
+        height: 48px;
+        line-height: 48px;
+        padding: 0 16px;
+      }
+      .history-row:last-child {
+        margin-bottom: 13px;
+      }
+      #tableWrap  {
+        overflow: hidden;
+        width: 100%;
+      }
+      #slider {
+        --paper-slider-active-color: transparent;
+      }
+      .slider-labels  {
+        @apply(--layout-horizontal);
+      }
+      .slider-labels > div:first-child {
+        @apply(--layout-flex);
+      } </style> <div class="layout vertical"> <!-- Top bar --> <div class="layout horizontal inner"> <!-- Left of top bar, contains title --> <div class="history-title"> History <template is="dom-if" if="[[countAvailable]]"> - [[historyUsageCount]]</template> </div> </div> <div class="historyTable-wrap"> <!-- Row titles --> <div id="header"> <div class="history-header"></div> <!-- Spacer so titles align with  rows --> <div class="history-row">Speed</div> <div class="history-row">Ping</div> <div class="history-row">Bufferbloat</div> </div> <!-- Entries --> <div id="historyTable"> </div> </div> <div class="inner"> <paper-slider id="slider" value="100" immediate-value="{{sliderPosition}}"></paper-slider> <div class="slider-labels"> <div>Oldest</div> <div>Latest</div> </div> </div> </div> </template> <script> Polymer({
+      is: 'benchmark-history',
+      properties:
+      {
+        sliderPosition:
+        {
+          type: Number,
+          observer: '_sliderPositionChanged',
+        },
+        testProcessor: Object,
+        historyUsageCount:
+        {
+          type: String,
+          value: "",
+        },
+        countAvailable:
+        {
+          type: Boolean,
+          value: false,
+        }
+      },
+
+      ready: function ()
+      {
+        window.addEventListener("resize", () => this.setSliderPosition(this.sliderPos));
+      },
+
+      ReloadHistory()
+      {
+        $("#historyTable", this).empty();
+        this.countAvailable = false;
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).done(this.GetHistoryCallback.bind(this));
+      },
+
+      Init(result)
+      {
+        this.downloadSpeed = result[0] / 1000;
+        this.uploadSpeed = result[1] / 1000;
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).done(this.GetHistoryCallback.bind(this));
+      },
+
+      GetHistoryCallback(result)
+      {
+        var data = result[0];
+
+        // Check if there is any tests to process. Stops error on first time run
+        if (data.length == 0)
+          return;
+
+        if (data[0] != "version:1.1.0")
+        {
+          alert("We were unable to load your historic test result, probably because it was tested on a different firmware of DumaOS. If you would still like to see this test result, please upgrade your router to the same firmware. If you are not sure how to do this, contact support");
+          return;
+        }
+
+        var numTests = data.length - 2;
+
+        var table = $("#historyTable", this)[0];
+
+        var maxSpeed = this.uploadSpeed;
+
+        var maxTests = parseInt(data[1].split(":")[5]);
+        this.historyUsageCount = numTests + "/" + maxTests;
+        this.countAvailable = true;
+
+        for (var i = 0; i < numTests; i++)
+        {
+          var entryInfo = data[i + 2].split(":");
+
+          var entry = document.createElement("benchmark-history-entry");
+
+          // Date
+          var dateTime = new Date(entryInfo[1] * 1000); // JS timestamp is ms since 1970 rather than standard seconds
+
+          entry.date = dateTime.toLocaleDateString([], {day: '2-digit', month: 'short', year: '2-digit'});
+          entry.time = dateTime.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'});
+
+          var index = parseInt(entryInfo[0]);
+
+          // Values
+          if (entryInfo.length > 2)
+          {
+            entry.pass(index,                     // Index
+                       parseFloat(entryInfo[2]),  // Upload
+                       this.uploadSpeed,          // User upload speed
+                       parseFloat(entryInfo[3]),  // Download
+                       this.downloadSpeed,        // User download speed
+                       parseFloat(entryInfo[4]),  // Ping
+                       parseFloat(entryInfo[5]),  // Jitter
+                       parseFloat(entryInfo[6]),  // Drop rate
+                       parseFloat(entryInfo[7]),  // Bloat upload
+                       parseFloat(entryInfo[8]),  // Bloat download
+                       parseFloat(entryInfo[9])); // Bloat idle
+
+            $(entry, this).click(function (localIndex)
+            {
+              this.testProcessor.SetLoading(true);
+              long_rpc_promise("com.netdumasoftware.benchmark", "get_file_data", [localIndex]).done(this.LoadGraph.bind(this))
+            }.bind(this, index));
+          }
+          else
+          {
+            // Failed test
+            entry.fail(index);
+          }
+
+          entry.addEventListener("reload-history", function() { this.ReloadHistory(); }.bind(this));
+
+          Polymer.dom(table).appendChild(entry);
+        }
+
+        // Wait for child to render before setting slider position
+        Polymer.RenderStatus.afterNextRender(this, () =>
+        {
+          this.setSliderPosition(100);
+        });
+      },
+
+      LoadGraph(result)
+      {
+        this.testProcessor.ClearGraphs();
+
+        for (var i = 0; i < result[0].length; i++)
+        {
+          if (this.testProcessor.SendResult(result[0][i])[0] == -1)
+          {
+            alert("We were unable to load your historic test result, probably because it was tested on a different firmware of DumaOS. If you would still like to see this test result, please upgrade your router to the same firmware. If you are not sure how to do this, contact support");
+            break;
+          }
+        }
+
+        this.testProcessor.UpdateGraph(-2);
+        this.testProcessor.SetLoading(false);
+      },
+
+      _sliderPositionChanged: function(newValue, oldValue)
+      {
+        this.setSliderPosition(newValue);
+      },
+
+      setSliderPosition(value)
+      {
+        this.sliderPos = value;
+        var table = $("#historyTable", this);
+        var header = $("#header", this);
+        var bonusOffset = (table[0].scrollWidth > table.width()) ? header.width() : 0;
+        var pos = (table[0].scrollWidth - table.width() + bonusOffset) * (value / 100)
+        table.css(
+        {
+         "transform": "translateX(-" + pos + "px)"
+        });
+      }
+    }); </script> </dom-module> 

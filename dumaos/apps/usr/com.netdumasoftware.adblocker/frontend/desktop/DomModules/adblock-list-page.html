@@ -1,0 +1,78 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-list-row.html"> <link rel="import" href="/apps/com.netdumasoftware.adblocker/desktop/DomModules/adblock-add-list-dialog.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-list-page"> <template> <style include="duma-theme iron-flex"> </style> <div> <iron-pages selected="[[noListsPage]]"> <div> <table> <thead> <tr> <td>Enabled</td> <td>[[typeName]] Name</td> <td>List Type</td> <td>Edit</td> <td>Delete</td> </tr> </thead> <tbody id="tableBody"></tbody> </table> </div> <div style="text-align: center;"> <h2>No Lists</h2> </div> </iron-pages> <div class="inner"> <paper-button id="addButton" background>Add List</paper-button> </div> </div> <adblock-add-list-dialog id="dialog" is-whitelist="[[isWhitelist]]"></adblock-add-list-dialog> </template> <script> Polymer(
+    {
+      is: 'adblock-list-page',
+      properties:
+      {
+        lists:
+        {
+          type: Object,
+          value: [],
+        },
+        typeName: String,
+        isWhitelist:
+        {
+          type: Boolean,
+          value: false,
+        },
+        noListsPage:
+        {
+          type: Number,
+          value: 1,
+        },
+        noListsBool:
+        {
+          type: Boolean,
+          value: true,
+        },
+      },
+      ready: function()
+      {
+        $(this.$.addButton).on("tap", () => this.$.dialog.Show());
+
+        this.$.dialog.addEventListener("reload-lists", this.ReloadList.bind(this));
+        this.$.tableBody.addEventListener("reload-lists", this.ReloadList.bind(this));
+        this.$.tableBody.addEventListener("edit-list", this.EditList.bind(this));
+
+        this.ReloadList();
+      },
+      EditList(event)
+      {
+        this.$.dialog.EditList(event.detail);
+      },
+      ReloadList()
+      {
+        $(this.$.tableBody).empty();
+
+        // Update lists
+        long_rpc_promise("com.netdumasoftware.adblocker", "get_lists", [this.isWhitelist]).done(this.GetListsCallback.bind(this));
+      },
+      GetListsCallback(result)
+      {
+        this.noListsPage = 1;
+        this.noListsBool = true;
+        var lists = [];
+        for (var i = 0; i < result[0].length; i++)
+        {
+          if (!result[0][i].old)
+          {
+            this.AddRow(result[0][i]);
+            lists.push(result[0][i]);
+          }
+        }
+
+        this.lists = lists;
+
+        this.fire("lists-loaded");
+      },
+      AddRow(list)
+      {
+        this.noListsPage = 0;
+        this.noListsBool = false;
+        var html = document.createElement("adblock-list-row");
+        var jQueryHtml = $(html);
+
+        jQueryHtml.prop("list", list);
+
+        Polymer.dom(this.$.tableBody).appendChild(html);
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,166 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html"> <link rel="import" href="/custom-elements/paper-range-slider/paper-range-slider.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="ping-history-range"> <template> <style is="custom-style" include="duma-theme"> .time-slider-wrapper {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+        padding: 0em 2em;
+      }
+      .time-slider-wrapper > div {
+        display: flex;
+        justify-content: flex-start;
+      }
+      .time-slider-wrapper > *:first-child{
+        flex-grow: 2;
+      }
+      .time-slider-wrapper > *:first-child paper-range-slider{
+        width: 100%;
+      }
+      .date-display {
+        white-space: nowrap;
+      }
+      #timeSlider {
+        --paper-range-slider-knob-start-color: var(--primary-color);
+        --paper-range-slider-knob-start-border-color: var(--primary-color);
+        margin: 0em 2em;
+      } </style> <div class="inner layout horizontal time-slider-wrapper"> <div> <paper-range-slider id="timeSlider" step="0.0001" min="0" max="[[_sliderLen]]" value-min="{{sliderVal.min}}" value-max="{{sliderVal.max}}" style="width:100%"></paper-range-slider> </div> <div> <paper-dropdown-menu dynamic-align label="Slider Timespan"> <paper-listbox class="dropdown-content" selected="{{timeSelected}}"> <template is="dom-repeat" items="[[timeOptions]]" as="time"> <paper-item time="[[time.t]]">[[time.text]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div>  </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-history-range",
+
+      properties: {
+        timeSelected: {
+          type: Number,
+          value: 2
+        },
+        timeOptions: {
+          type: Array,
+          notify: true,
+          value: [
+            { t: 3600, text: "1 Hour" },
+            { t: 21600, text: "6 Hours" },
+            { t: 86400, text: "24 Hours" },
+            { t: 604800, text: "1 Week" },
+            { t: 1209600, text: "2 Weeks" },
+            { t: 2592000, text: "1 Month" }
+          ]
+        },
+        sliderVal: {
+          type: Object,
+          value: {
+            min: 0,
+            max: 0
+          },
+        },
+        _sliderLen: Number,
+        _sliderScale: {
+          type: Number,
+          value: 60
+        },
+      },
+
+      observers: [
+        "_refresh(timeOptions,timeSelected,_callback,sliderVal)",
+        "_sliderChange(sliderVal.min,sliderVal.max,timeSelected)"
+      ],
+
+      ready: function(){
+        this._callback = null;
+        this._knob = [null,null];
+        $(this.$.timeSlider).find(".slider-knob-inner").each(function(index,element){
+          var span = $(document.createElement("span"));
+          span.addClass("date-display")
+            .css({
+              "white-space": "nowrap",
+              "position": "absolute",
+              "left": "50%",
+              "top": "-0.7em",
+              "transform": "translateX(-50%)"
+            });
+            $(element).append(span);
+          this._knob[index] = span;
+        }.bind(this));
+        this.load();
+      },
+      attached: function(){
+        this.load();
+      },
+
+      load: function(){
+        var digitEx = new RegExp("\\d+");
+        var time_drop = duma.storage(packageId,"range_time_drop");
+        if(time_drop && time_drop.match(digitEx)){
+          this.timeSelected = parseInt(time_drop);
+        }else{
+          this.timeSelected = 2;
+        }
+        var smin = duma.storage(packageId,"range_slider_min");
+        var smax = duma.storage(packageId,"range_slider_max");
+        if(smin && smax && smin.match(digitEx) && smax.match(digitEx)){
+          this.sliderVal = {
+            min: parseFloat(smin),
+            max: parseFloat(smax)
+          };
+        }else{
+          this.sliderVal = {
+            min: 0,
+            max: this._sliderLen
+          }
+        }
+      },
+      save: function(){
+        if($(this).closest("duma-panel").prop("loaded")){
+          duma.storage(packageId,"range_time_drop",this.timeSelected);
+          duma.storage(packageId,"range_slider_min",this.sliderVal.min);
+          duma.storage(packageId,"range_slider_max",this.sliderVal.max);
+        }
+      },
+      
+      _pinDisplay: function(begin,end){
+        if(this._knob && this._knob.length == 2){
+          this._knob[0].text(end);
+          this._knob[1].text(begin);
+        }
+      },
+      _sliderToUnix: function(begin, end){
+        var start = Date.now() - (this.timeOptions[this.timeSelected].t * 1000);
+        var ret = [
+          start + ( (begin * this._sliderScale) * 1000 ),
+          start + ( (end * this._sliderScale) * 1000 )
+        ];
+        // ret[0] = ret[0] - (ret[0] % 86400000);
+        // ret[1] = ret[1] + (86400000 - (ret[1] % 86400000));
+        return ret;
+      },
+      _unixToDisplayDate: function(unixTime,multi=1){
+        var unixDate = new Date(unixTime * multi);
+        return unixDate.toLocaleDateString([], {day:'numeric', month: 'numeric'}) + " " + unixDate.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'})
+      },
+
+      _sliderChange: function(begin, end){
+        var times = this._sliderToUnix(begin,end);
+        this._pinDisplay(this._unixToDisplayDate(times[0]),this._unixToDisplayDate(times[1]));
+        this._call(times[0],end === this._sliderLen ? null : times[1]);
+        this.save();
+      },
+
+      _refresh: function () {
+        var timeData = this.timeOptions[this.timeSelected];
+        var times = [Date.now() - (timeData.t * 1000), Date.now()];
+        var len = 100;
+        this._sliderLen = len;
+        this._sliderScale = timeData.t / len;
+        // this.sliderVal = {min: 0, max: len};
+        this.save();
+        Polymer.dom.flush();
+      },
+      _call: function(begin, end){
+        if(this._callback){
+          this._callback(begin,end);
+        }
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

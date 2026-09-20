@@ -1,0 +1,25 @@
+#!/bin/sh
+
+error_message="$1"
+uci_section="$3"
+
+if grep -Fq '"bank_2"' /proc/mtd && [ -f /proc/banktable/active ]; then
+	local expected="$(uci get "${uci_section}.bank")"
+	local active="$(cat /proc/banktable/active)"
+	local booted="$(cat /proc/banktable/booted)"
+	if [ -z "$expected" ]; then
+		# The previous firmware did not record the expected active bank so we
+		# are not able to check it. Assume it is correct.
+		expected="$active"
+	fi
+	if [ "$expected" != "$active" ]; then
+		error_message='2,programming new firmware failed'
+	elif [ "$active" != "$booted" ]; then
+		error_message='3,starting new firmware failed'
+		# reset active bank to make future reboots predictable
+		# (the upgrade failed so we must keep on booting the current firmware)
+		cat /proc/banktable/booted >/proc/banktable/active
+	fi
+fi
+
+echo "$error_message"

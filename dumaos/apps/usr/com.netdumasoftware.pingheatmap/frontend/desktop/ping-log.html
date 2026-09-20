@@ -1,0 +1,175 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/add-to-list.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="ping-log"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host {
+        width: 20%;
+        min-width: 160px;
+        height: 100%;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 100%;
+      }
+      .scrollable {
+        display: flex;
+        flex-grow: 1;
+        position: relative;
+      }
+      .scrollable tbody {
+        position: absolute;
+        overflow-y: auto;
+        height: calc(100% - 36px);
+        width: 100%;
+      }
+      .line * {
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .line > th {
+        position: sticky;
+      }
+      .line td:first-child {
+        padding-left: 0;
+        width: 80%;
+      }
+      .line > tr > *:last-child {
+        width: 3em;
+      }
+      .line.selected * {
+        color: var(--primary-color);
+      }
+      .more-info {
+        padding: 1em;
+      }
+      .more-info #success-info {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .dot {
+        height: 10px;
+        width: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 0.2em;
+      } </style> <div class="container"> <div class="scrollable"> <table> <thead> <tr class="line"> <th>Server</th> <th>Ping</th> </tr> </thead> <tbody id="tableBody"> <template is="dom-repeat" items="[[servers]]" as="server"> <tr class="line" onmouseover="[[_getMouseOverRow(server)]]" onmouseout="[[_getMouseOutRow(server)]]" onclick="[[_getMouseClickRow(server)]]"> <td> <span>[[_getServerDisplay(server)]]</span> </td> <td> <span class="dot" style$="[[_getPingColour(server.ping)]]"></span><span>[[_getPingDisplay(server.ping)]] ms</span> </td> </tr> </template> </tbody> </table> </div> <div class="more-info"> <div id="success-info"> <div> Successful: <span>0</span> </div> <div> Failed: <span>0</span> </div> </div> </div> </div> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-log",
+
+      properties: {
+        servers: {
+          type: Array,
+          value: null
+        },
+        category: {
+          type: Object,
+          value: null
+        }
+      },
+
+      _svgElement: null,
+      _svg: function(){
+        if(!this._svgElement){
+          this._svgElement = $(this).closest(".horizontal-wrapper").find("ping-servers-svg")[0];
+        }
+        return this._svgElement;
+      },
+
+      _getServerDisplay: function(data){
+        var server = data.server;
+        var texts = [];
+        if(server.name) texts.push(titleCase(server.name));
+        if(server.display) texts.push(server.display);
+        if(!server.display) texts.push(server.ip);
+        return texts.join(" - ");
+      },
+
+      _getMouseOverRow: function(data){
+        return function(event){
+          this._svg().highlightIP(data.server.ip);
+          this._closeCluster = true;
+        }.bind(this);
+      },
+      _getMouseOutRow: function(data){
+        return function(event){
+          this._svg().dehighlightIP(data.server.ip);
+        }.bind(this);
+      },
+      _getMouseClickRow: function(data){
+        return function(event){
+          this._closeCluster = false;
+          this._svg().selectAndClickIP(data.server.ip);
+          this.setSelected($(event.target).closest(".line")[0]);
+          this.fire("server-click",data);
+        }.bind(this);
+      },
+      setSelected: function(elem){
+        $(this.$.tableBody).find(".line").each(function(index,element){
+          if(element.classList.contains("selected")){
+            element.classList.remove("selected");
+          }
+          if(element === elem || index === elem){
+            element.classList.add("selected");
+            element.scrollIntoView({behavior: "smooth", block: "nearest"});
+          }
+        })
+      },
+      setHighlighted: function(elems){
+        var scrolled = false;
+        $(this.$.tableBody).find(".line").each(function(index,element){
+          if(element.classList.contains("highlight")){
+            element.classList.remove("highlight");
+          }
+          for(var i = 0; i < elems.length; i++){
+            if(element === elems[i] || index === elems[i]){
+              element.classList.add("highlight");
+              if(!scrolled){
+                element.scrollIntoView({behavior: "smooth", block: "nearest"});
+                scrolled = true;
+              }
+            }
+          }
+        });
+      },
+
+      _getPingDisplay: function(ping){
+        return ping < 0 ? "N/A" : Math.min(999,ping);
+      },
+
+      _getPingColour: function(ping){
+        if(ping < 0) return "<%= theme.PRIMARY_TEXT_COLOR %>"
+        var c = scoreUtil.getPingColour(ping);
+        return "background-color:" + c + ";"
+      },
+
+      _genAddClick: function(event){
+        var paper_icon = $(event.target).closest("paper-icon-button");
+        this.$.add.open(paper_icon[0].server.server);
+      },
+
+      update: function(servers, category){
+        servers.sort(function(a,b){
+          if(a.ping < 0) return 1;
+          if(b.ping < 0) return -1;
+          return a.ping - b.ping;
+        });
+        this.servers = servers;
+        this.category = category;
+      },
+      updateFromHistory: function(data){
+        for(var i = 0; i < data.length; i++){
+          var d = data[i];
+          for(var s = 0; s < this.servers.length; s++){
+            var serv = this.servers[s];
+            if(serv.server.ip === d.server.ip){
+              this.set('servers.' + s.toString() + '.ping',d.ping);
+            }
+          }
+        }
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

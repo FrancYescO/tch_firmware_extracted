@@ -1,0 +1,163 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tabs.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tab.html"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html"> <link rel="import" href="/custom-elements/paper-input/paper-input.html"> <link rel="import" href="/custom-elements/paper-input/paper-textarea.html"> <link rel="import" href="/custom-elements/file-upload/file-upload.html"> <script src="/apps/com.netdumasoftware.adblocker/desktop/Scripts/utillity.js"></script>.0 <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-domain-burst-dialog"> <template> <style include="duma-theme iron-flex"> ::content #mainTable {
+        display: block;
+        max-height: 300px;
+        width: 100%;
+      }
+      ::content #mainTable td {
+        box-sizing: border-box;
+      }
+      ::content #mainTable td:first-child {
+        padding-left: 24px;
+        max-width: 256px;
+      }
+      ::content #mainTable td:last-child {
+        padding-right: 24px;
+      } </style> <paper-dialog id="dialog" modal> <h2>[[title]] <div id="titleTime" class="rowTimeEntry"> </div> </h2> <div class="inner"> Total Domains Blocked: [[totalBlocked]] </div> <paper-dialog-scrollable> <iron-pages selected="{{loading}}"> <div> <table id="mainTable"> <thead> <tr> <td>Domain</td> <template is="dom-if" if="[[showTimeColumn]]"> <td>Time Since</td> </template> <td>Current List</td> </tr> </thead> <tbody id="tableBody"> </tbody> </table> </div> <div> <paper-spinner-lite active> </paper-spinner-lite></div> </iron-pages> </paper-dialog-scrollable> <div class="buttons"> <paper-button dialog-dismiss autofocus id="closeButton" on-tap="Hide">Close</paper-button> </div> </paper-dialog> </template> <script> Polymer(
+    {
+      is: 'adblock-domain-burst-dialog',
+      properties:
+      {
+        selected:
+        {
+          type: Number,
+          value: 0,
+        },
+        totalBlocked:
+        {
+          type: Number,
+          value: 0,
+        },
+        showTimeColumn:
+        {
+          type: Boolean,
+          value: false,
+        },
+        titleTime:
+        {
+          type: String,
+          value: "",
+        },
+        title:
+        {
+          type: String,
+          value: "Recent Domains"
+        },
+        devices: Object,
+        lists: Array,
+        loading:
+        {
+          type: Number,
+          value: 1,
+        }
+      },
+      ready: function()
+      {
+        this.extraTime = 0;
+
+        setInterval(function()
+        {
+          this.extraTime++;
+          $(".rowTimeEntry", this).each(function (index, element)
+          {
+            $(element).text((element.id == "titleTime" && this.showTimeColumn) ? "" :
+                            FormatTimeAgo(this.latestRouterTime + this.extraTime - parseFloat(element.timestamp), (element.id == "titleTime")));
+          }.bind(this));
+        }.bind(this), 1000)
+      },
+      SetLists: function(lists)
+      {
+        this.listIndex = {};
+        for (var i = 0; i < lists.length; i++)
+          this.listIndex[lists[i].id] = lists[i].name;
+      },
+      ShowTimestamp: function(timestamp, deviceID)
+      {
+        this.loading = 1;
+        this.deviceID = -1;
+        this.showTimeColumn = false;
+        $(this.$.tableBody).empty();
+        this.$.dialog.open();
+        long_rpc_promise("com.netdumasoftware.adblocker", "burst_domains", [deviceID, timestamp]).done(this.ProcessData.bind(this));
+      },
+      ShowRange: function(startTimestamp, endTimestamp, deviceID)
+      {
+        this.loading = 1;
+        this.deviceID = deviceID;
+        this.showTimeColumn = true;
+        $(this.$.tableBody).empty();
+        this.$.dialog.open();
+        long_rpc_promise("com.netdumasoftware.adblocker", "burst_range", [true, {time: startTimestamp.toFixed(1), relative: true}, {time: endTimestamp.toFixed(1), relative: true}]).done(this.ProcessData.bind(this));
+      },
+      Hide: function()
+      {
+        this.$.dialog.close();
+      },
+      ProcessData: function(data)
+      {
+        this.extraTime = 0;
+        var json = JSON.parse(data);
+
+        if (!this.showTimeColumn)
+        {
+          if (json.bursts.length == 0)
+          {
+            this.Hide();
+            throw "Error: Error loading domain burst. Please try again later";
+            return;
+          }
+
+          for (var i = 0; i < this.devices.length; i++)
+            if (this.devices[i].DeviceID == json.bursts[0].device_id)
+            {
+              devIndex = i;
+              break;
+            }
+
+          this.title = this.devices[devIndex].Name + " - ";
+        }
+
+        this.latestRouterTime = parseFloat(json.current_time);
+
+        this.totalBlocked = 0;
+
+        for (var i = 0; i < json.bursts.length; i++)
+          if (this.deviceID == -1 || this.deviceID == json.bursts[i].device_id)
+            this.ProcessBurst(json.bursts[i]);
+
+        this.$.dialog.notifyResize();
+        this.loading = 0;
+      },
+      ProcessBurst: function(burst)
+      {
+        this.totalBlocked += burst.domains.length;
+
+        if (!this.showTimeColumn)
+          this.$.titleTime.timestamp = burst.timestamp;
+
+        for (var ii = 0; ii < burst.domains.length; ii++)
+            this.CreateRow(burst.domains[ii]);
+      },
+      CreateRow: function(domain)
+      {
+        var rowHtml = document.createElement("tr");
+
+        var domainHtml = document.createElement("td");
+        $(domainHtml).text(domain.name);
+        rowHtml.append(domainHtml);
+
+        if (this.showTimeColumn)
+        {
+          var time = document.createElement("td");
+          $(time).text(FormatTimeAgo(this.latestRouterTime - parseFloat(domain.timestamp)))
+                 .addClass("rowTimeEntry");
+          time.timestamp = domain.timestamp;
+          rowHtml.append(time);
+        }
+
+        var list = document.createElement("td");
+        $(list).text(this.listIndex[domain.list_id]);
+        rowHtml.append(list);
+
+        Polymer.dom(this.$.tableBody).appendChild(rowHtml);
+      }
+    }); </script> </dom-module> 

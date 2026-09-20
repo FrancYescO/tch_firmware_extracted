@@ -1,0 +1,111 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html"> <link rel="import" href="/custom-elements/paper-button/paper-button.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/ping-custom-list.html"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="add-to-list"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> .list {
+        min-height: 25px;
+      } </style> <paper-dialog id="dialog"> <h2>Add to Lists</h2> <div class="inner"> <div class="layout vertical list"> <template is="dom-if" if="[[_disabledSave(lists)]]" as="list"> <p>No Lists</p> </template> <template is="dom-repeat" items="[[lists]]" as="list"> <paper-checkbox checked="[[_isServerInList(server,list,update)]]" list="[[list]]" in="[[_isServerInList(server,list)]]">[[list.display]]</paper-checkbox> </template> </div> </div> <div class="layout horizontal buttons inner"> <paper-button dialog-dismiss>Cancel</paper-button> <paper-button id="new-list" on-click="_newList">Add new list</paper-button> <paper-button id="saveButton" background on-click="_save" disabled="[[_disabledSave(lists)]]">Save</paper-button> </div> </paper-dialog> <ping-custom-list id="custom"></ping-custom-list> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "add-to-list",
+
+      properties: {
+        lists: {
+          type: Array,
+          value: []
+        },
+        server: Object,
+        update: {
+          type: Number,
+          value: 0
+        }
+      },
+
+      ready: function(){
+        $(this.$.custom).on("list-updated",function(){
+          if(this.$.dialog.opened){
+            this.open(this.server);
+          }
+          if(!$(this).closest("duma-panel").prop("desktop")){
+            var panel = $("duma-panels").find("duma-panel")[0];
+            if(panel.refresh_categories){
+              panel.refresh_categories();
+            }
+          }
+        }.bind(this));
+      },
+
+      _disabledSave: function(){
+        return this.lists.length === 0;
+      },
+
+      _newList: function(){
+        this.$.custom.open();
+      },
+
+      open: function(server){
+        long_rpc_promise(packageId, "get_categories", []).done(function(result){
+          var customs = [];
+          var customServers = [];
+          var categories = JSON.parse(result[0]);
+          forObject(categories, function(key,cat){
+            if(cat.custom === true || cat.custom === "true"){
+              cat.identifier = key;
+              customs.push(cat);
+              customServers.push(long_rpc_promise(packageId, "get_servers", [key]));
+            }
+          });
+          this.server = server;
+          this.update += 1;
+          Polymer.dom.flush();
+          Q.all(customServers).done(function(serversLists){
+            for(var i = 0; i < serversLists.length; i ++){
+              customs[i].servers = serversLists[i] && serversLists[i].length ? JSON.parse(serversLists[i]).servers : [];
+            }
+            this.lists = customs;
+            this.$.dialog.open();
+          }.bind(this));
+        }.bind(this));
+      },
+
+      _toggle: function(list){
+        if(this._isServerInList(this.server,list)){
+          this._remove(list, this._getServerObj());
+        }else{
+          this._add(list, this._getServerObj());
+        }
+      },
+      _getServerObj: function(){
+        var obj = {};
+        Object.assign(obj, this.server);
+        delete this.server.identifier;
+        return obj;
+      },
+      _add: function(list, serverObj){
+        long_rpc_promise(packageId,"add_server_to_category",[list.identifier, serverObj]).done(function(message){
+          if(message[0] !== serverObj.ip)
+            console.log(message)
+        });
+      },
+      _remove: function(list, serverObj){
+        long_rpc_promise(packageId,"remove_server_from_category",[list.identifier, serverObj.ip]).done(function(message){
+          if(message[0] !== serverObj.ip)
+            console.log(message);
+        });
+      },
+
+      _isServerInList: function(server,list){
+        return !!list.servers[server.ip];
+      },
+
+      _save: function(){
+        $(this.$.dialog).find("paper-checkbox").each(function(index,element){
+          if(element.checked !== element.in){
+            this._toggle(element.list);
+          }
+        }.bind(this));
+        this.$.dialog.close();
+        this.lists = [];
+        this.server = {};
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

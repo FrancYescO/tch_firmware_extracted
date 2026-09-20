@@ -1,0 +1,103 @@
+#!/bin/sh
+
+if [ "$ACTION" = "dumaos_enabled" ];then
+	PERSIST_DUMAOS="/old_root/usr/share/config/etc/config/dumaos"
+	DUMA_STATUS=$(uci show dumaos | grep "dumaos_enabled" | wc -l)
+	if [ "$DUMA_STATUS" = "0" ];then
+		echo -e "\nconfig  tr69 'tr69'\n\toption 'dumaos_enabled' '0'\n\toption 'dumaos_started' '0'" >> /etc/config/dumaos
+		uci commit dumaos
+		uci set dumaos.tr69.dumaos_enabled=1
+		uci set dumaos.tr69.dumaos_started=0
+		uci commit dumaos
+		if [ "$(ps ww | grep "procmanager" | grep -v grep | wc -l)" -lt 1 ];then
+			#logger DumaOS "DumaOS Starting"
+			/etc/init.d/dumaos start &
+		fi	
+		#rm -f /tmp/dumaos_enabled
+	elif [ "$DUMA_STATUS" = "1" ];then
+		uci set dumaos.tr69.dumaos_enabled=1
+		uci set dumaos.tr69.dumaos_started=0
+		 uci commit dumaos
+		if [ "$(ps ww | grep "procmanager" | grep -v grep | wc -l)" -lt 1 ];then
+                        #logger DumaOS "DumaOS Starting"
+                        /etc/init.d/dumaos start &
+                fi
+		#rm -f /tmp/dumaos_enabled
+	fi
+	if [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+		echo "Arcadyan LH1000 Platform"
+	#if [ "$(grep -r "dumaos_started" /etc/crond/root | wc -l)" = "0" ];then 
+		#echo "* * * * * ACTION=dumaos_started /sbin/hotplug-call dumaos" >> /etc/crond/root
+		#killall -9 crond
+		#crond -c /etc/crond/
+	#fi
+	cp -f /etc/config/dumaos $PERSIST_DUMAOS && sync
+	elif [ "$(cat /dumaossystem/model)" = "DJA0231" ];then
+		echo "Technicolor DJA0231 Platform"
+		#if [ "$(grep -r "dumaos_started" /etc/crontabs/root | wc -l)" = "0" ];then
+		#echo "* * * * * ACTION=dumaos_started /sbin/hotplug-call dumaos" >> /etc/crontabs/root
+                #killall -9 crond
+                #/usr/sbin/crond -f -c /etc/crontabs -l 5 &
+		#fi
+	fi	
+fi	
+
+if [ "$ACTION" = "dumaos_disabled" ];then
+	PERSIST_DUMAOS="/old_root/usr/share/config/etc/config/dumaos"
+        DUMA_STATUS=$(uci show dumaos | grep "dumaos_enabled" | wc -l)
+        if [ "$DUMA_STATUS" = "1" ];then
+                uci set dumaos.tr69.dumaos_enabled=0
+		uci set dumaos.tr69.dumaos_started=0
+		uci commit dumaos
+		#rm -f /tmp/dumaos_enabled
+                /etc/init.d/dumaos stop &
+        elif [ "$DUMA_STATUS" = "0" ];then
+		echo -e "\nconfig  tr69 'tr69'\n\toption 'dumaos_enabled' '0'\n\toption 'dumaos_started' '0'" >> /etc/config/dumaos
+		uci set dumaos.tr69.dumaos_enabled=0
+		uci set dumaos.tr69.dumaos_started=0
+		uci commit dumaos
+                /etc/init.d/dumaos stop &
+		#rm -f /tmp/dumaos_enabled
+        fi
+	if [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+		echo "Arcadyan LH1000 Platform"
+	#if [ "$(grep -r "dumaos_started" /etc/crond/root | wc -l)" = "1" ];then
+        #       sed -i '/dumaos_started/d' /etc/crond/root
+        #fi
+	cp -f /etc/config/dumaos $PERSIST_DUMAOS && sync
+	elif [ "$(cat /dumaossystem/model)" = "DJA0231" ];then
+		echo "Technicolor DJA0231 Platform"
+		/etc/init.d/uhttpd stop && /etc/init.d/uhttpd disable
+		/etc/init.d/ctwatch stop && /etc/init.d/ctwatch disable
+		/etc/init.d/connwatch stop && /etc/init.d/connwatch disable
+		/etc/init.d/arpwatch stop && /etc/init.d/arpwatch disable
+		#if [ "$(grep -r "dumaos_started" /etc/crontabs/root | wc -l)" = "1" ];then
+               	#	sed -i '/dumaos_started/d' /etc/crontabs/root
+        	#fi
+	fi
+fi
+
+if [ "$ACTION" = "dumaos_started" ];then
+	PERSIST_DUMAOS="/old_root/usr/share/config/etc/config/dumaos"
+	DUMA_LOADED=$(ps ww | grep "cleaner.lua" | grep -v grep | wc -l)
+	if [ "$DUMA_LOADED" = "1" ];then
+		uci set dumaos.tr69.dumaos_started=1
+		uci commit dumaos
+		#touch /tmp/dumaos_enabled
+	fi
+	if [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+		cp -f /etc/config/dumaos $PERSIST_DUMAOS && sync
+	fi	
+fi
+
+if [ "$ACTION" = "rappstart" ];then
+        if [ "$RAPP" = "com.netdumasoftware.pingheatmap" ];then
+                if [ "$(ubus list | grep com.netdumasoftware.devicemanager | wc -l)" = 1 ];then
+                        uci set dumaos.tr69.dumaos_started=1;uci commit dumaos
+                fi
+        fi
+fi
+
+if [ "$ACTION" = "cleanup" ];then
+        uci set dumaos.tr69.dumaos_started=0;uci commit dumaos
+fi
