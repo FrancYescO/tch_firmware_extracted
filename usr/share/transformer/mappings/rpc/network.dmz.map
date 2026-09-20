@@ -1,0 +1,39 @@
+local network_dmz_ = {
+  objectType = {
+    name = "rpc.network.dmz.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    },
+  }
+}
+
+local switch = require("transformer.shared.nwswitcher")
+
+network_dmz_.get = {
+    enabled = function(mapping, paramname, key)
+        return switch:dmz_state()
+    end,
+}
+
+network_dmz_.set = {
+    enabled = function(mapping, paramname, paramvalue, key)
+        if paramvalue ~= switch:dmz_state() then
+            local result, msg = switch:dmz_switch(paramvalue)
+            if result then
+                commitapply:newset("rpc.network.dmz.enabled")
+            end
+            return result, msg
+        else
+            return true
+        end
+    end,
+}
+
+register(network_dmz_)
+

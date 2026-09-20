@@ -1,0 +1,34 @@
+#!/bin/sh
+
+TARGET=$(cat /proc/banktable/notbooted)
+if [ -z $TARGET ]; then
+	echo "switchover: No notbooted bank, either single bank platform or catastrophic error"
+	echo "switchover: bailing out"
+	exit
+fi
+
+# check for possible back parameter conversion
+# this is only needed in case the config for the target
+# bank exists.
+CONFIG=/overlay/$TARGET
+if [ -d $CONFIG ]; then
+	if [ -x /usr/lib/parameter_conversion/switchback.sh ]; then
+		/usr/lib/parameter_conversion/switchback.sh $CONFIG
+	fi
+fi
+
+echo $TARGET >/proc/banktable/active
+
+#call cwmpd switover script if present
+if [ -x /usr/lib/cwmpd/transfers/switchover.sh ]; then
+	# this script needs to be started in the background as it
+	# may wait indefinitly before rebooting.
+	/usr/lib/cwmpd/transfers/switchover.sh &
+	exit
+else
+	if [ -f /lib/functions/reboot_reason.sh ]; then
+		. /lib/functions/reboot_reason.sh
+		set_reboot_reason SWOVER
+	fi
+	reboot
+fi
