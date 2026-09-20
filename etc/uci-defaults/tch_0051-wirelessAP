@@ -1,0 +1,198 @@
+#!/bin/sh
+
+#Add the Guest IP interface
+
+uci set network.guest=interface
+uci set network.guest.proto=static
+uci set network.guest.type=bridge
+uci set network.guest.ipv6='0'
+uci set network.guest.ip6hint=1
+uci set network.guest.netmask=255.255.255.128
+uci set network.guest.ipaddr=192.168.168.126
+uci add_list network.guest.ifname=wl0_1
+uci set network.guest.force_link=0
+
+uci commit network
+
+#Add DHCP settig for the new interface
+
+uci add_list dhcp.@dnsmasq[0].interface=br-lan
+uci add_list dhcp.@dnsmasq[0].interface=br-guest
+
+uci set dhcp.guest_private=dhcp
+uci set dhcp.guest_private.interface=guest
+uci set dhcp.guest_private.start=1
+uci set dhcp.guest_private.leasetime=12h
+uci set dhcp.guest_private.force=1
+uci set dhcp.guest_private.dhcpv6=server
+uci set dhcp.guest_private.ra=server
+uci set dhcp.guest_private.ra_management=0
+uci set dhcp.guest_private.ra_min_interval=200
+uci set dhcp.guest_private.ra_max_interval=600
+uci set dhcp.guest_private.ra_lifetime=1800
+uci set dhcp.guest_private.ra_hoplimit=64
+uci set dhcp.guest_private.ra_max_mtu=1480
+uci set dhcp.guest_private.limit=100
+uci add_list dhcp.guest_private.dhcp_option=tag:cpewan-id,vi-encap:3561,6,\""`uci get env.var.prod_number`"\"
+uci add_list dhcp.guest_private.dhcp_option=tag:cpewan-id,vi-encap:3561,5,\"`uci get env.rip.factory_id``uci get env.rip.serial`\"
+uci add_list dhcp.guest_private.dhcp_option=tag:cpewan-id,vi-encap:3561,4,\"`uci get env.var.oui`\"
+
+
+uci commit dhcp
+
+#Create firewall settings
+##Zones
+uci set firewall.guest=zone
+uci set firewall.guest.name=guest
+uci add_list firewall.guest.network=guest
+uci set firewall.guest.input=DROP
+uci set firewall.guest.output=ACCEPT
+uci set firewall.guest.forward=REJECT
+uci set firewall.guest.wan=0
+
+##Forwarding
+uci set firewall.guest_wan=forwarding
+uci set firewall.guest_wan.src='guest'
+uci set firewall.guest_wan.dest='wan'
+uci set firewall.guest_wan.name='guest2wan'
+uci set firewall.guest_wan.enabled='1'
+
+##Rules
+uci set firewall.drop_lan_2_guest=rule
+uci set firewall.drop_lan_2_guest.name=drop_lan_2_guest
+uci set firewall.drop_lan_2_guest.src=lan
+uci set firewall.drop_lan_2_guest.dest=guest
+uci set firewall.drop_lan_2_guest.proto=all
+uci set firewall.drop_lan_2_guest.target=DROP
+
+uci set firewall.drop_guest_2_lan=rule
+uci set firewall.drop_guest_2_lan.name=drop_guest_2_lan
+uci set firewall.drop_guest_2_lan.src=guest
+uci set firewall.drop_guest_2_lan.dest=lan
+uci set firewall.drop_guest_2_lan.proto=all
+uci set firewall.drop_guest_2_lan.target=DROP
+
+uci set firewall.allow_guest_dhcp=rule
+uci set firewall.allow_guest_dhcp.name=allow_guest_dhcp
+uci set firewall.allow_guest_dhcp.src=guest
+uci set firewall.allow_guest_dhcp.family=ipv4
+uci set firewall.allow_guest_dhcp.proto=udp
+uci set firewall.allow_guest_dhcp.dest_port=67
+uci set firewall.allow_guest_dhcp.target=ACCEPT
+
+uci set firewall.allow_guest_dns=rule
+uci set firewall.allow_guest_dns.name=allow_guest_dns
+uci set firewall.allow_guest_dns.src=guest
+uci set firewall.allow_guest_dns.family=ipv4
+uci set firewall.allow_guest_dns.proto=udp
+uci set firewall.allow_guest_dns.dest_port=53
+uci set firewall.allow_guest_dns.target=ACCEPT
+
+uci commit firewall
+
+#Qos
+
+
+#Wireless
+
+uci set wireless.wl0_1=wifi-iface
+uci set wireless.wl0_1.device=radio_2G
+uci set wireless.wl0_1.mode=ap
+uci set wireless.wl0_1.state=1
+uci set wireless.wl0_1.network=guest
+uci set wireless.wl0_1.reliable_multicast=0
+uci set wireless.wl0_1.ssid=Guest`uci get env.var.ssid_mac_postfix_r0`  
+
+uci set wireless.ap2=wifi-ap
+uci set wireless.ap2.iface=wl0_1
+uci set wireless.ap2.state=0
+uci set wireless.ap2.public=1
+uci set wireless.ap2.ap_isolation=1
+uci set wireless.ap2.station_history=1
+uci set wireless.ap2.max_assoc=5
+uci set wireless.ap2.pmf=disabled
+uci set wireless.ap2.pmksa_cache=1
+uci set wireless.ap2.wps_state=0
+uci set wireless.ap2.wps_w7pbc=0
+uci set wireless.ap2.wsc_state=configured
+uci set wireless.ap2.wps_ap_setup_locked=0
+uci set wireless.ap2.acl_mode=unlock
+uci set wireless.ap2.acl_registration_time=60
+uci set wireless.ap2.trace_modules=
+uci set wireless.ap2.trace_level=some
+uci set wireless.ap2.wep_key=`uci get env.var.default_key_r0_s1`
+uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+uci set wireless.ap2.security_mode=wpa-wpa2-psk
+uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+
+uci set wireless.ap2_auth0=wifi-radius-server
+uci set wireless.ap2_auth0.state='0'
+uci set wireless.ap2_auth0.port='1812'
+uci set wireless.ap2_auth0.priority='3'
+uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r0_s0`
+uci set wireless.ap2_acct0=wifi-radius-server
+uci set wireless.ap2_acct0.state='0'
+uci set wireless.ap2_acct0.port='1813'
+uci set wireless.ap2_acct0.priority='3'
+
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G`
+
+
+
+if [ "$?" == "0" ] ; then
+
+
+
+	
+
+    uci add_list network.guest.ifname=wl1_1
+    
+    
+    uci set wireless.wl1_1=wifi-iface
+    uci set wireless.wl1_1.device=radio_5G
+    uci set wireless.wl1_1.mode=ap
+    uci set wireless.wl1_1.state=1
+    uci set wireless.wl1_1.network=guest
+    uci set wireless.wl1_1.reliable_multicast=0
+    uci set wireless.wl1_1.ssid=Guest`uci get env.var.ssid_mac_postfix_r0`-5G
+    
+    uci set wireless.ap3=wifi-ap
+    uci set wireless.ap3.state=0
+    uci set wireless.ap3.iface=wl1_1
+    uci set wireless.ap3.public=1
+    uci set wireless.ap3.ap_isolation=1
+    uci set wireless.ap3.station_history=1
+    uci set wireless.ap3.max_assoc=5
+    uci set wireless.ap3.pmf=disabled
+    uci set wireless.ap3.pmksa_cache=1
+    uci set wireless.ap3.wps_state=0
+    uci set wireless.ap3.wps_w7pbc=0
+    uci set wireless.ap3.wsc_state=configured
+    uci set wireless.ap3.wps_ap_setup_locked=0
+    uci set wireless.ap3.acl_mode=unlock
+    uci set wireless.ap3.acl_registration_time=60
+    uci set wireless.ap3.trace_modules=
+    uci set wireless.ap3.trace_level=some
+    uci set wireless.ap3.wep_key=`uci get env.var.default_key_r0_s1`
+    uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+    uci set wireless.ap3.security_mode=wpa-wpa2-psk
+    uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+    
+    
+    uci set wireless.ap3_auth0=wifi-radius-server
+    uci set wireless.ap3_auth0.state='0'
+    uci set wireless.ap3_auth0.port='1812'
+    uci set wireless.ap3_auth0.priority='3'
+    uci set wireless.ap3_auth0.secret=`uci get env.var.default_key_r0_s0`
+    uci set wireless.ap3_acct0=wifi-radius-server
+    uci set wireless.ap3_acct0.state='0'
+    uci set wireless.ap3_acct0.port='1813'
+    uci set wireless.ap3_acct0.priority='3' 
+	
+
+fi
+
+uci commit wireless

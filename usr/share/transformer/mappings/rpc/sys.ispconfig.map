@@ -1,0 +1,147 @@
+local open = io.open
+local popen = io.popen
+local string, format = string, string.format
+local register = register
+local logger = require("transformer.logger")
+local lfs = require("lfs")
+local log = logger.new("sys.ispconfig", 2)
+local ispfile = "/etc/ispconfig/tch_0000-ispconfig"
+local ispsts = "/etc/ispconfig/ispconfig.sts"
+local logofile = "/www/docroot/img/custom/logo.gif"
+local logofile2 = "/etc/ispconfig/logo.gif"
+
+local sys_ispconfig_ = {
+    objectType = {
+        name = "sys.ispconfig.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Delete = {
+                access = "readWrite",
+                type = "boolean"
+            },
+            Present = {
+                access = "readOnly",
+                type = "string"
+            },
+            LogoDelete = {
+                access = "readWrite",
+                type = "boolean"
+            },
+            LogoPresent = {
+                access = "readOnly",
+                type = "string"
+            },
+            CreateDef = {
+                access = "readWrite",
+                type = "string"
+            },
+        },
+    }
+}
+
+local function getall(mapping, key)
+  local returnvars = {}
+  local fd, msg = open(ispfile)
+  returnvars["Present"] = "0"
+  if fd then
+    --local result = fd:read("*1")
+    local linetable = {}
+    local count = 0
+    for line in fd:lines() do 
+      table.insert(linetable, line)
+      count = count + 1
+      if count == 2 then break end
+    end
+ 
+    if #linetable > 0 then
+      if linetable[2] then
+        local Versioncontrol = tostring(linetable[2])
+        returnvars["Present"] = string.sub(Versioncontrol,2,#Versioncontrol)
+      else
+        returnvars["Present"] = "1"
+      end
+    end
+    fd:close()
+  end  
+  returnvars["LogoPresent"] = "0"
+  if lfs.attributes(logofile, "mode") == "file" then
+    returnvars["LogoPresent"] = "1"
+  end 
+  returnvars["Delete"] = "0"
+  returnvars["LogoDelete"] = "0"
+  returnvars["CreateDef"] = "0"
+  
+  return returnvars
+end
+
+
+local function get(mapping, paramName, key)
+   local value = getall(mapping, key)
+   return value[paramName]
+end
+
+
+local function split(x, sep)
+        local sep, fields = sep or ":", {}
+        local pattern = format("([^%s]+)", sep)
+        x:gsub(pattern, function(c) fields[#fields+1] = c end)
+        return fields
+end
+
+local set = {
+  Delete = function(mapping, param, value)
+    local deletefiles = os.remove(ispfile)
+    deletefiles = os.remove(ispsts)
+    return true
+  end,
+  LogoDelete = function(mapping, param, value)
+    local deletefiles = os.remove(logofile)
+    deletefiles = os.remove(logofile2)
+    return true
+  end,
+  CreateDef = function(mapping, param, value)
+    local deletefiles = os.remove(ispfile)
+    
+    local file = io.open(ispfile, "a")
+    local pervars = split(value, ",")
+    local err = nil
+    io.output(file)
+    
+    io.write("#!/bin/sh","\n")
+    io.write("#Created By GUI","\n")
+    for _, x in pairs (pervars) do
+      
+      local k, v = string.match(x, "(%w+)=(%S+)")
+      --log:error(format("k:%s",k))
+      --log:error(format("v:%s",v)) 
+      if v ~= "" then
+          if k == "pppuser" then
+              io.write(string.format("uci set %s=%s","network.wan.username",v),"\n")
+          elseif k == "ppppass" then 
+              io.write(string.format("uci set %s=%s","network.wan.password",v),"\n") 
+          elseif k == "acsurl" then
+              if (v:match("^http://") or v:match("^https://")) then 
+                io.write(string.format("uci set %s=%s","cwmpd.cwmpd_config.acs_url",v),"\n") 
+              else
+                err = 1
+              end
+          end
+      else 
+        err = 1
+      end      
+    end
+    io.write("uci commit network","\n","uci commit cwmpd","\n","\n") 
+    io.close(file)
+    if err then
+      local deletefiles = os.remove(ispfile)  
+    end
+    return true
+  end
+}
+
+
+sys_ispconfig_.get = get
+sys_ispconfig_.set = set
+register(sys_ispconfig_)

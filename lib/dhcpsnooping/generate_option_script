@@ -1,0 +1,31 @@
+#!/bin/sh
+BRIDGE=$1
+INPORT=$2
+OUTPORT=$3
+MACADDR=$4
+OPTION=$5
+IFMAC=$(ifconfig ${BRIDGE} | grep -o -E '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}')  
+IFACE=$(uci -q get wireless."${INPORT}".ssid) || IFACE=${INPORT:5}   
+
+case $IFACE in
+          "eth0")        IFACE="Eth_Port_1"    ;;
+          "eth1")        IFACE="Eth_Port_2"    ;;
+          "eth2")        IFACE="Eth_Port_3"    ;;
+          "eth3")        IFACE="Eth_Port_4"    ;; 
+      esac
+
+print_charcode() {
+        local hexcode=$(printf "%x" $1)
+        eval echo -n \$\'\\x$hexcode\'
+}
+ 
+print_suboption() {
+        print_charcode $1
+        print_charcode ${#2}
+        echo -n $2
+}
+ 
+if [ "$OPTION" -eq 82 ]; then
+        print_suboption 1 "${IFMAC};${IFACE}"
+        print_suboption 2 $MACADDR
+fi
