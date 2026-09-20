@@ -1,0 +1,317 @@
+debug_on
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_set cwmpd.cwmpd_config.state
+uci_set cwmpd.cwmpd_config.upgradesmanaged
+uci_set cwmpd.cwmpd_config.connectionrequest_auth
+uci_set cwmpd.cwmpd_config.periodicinform_enable
+uci_set cwmpd.cwmpd_config.periodicinform_interval
+uci_set cwmpd.cwmpd_config.interface
+uci_set cwmpd.cwmpd_config.showpasswords
+uci_set cwmpd.cwmpd_config.connectionrequest_port
+uci_set cwmpd.cwmpd_config.upgrade_switchovertype
+uci_set cwmpd.cwmpd_config.ssl_hostnamecheck
+uci_set cwmpd.cwmpd_config.rollback_unknown
+uci_set cwmpd.cwmpd_config.ssl_verifypeer
+uci_set cwmpd.cwmpd_config.acs_user
+uci_set cwmpd.cwmpd_config.acs_url
+copy_dir /usr/share/transformer
+copy_dir /usr/lib/lua
+
+uci_set ddns.myddns.enabled ddns.myddns_ipv4.enabled
+uci_set ddns.myddns.service_name ddns.myddns_ipv4.service_name
+uci_set ddns.myddns.domain ddns.myddns_ipv4.domain
+uci_set ddns.myddns.username ddns.myddns_ipv4.username
+uci_set ddns.myddns.password ddns.myddns_ipv4.password
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns','domain') n:set('ddns','myddns_ipv4','lookup_host', v) n:commit('ddns')\"
+
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.ignore
+
+uci_set dhcp.Guest1_private.start
+uci_set dhcp.Guest1_private.leasetime
+uci_set dhcp.Guest1_private.limit
+
+uci_set dhcp.Guest1_5GHz_private.start
+uci_set dhcp.Guest1_5GHz_private.leasetime
+uci_set dhcp.Guest1_5GHz_private.limit
+
+uci_section firewall.@userrule 
+uci_section firewall.@userrule_v6
+uci_section firewall.@fwconfig
+uci_section firewall.@userredirect
+
+uci_set firewall.@rule[16].enabled
+uci_section firewall.@zone id=name
+
+uci_section dhcp.@host id=name
+
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_set firewall.userredirects.enabled
+uci_set firewall.defaultoutgoing.target
+
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') u=o:get('firewall','laxrules','enabled') v=o:get('firewall','highrules','enabled') if (u == '1') then n:set('firewall','fwconfig','level','lax') elseif (v == '1') then n:set('firewall','fwconfig','level','high') else n:set('firewall','fwconfig','level','normal') end n:commit('firewall')\"
+uci_set minidlna.config.enabled
+uci_set minidlna.config.friendly_name
+
+
+uci_set mmpbx.global.enabled
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.sip_profile_1='profile'; fi 
+uci_set mmpbx.sip_profile_0.config mmpbx.sip_profile_1.config
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.incoming_map_sip_profile_1='incoming_map'; fi 
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.incoming_map_sip_profile_1.profile='sip_profile_1'; fi 
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='fxs_dev_0'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='fxs_dev_1'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_0'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_1'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_2'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_3'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_4'; fi  
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.incoming_map_sip_profile_1.device='dect_dev_5'; fi 
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_5='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_5.device='dect_dev_5'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_5.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_5.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_4='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_4.device='dect_dev_4'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_4.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_4.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_3='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_3.device='dect_dev_3'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_3.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_3.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_2='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_2.device='dect_dev_2'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_2.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_2.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_1='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_1.device='dect_dev_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_1.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_1.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_0='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_dect_dev_0.device='dect_dev_0'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_0.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_dect_dev_0.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_fxs_dev_1='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_fxs_dev_1.device='fxs_dev_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_fxs_dev_1.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_fxs_dev_1.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_fxs_dev_0='outgoing_map'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.outgoing_map_fxs_dev_0.device='fxs_dev_0'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_fxs_dev_0.profile='sip_profile_1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.outgoing_map_fxs_dev_0.priority='1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.service_call_return='service'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.service_call_return.type='CALL_RETURN'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.service_call_return.provisioned='1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci set mmpbx.service_call_return.activated='1'; fi
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.service_call_return.profile='sip_profile_1'; fi
+
+uci_set mmpbx.@service[2].activated mmpbx.service_call_waiting.activated
+uci_set mmpbx.@service[2].timeout mmpbx.service_call_waiting.timeout
+uci_set mmpbx.@service[2].cw_reject_persistency mmpbx.service_call_waiting.cw_reject_persistency
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.service_clip.profile='sip_profile_1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.service_clir.profile='sip_profile_1'; fi
+
+inline_sh_cmd if [ -n "$(cat '/overlay/'`cat /proc/banktable/inactive`'/etc/config/mmpbxrvsipnet' | grep +46)" ]; then uci add_list mmpbx.service_hold.profile='sip_profile_1'; fi
+
+uci_set mmpbx.@service[8].activated mmpbx.service_warmline_fxs_dev_0.activated
+uci_set mmpbx.@service[8].timeout mmpbx.service_warmline_fxs_dev_0.timeout
+uci_set mmpbx.@service[8].destination mmpbx.service_warmline_fxs_dev_0.destination
+
+uci_set mmpbx.@service[9].activated  mmpbx.service_warmline_fxs_dev_1.activated
+uci_set mmpbx.@service[9].timeout mmpbx.service_warmline_fxs_dev_1.timeout
+uci_set mmpbx.@service[9].destination mmpbx.service_warmline_fxs_dev_1.destination
+
+uci_set mmpbx.@service[10].activated mmpbx.service_warmline_dect_dev_0.activated
+uci_set mmpbx.@service[10].timeout mmpbx.service_warmline_dect_dev_0.timeout
+uci_set mmpbx.@service[10].destination mmpbx.service_warmline_dect_dev_0.destination
+
+uci_set mmpbx.@service[11].activated mmpbx.service_warmline_dect_dev_1.activated
+uci_set mmpbx.@service[11].timeout mmpbx.service_warmline_dect_dev_1.timeout
+uci_set mmpbx.@service[11].destination mmpbx.service_warmline_dect_dev_1.destination
+
+uci_set mmpbx.@service[12].activated mmpbx.service_warmline_dect_dev_2.activated
+uci_set mmpbx.@service[12].timeout mmpbx.service_warmline_dect_dev_2.timeout
+uci_set mmpbx.@service[12].destination mmpbx.service_warmline_dect_dev_2.destination
+
+uci_set mmpbx.@service[13].activated mmpbx.service_warmline_dect_dev_3.activated
+uci_set mmpbx.@service[13].timeout mmpbx.service_warmline_dect_dev_3.timeout
+uci_set mmpbx.@service[13].destination mmpbx.service_warmline_dect_dev_3.destination
+
+uci_set mmpbx.@service[14].activated mmpbx.service_warmline_dect_dev_4.activated
+uci_set mmpbx.@service[14].timeout mmpbx.service_warmline_dect_dev_4.timeout
+uci_set mmpbx.@service[14].destination mmpbx.service_warmline_dect_dev_4.destination
+
+uci_set mmpbx.@service[15].activated mmpbx.service_warmline_dect_dev_5.activated
+uci_set mmpbx.@service[15].timeout mmpbx.service_warmline_dect_dev_5.timeout
+uci_set mmpbx.@service[15].destination mmpbx.service_warmline_dect_dev_5.destination
+
+uci_section mmpbxbrcmdectdev.@base
+uci_section mmpbxbrcmdectdev.@device
+
+uci_set mmpbxrvsipnet.sip_net.cac
+uci_set mmpbxrvsipnet.sip_net.primary_proxy
+uci_set mmpbxrvsipnet.sip_net.primary_registrar
+
+inline_sh_cmd uci set mmpbxrvsipnet.sip_profile_1='profile'
+uci_set mmpbxrvsipnet.sip_profile_0.network mmpbxrvsipnet.sip_profile_1.network
+uci_set mmpbxrvsipnet.sip_profile_0.uri mmpbxrvsipnet.sip_profile_1.uri
+uci_set mmpbxrvsipnet.sip_profile_0.user_name mmpbxrvsipnet.sip_profile_1.user_name
+uci_set mmpbxrvsipnet.sip_profile_0.password mmpbxrvsipnet.sip_profile_1.password
+uci_set mmpbxrvsipnet.sip_profile_0.display_name mmpbxrvsipnet.sip_profile_1.display_name
+uci_set mmpbxrvsipnet.sip_profile_0.enabled mmpbxrvsipnet.sip_profile_1.enabled
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+copy_file /etc/griffinnvs.bin
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+uci_set network.lan.ipaddr
+uci_set network.lan.netmask
+uci_set network.lan.ipv6
+uci_set network.lan.ifname
+
+uci_set network.Guest1.ipv6
+uci_set network.Guest1.netmask
+uci_set network.Guest1.ipaddr
+
+uci_set network.Guest1_5GHz.ipv6
+uci_set network.Guest1_5GHz.netmask
+uci_set network.Guest1_5GHz.ipaddr
+
+uci_set network.vlan_eth3.vid
+
+uci_set network.phy_eth3.mtu
+
+uci_set network.wan.ifname
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('network','wan','ifname') if (v ~= 'eth4' and v ~= 'atm_wan' and v ~= 'ptm0') then n:set('network','wan','type','bridge') end n:commit('network')\"
+
+uci_set network.@interface.reqopts
+
+uci_set network.vlan_iptv.vid
+uci_set network.vlan_voip.vid
+uci_set network.vlan_mgmt.vid
+
+inline_sh_cmd uci delete network.@switch_vlan[1]
+inline_sh_cmd uci delete network.@switch_vlan[0]
+
+uci_section network.@switch_vlan id=vlan
+
+uci_set parental.general.enable
+uci_set parental.general.exclude
+
+uci_section parental.@URLfilter 
+
+uci_section tod.@host 
+
+uci_set samba.@samba[0].name
+uci_set samba.@samba[0].workgroup
+uci_set samba.@samba[0].description
+uci_set samba.@samba[0].enabled
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+
+copy_web_users
+
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_port 
+uci_set system.@system[0].log_filter_port
+
+uci_set wireless.radio_2G.state
+uci_set wireless.radio_2G.standard
+uci_set wireless.radio_2G.channel
+uci_set wireless.radio_2G.channelwidth
+uci_set wireless.radio_2G.sgi
+uci_set wireless.radio_2G.cdd
+uci_set wireless.radio_2G.stbc
+
+uci_set wireless.radio_5G.state
+uci_set wireless.radio_5G.channel
+uci_set wireless.radio_5G.channelwidth
+uci_set wireless.radio_5G.sgi
+uci_set wireless.radio_5G.cdd
+uci_set wireless.radio_5G.stbc
+
+uci_set wireless.wl0.ssid
+
+uci_set wireless.wl0_1.ssid
+
+uci_set wireless.wl1.ssid
+
+uci_set wireless.wl1_1.ssid
+
+uci_set wireless.ap0.state
+uci_set wireless.ap0.public
+uci_set wireless.ap0.security_mode
+uci_set wireless.ap0.wps_state
+uci_set wireless.ap0.wep_key
+uci_set wireless.ap0.wpa_psk_key
+uci_set wireless.ap0.acl_mode
+uci_set wireless.ap0.acl_accept_list
+uci_set wireless.ap0.acl_deny_list
+
+uci_set wireless.ap1.state
+uci_set wireless.ap1.public
+uci_set wireless.ap1.security_mode
+uci_set wireless.ap1.wps_state
+uci_set wireless.ap1.wep_key
+uci_set wireless.ap1.wpa_psk_key
+uci_set wireless.ap1.acl_mode
+uci_set wireless.ap1.acl_accept_list
+uci_set wireless.ap1.acl_deny_list
+
+uci_set wireless.ap3.state
+uci_set wireless.ap3.public
+uci_set wireless.ap3.security_mode
+uci_set wireless.ap3.wps_state
+uci_set wireless.ap3.wep_key
+uci_set wireless.ap3.wpa_psk_key
+uci_set wireless.ap3.acl_mode
+uci_set wireless.ap3.acl_accept_list
+uci_set wireless.ap3.acl_deny_list
+
+uci_set wireless.ap4.state
+uci_set wireless.ap4.public
+uci_set wireless.ap4.security_mode
+uci_set wireless.ap4.wps_state
+uci_set wireless.ap4.wep_key
+uci_set wireless.ap4.wpa_psk_key
+uci_set wireless.ap4.acl_mode
+uci_set wireless.ap4.acl_accept_list
+uci_set wireless.ap4.acl_deny_list
+
+uci_section wireless.wl1_2
+uci_section wireless.ap5
+uci_section wireless.ap5_auth0
+uci_section wireless.ap5_acct0
+
+
+

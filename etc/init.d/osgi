@@ -1,0 +1,64 @@
+#!/bin/sh /etc/rc.common
+CUR_DIR=`pwd`
+START=99
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+SERVICE_PID_FILE=/var/run/osgi.pid
+unset SERVICE_MATCH_EXEC
+EXE_NM=server.sh
+EXE_DIR=/usr/bin/osgi/bin/vms/ceej
+CGROUP_MEMLIMIT_FILE=/cgroups/cpumemblk/osgi/memory.limit_in_bytes
+CGROUP_TASK_FILE=/cgroups/cpumemblk/osgi/tasks
+. /lib/functions.sh
+config_load "osgi"
+
+start() {
+local enabled
+config_get enabled config enabled 0
+[ "$enabled" -eq 0 ] && return 1
+if [ -f $SERVICE_PID_FILE ]; then
+        return 1
+fi
+logger -t osgi "Starting OSGi"
+#Configure Cgroups
+if [ -d /cgroups/cpumemblk ]; then
+	if ! [ -d /cgroups/cpumemblk/osgi ]; then
+		mkdir /cgroups/cpumemblk/osgi
+	fi
+	local MEM_LIMIT
+	config_get MEM_LIMIT config memory_limit
+	check=`echo $MEM_LIMIT  | egrep -o "^[0-9]+[MK]?$"`
+	if [ -z "$check" ]; then
+		logger -t osgi "Cgroup:Setting default memory limit(50M) for osgi"
+		MEM_LIMIT=50M
+	fi
+	if [ -f $CGROUP_MEMLIMIT_FILE ]; then
+		echo $MEM_LIMIT > $CGROUP_MEMLIMIT_FILE
+	fi
+	if [ -f $CGROUP_TASK_FILE ]; then
+		echo $$ > $CGROUP_TASK_FILE
+	fi
+	/etc/init.d/osgi-watchdog start &
+fi
+cd $EXE_DIR
+service_start ./$EXE_NM
+#echo "Changing back to previous directory"
+cd $CUR_DIR
+logger -t osgi "OSGi Started"
+}
+
+stop() {
+	start-stop-daemon -K -p $SERVICE_PID_FILE
+        if [ -f $SERVICE_PID_FILE ]; then
+                rm -f $SERVICE_PID_FILE
+        fi
+	logger -t osgi "OSGi Stopped"
+}
+
+restart() {
+logger -t osgi "Stopping OSGi"
+stop
+logger -t osgi "Starting OSGi"
+sleep 10
+start
+}

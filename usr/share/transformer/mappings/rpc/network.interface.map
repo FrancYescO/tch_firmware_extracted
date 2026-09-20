@@ -1,0 +1,462 @@
+local network_interface_ = {
+  objectType = {
+    name = "rpc.network.interface.@.",
+    access = "readOnly",
+    numEntriesParameter = "InterfaceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      ipaddr = {
+        access = "readOnly",
+        type = "string",
+      },
+      ipmask = {
+        access = "readOnly",
+        type = "string",
+      },
+      ip6addr = {
+       access = "readOnly",
+       type = "string",
+      },
+      ip6prefix = {
+       access = "readOnly",
+       type = "string",
+      },
+      ip6prefix_assignment = {
+       access = "readOnly",
+       type = "string",
+      },
+      dnsservers = {
+       access = "readOnly",
+       list = true,
+       max = "64",
+       type = "string",
+      },
+      NTPServers= {
+       access = "readOnly",
+       list = true,
+       max = "64",
+       type = "string",
+      },
+      dnsserver1_ping = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Waiting",
+          "Success",
+	  "Failed",
+        }
+      },
+      dnsserver2_ping = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Waiting",
+          "Success",
+	  "Failed",
+        }
+      },
+      nexthop = {
+       access = "readOnly",
+       type = "string",
+      },
+      nexthop_ping = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Waiting",
+          "Success",
+	  "Failed",
+        }
+      },
+      -- needed for fitting the transactions model
+      status_ping_test= {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Done",
+          "Waiting"
+        }
+      },
+      up = {
+       access = "readOnly",
+       type = "boolean",
+      },
+      available = {
+       access = "readOnly",
+       type = "boolean",
+      },
+      uptime = {
+       access = "readOnly",
+       type = "unsignedInt",
+      },
+      tx_bytes = {
+       access = "readOnly",
+       type = "unsignedInt",
+      },
+      rx_bytes = {
+       access = "readOnly",
+       type = "unsignedInt",
+      },
+      type = {
+       access = "readOnly",
+       type = "string",
+      },
+    }
+  }
+}
+
+local logger = require("transformer.logger")
+local log = logger.new("network.interface", 2)
+local open = io.open
+local uci_helper = mapper("ucihelper")
+local common = mapper("nwcommon")
+local get_ubus_interface_status = common.get_ubus_interface_status
+local get_ubus_device_status = common.get_ubus_device_status
+local get_intf_stat=common.get_intf_stat
+local get_lower_layers = common.get_lower_layers
+local findLanWanInterfaces = common.findLanWanInterfaces
+local ping_helper = require("transformer.shared.ippinghelper")
+local section = "network_rpc"
+local STATE_STORE = "/var/state/rpc_network"
+local NUM_REP = "2"
+local state_table = {}
+
+local function entriesInterfaces(mapping)
+    local intfs = {}
+    local binding = {
+      config="network",
+      sectionname="interface",
+    }
+    local intf_6rd = {}
+    uci_helper.foreach_on_uci(binding, function(s)
+    -- iterate over the interfaces
+      if s.iface6rd and (s.iface6rd ~= "0") then
+        intf_6rd[s.iface6rd] = true
+      end
+
+      if s.proto == "6rd" then
+        intf_6rd[s[".name"]] = true
+      else
+        intfs[#intfs+1]= s['.name']
+      end
+    end)
+
+    for k,_ in pairs(intf_6rd) do
+      intfs[#intfs+1]=k
+    end
+    return intfs
+end
+
+
+
+--Check if the ipping is available start the test or
+-- wait till till it becomes free
+local function checkIfAvailableAndStart(host, interface)
+  local pinger_state =  ping_helper.uci_ipping_get(section, "DiagnosticsState")
+  local wait = false
+
+  if (pinger_state == "Complete" or
+     pinger_state == "Error_CannotResolveHostName" or
+     pinger_state == "Error_Internal" or
+     pinger_state == "Error_Other") then
+    for _,v in pairs(state_table) do
+      if(v == "Requested") then
+        wait = true
+      end
+    end
+    if wait == false then
+      pinger_state = "None"
+      ping_helper.uci_ipping_set(section, "DiagnosticsState", "None", commitapply)
+    end
+  end
+  if pinger_state == "None" then
+    ping_helper.uci_ipping_set(section, "Host", host, commitapply)
+    ping_helper.uci_ipping_set(section, "NumberOfRepetitions", NUM_REP, commitapply)
+    ping_helper.uci_ipping_set(section, "Interface", interface, commitapply)
+    ping_helper.uci_ipping_set(section, "DiagnosticsState", "Requested", commitapply)
+    state_table[host] = "Requested"
+
+  else
+    state_table[host] = "Waiting"
+
+  end
+end
+--This is called on read of the state
+local function getState(host)
+  local pinger_state
+
+  if state_table == nil then
+    state_table = {}
+    state_table[host] = "None"
+  end
+  if state_table[host] == nil then
+    state_table[host] = "None"
+  end
+
+  if (state_table[host] == "Success" or state_table[host] == "Failed") then
+    return state_table[host]
+  end
+  if state_table[host] == "Requested" then
+    pinger_state = ping_helper.uci_ipping_get(section, "DiagnosticsState")
+    if pinger_state == "Requested" then
+	return "Requested"
+    end
+    if pinger_state == "Complete" then
+      local numReq = ping_helper.uci_ipping_get(section, "NumberOfRepetitions")
+      local numRec = ping_helper.uci_ipping_get(section, "SuccessCount")
+      if numReq == numRec then
+        state_table[host] = "Success"
+      else
+        state_table[host] = "Failed"
+      end
+    else
+      state_table[host] = "Failed"
+    end
+
+  end
+
+  return state_table[host]
+end
+
+--This is called to pushes the statemachine to the next state
+-- (external commit apply is needed)
+-- introduced to fit transactions
+local function pushState()
+  local pinger_state
+  pinger_state = ping_helper.uci_ipping_get(section, "DiagnosticsState")
+  if pinger_state == "Complete" then
+    ping_helper.uci_ipping_set(section, "DiagnosticsState", "None", commitapply)
+  end
+  for host,state in pairs(state_table) do
+    if state == "Waiting" then
+      if pinger_state == "None" then
+        ping_helper.uci_ipping_set(section, "Host", host, commitapply)
+        ping_helper.uci_ipping_set(section, "NumberOfRepetitions", NUM_REP, commitapply)
+        ping_helper.uci_ipping_set(section, "DiagnosticsState", "Requested", commitapply)
+        state_table[host] = "Requested"
+      end
+      return
+    end
+  end
+end
+
+local function busy()
+   for _,state in pairs(state_table) do
+    if state == "Waiting" then
+       return "Waiting"
+    end
+  end
+  return "Done"
+end
+
+local nextHopLcl = ""
+
+local function getNexthopInfo(key)
+  nextHopLcl = ""
+  local v = get_ubus_interface_status(key)
+  v = v and v['route']
+  local route  = v and v[1]
+  local nexthop = (route and route['nexthop']) or ""
+  if (v) then
+    for i, route in ipairs(v) do
+      if route['mask'] == 0 then
+        nexthop = route['nexthop']
+        break
+      end
+    end
+  end
+  return nexthop
+end
+
+
+local dnsServer1 = ""
+local dnsServer2 = ""
+local servers = ""
+local function getDnsServers(key)
+  servers = ""
+  dnsServer1 = ""
+  dnsServer2 = ""
+  local v = get_ubus_interface_status(key)
+  v = v and v['dns-server']
+  if (v) then
+      for i, server in ipairs(v) do
+        if string.find(servers,server) == nil then
+          if (i > 1) then
+            servers = servers .. ","
+            dnsServer2 = server
+          else
+            dnsServer1 = server
+          end
+          servers = servers .. server
+        end
+      end
+    end
+end
+
+local config = "ipping"
+
+local uci_binding = {
+  DiagnosticsState = { config = config, sectionname = section, option = "state" },
+  Interface = { config = config, sectionname = section, option = "interface" },
+  Host = { config = config, sectionname = section, option = "host" },
+  NumberOfRepetitions = { config = config, sectionname = section, option = "count" },
+  Timeout = { config = config, sectionname = section, option = "timeout" },
+  DataBlockSize = { config = config, sectionname = section, option = "size" },
+  DSCP = { config = config, sectionname = section, option = "dscp" },
+}
+
+local startup = ping_helper.startup
+local clear_ping_results = ping_helper.clear_ping_results
+local intfs_type = {
+  wan = true,
+  lan = false,
+}
+
+startup(section, uci_binding)
+network_interface_.get = {
+  ipaddr = function(mapping, param, key)
+      local v = get_ubus_interface_status(key)
+      v = v and v['ipv4-address']
+      v = v and v[1]
+      return (v and v['address']) or ""
+  end,
+  NTPServers = function(mapping, param, key)
+      local v = get_ubus_interface_status(key)
+      v = v and v['data']
+      return (v and v['ntpserver']) or ""
+  end,
+  ipmask = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['ipv4-address']
+    v = v and v[1]
+    return (v and tostring(v['mask'])) or ""
+  end,
+  ip6addr = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['ipv6-address']
+    v = v and v[1]
+    return (v and v['address']) or ""
+  end,
+  ip6prefix = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['ipv6-prefix']
+    v = v and v[1]
+    return (v and v['address'].."/"..v['mask']) or ""
+  end,
+  ip6prefix_assignment = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['ipv6-prefix-assignment']
+    v = v and v[1]
+    return (v and v['address'].."/"..v['mask']) or ""
+  end,
+  dnsservers = function(mapping, param, key)
+    getDnsServers(key)
+    return servers
+  end,
+  nexthop = function(mapping, param, key)
+   nextHopLcl =  getNexthopInfo(key)
+   return nextHopLcl
+  end,
+  dnsserver1_ping = function(mapping, param, key)
+    getDnsServers(key)
+    if dnsServer1 ~= "" then
+      return getState(dnsServer1)
+    end
+    return "None"
+  end,
+  dnsserver2_ping = function(mapping, param, key)
+    getDnsServers(key)
+    if dnsServer2 ~= "" then
+      return getState(dnsServer2)
+    end
+    return "None"
+  end,
+  nexthop_ping = function(mapping, param, key)
+    nextHopLcl =  getNexthopInfo(key)
+    if nextHopLcl ~= "" then
+      return getState(nextHopLcl)
+    end
+    return "None"
+  end,
+  status_ping_test = busy,
+  up = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['up']
+    if v then
+      return "1"
+    else
+      return "0"
+    end
+  end,
+  available = function(mapping, param, key)
+    local v = get_ubus_interface_status(key)
+    v = v and v['available']
+    if v then
+      return "1"
+    else
+      return "0"
+    end
+  end,
+  uptime = function(mapping, param, key)
+      local v = get_ubus_interface_status(key)
+      if v and v.uptime then
+        return tostring(v.uptime)
+      end
+      return ""
+  end,
+  tx_bytes = function(mapping, param, key)
+    return get_intf_stat(key, "tx_bytes")
+  end,
+  rx_bytes = function(mapping, param, key)
+    return get_intf_stat(key, "rx_bytes")
+  end,
+  type = function(mapping, param, key)
+    for k,v in pairs(intfs_type) do
+        local intfs = findLanWanInterfaces(v)
+        for _, vv in pairs(intfs) do
+            if key == vv then
+              return k
+            end
+        end
+    end
+    return ""
+  end
+}
+network_interface_.set = {
+  dnsserver1_ping = function(mapping, param, value, key)
+    getDnsServers(key)
+    if dnsServer1 ~= "" then
+      checkIfAvailableAndStart(dnsServer1 , key)
+    end
+    return true
+  end,
+  dnsserver2_ping = function(mapping, param, value, key)
+    getDnsServers(key)
+    if dnsServer2 ~= "" then
+      checkIfAvailableAndStart(dnsServer2, key)
+    end
+    return true
+  end,
+  nexthop_ping = function(mapping, param, value, key)
+    nextHopLcl =  getNexthopInfo(key)
+    if nextHopLcl ~= "" then
+      checkIfAvailableAndStart(nextHopLcl , key)
+    end
+    return true
+  end,
+  status_ping_test = pushState,
+  }
+
+network_interface_.entries = entriesInterfaces
+network_interface_.commit = ping_helper.uci_ipping_commit
+network_interface_.revert = ping_helper.uci_ipping_revert
+clear_ping_results(section)
+register(network_interface_)
+

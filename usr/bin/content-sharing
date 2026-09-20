@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+#
+# --------------------------------------------------------------------------------------------------------
+# [Home Storage ]:
+# Auto manage all partitions in uci.sanba and uci.samba.info. < Called by hotplug2  >
+#
+# --------------------------------------------------------------------------------------------------------
+# hotplug2 : Input ENVs
+#   ...
+#
+# ACTION='add' / 'remove'
+# SUBSYSTEM=usb
+# DEVPATH=/devices/pci0000:00/0000:00:0a.0/usb1/1-2, DEVICENAME=1-2
+# or
+# DEVPATH=/devices/pci0000:00/0000:00:0a.0/usb1/1-2/1-2:1.0, DEVICENAME=1-2:1.0
+#   ...
+
+#
+###defined for testing on hostachine
+#
+#ACTION='remove'
+#ACTION='add'
+#DEVPATH=/devices/pci0000:00/0000:00:0a.0/usb1/1-2
+#    DEVPATH=/devices/pci0000:00/0000:00:1f.2/host0/target0:0:0/0:0:0:0/block/
+#SUBSYSTEM='usb'
+#
+
+#=========================================================================================================
+#
+# DEVINFO=/dev/sda
+# DEVNODE=sda1 ('sda' without Partition table)
+#
+#
+
+
+#DEVPATH=`echo /dev/`
+sleep 2
+
+logger -t content-sharing "==============launched by hotplug============="
+devicecount=0
+if [ $SUBSYSTEM != 'usb' ] ; then
+      return
+fi
+
+
+# find out the added/removed device information
+#DEVICEDIR=`echo $DEVPATH`
+# In case some delay, retry 60 seconds
+i=0;
+while [ $i -lt 60 ] ; do
+  let "i++"
+  DEV_COUNT=`df -h | grep "usb" | /usr/bin/wc -l`
+  if [ $DEV_COUNT != 0 ] ; then
+    break;
+  fi
+  sleep 1
+done
+
+logger -t content-sharing "$DEV_COUNT connected devices found"
+uci -P /var/state set samba.info=status
+uci -P /var/state set samba.info.connecteddevices=$DEV_COUNT
+uci -P /var/state commit samba

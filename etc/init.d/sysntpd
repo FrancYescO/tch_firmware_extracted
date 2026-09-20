@@ -1,0 +1,78 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2011 OpenWrt.org
+
+START=98
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+SERVICE_PID_FILE=/var/run/sysntpd.pid
+
+get_dhcp_ntp_servers() {
+	local interfaces="$1"
+	local filter="*"
+	local network_dump
+	local interface
+	local ntpservers
+	local ntpserver
+
+	network_dump=$(ubus call network.interface dump)
+	for interface in $interfaces; do
+		[ "$filter" = "*" ] && filter="@.interface='$interface'" || filter="$filter,@.interface='$interface'"
+	done
+
+	ntpservers=$(jsonfilter -s "$network_dump" -e "@.interface[$filter]['data']['ntpserver']")
+
+	for ntpserver in $ntpservers; do
+		local duplicate=0
+		local entry
+
+		for entry in $peers; do
+			[ "$ntpserver" = "$entry" ] && duplicate=1
+		done
+		[ "$duplicate" = 0 ] && peers="$peers $ntpserver"
+	done
+}
+
+start() {
+	local peers
+	local args="-n"
+	local enable_server
+	local enable_client
+	local prog
+	local use_dhcp
+	local dhcp_interface
+
+	config_load system
+	config_get peers ntp server
+	config_get prog ntp program
+	config_get_bool enable_server ntp enable_server 0
+	config_get_bool enable_client ntp enable_client 1
+	config_get_bool use_dhcp ntp use_dhcp 0
+	config_get dhcp_interface ntp dhcp_interface
+
+
+	if [ $enable_server -ne 0 ]; then
+		append args "-l"
+	fi
+
+	[ $use_dhcp = 1 ] && get_dhcp_ntp_servers "$dhcp_interface"
+
+	if [ $enable_client -eq 1 -a -n "$peers" ]; then
+		local peer
+		for peer in $peers; do
+			append args "-p $peer"
+		done
+	fi
+
+	if [ -n "$prog" ]; then
+		append args "-S $prog"
+	fi
+
+	if [ "$args" != "-n" ]; then
+		service_start /usr/sbin/ntpd $args
+	fi
+}
+
+stop() {
+	service_stop /usr/sbin/ntpd
+}

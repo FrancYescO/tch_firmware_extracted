@@ -1,0 +1,20 @@
+#!/bin/sh
+
+touch /var/slicstate
+insmod endpointdd
+if [ -f /proc/voice/detectslic ]
+    then echo "this is a non voice platform "
+else
+    /usr/bin/mmdetectslic
+fi
+
+[ -f /proc/voice/detectslic ] && cat /proc/voice/detectslic  > /var/slicstate
+rmmod endpointdd
+cat /var/slicstate  | grep "isVoiceOn:1"
+if [ "$?" = 0 ]
+    then echo "This is a voice platform continue ...."
+else
+    echo "This is not a voice platform, do the clean up ..."
+    opkg remove --force-removal-of-dependent mmpbx
+    opkg remove mappings-mmpbxd
+fi

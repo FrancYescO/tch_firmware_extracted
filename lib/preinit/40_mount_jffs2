@@ -1,0 +1,35 @@
+#!/bin/sh
+# Copyright (C) 2006-2010 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+
+find_mount_jffs2() {
+    local options
+    options=$(grep "^mount=" /etc/jffs2_options 2>/dev/null | sed "s/^mount=//" )
+    if [ ! -z $options ]; then
+        options="-o $options"
+    fi
+    mkdir -p /tmp/overlay
+    for mtdpartname in rootfs_data userfs; do
+        mtdpart="$(find_mtd_part $mtdpartname)"
+        [ -n "$mtdpart" ] && break
+    done
+    mount -t jffs2 $options "$mtdpart" /tmp/overlay
+    mtd -qq unlock $mtdpartname
+}
+
+jffs2_not_mounted() {
+    if [ "$pi_jffs2_mount_success" != "true" ]; then
+	return 0
+    else
+	return 1
+    fi
+}
+
+do_mount_jffs2() {
+    check_skip || {
+	find_mount_jffs2 && pi_jffs2_mount_success=true
+    }
+}
+
+boot_hook_add preinit_mount_root do_mount_jffs2
+

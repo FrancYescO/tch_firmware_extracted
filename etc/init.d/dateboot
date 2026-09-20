@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+# Copyright © 2016 Technicolor
+
+# This startup script is to set the date as per build date - 2 days to cover all timezones
+
+START=22
+
+boot() {
+	# if the year is > 2013 assume the date is set and do nothing
+	local CURRENTYEAR=$(date +"%Y")
+	[ $CURRENTYEAR -gt "2013" ] && return
+
+	# Parse Build Time from uci.
+	BUILD_TIME_STAMP=$(uci get version.@version[0].version | cut -d "-" -f3 | cut -c 1-12)
+
+	# Return if anything wrong in parsing build time
+	echo "$BUILD_TIME_STAMP" | egrep -q '^[0-9]+$' > /dev/null
+	[ "$?" -ne 0 ] && return
+
+	# convert build time into seconds
+	BUILD_TIME_SECONDS=$(date -d "$BUILD_TIME_STAMP" "+%s")
+
+	# Just return in case invalid date error
+	[ "$?" -ne 0 ] && return
+
+	# Build Time - 2 Days (172800 seconds)
+	SYSTIME_AS_PER_BUILD_TIME=$(($BUILD_TIME_SECONDS - 172800))
+
+	# Setting the date as build time
+	date -s "@$SYSTIME_AS_PER_BUILD_TIME"
+
+	# Now generate this device's self signed certificate if not done yet
+	[ ! -f /etc/nginx/server.crt ] && {
+		sscertgen -keyfile /etc/nginx/server.key -certfile /etc/nginx/server.crt
+		chmod 400 /etc/nginx/server.key /etc/nginx/server.crt
+	}
+}

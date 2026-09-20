@@ -1,0 +1,53 @@
+local tonumber, string = tonumber, string
+
+local helper = require("mobiled.scripthelpers")
+
+local mobiled_device_firmware_upgrade_ = {
+    objectType = {
+        name = 'rpc.mobiled.device.@.firmware_upgrade.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            path = {
+                access = "readWrite",
+                type = "string"
+            },
+            status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "None",
+                    "Available",
+                    "Valid",
+                    "Blocked",
+                    "Error",
+                }
+            }
+        }
+    }
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+local function get(mapping, paramName, key)
+    if paramName == "status" then
+        local info = helper.getUbusData(conn, "mobiled.device", "firmware_upgrade", { dev_idx = tonumber(string.match(key, '%d')) })
+        return info.status
+    end
+    return ""
+end
+
+local function set(mapping, paramName, paramvalue, key)
+    if(paramName == "path") then
+        conn:call("mobiled.device", "firmware_upgrade", { ["path"] = paramvalue, dev_idx = tonumber(string.match(key, '%d')) })
+    end
+end
+
+mobiled_device_firmware_upgrade_.get = get
+mobiled_device_firmware_upgrade_.set = set
+
+register(mobiled_device_firmware_upgrade_)
