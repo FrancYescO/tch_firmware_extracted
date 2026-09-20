@@ -1,0 +1,34 @@
+#!/bin/sh
+
+
+# Compares sha256 sum on stdin with $1
+matchsha() {
+	EXPECTED="$1"
+	ACTUAL=`sha256sum | cut -d ' ' -f 1`
+	if [ "$EXPECTED" != "$ACTUAL" ]; then
+		echo "SHA256 checksum mismatch: $EXPECTED vs $ACTUAL" 1>&2
+		return 1;
+	fi
+}
+
+# HEADERSIZE(1) CONTENTSIZE(4)
+dd bs=1 count=5 &>/dev/null
+SHA256=`dd bs=1 count=32 2>/dev/null | hexdump -v -e  '1/1 "%02x"'`
+
+# Prepare separate stream for SHA256
+TMPPIPE=`mktemp`
+rm $TMPPIPE
+mkfifo $TMPPIPE
+
+# Run SHA256 in background on second stream
+(matchsha $SHA256 <$TMPPIPE) &
+SHAPID=$!
+
+# Split input 
+tee $TMPPIPE | bli_unseal
+
+# Obtain SHA256 result
+wait $SHAPID
+SHAOK=$?
+rm $TMPPIPE
+return $SHAOK
