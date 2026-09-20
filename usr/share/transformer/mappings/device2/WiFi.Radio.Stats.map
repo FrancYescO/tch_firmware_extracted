@@ -1,0 +1,115 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_WiFi_Radio_i_Stats_ = {
+  objectType = {
+    name = "Device.WiFi.Radio.{i}.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedLong",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      ErrorsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      DiscardPacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      DiscardPacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      Noise = {
+        access = "readOnly",
+        type = "int",
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+local dummy_values = setmetatable({}, {
+  __index = function()
+    return "0"
+  end
+})
+
+local function getRadioStats(key)
+  local data = conn:call("wireless.radio.stats", "get",  { name = key })
+    if data == nil then
+      return dummy_values
+    end
+  return data[key] or dummy_values
+end
+
+-- Returns Noise parameter value
+-- @function getChannelStats
+-- @param key #string containing the radio channel name
+-- @param param #string containing the corresponding ubus option to be mapped for the parameter
+-- @return #string contains the noise value for the given channel
+local function getChannelStats(key, param)
+  local channelStats = conn:call("wireless.radio.acs.channel_stats", "get", { name = key }) or {}
+  return channelStats[key] and channelStats[key][param] and tostring(channelStats[key][param]) or "0"
+end
+
+local statsEntries = {
+  BytesSent = "tx_bytes",
+  BytesReceived = "rx_bytes",
+  PacketsSent = "tx_packets",
+  PacketsReceived = "rx_packets",
+  ErrorsSent = "tx_errors",
+  ErrorsReceived = "rx_errors",
+  DiscardPacketsSent = "tx_discards",
+  DiscardPacketsReceived = "rx_discards",
+}
+
+Device_WiFi_Radio_i_Stats_.get = function(mapping, param, key)
+  local field = statsEntries[param]
+  if field then
+    return tostring(getRadioStats(key)[field]) or "0"
+  end
+  if param == "Noise" then
+    return getChannelStats(key, "noise")
+  end
+  return "0"
+end
+
+Device_WiFi_Radio_i_Stats_.getall = function(mapping, key)
+  local all = {}
+  local data = getRadioStats(key)
+  for param, field in pairs(statsEntries) do
+    all[param] = tostring(data[field]) or "0"
+  end
+  return all
+end
+
+register(Device_WiFi_Radio_i_Stats_)
