@@ -1,0 +1,299 @@
+----------------------------------------------------------
+-- Mapping for bbf #ROOT.User.{i}.
+----------------------------------------------------------
+
+local Multi_User_i_= {
+  objectType = {
+    name = "#ROOT.User.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "UserNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        hidden = "true",
+        max = "64",
+      },
+      RemoteAccessCapable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "true",
+      },
+      X_000E50_Role = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+--[[ TODO
+      Language = {
+        access = "readWrite",
+        type = "string",
+        max = "16",
+        default = "",
+      },
+--]]
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local srp = require 'srp'
+local mapper, ipairs = mapper, ipairs
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local deleteOnUci = uciHelper.delete_on_uci
+local commitApply = commitapply
+local webBinding = { config = "web" }
+local isConfigChanged = false
+local random = math.random
+
+local function isUserInAssistance(key)
+  webBinding.sectionname = "remote"
+  webBinding.option = "sessionmgr"
+  webBinding.sectionname = getFromUci(webBinding)
+  webBinding.option = "users"
+  local remoteUserList =  getFromUci(webBinding)
+  for _,v in ipairs(remoteUserList) do
+    if key == v then
+      return "1"
+    end
+  end
+  return "0"
+end
+
+local function isUserInRemote(key)
+  webBinding.sectionname = key
+  webBinding.option = "name"
+  local userName = getFromUci(webBinding)
+  webBinding.sectionname = "remote"
+  webBinding.option = "user"
+  local assistName = getFromUci(webBinding)
+  if assistName == userName then
+    return "1"
+  end
+  return "0"
+end
+
+local function isRemoteUser(key)
+  if isUserInAssistance(key) == "1" and isUserInRemote(key) == "1" then
+     return "1"
+  end
+  return "0"
+end
+
+
+local function generateNewObjectname()
+  return "usr_default_" .. tostring(random()):sub(3)
+end
+
+local function isSectionNameUnique(name)
+  webBinding.sectionname = "default"
+  webBinding.option = "users"
+  local sectionNameList =  getFromUci(webBinding)
+  for _,v in ipairs(sectionNameList) do
+     if name == v then
+       return "1"
+     end
+  end
+  return "0"
+end
+
+Multi_User_i_.entries = function()
+  local users = {}
+  webBinding.sectionname = "user"
+  webBinding.option = "name"
+  uciHelper.foreach_on_uci( webBinding,function(s)
+    users[#users+1] = s['.name']
+  end)
+  return users
+end
+
+Multi_User_i_.add = function(mapping)
+  local objectName = generateNewObjectname()
+  while isSectionNameUnique(objectName) == "1" do
+     objectName = generateNewObjectname()
+  end
+  webBinding.sectionname = objectName
+  webBinding.option = nil
+  setOnUci(webBinding, "user", commitApply)
+
+  --New user's default role is 'guest'.
+  webBinding.option = "role"
+  setOnUci(webBinding, "guest", commitApply)
+
+  webBinding.sectionname = "default"
+  webBinding.option = "users"
+  local defaultUserList =  getFromUci(webBinding)
+  table.insert(defaultUserList, objectName)
+  setOnUci(webBinding, defaultUserList, commitApply)
+  isConfigChanged = true
+  return objectName
+end
+
+Multi_User_i_.delete = function(mapping, key)
+  webBinding.sectionname = key
+  webBinding.option = "name"
+  local user = getFromUci(webBinding)
+  if user == "admin" then
+     return nil, "the user admin cannot be deleted"
+  end
+  if isRemoteUser(key) == "1" then
+     return nil, "the usr has remote access cannot be deleted"
+  end
+  webBinding.sectionname = key
+  webBinding.option = nil
+  deleteOnUci(webBinding,commitapply)
+  webBinding.sectionname = "default"
+  webBinding.option = "users"
+  local defaultUserList =  getFromUci(webBinding)
+  for i, v in ipairs(defaultUserList) do
+    if v == key then
+      table.remove(defaultUserList,i)
+      break
+    end
+  end
+  setOnUci(webBinding, defaultUserList, commitApply)
+  isConfigChanged = true
+  return true
+end
+
+Multi_User_i_.get = {
+  Enable = "1",
+
+  Username = function(mapping, param, key)
+    webBinding.sectionname = key
+    webBinding.option = "name"
+    return getFromUci(webBinding)
+  end,
+
+  Password = "",
+
+  RemoteAccessCapable = function(mapping, param, key)
+    return isRemoteUser(key)
+  end,
+
+  X_000E50_Role = function(mapping, param, key)
+    webBinding.sectionname = key
+    webBinding.option = "role"
+    return getFromUci(webBinding)
+  end,
+}
+
+Multi_User_i_.set = {
+  Username = function (mapping, param, value, key)
+  --When new user was created and Username is set or change, 
+  --this user cannot login until its password was set explicitly;
+  --When a existing user's name was changed, the new user doesn't 
+  --take effect and cannot login until its password was set explicitly.
+    webBinding.sectionname = key
+    webBinding.option = "name"
+    local currentUserName = getFromUci(webBinding)
+    if currentUserName == value then
+       return true
+    end
+    webBinding.sectionname = "user"
+    local sameName = 0
+    uciHelper.foreach_on_uci( webBinding,function(s)
+       if s["name"] == value then
+           sameName = 1
+           return false
+       end
+    end)
+    if sameName == 1 then
+       sameName = 0
+       return nil, "Already have the user name"
+    end
+    webBinding.sectionname = key
+    webBinding.option = "name"
+    setOnUci(webBinding, value, commitApply)
+    isConfigChanged = true
+  end,
+
+  Password = function (mapping, param, value, key)
+    webBinding.sectionname = key
+    webBinding.option = "name"
+    local user = getFromUci(webBinding)
+    if user == "" then
+      return nil, "Invalid user for password setting"
+    end
+    if isRemoteUser(key) == "1" then
+      return nil, "Password cannot be set for this user"
+    end
+    webBinding.sectionname = key
+    local srp_salt, srp_verifier = srp.new_user(user, value)
+    webBinding.option = "srp_salt"
+    setOnUci(webBinding, srp_salt, commitApply)
+    webBinding.option = "srp_verifier"
+    setOnUci(webBinding, srp_verifier, commitApply)
+
+    --Reload user when password is updated.
+    commitApply:newset("InternetGatewayDevice.User.{i}.Password")
+    isConfigChanged = true
+  end,
+
+  Enable = function (mapping, param, value, key)
+    return true, "current web should always be Enabled, no need to change the status of web."
+  end,
+
+  RemoteAccessCapable = function (mapping, param, value, key)
+    webBinding.sectionname = key
+    webBinding.option = "name"
+    local user = getFromUci(webBinding)
+    if user == "" then
+      return nil, "Invalid user for RemoteAccess setting"
+    end
+    return true, "current doesn't really support write of this parameter to change a user to be able of remote access."
+  end,
+
+  X_000E50_Role = function (mapping, param, value, key)
+    if value == "" then
+      return nil, "Please input correct role"
+    end
+    webBinding.sectionname = key
+    webBinding.option = "role"
+    setOnUci(webBinding, value, commitApply)
+    isConfigChanged = true
+  end,
+}
+
+Multi_User_i_.commit = function ()
+  if isConfigChanged then
+    uciHelper.commit(webBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_User_i_.revert = function ()
+  if isConfigChanged then
+    uciHelper.revert(webBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_User_i_, "#ROOT", {"InternetGatewayDevice", "Device.Users"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

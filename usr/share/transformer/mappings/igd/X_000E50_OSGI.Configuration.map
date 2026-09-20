@@ -1,0 +1,61 @@
+-- Manually Generated
+local InternetGatewayDevice_Services_X_000E50_OSGI_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_OSGI.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  }
+}
+
+register(InternetGatewayDevice_Services_X_000E50_OSGI_)
+
+local InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_OSGI.Configuration.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local isConfigChanged = false
+local uciHelper = mapper("ucihelper")
+local osgiBinding = { config = "osgi", sectionname = "config", option = "enabled" }
+
+InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_.get = {
+  Enable = function()
+    return uciHelper.get_from_uci(osgiBinding)
+  end,
+}
+
+InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_.set = {
+  Enable = function(mapping, param, value)
+    uciHelper.set_on_uci(osgiBinding, value, commitapply)
+    isConfigChanged = true
+  end,
+}
+
+InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(osgiBinding)
+    isConfigChanged = false
+  end
+end
+
+InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_.revert = function()
+  if isConfigChanged then
+    uciHelper.commit(osgiBinding)
+    isConfigChanged = false
+  end
+end
+
+register(InternetGatewayDevice_Services_X_000E50_OSGI_Configuration_)

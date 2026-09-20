@@ -1,0 +1,145 @@
+#!/usr/bin/env lua
+local assert = assert
+local format, match, gsub = string.format, string.match, string.gsub
+local logger = require 'transformer.logger'
+local cursor = require("uci").cursor()
+local common = require 'transformer.mapper.nwcommon'
+local lfs = require("lfs")
+local ubus = require("ubus")
+-- UBUS connection
+local ubus_conn
+
+local log_config = {
+  level = 3,
+  stderr = false
+}
+
+logger.init(log_config.level, log_config.stderr)
+logger = logger.new("tr143", log_config.level)
+
+-- command line argument = user name
+local user=arg[1]
+-- user cannot be nil
+if user==nil then
+  logger:critical("You need to specify an user (igd,wwwconn,wwwdownload,...)")
+  return
+end
+
+-- get downloaddiag configuration from UCI
+local config, dir = "downloaddiag", "down"
+if arg[2] == "uploaddiag" then
+  config, dir = "uploaddiag", "up"
+end
+
+local outfilePath = "/tmp/tr143"
+local outfile = format("%s/%s_%s.out", outfilePath, config, user)
+
+local state = "Completed"
+local event_msg = {}
+
+local function get_intf_by_url(url)
+    local host = match(url, "http://(.-)/") or match(url, "ftp://(.-)/")
+    host = gsub(host, ":.*", "") -- remove :port to get pure host or ip address
+    if not match(host, "(%d+.%d+.%d+.%d+)") then
+        -- if domain name, resolve to ip address
+        local cmdline = host and format("nslookup %s 2>&1", host)
+        local p = assert(io.popen(cmdline))
+        local output = p:read("*a")
+        p:close()
+        host  = match(output, "Address.*:%s*(%d+.%d+.%d+.%d+).*")
+    end
+    -- get interface by route
+    local cmdline = host and format("ip route get %s 2>&1", host)
+    local p = assert(io.popen(cmdline))
+    local output = p:read("*a")
+    p:close()
+    local intf = match(output, "dev%s+([%w_-]+)")
+    return intf
+end
+
+local function tr143_diag(user)
+  -- check if all required parameters are present
+  local url = cursor:get(config, user, "url")
+  if not url then
+    state = "Error_Other"
+    return
+  end
+
+  -- get logical interface and convert to physical
+  local iface = cursor:get(config, user, "interface")
+  local iface_option = ""
+
+  if iface and iface:len() ~= 0 then
+    iface = common.get_ubus_interface_status(iface)
+    iface = iface and iface["l3_device"]
+    if not iface then
+      state = "Error_Other"
+      return
+    end
+    logger:debug("resolved logical name to physical device: " .. iface)
+    iface_option = format("--intf %s", iface)
+  else
+    iface = get_intf_by_url(url)
+    if iface and iface:len() ~= 0 then
+      iface_option = format("--intf %s", iface)
+    end
+  end
+
+  local pbit = cursor:get(config, user, "pbit")
+  local dscp = cursor:get(config, user, "dscp")
+  local dscp_option = ""
+  if dscp then
+    dscp_option = format("--dscp %s", dscp)
+  end
+
+  local upsize_option = ""
+  if dir == "up" then
+    local upsize = cursor:get(config, user, "filesize")
+    if (not upsize or upsize == "" or upsize == "0") then
+      state = "Error_Other"
+      return
+    end
+    upsize_option = format("--upsize %s", upsize)
+  end
+
+  lfs.mkdir(outfilePath)
+  -- do downloaddiag and capture output
+  local cmdline = format("/usr/bin/tr143_diag --dir %s --url %s %s --resfile %s %s %s", dir, url, upsize_option, outfile, iface_option, dscp_option)
+  os.execute(cmdline)
+  local info ={}
+  event_msg[user] = info
+  -- Publish the downloaddiag result on ubus
+  local ubuspath = format("%sload.%sload_dm", dir, dir)
+  ubus_conn:send(ubuspath, info)
+end
+
+--publish results in ubus
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end
+
+local function getNewState (file)
+  local f = io.open(file, "r")
+  if f then
+    local output = f:read("*a")
+    f:close()
+    return output:match("DiagnosticsState=%s*([^%s]*)")
+  end
+end
+
+local err, msg = pcall(tr143_diag, user)
+if not err then
+  state = "Error_Internal"
+  logger:critical(msg)
+else
+  local uci_state = cursor:get(config, user, "state")
+  if uci_state == "None" then
+    state = uci_state
+  elseif state == "Completed" then
+    state = getNewState(outfile) or state
+  end
+end
+
+-- write results to UCI
+cursor:set(config, user, "state",   state)
+cursor:commit(config)

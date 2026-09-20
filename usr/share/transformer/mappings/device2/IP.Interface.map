@@ -1,0 +1,332 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_IP_Interface_i_ = {
+  objectType = {
+    name = "Device.IP.Interface.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "InterfaceNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+--[[ TODO
+      IPv4Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+--]]
+      IPv6Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+--[[ TODO
+      ULAEnable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+--]]
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Down",
+          "Unknown",
+          "Dormant",
+          "NotPresent",
+          "LowerLayerDown",
+          "Error",
+        },
+        default = "Down",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      LastChange = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      LowerLayers = {
+        access = "readOnly", -- readWrite currently not supported
+        list = true,
+        max = "1024",
+        type = "string",
+        pathRef = true,
+        default = "",
+      },
+      Router = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.Routing.Router.{i}.",
+        default = "",
+      },
+      Reset = {
+        access = "readWrite",
+        hidden = "true",
+        command = "true",
+        type = "boolean",
+        default = "false",
+      },
+      MaxMTUSize = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+        range = {
+          {
+            min = "64",
+            max = "65535",
+          },
+        },
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Normal",
+          "Loopback",
+          "Tunnel",
+          "Tunneled",  -- Reference not available
+        },
+        default = "Normal",
+      },
+      Loopback = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+         --IPv4AddressNumberOfEntries
+         --automatically created when Device.IP.Interface.{i}.IPv4Address.{i}. is loaded
+         --IPv6AddressNumberOfEntries
+         --automatically created when Device.IP.Interface.{i}.IPv6Address.{i}. is loaded
+         --IPv6PrefixNumberOfEntries
+         --automatically created when Device.IP.Interface.{i}.IPv6Prefix.{i}. is loaded
+--[[ TODO
+      AutoIPEnable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+--]]
+    }
+  },
+  aliasDefault = "Name"
+}
+
+local mapper = mapper
+local nwmodel = require "transformer.shared.models.device2.network"
+local IPInterface = nwmodel.register("IPInterface", Device_IP_Interface_i_.objectType.name)
+local model
+
+local open = io.open
+local uciHelper = mapper("ucihelper")
+local getAllFromUci = uciHelper.getall_from_uci
+local ubusConnection = mapper("ubus").connect()
+local commitApply = commitapply
+local nwCommon = mapper("nwcommon")
+local getIntfInfo = nwCommon.getIntfInfo
+local networkBinding = { config = "network", sectionname = "", option = "" }
+local isConfigChanged = false
+local posix = require("tch.posix")
+local getClockTime = posix.clock_gettime
+local lastStateChangeTime = {}
+
+-- Reference for this can be found in linux documentation.
+--Link : https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-net
+-- and http://lxr.free-electrons.com/source/include/uapi/linux/if_arp.h
+local typeMap = {
+  ["768"] = "Tunnel",
+  ["769"] = "Tunnel",
+  ["772"] = "Loopback"
+}
+
+-- map for /sys/class/net/<iface>/operstate
+local statusMap = {
+  ["unknown"] = "Unknown",
+  ["notpresent"] = "NotPresent",
+  ["down"] = "Down",
+  ["dormant"] = "Dormant",
+  ["lowerlayerdown"] = "LowerLayerDown",
+  ["up"] = "Up"
+}
+
+local function getIntfName(key)
+  return model:getDevice(key)
+end
+
+local function getUciParam(key, paramName, default)
+  networkBinding.sectionname = model:getUciKey(key)
+  networkBinding.option = paramName
+  networkBinding.default = default
+  return uciHelper.get_from_uci(networkBinding)
+end
+
+Device_IP_Interface_i_.entries = function(mapping)
+  model = nwmodel.load()
+  local ipEntries = {}
+  for _,v in pairs(model:getKeys(IPInterface)) do
+    if v ~= "loopback" then
+      ipEntries[#ipEntries + 1] = v
+    end
+  end
+  return ipEntries
+end
+
+local function getMaxMtu(mapping,param,key,value)
+  local interface = value or getIntfName(key)
+  return getIntfInfo(interface,"mtu","0")
+end
+
+local function getType(mapping,param,key,value)
+  local interface = value or getIntfName(key)
+  return typeMap[getIntfInfo(interface,"type")] or "Normal"
+end
+
+local function getIPIntfStatus(mapping,param,key,value)
+  local interface = value or getIntfName(key)
+  return statusMap[getIntfInfo(interface,"operstate")] or "Down"
+end
+
+-- check ifname for interface used, if it starts with @
+--   yes : points to other interface, read/write to/from interface pointed
+--   no : use same interface for read/write
+local function getIPv6Enable(mapping,param,key,value)
+  return getUciParam(model:getBaseKey(key), "ipv6", "1")
+end
+
+local function getLoopback(mapping,param,key,value)
+  local device = model:getDevice(key)
+  if typeMap[getIntfInfo(device, "type")] == "Loopback" then
+    return "1"
+  end
+  return "0"
+end
+
+local function getLowerLayers(mapping,param,key,value,uciValues)
+  return model:getLowerLayersResolved(key, resolve)
+end
+
+local function getLastChange(mapping, param, key)
+  local interface = model:getName(key)
+  local ubusStatus = ubusConnection:call("network.interface." .. interface, "status", {})
+  local value
+  if ubusStatus and ubusStatus["uptime"] then
+    value = ubusStatus["uptime"]
+  else
+    value = getClockTime(posix.CLOCK_MONOTONIC) - (lastStateChangeTime[interface] or 0)
+  end
+  return tostring(value)
+end
+
+Device_IP_Interface_i_.get = {
+  Enable = function(mapping, param, key)
+    return getUciParam(key, "auto", "1")
+  end,
+  Status = getIPIntfStatus,
+  Name = function(mapping, param, key)
+    return model:getName(key)
+  end,
+  MaxMTUSize = getMaxMtu,
+  Reset = "false",
+  Type = getType,
+  IPv6Enable = getIPv6Enable,
+  Loopback = getLoopback,
+  LastChange = getLastChange,
+  LowerLayers = getLowerLayers,
+  Router = "Device.Routing.Router.1"
+}
+
+Device_IP_Interface_i_.getall = function(mapping, key)
+  local interface = getIntfName(key)
+  networkBinding.sectionname = model:getUciKey(key)
+  networkBinding.option = nil
+  local uciValues = getAllFromUci(networkBinding)
+  return {
+    Enable = uciValues.auto or "1",
+    Status = getIPIntfStatus(mapping,nil,key,interface),
+    Name = key,
+    MaxMTUSize = getMaxMtu(mapping,nil,key,interface),
+    Type = getType(mapping,nil,key,interface),
+    IPv6Enable = getIPv6Enable(mapping,nil,key,uciValues),
+    Loopback = getLoopback(mapping,nil,key,interface),
+    LastChange = getLastChange(mapping, nil, key),
+    LowerLayers = getLowerLayers(mapping,nil,key,interface,uciValues),
+    Router = "Device.Routing.Router.1"
+  }
+end
+
+local function setUciParam(key, paramName, value)
+  networkBinding.sectionname = model:getUciKey(key)
+  networkBinding.option = paramName
+  uciHelper.set_on_uci(networkBinding, value, commitApply)
+  isConfigChanged = true
+end
+
+Device_IP_Interface_i_.set = {
+  Enable = function(mapping, param, value, key)
+    setUciParam(key, "auto", value)
+  end,
+
+-- check ifname for interface used, if it starts with @
+--   yes : points to other interface, read/write to/from interface pointed
+--   no : use same interface for read/write
+  IPv6Enable = function(mapping, param, value, key)
+    setUciParam(model:getBaseKey(key), "ipv6", value)
+  end,
+
+  Reset = function(mapping,param,value,key)
+    if value == "1" then
+      local fileHandler = open("/tmp/.ip_intf","a")
+      if fileHandler then
+        fileHandler:write(key,"\n")
+        fileHandler:close()
+        commitApply:newset("Device.IP.Interface.{i}.Reset")
+      else
+        return nil, "unexpected write error"
+      end
+    end
+  end,
+}
+
+Device_IP_Interface_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_IP_Interface_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+local function ubusEventTriggered(mapping, action, data)
+  if data["action"] == "ifup" or data["action"] == "ifdown" then
+    lastStateChangeTime[data.interface] = getClockTime(posix.CLOCK_MONOTONIC)
+  end
+end
+
+Device_IP_Interface_i_.add_watchers = function(mapping)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, ubusEventTriggered, "network.interface")
+end
+
+register(Device_IP_Interface_i_)

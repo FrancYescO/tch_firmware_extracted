@@ -1,0 +1,100 @@
+#!/bin/sh /etc/rc.common
+
+START=10
+STOP=89
+
+SERVICE_USE_PID=1
+SERVICE_NAME=watchdog
+
+CONFIGFILE="/var/etc/watchdog.conf"
+
+append_parm() {
+	local section="$1"
+	local option="$2"
+	local config="$3"
+	local _loctmp
+	config_get _loctmp "$section" "$option"
+	[ -z "$_loctmp" ] && return 0
+	echo "$config=$_loctmp" >> $CONFIGFILE
+}
+
+pidfile() {
+	echo "pidfile=$1" >> $CONFIGFILE
+	touch $1
+}
+
+ping() {
+	echo "ping=$1" >> $CONFIGFILE
+}
+
+interface() {
+	local phys_device
+	network_get_physdev phys_device $1
+	echo "interface=${phys_device}"  >> $CONFIGFILE
+}
+
+watchdog() {
+	local cfg="$1"
+	local admin
+	append_parm "$cfg" interval "interval"
+	append_parm "$cfg" logtick "logtick"
+	append_parm "$cfg" load1 "max-load-1"
+	append_parm "$cfg" load5 "max-load-5"
+	append_parm "$cfg" load15 "max-load-15"
+	append_parm "$cfg" watchdog_device "watchdog-device"
+	append_parm "$cfg" timeout "watchdog-timeout"
+	append_parm "$cfg" repair_binary "repair-binary"
+	append_parm "$cfg" repair_timeout "repair-timeout"
+	append_parm "$cfg" test_directory "test-directory"
+	append_parm "$cfg" test_binary "test-binary"
+	append_parm "$cfg" test_timeout "test-timeout"
+	append_parm "$cfg" mem_pages "min-memory"
+	append_parm "$cfg" temperature "max-temperature"
+	append_parm "$cfg" temperature_device "temperature-device"
+	append_parm "$cfg" admin "admin"
+
+	config_get log_dir "$cfg" log_dir "/tmp"
+	echo "log-dir=${log_dir}" >> $CONFIGFILE
+
+	config_get_bool debug "$cfg" debug 0
+	[ "${debug}" -eq 1 ] && append args "-q"
+
+	config_list_foreach "$cfg" "pidfile" pidfile
+	config_list_foreach "$cfg" "ping" ping
+	config_list_foreach "$cfg" "interface" interface
+}
+
+filewatch() {
+	local cfg="$1"
+	append_parm "$cfg" filename "file"
+	append_parm "$cfg" change "change"
+}
+
+start() {
+	include /lib/network
+	. /lib/functions/network.sh
+
+	scan_interfaces
+	config_load watchdog
+
+	# before we can call xappend
+	mkdir -p $(dirname $CONFIGFILE)
+
+	echo "# auto-generated config file from /etc/config/watchdog" > $CONFIGFILE
+	echo "realtime=yes" >> $CONFIGFILE
+	echo "priority=1" >> $CONFIGFILE
+
+	config_foreach watchdog watchdog
+	config_foreach filewatch filewatch
+	service_start /usr/sbin/watchdog-tch -c $CONFIGFILE $args
+}
+
+stop() {
+	service_stop /usr/sbin/watchdog-tch
+}
+
+shutdown() {
+	# Forcefully kill so that watchdog device will keep on ticking
+	SERVICE_SIG="KILL" service_stop /usr/sbin/watchdog-tch
+	[ -c /dev/console ] && echo "Watchdog was terminated due to requested system reboot." >/dev/console
+}
