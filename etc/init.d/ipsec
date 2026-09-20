@@ -1,0 +1,294 @@
+#!/bin/sh /etc/rc.common
+
+NAME=ipsec
+START=21
+STOP=60
+
+. $IPKG_INSTROOT/lib/functions.sh
+. $IPKG_INSTROOT/lib/functions/service.sh
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+FileSecrets=/var/ipsec/ipsec.secrets
+FileConn=/var/ipsec/ipsec.conf
+FileCommon=/var/ipsec/strongswan.conf
+
+EnabledRemotePeers=0
+InterfaceAvailable=0
+
+ConfigPhase1() {
+	local encryption_algorithm
+	local hash_algorithm
+	local dh_group
+
+	config_get encryption_algorithm  "$1" encryption_algorithm
+	config_get hash_algorithm        "$1" hash_algorithm
+	config_get dh_group              "$1" dh_group
+
+	Phase1Proposal=${Phase1Proposal}","${encryption_algorithm}-${hash_algorithm}-${dh_group}
+}
+
+ConfigTunnel() {
+	local mode
+	local local_subnet
+	local local_nat
+	local local_sourceip
+	local local_updown
+	local remote_subnet
+	local remote_sourceip
+	local remote_updown
+	local p2_proposal
+	local pfs_group
+	local encryption_algorithm
+	local authentication_algorithm
+	local ikelifetime
+	local lifetime
+	local margintime
+	local keyingtries
+	local dpdaction
+	local dpddelay
+	local inactivity
+
+	config_get mode                     "$1"           mode "route"
+	config_get local_subnet             "$1"           local_subnet
+	config_get local_nat                "$1"           local_nat ""
+	config_get local_sourceip           "$1"           local_sourceip ""
+	config_get local_updown             "$1"           local_updown ""
+	config_get remote_subnet            "$1"           remote_subnet
+	config_get remote_sourceip          "$1"           remote_sourceip ""
+	config_get remote_updown            "$1"           remote_updown ""
+	config_get p2_proposal              "$1"           p2_proposal
+	config_get ikelifetime              "$1"           ikelifetime "3h"
+	config_get lifetime                 "$1"           lifetime "1h"
+	config_get margintime               "$1"           margintime "9m"
+	config_get keyingtries              "$1"           keyingtries "3"
+	config_get dpdaction                "$1"           dpdaction "none"
+	config_get dpddelay                 "$1"           dpddelay "30s"
+	config_get inactivity               "$1"           inactivity ""
+	config_get pfs_group                "$p2_proposal" pfs_group
+	config_get encryption_algorithm     "$p2_proposal" encryption_algorithm
+	config_get authentication_algorithm "$p2_proposal" authentication_algorithm
+
+	[[ "$local_nat" != "" ]] && local_subnet=$local_nat
+
+	p2_proposal="${encryption_algorithm}-${authentication_algorithm}-${pfs_group}"
+
+	echo "conn $ConfigName-$1" >> $FileConn
+	echo "  keyexchange=ikev2" >> $FileConn
+	echo "  left=%any" >> $FileConn
+	echo "  right=$RemoteGateway" >> $FileConn
+
+	# According to Strongswan Documentation, when leftsourceip is present, there is no need to set leftsubnet
+	# So local_subnet uci option is ignored when local_sourceip is set
+	if [ "$local_sourceip" != "" ]; then
+		echo "  leftsourceip=$local_sourceip" >> $FileConn
+	else
+		echo "  leftsubnet=$local_subnet" >> $FileConn
+	fi
+
+	echo "  ikelifetime=$ikelifetime" >> $FileConn
+	echo "  lifetime=$lifetime" >> $FileConn
+	echo "  margintime=$margintime" >> $FileConn
+	echo "  keyingtries=$keyingtries" >> $FileConn
+	echo "  dpdaction=$dpdaction" >> $FileConn
+	echo "  dpddelay=$dpddelay" >> $FileConn
+
+	if [ "$inactivity" != "" ]; then
+		echo "  inactivity=$inactivity" >> $FileConn
+	fi
+
+	if [ "$AuthenticationMethod" = "psk" ]; then
+		echo "  leftauth=psk" >> $FileConn
+		echo "  rightauth=psk" >> $FileConn
+		# According to Strongswan Documentation, when rightsourceip is present, there is no need to set rightsubnet
+		# So remote_subnet uci option is ignored when remote_sourceip is set
+		if [ "$remote_sourceip" != "" ]; then
+			echo "  rightsourceip=$remote_sourceip" >> $FileConn
+		else
+			echo "  rightsubnet=$remote_subnet" >> $FileConn
+		fi
+		echo "  auto=$mode" >> $FileConn
+	else
+		echo "WARNING: AuthenticationMethod $AuthenticationMethod not supported"
+	fi
+	if [ "$LocalIdentifier" != "" ]; then
+		echo "  leftid=$LocalIdentifier" >> $FileConn
+	fi
+	if [ "$RemoteIdentifier" != "" ]; then
+		echo "  rightid=$RemoteIdentifier" >> $FileConn
+	fi
+	if [ "$local_updown" != "" ]; then
+		echo "  leftupdown=$local_updown" >> $FileConn
+	fi
+	if [ "$remote_updown" != "" ]; then
+		echo "  rightupdown=$remote_updown" >> $FileConn
+	fi
+
+	echo "  esp=$p2_proposal" >> $FileConn
+	echo "  ike=$Phase1Proposal" >> $FileConn
+	echo "  type=tunnel" >> $FileConn
+}
+
+ConfigRemote() {
+	local enabled
+	local gateway
+	local pre_shared_key
+	local authentication_method
+	local local_identifier
+	local remote_identifier
+
+	ConfigName=$1
+
+	config_get_bool enabled "$1" enabled 0
+	[[ "$enabled" == "0" ]] && return
+
+	EnabledRemotePeers=$((EnabledRemotePeers+1))
+
+	config_get gateway               "$1" gateway
+	config_get pre_shared_key        "$1" pre_shared_key
+	config_get authentication_method "$1" authentication_method
+	config_get local_identifier      "$1" local_identifier
+	config_get remote_identifier     "$1" remote_identifier
+
+	AuthenticationMethod=$authentication_method
+	LocalIdentifier=$local_identifier
+	RemoteIdentifier=$remote_identifier
+
+	RemoteGateway=$gateway
+	if [ "$RemoteGateway" = "any" ]; then
+		RemoteGateway="%any"
+		LocalGateway=`ip route get 1.1.1.1 | awk -F"src" '/src/{gsub(/ /,"");print $2}'`
+	else
+		LocalGateway=`ip route get $RemoteGateway | awk -F"src" '/src/{gsub(/ /,"");print $2}'`
+	fi
+	if [ -n "$LocalIdentifier" ]; then
+		echo -n "$LocalIdentifier " >> $FileSecrets
+	else
+		echo -n "$LocalGateway " >> $FileSecrets
+	fi
+	if [ -n "$RemoteIdentifier" ]; then
+		echo -n "$RemoteIdentifier " >> $FileSecrets
+	else
+		echo -n "$RemoteGateway " >> $FileSecrets
+	fi
+	echo ": PSK \"$pre_shared_key\"" >> $FileSecrets
+
+	Phase1Proposal=""
+	config_list_foreach "$1" p1_proposal ConfigPhase1
+	Phase1Proposal=`echo $Phase1Proposal | cut -b 2-`
+
+	config_list_foreach "$1" tunnel ConfigTunnel
+}
+
+ConfigIpsec() {
+	local debug
+	local rtinstall_enabled
+	local routing_tables_ignored
+	local routing_table
+	local routing_table_id
+	local interface
+	local L3interface_list
+
+	if [ ! -L /etc/ipsec.secrets ]; then
+		rm /etc/ipsec.secrets 2>/dev/null
+		ln -s $FileSecrets /etc/ipsec.secrets
+	fi
+
+	if [ ! -L /etc/strongswan.conf ]; then
+		rm /etc/strongswan.conf 2>/dev/null
+		ln -s $FileCommon /etc/strongswan.conf
+	fi
+
+	if [ ! -L /etc/ipsec.conf ]; then
+		rm /etc/ipsec.conf 2>/dev/null
+		ln -s $FileConn /etc/ipsec.conf
+	fi
+
+	echo "# generated by /etc/init.d/ipsec" > $FileConn
+	echo "version 2" > $FileConn
+	echo "# generated by /etc/init.d/ipsec" > $FileSecrets
+
+	config_get debug "$1" debug 0
+	config_get_bool rtinstall_enabled "$1" rtinstall_enabled 1
+	[ $rtinstall_enabled -eq 1 ] && install_routes=yes || install_routes=no
+
+	# prepare extra charon config option ignore_routing_tables
+	for routing_table in $(config_get "$1" "ignore_routing_tables")
+	do
+	    if [ "$routing_table" -ge 0 ] 2>/dev/null; then
+		    routing_table_id=$routing_table
+            else
+		    routing_table_id=$(sed -n '/[ \t]*[0-9]\+[ \t]\+'$routing_table'[ \t]*$/s/[ \t]*\([0-9]\+\).*/\1/p' /etc/iproute2/rt_tables)
+	    fi
+	    [ -n "$routing_table_id" ] && append routing_tables_ignored "$routing_table_id"
+	done
+
+	#prepare extra charon config option interface. This will be the interface ipsec will select to send traffic.
+	for interface in $(config_get "$1" "interface")
+        do
+            network_get_device intf $interface
+	    if [ ! -z "$intf" ];then
+            #  start ipsec/strongswan as long as the interface is up,procd will retry on intf up/down.
+               InterfaceAvailable=1
+               append L3interface_list "$intf" ","
+            fi
+        done
+
+	echo "# generated by /etc/init.d/ipsec" > $FileCommon
+	echo "charon {" >> $FileCommon
+	echo "  load_modular = yes" >> $FileCommon
+	echo "  install_routes = $install_routes" >> $FileCommon
+	echo "  ignore_routing_tables = $routing_tables_ignored" >> $FileCommon
+	echo "  interfaces_use = $L3interface_list" >> $FileCommon
+	echo "    plugins {"  >> $FileCommon
+	echo "      include strongswan.d/charon/*.conf"  >> $FileCommon
+	echo "    }"  >> $FileCommon
+	echo "  syslog {" >> $FileCommon
+	echo "    identifier = ipsec" >> $FileCommon
+	echo "    daemon {" >> $FileCommon
+	echo "      default = $debug" >> $FileCommon
+	echo "    }" >> $FileCommon
+	echo "    auth {" >> $FileCommon
+	echo "      default = $debug" >> $FileCommon
+	echo "    }" >> $FileCommon
+	echo "  }" >> $FileCommon
+	echo "}" >> $FileCommon
+}
+
+PrepareEnvironment() {
+	mkdir -p /var/ipsec
+	config_load ipsec
+	config_foreach ConfigIpsec ipsec
+	config_foreach ConfigRemote remote
+}
+
+start() {
+	PrepareEnvironment
+	if [ $EnabledRemotePeers -gt 0 ] && [ $InterfaceAvailable -eq 1 ]; then
+		ipsec start
+	fi
+}
+
+stop() {
+	ipsec stop
+}
+
+restart() {
+	PrepareEnvironment
+	if [ $EnabledRemotePeers -gt 0 ] && [ $InterfaceAvailable -eq 1 ]; then
+		ipsec restart
+	else
+		ipsec stop
+	fi
+}
+
+reload() {
+	PrepareEnvironment
+	if [ $EnabledRemotePeers -gt 0 ] && [ $InterfaceAvailable -eq 1 ]; then
+		ipsec secrets
+		if [[ ! -z "$(ipsec status)" ]]; then
+			ipsec reload
+		else
+			ipsec start
+		fi
+	fi
+}

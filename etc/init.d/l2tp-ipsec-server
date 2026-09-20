@@ -1,0 +1,68 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+
+local SETUP_SCRIPT="/usr/lib/l2tpipsecserver/setup.sh"
+
+__enabled() {
+  config_load "l2tpipsecserver"
+  config_get_bool enabled global enabled 0
+
+  echo "$enabled"
+}
+
+start() {
+  # First setup conf files and routing again, then start daemons if enabled
+  . $SETUP_SCRIPT
+
+  [ "$(__enabled)" -eq "0" ] && return 0
+
+  /usr/sbin/ipsec start
+  /etc/init.d/xl2tpd start
+}
+
+stop() {
+  /etc/init.d/xl2tpd stop
+  /usr/sbin/ipsec stop
+}
+
+reload() {
+  # First setup conf files and routing again, then start, reload or stop daemons
+  . $SETUP_SCRIPT
+
+  if [ "$(__enabled)" -eq "0" ]; then
+    # Always stop both daemons when the server is disabled
+    stop
+  else
+    # Use ipsec status return code to obtain charon's status
+    /usr/sbin/ipsec status >/dev/null
+
+    # ipsec status '0' means 'service up and running'
+    if [ $? -ne 0 ]; then
+      # charon is not running: start both daemons
+      start
+    else
+      # ipsec reload preserves established connections
+      /usr/sbin/ipsec reload
+      /etc/init.d/xl2tpd reload
+    fi
+  fi
+
+  /etc/init.d/firewall reload
+}
+
+restart() {
+  # First setup conf files and routing again, then restart, reload or stop daemons
+  . $SETUP_SCRIPT
+
+  if [ "$(__enabled)" -eq "0" ]; then
+    # Always stop both daemons when the server is disabled
+    stop
+  else
+    # ipsec restart does stop/start and terminates established connections
+    /usr/sbin/ipsec restart
+    /etc/init.d/xl2tpd restart
+  fi
+
+  /etc/init.d/firewall reload
+}

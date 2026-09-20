@@ -1,0 +1,80 @@
+#!/bin/sh
+
+if [ -z "$1" ]; then
+	exit
+fi
+
+if [ -n "$DEBUG" ]; then
+	set -x
+fi
+
+DEFAULT_PROFILE_NAME="other"
+OLDCONFIG="$1/etc/config"
+
+if [ ! -f "$OLDCONFIG/mobiledongle" ]; then
+	exit
+fi
+
+SELECTION=$(uci -c "$OLDCONFIG" -q get mobiledongle.config.operator_mode)
+if [ "$SELECTION" = "AUTOMATIC" ]; then
+	uci set mobiled.device_defaults.network_selection='auto'
+elif [ "$SELECTION" = "MANUAL" ]; then
+	uci set mobiled.device_defaults.network_selection='manual'
+fi
+
+PLMN=$(uci -c "$OLDCONFIG" -q get mobiledongle.config.requested_operator)
+if [ -n "$PLMN" ]; then
+	MCC="${PLMN:0:3}" && uci -q set "mobiled.device_defaults.mcc=$MCC"
+	MNC="${PLMN:3}" && uci -q set "mobiled.device_defaults.mnc=$MNC"
+fi
+
+SELECTION=$(uci -c "$OLDCONFIG" -q get mobiledongle.config.requested_technology)
+if [ "$SELECTION" = "3G" ]; then
+	uci set mobiled.device_defaults.radio_pref='umts'
+elif [ "$SELECTION" = "4G" ]; then
+	uci set mobiled.device_defaults.radio_pref='lte'
+fi
+
+APN=$(uci -c "$OLDCONFIG" -q get mobiledongle.$DEFAULT_PROFILE_NAME.apn)
+USERNAME=$(uci -c "$OLDCONFIG" -q get mobiledongle.$DEFAULT_PROFILE_NAME.username)
+PASSWORD=$(uci -c "$OLDCONFIG" -q get mobiledongle.$DEFAULT_PROFILE_NAME.password)
+if [ -n "$APN" ] || [ -n "$USERNAME" ] || [ -n "$PASSWORD" ]; then
+	EXISTING=$(uci show mobiled | grep @profile | grep name | grep $DEFAULT_PROFILE_NAME | head -n 1 | cut -d '.' -f 1-2)
+	if [ -n "$EXISTING" ]; then
+		PROFILE="$EXISTING"
+	else
+		LAST_ID=$(uci show mobiled | grep @profile | grep 'id=' | cut -d '=' -f 2 | tr -d "'" | sort -r | head -n 1)
+		uci add mobiled profile >/dev/null
+		PROFILE="mobiled.@profile[-1]"
+		uci set "${PROFILE}.id=$((LAST_ID+1))"
+	fi
+	uci set "${PROFILE}.apn=$APN"
+	uci set "${PROFILE}.username=$(uci -c "$OLDCONFIG" -q get mobiledongle.$DEFAULT_PROFILE_NAME.username)"
+	uci set "${PROFILE}.password=$(uci -c "$OLDCONFIG" -q get mobiledongle.$DEFAULT_PROFILE_NAME.password)"
+	uci set "${PROFILE}.name=$DEFAULT_PROFILE_NAME"
+	uci set "${PROFILE}.pdptype=ipv4v6"
+	uci set "${PROFILE}.visible=1"
+	uci set "${PROFILE}.editable=1"
+fi
+
+INTERFACE="$(uci show network | grep 'wwan=interface\|internet=interface' | cut -d '=' -f 1)"
+NETWORK=$(uci -c "$OLDCONFIG" -q get mobiledongle.config.network)
+if [ -n "$NETWORK" ]; then
+	PROFILE=$(uci -q show mobiled | grep @profile | grep "$NETWORK" | cut -d . -f 1-2)
+fi
+if [ -n "$PROFILE" ]; then
+	ID="$(uci -q get "${PROFILE}.id")"
+	uci set "${INTERFACE}.profile=$ID"
+	uci set "${INTERFACE}.session_id=0"
+	uci set "${INTERFACE}.proto=mobiled"
+fi
+
+PIN=$(uci -c "$OLDCONFIG" -q get mobiledongle.sim.pin)
+if [ -n "$PIN" ]; then
+	uci add mobiled sim >/dev/null
+	SIM="mobiled.@sim[-1]"
+	uci set "${SIM}.iccid=unknown"
+	uci set "${SIM}.pin_type=pin1"
+	uci set "${SIM}.pin=$PIN"
+fi
+

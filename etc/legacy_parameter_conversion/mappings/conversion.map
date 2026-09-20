@@ -1,0 +1,1049 @@
+local gsub, format, match = string.gsub, string.format, string.match
+local sort, concat = table.sort, table.concat
+local ch = require("tch.configmigration.convert_helper")
+local bit = require("bit")
+local emc = ch.escape_lua_magic_char
+
+local acs_policy_map = {
+  ["Legacy"] = 0,
+  ["Interference"] = 1,
+  ["Interference&Busy"] = 2,
+  ["Optimized"] = 3,
+  ["Custom1"] = 4,
+  ["Custom2"] = 5,
+  ["legacy&noise"] = 6,
+}
+
+local function ssid_map_template(wifi_iface)
+  return {
+    ["ssid"] =          { uci_secname = wifi_iface, uci_option = "ssid" }, -- override uci_secname if need
+    ["apisolation"] =   { uci_option = "ap_isolation", value = ch.convert_bool },
+    ["any"] =           { uci_option = "public", value = ch.convert_bool },
+    ["secmode"] =       { uci_option = "security_mode", value = ch.wireless_convert_secmode },
+    ["WEPkey"] =        { uci_option = "wep_key" },
+    ["WPAPSKkey"] =     { uci_option = "wpa_psk_key" },
+    ["pmksacache"] =    { uci_option = "pmksa_cache", value = ch.convert_bool },
+    ["stationhistory"] ={ uci_option = "station_history", value = ch.convert_bool },
+    ["maxassociations"]={ uci_option = "max_assoc" },
+  }
+end
+
+local trace_modules_map = {
+    ["level"]  = { uci_option = "level" },
+    ["radius"] = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["acs"]    = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["wps"]    = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["dot1x"]  = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+    ["remote"] = { uci_option = "trace_modules", action = "add_list", value = ch.wireless_convert_trace_modules, },
+  }
+
+local function dsd_uf_get_uci_secname(_,_,lt)
+  if not lt._maps_store["_uf_uci_secname"] then
+     lt._maps_store["_uf_uci_secname"] = lt._maps_store["_ucicmd_result"]
+  end
+  return lt._maps_store["_uf_uci_secname"]
+end
+
+local dhcs_map = {
+    ["poolstart"] = { uci_option = "start", value = ch.dhcs_convert_pooloffset },
+    ["poolend"] = { uci_option = "limit", value = ch.dhcs_convert_poolrange },
+    ["state"] = { uci_option = "ignore", value = ch.dhcs_convert_poolstate },
+  }
+
+local function ip_save_primary_preferred_in_maps_store(_,lv,lt)
+  if lt["primary"] == "enabled" then
+     lt._maps_store["_primary_ip"] = lv
+  end
+  if lt["preferred"] == "enabled" then
+     lt._maps_store["_preferred_ip"] = lv
+  end
+end
+
+local function ip_if_localnetwork_ip_need_to_converted(_,_,lt)
+  -- do not use 'lv' here since "intf" was used to convert "netmask",
+  -- the value of "intf" will be lv in such case.
+  local addr = gsub(lt["addr"] or "", "/%d+", "")
+  if (addr == lt._maps_store["_primary_ip"]) or (addr == lt._maps_store["_preferred_ip"]) then
+     return "lan"
+  end
+  if not lt._maps_store["_primary_ip"] and not lt._maps_store["_primary_ip"] then
+     return "lan"
+  end
+end
+
+local function ip_save_first_in_maps_store(_,_,lt)
+  local addr = lt["addr"]
+  addr = (type(addr) == "table") and addr[1] or addr
+  addr = gsub(addr or "", "/%d+", "")
+  lt._maps_store["first_ip"] = addr
+end
+
+local function ip_if_ipwifi_ip_need_to_converted(_,_,lt)
+  -- do not use 'lv' here since "intf" was used to convert "netmask",
+  -- the value of "intf" will be lv in such case.
+  local addr = gsub(lt["addr"] or "", "/%d+", "")
+  if addr == lt._maps_store["first_ip"] then
+     return "Guest1"
+  end
+end
+
+local function ip_convert_netmask(_,_,lt)
+  local netmask = match(lt["addr"] or "", "/(%d+)")
+  if netmask and tonumber(netmask) >= 0 and tonumber(netmask) <= 32 then
+    netmask = netmask ~= "0" and bit.lshift(bit.bnot(0), 32-netmask) or 0
+  else
+    netmask = 24 -- 255.255.255.0 by default
+  end
+  return ch.num2ipv4(netmask)
+end
+
+
+local voice_device_map = {
+  ["FXS1"] = "fxs_dev_0",
+  ["FXS2"] = "fxs_dev_1",
+  ["DECT1"] = "dect_dev_0",
+  ["DECT2"] = "dect_dev_1",
+  ["DECT3"] = "dect_dev_2",
+  ["DECT4"] = "dect_dev_3",
+  ["DECT5"] = "dect_dev_4",
+  ["DECT6"] = "dect_dev_5",
+}
+
+local function voice_convert_device_list(_,lv)
+  if type(lv) == "string" then
+     return voice_device_map[lv]
+  elseif type(lv) == "table" then
+     for k,v in ipairs(lv) do
+         lv[k] = voice_device_map[v]
+     end
+     return lv
+  end
+end
+
+local function get_wanmode(_,_,lt,g_user_ini)
+  local wanmode = match(g_user_ini["system.ini"], "config %C*WANMode=(%S+)")
+    if wanmode == "ADSL" then
+      return "atm_wan eth3"
+    elseif wanmode == "VDSL" then
+      return "vlan_data eth3"
+    elseif wanmode == "ETH" then
+      return "eth4 eth3"
+    end
+end
+
+
+
+local function get_laxrules(_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "Disabled" then
+      return "1"
+    else
+      return "0"
+    end
+end
+
+local function get_normalrules(_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "Standard" then
+      return "1"
+    else
+      return "0"
+    end
+end
+
+local function get_highrules(_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "BlockAll" then
+      return "1"
+    else
+      return "0"
+    end
+end
+
+local function get_zone(_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "Disabled" then
+      return "REJECT"
+    else
+      return "DROP"
+    end
+end
+
+local function get_target (_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "BlockAll" then
+      return "DROP"
+    else
+      return "ACCEPT"
+    end
+end	
+
+local function get_firewall_level(_,_,lt,g_user_ini)
+  local firewall_setting = match(g_user_ini["fwlevel.ini"], "set %C*name=(%S+)")
+    if firewall_setting == "Disabled" then
+      return "lax"
+    elseif firewall_setting == "BlockAll" then
+      return "high"
+    else
+      return "normal"
+    end
+end
+
+
+local service_mac_mapped = {}
+function service_add_host_if_needed(_,_,lt,g_user_ini)
+  local mac = match(g_user_ini["dhcs.ini"], "addr="..lt.host:gsub('%.', '%%%.').." %C+macaddr=(%S+)")
+  if mac and not service_mac_mapped[mac] then
+     service_mac_mapped[mac] = true
+     return "add"
+  end
+end
+
+
+local function get_mac(_,_,lt,g_user_ini)
+  local mac = match(g_user_ini["dhcs.ini"], "addr="..lt.host:gsub('%.', '%%%.').." %C+macaddr=(%S+)")
+  if mac ~= nil then
+    return match(g_user_ini["dhcs.ini"], "addr="..lt.host:gsub('%.', '%%%.').." %C+macaddr=(%S+)")
+  end	
+end
+
+
+local function get_name(_,_,lt,g_user_ini)
+	local mac = match(g_user_ini["dhcs.ini"], "addr="..lt.host:gsub('%.', '%%%.').." %C+macaddr=(%S+)")
+	if mac ~= nil then
+		local hostname = match(g_user_ini["hostmgr.ini"], "mac_addr="..mac.." %C+host_name=(%S+)")
+		if hostname == nil then
+			hostname = match(lt.name, "%S+")
+		end
+		return hostname
+	end
+end
+
+
+local function get_gwip(_,_,lt,g_user_ini)
+  return match(g_user_ini["dhcs.ini"], "LocalNetwork %C*gateway=(%S+)")
+end
+
+local function get_rollbacksetting (_,_,lt,g_user_ini)
+  local swversion = match(g_user_ini["cwmp.ini"], "runtimevar %C*softwareVersion=(%S+)")
+  if swversion=="10.A.3.2" or swversion=="10.5.1.T" then
+	return "600"
+  else 
+	return "0"
+  end
+end
+
+
+function service_convert_baseport_to_dest_port(_,legacy_value,legacy_attribute_t)
+  if legacy_attribute_t["baseport"] then
+	
+	local mapb2ipport = {
+  ["undefined"] = 0,        -- DNS/SRV undefined port for SIP Proxy
+  ["at-echo"]   = 204,      -- AppleTalk Echo
+  ["at-nbp"]    = 202,      -- AppleTalk Name Binding
+  ["at-rtmp"]   = 201,      -- AppleTalk Routing Maintenance
+  ["at-zis"]    = 206,      -- AppleTalk Zone Information
+  ["auth"]      = 113,      -- Authentication Service
+  ["bgp"]       = 179,      -- Border Gateway Protocol
+  ["biff"]      = 512,      -- used by mail system to notify users
+  ["bootpc"]    = 68,       -- Bootstrap Protocol Client
+  ["bootps"]    = 67,       -- Bootstrap Protocol Server
+  ["chargen"]   = 19,       -- Character Generator
+  ["clearcase"] = 371,      -- Clearcase
+  --["cmd"]     = 514,      -- like exec, but automatic
+  ["daytime"]   = 13,       -- Daytime
+  ["discard"]   = 9,        -- Discard
+  ["dns"]       = 53,       -- Domain Name Server
+  ["domain"]    = 53,       -- Domain Name Server
+  ["doom"]      = 666,      -- doom Id Software
+  ["echo"]      = 7,        -- Echo */
+  ["exec"]      = 512,      -- remote process execution;
+  ["finger"]    = 79,       -- Finger
+  ["ftp"]       = 21,       -- File Transfer [Control]
+  ["ftp-data"]  = 20,       -- File Transfer [Default Data]
+  ["gopher"]    = 70,       -- Gopher
+  ["h323"]      = 1720,     -- h323
+  ["httpproxy"] = 8080,     -- HTTP proxy
+  ["ike"]       = 500,      -- IKE
+  ["ils"]       = 1002,     -- ils
+  ["imap2"]     = 143,      -- Interim Mail Access Protocol v2
+  ["imap3"]     = 220,      -- Interactive Mail Access Protocol v3
+  ["ingres-net"]= 134,      -- INGRES-NET Service *
+  ["ipcserver"] = 600,      -- Sun IPC server
+  ["ipx"]       = 213,      -- IPX
+  ["irc-o"]     = 194,      -- Internet Relay Chat Protocol */
+  ["irc-u"]     = 6667,     -- Internet Relay Chat Protocol
+  ["kerberos"]  = 88,       -- Kerberos
+  ["ldap"]      = 389,      -- Lightweight Directory Access Protocol
+  --["login"]   = 49,       -- dups port 513 !!!  Login Host Protocol
+  ["login"]     = 513,      -- remote login a la telnet;
+  ["netbios-dgm"]   = 138,  -- NETBIOS Datagram Service
+  ["netbios-ns"]    = 137,  -- NETBIOS Name Service
+  ["netbios-ssn"]   = 139,  -- NETBIOS Session Service *
+  ["netwall"]   = 533,      -- for emergency broadcasts
+  ["netware-ip"]    = 396,  -- Novell Netware over IP *
+  ["new-rwho"]  = 550,      -- new-who
+  ["nfds"]      = 2049,     -- NFS deamon
+  ["nicname"]   = 43,       -- Who Is
+  ["nntp"]      = 119,      -- Network News Transfer Protocol
+  ["ntalk"]     = 518,
+  ["ntp"]       = 123,      -- Network Time Protocol */
+  ["pcmail-srv"]= 158,      -- PCMail Server
+  ["pop2"]      = 109,      -- Post Office Protocol - Version 2
+  ["pop3"]      = 110,      -- Post Office Protocol - Version 3
+  ["printer"]   = 515,      -- spooler
+  ["qotd"]      = 17,       -- Quote of the Day
+  ["realaudio"] = 7070,     -- realaudio
+  ["rip"]       = 520,      -- rip
+  ["rtelnet"]   = 107,      -- Remote Telnet Service
+  ["rtsp"]      = 554,      -- rtsp
+  ["sip"]       = 5060,     -- Session Initiation Protocol
+  ["smtp"]      = 25,       -- Simple Mail Transfer
+  ["snmp"]      = 161,      -- SNMP
+  ["snmptrap"]  = 162,      -- SNMPTRAP
+  ["snpp"]      = 444,      -- Simple Network Paging Protocol
+  ["sntp"]      = 123,      -- Network Time Protocol */
+  ["sql*net"]   = 66,       -- Oracle SQL*NET
+  ["sql-net"]   = 150,      -- SQL-NET
+  ["sqlserv"]   = 118,      -- SQL Services
+  ["sunrpc"]    = 111,      -- SUN Remote Procedure Call
+  ["syslog"]    = 514,
+  ["systat"]    = 11,       -- Active Users
+  ["talk"]      = 517,      -- like tenex link, but across
+  ["telnet"]    = 23,       -- Telnet
+  ["time"]      = 37,       -- Time
+  ["timed"]     = 525,      -- timeserver
+  ["tftp"]      = 69,       -- Trivial File Transfer
+  ["ulistserv"] = 372,      -- Unix Listserv
+  ["utime"]     = 519,      -- unixtime
+  ["uucp"]      = 540,      -- uucpd
+  ["uucp-rlogin"]   = 541,  -- uucp-rlogin  Stuart Lynne
+  ["who"]       = 513,      -- maintains data bases showing who's
+  ["www-http"]  = 80,       -- World Wide Web HTTP
+  ["whoami"]    = 565,      -- whoami
+  ["xwindows"]  = 6000,     -- X windows
+}
+
+		 local baseport = mapb2ipport[legacy_attribute_t["baseport"]] or legacy_attribute_t["baseport"]
+
+     -- fully use Lua imply type convsion
+     local range = gsub(legacy_attribute_t["portrange"], "((%d+)%-(%d+))", function(_,s,e) return e-s end)
+     return format("%d-%d", baseport, baseport+range)
+  --else
+  --don't do anything, then return value will be nil, thus framework will use legacy value.
+  end
+end
+
+local map_table = {
+
+["fwlevel.ini"] = {
+   {
+      key = "dd name=BlockAll %C+",
+      uci_config = "firewall",
+      map = {
+	      ["name"] = { uci_secname = "fwconfig", uci_option = "level", value = get_firewall_level },
+	      ["index"] = { uci_secname = "laxrules", uci_option = "enabled", value = get_laxrules },
+	      ["readonly"] = { uci_secname = "normalrules", uci_option = "enabled", value = get_normalrules },
+	      ["udptrackmode"] = { uci_secname = "highrules", uci_option = "enabled", value = get_highrules },
+	      ["service"] = { uci_secname = "@zone[1]", uci_option = "input", value = get_zone },
+	      ["proxy"] = { uci_secname = "@zone[1]", uci_option = "forward", value = get_zone },
+	      ["text"] = { uci_secname = "defaultoutgoing", uci_option = "target", value = get_target },	
+	    } 
+   },
+},
+
+["contentsharing.ini"] = {
+    -- single instance case: one table means one instance here
+    {
+      key = "upnp config %C+",  -- a regex indicate how to identify an instance
+      uci_config = "minidlna",
+      uci_secname = "config",
+      map = {
+              --we use legacy parameter name as key for quick index,
+              ["state"] =        { uci_option = "enabled", value = ch.convert_bool },
+              ["friendlyname"] = { uci_option = "friendly_name" },
+            },
+    },
+
+    {
+      key = "ftp config %C+",
+      map = { -- "uci_config" and "uci_secname" can be overwritten
+              ["state"] = { uci_config = "pure-ftpd", uci_secname = "@pure-ftpd[0]", uci_option = "enabled", value = ch.convert_bool },
+            },
+    },
+
+    {
+      key = "cifs config %C+",
+      uci_config = "samba",
+      uci_secname = "@samba[0]",
+      map = {
+              ["state"] =     { uci_option = "enabled", value = ch.convert_bool },
+              ["workgroup"] = { uci_option = "workgroup" },
+              ["name"] =      { uci_option = "name" },
+              ["comment"] =   { uci_option = "description" },
+            },
+    },
+  },
+
+  ["wireless.ini"] = {
+    -- multi-instance case: one table means one instance as well
+    -- radio stuff
+    {
+      key = "radio %C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "radio_2G",
+      map = {
+              ["state"] =        { uci_option = "state", value = ch.convert_bool },
+              ["interop"] =      { uci_option = "standard", value = function (_,s) return gsub(s, "[8021/%.]", "") end },
+              ["country"] =      { uci_option = "country" },
+              ["channel"] =      { uci_option = "channel" },
+              ["channelwidth"] = { uci_option = "channelwidth",
+                                     value = function (_,s) s = s.."MHz"; return gsub(s, "20/40MHz", "auto") end },
+              ["sgi"] =          { uci_option = "sgi", value = ch.convert_bool },
+              ["cdd"] =          { uci_option = "cdd", value = ch.convert_bool },
+              ["stbc"] =         { uci_option = "stbc", value = ch.convert_bool },
+              ["frameburst"] =   { uci_option = "frame_bursting", value = ch.convert_bool },
+              ["interferencemode"]     = { uci_option = "interference_mode" },
+              ["interferencechannel"]  = { uci_option = "interference_channel_list" },
+              ["htsecurityrestriction"]= { uci_option = "ht_security_restriction", value = ch.convert_bool },
+            },
+    },
+    -- acs stuff
+    {
+      key = "acs config %C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "radio_2G",
+      map = {
+              ["state"]        = { uci_option = "acs_state", value = function (_,s) return s:lower() end, },
+              ["mode"]         = { uci_option = "acs_policy", value = function (_,s) return acs_policy_map[s] end, },
+              ["rescanperiod"] = { uci_option = "acs_rescan_period" },
+              ["rescandelay"]  = { uci_option = "acs_rescan_delay" },
+              ["rescandelaypolicy"]    = { uci_option = "acs_rescan_delay_policy", value = function (_,s) return s:lower() end, },
+              ["rescandelaymaxevents"] = { uci_option = "acs_rescan_delay_max_events" },
+              ["chmonitorperiod"]      = { uci_option = "acs_channel_monitor_period" },
+              ["chfaillockoutperiod"]  = { uci_option = "acs_channel_fail_lockout_period" },
+              ["allowedchannels"]      = { uci_option = "acs_allowed_channels" },
+              ["chmonitoraction"]      = { uci_option = "acs_monitor_action" },
+            },
+    },
+    -- ssid stuff: ap0~ap1
+    {
+      key = "mssid ifconfig ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = ssid_map_template("wl0"),
+    },
+    {
+      key = "mssid ifconfig ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = ssid_map_template("wl0_1"),
+    },
+    --ifattach(for homeware version:wifi-iface state & ap state):ap state, ssid_id is just used for run into this mapping
+    {
+      key = "mssid ifattach ssid_id=0%D-%C-radio_id=0",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["ssid_id"] = { uci_option = "state" , value = "1" }, },
+    },
+
+    --ifattach(for homeware version:wifi-iface state & ap state):ap state
+     {
+       key = "mssid ifattach ssid_id=1%D-%C-radio_id=0",
+       uci_config = "wireless",
+       uci_secname = "ap1",
+       map = { ["ssid_id"] = { uci_option = "state" , value = "1" }, },
+     },
+
+    --wps_state:ap0
+    {
+      key = "wps config ssid_id=0%D-%C-radio_id=0%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["state"] = { uci_option = "wps_state" , value = ch.convert_bool }, }
+    },
+
+    --wps_state:ap1
+    {
+      key = "wps config ssid_id=1%D-%C-radio_id=0%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["state"] = { uci_option = "wps_state" , value = ch.convert_bool }, }
+    },
+
+    -- MAC ACL stuff: ap0
+    {
+      key = "macacl config ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = {
+              ["control"] = { uci_option = "acl_mode" },
+              ["regtime"] = { uci_option = "acl_registration_time" },
+            },
+    },
+    {
+      key = "macacl config ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = {
+              ["control"] = { uci_option = "acl_mode" },
+              ["regtime"] = { uci_option = "acl_registration_time" },
+            },
+    },
+    -- MAC ACL accept list: ap0~ap1
+    {
+      key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=allow%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["hwaddr"] = { uci_option = "acl_accept_list", action = "add_list" }, },
+    },
+    {
+      key = "macacl add ssid_id=1%D-%C-radio_id=0%D-%C-permission=allow%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["hwaddr"] = { uci_option = "acl_accept_list", action = "add_list" }, },
+    },
+    -- MAC ACL deny list: ap0~ap1
+    {
+      key = "macacl add ssid_id=0%D-%C-radio_id=0%D-%C-permission=deny%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = { ["hwaddr"] = { uci_option = "acl_deny_list", action = "add_list" }, },
+    },
+    {
+      key = "macacl add ssid_id=1%D-%C-radio_id=0%D-%C-permission=deny%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = { ["hwaddr"] = { uci_option = "acl_deny_list", action = "add_list" }, },
+    },
+    -- trace modules stuff: ap0~ap1
+    {
+      key = "debug traceconfig ssid_id=0%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap0",
+      map = trace_modules_map,
+    },
+    {
+      key = "debug traceconfig ssid_id=1%D-%C-radio_id=0%D-%C+",
+      uci_config = "wireless",
+      uci_secname = "ap1",
+      map = trace_modules_map,
+    },
+  },
+
+  ["dyndns.ini"] = {
+    -- single instance case: one table means one instance here
+    {
+      key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+      uci_config = "ddns",
+      uci_secname = "myddns_ipv4",
+      map = {
+              --we use legacy parameter name as key for quick index,
+                ["name"] = {uci_option = "domain"},		
+            },
+    },
+		{
+      key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+      uci_config = "ddns",
+      uci_secname = "myddns_ipv4",
+      map = {
+              --we use legacy parameter name as key for quick index,
+                ["name"] = {uci_option = "lookup_host"},
+            },
+    },
+	{
+      key = "host add group=%D-%C+",  -- a regex indicate how to identify an instance
+      uci_config = "ddns",
+      uci_secname = "myddns_ipv6",
+      map = {
+              --we use legacy parameter name as key for quick index,
+                ["name"] = {uci_option = "domain"},
+            },
+    },
+    {
+      key = "modify name=%C+ intf=%C+",
+      uci_config = "ddns",
+      uci_secname = "myddns_ipv4",
+      map = {
+               ["status"] = { uci_option = "enabled", value = ch.convert_bool },
+               ["user"] = { uci_option = "username" },
+               ["password"] = { uci_option = "password", value = ch.decrypt },
+               ["service"] = { uci_option = "service_name", value = ch.convert_ddns_service },
+            },
+    },
+	{
+      key = "modify name=%C+ intf=%C+",
+      uci_config = "ddns",
+      uci_secname = "myddns_ipv6",
+      map = {
+               ["status"] = { uci_option = "enabled", value = ch.convert_bool },
+               ["user"] = { uci_option = "username" },
+               ["password"] = { uci_option = "password", value = ch.decrypt },
+               ["intf"] = { uci_option = "interface", value = ch.convert_ddns_interface },
+               ["service"] = { uci_option = "service_name", value = ch.convert_ddns_service },
+            },
+    },
+  },
+
+  ["dhcs.ini"] = {
+    {
+      key = "intf=LocalNetwork %C+",
+      uci_config = "dhcp",
+      uci_secname = "lan",
+      map = dhcs_map,
+    },
+  },
+
+  ["service.ini"] = {
+    {
+      keycap = "assign name=(%C+) host=%C+",
+      type = "multiple",
+      maps = {
+        {
+          keygen = function (t) return format("rule add name=(%s) %%C+portrange=([%%d%%-]+)%%C+", emc(t[1])) end,
+          type = "multiple",
+          maps = {
+            {
+              --uci_secname = nil, --it means nothing will be converted, because this element just do some preparations.
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              map = {
+                ["mode"] = { uci_option = "target", value = ch.service_get_portmapping_mode, },
+              },
+            },
+            {
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "firewall",
+              map = {
+                -- when use UCI 'add' action, you need to provide 'uci_sectype' element.
+                ["name"] = { uci_option = "name", uci_sectype = "userredirect", action = ch.service_add_portmapping_if_need },
+              },
+            },
+            {
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                ["name"]      = { uci_option = "name", },
+                ["protocol"]  = { uci_option = "proto", action = "add_list",
+                                  -- looks like homeware has a bug, type of 'proto' is list, however,
+                                  -- if we provide a list like {"tcp","udp"}, GUI will be confused
+                                  -- when we change a port mapping entry.
+                                  value = function (_,lv) if type(lv) == "table" then sort(lv);return concat(lv);end end },
+                ["ipversion"] = { uci_option = "family",
+                                  value = function (_,lv) if type(lv) == "table" then return "any" end end, },
+                ["mode"]      = { uci_option = "target", value = function (_,_,lt) return lt._maps_store["_target"] end, },
+                ["portrange"] = { uci_option = "src_dport", },
+              },
+            },
+            {
+              keygen = function (t) return format("rule add name=%s %%C+portrange=%s%%C+", emc(t[1]), emc(t[2])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                -- The parameter 'baseport' is optional in legacy, 'portrange' is mandatory;
+                -- but in homeware the 'dest_port' is mandatory. We cannot map an optional
+                -- parameter to a mandatory one, so we have to create a new map element to
+                -- map a mandatory parameter to another mandatory one.
+                ["portrange"] = { uci_option = "dest_port", value = service_convert_baseport_to_dest_port, },
+                -- uci option 'src' is mandatory when target is DNAT in homeware, in this case value usually is 'wan'
+                -- uci option 'dest' is mandatory when target is SNAT in homeware, in this case value usually is 'wan'
+                ["name"] = { uci_option = function (_,_,lt) return lt._maps_store["_target"] == "DNAT" and "src" or "dest" end,
+                             value = "wan", },
+              },
+            },
+            {
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "firewall",
+              uci_secname = ch.service_get_uci_secname,
+              map = {
+                ["host"] = { uci_option = "dest_ip", },
+                -- there is no corresponding legacy parameter for uci_option "enabled",
+                -- since we only migrated effective legacy port mapping, so homeware
+                -- option "enabled" should always be "1"
+                ["name"] = { uci_option = "enabled", value = "1", },
+              },
+            },
+			{
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "dhcp",
+             	map = {
+                -- when use UCI 'add' action, you need to provide 'uci_sectype' element.
+                ["name"] = { uci_option = "name", uci_sectype = "host", action = service_add_host_if_needed },
+              },
+            },
+			{
+              keygen = function (t) return format("assign name=%s host=%%C+", emc(t[1])) end,
+              uci_config = "dhcp",
+              uci_secname = dsd_uf_get_uci_secname,
+              map = {
+                ["host"] = { uci_option = "ip", },
+                ["name"] = { uci_option = "name", value = get_name, },
+				["intf"] = { uci_option = "mac", value = get_mac, },
+              },
+            },
+		  },
+        },
+      },
+    },
+  },
+
+
+  ["ip.ini"] = {
+    -- LocalNetwork
+    {
+      key = "ifconfig intf=LocalNetwork %C+",
+      uci_config = "network",
+      uci_secname = "lan",
+      map = {
+        ["ipv6"] = { uci_option = "ipv6", value = ch.convert_bool },
+		["curhoplimit"] = { uci_option = "ipaddr", value = get_gwip },
+      },
+    },  
+  },
+
+  ["tod.ini"] = {},
+  ["mlpuser.ini"] = {},
+  
+  ["bridgevlan.ini"] = {
+    {
+      key = "ifconfig brname=bridge intf=ethport4 %C+",
+      map = {
+        ["vlan"] = { uci_config = "network", uci_secname = "wan", uci_option = "ifname", value = get_wanmode }, 
+        ["intf"] = { uci_config = "network", uci_secname = "wan", uci_option = "type", value = "bridge", },
+        ["brname"] = { uci_config = "network", uci_secname = "lan", uci_option = "ifname", value = "eth0 eth1 eth2", }, 
+      },
+    },
+  },
+
+  ["cwmp.ini"] = {
+    {
+      key = "server config %C+",
+      uci_config = "cwmpd",
+      uci_secname = "cwmpd_config",
+      map = {
+        ["url"] = { uci_option = "upgrade_rollback_timeout", value = get_rollbacksetting },
+      },
+    },
+	-- add workaround for NG-73754 LE-HW Migration: Display message "your password has been reset" after firstboot.
+	{
+		key = "config %C+",
+		uci_config = "env",
+		uci_secname = "var",
+		map = {
+			["state"] = { uci_option = "LEHWupgrade", value = "1" },
+		},
+	},
+  },
+
+ ["servmgr.ini"] = {
+    {
+      key = "modify name=VOIP_SIP %C+",
+      uci_config = "mmpbx",
+      uci_secname = "global",
+      map = { --In legacy GUI toggle voice was applied on servmgr VOIP_SIP state
+        ["state"] = { uci_option = "enabled", value = ch.convert_bool },
+      },
+    },
+  },
+
+
+  ["voice.ini"] = {
+    -- voice sip config
+    {
+      key = "sip config %C+",
+      uci_config = "mmpbxrvsipnet",
+      uci_secname = "sip_net",
+      map = {
+        ["primregaddr"] = { uci_option = "primary_registrar", },
+        ["regport"]     = { uci_option = "primary_registrar_port", value = ch.convert_ipport },
+        ["primproxyaddr"] = { uci_option = "primary_proxy", },
+        ["proxyport"]   = { uci_option = "primary_proxy_port", value = ch.convert_ipport },
+        ["secproxyaddr"]= { uci_option = "secondary_proxy", },
+        ["secproxyport"]= { uci_option = "secondary_proxy_port", value = ch.convert_ipport },
+        ["regexpire"]   = { uci_option = "reg_expire", },
+      },
+    },
+    -- voice services - provision and (activate or deactivate)
+    {
+      keycap = "services provision type=(%w+)",
+      type = "multiple",
+      maps = {
+        {
+          keygen = function (t) return format("services provision type=%s%%c", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_services_get_uci_name,
+          map = {
+            ["type"] = { uci_option = "provisioned", value = "1", },
+          }
+        },
+        {
+          keygen = function (t) return format("services activate type=%s%%c", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_services_get_uci_name,
+          map = {
+            ["type"] = { uci_option = "activated", value = "1", },
+          }
+        },
+        {
+          keygen = function (t) return format("services deactivate type=%s%%c", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_services_get_uci_name,
+          map = {
+            ["type"] = { uci_option = "activated", value = "0", },
+          }
+        },
+      },
+    },
+    -- voice services - withdraw and deactivate
+    {
+      keycap = "services withdraw type=(%w+)",
+      type = "multiple",
+      maps = {
+        {
+          keygen = function (t) return format("services withdraw type=%s%%c", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_services_get_uci_name,
+          map = {
+            ["type"] = { uci_option = "provisioned", value = "0", },
+          }
+        },
+        {
+          keygen = function (t) return format("services deactivate type=%s%%c", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_services_get_uci_name,
+          map = {
+            ["type"] = { uci_option = "activated", value = "0", },
+          }
+        },
+      },
+    },
+    -- voice services - config
+    {
+      key = "services config %C+",
+      uci_config = "mmpbx",
+      map = {
+        ["cw_timer"] = { uci_secname = ch.voice_services_get_cw_uciname, uci_option = "timeout" },
+        ["cw_reject_persistence"] = { uci_secname = ch.voice_services_get_cw_uciname,
+                         uci_option = "cw_reject_persistency", value = ch.convert_bool, },
+        ["warm-line-timer"] = { uci_secname = ch.voice_services_get_wl_uciname, uci_option = "timeout" },
+        ["warm-line-dest"] = { uci_secname = ch.voice_services_get_wl_uciname, uci_option = "destination" },
+      },
+    },
+    {
+      key = "dectport config %C+",
+      uci_config = "mmpbxbrcmdectdev",
+      uci_secname = "dect_base",
+      map = {
+        ["substimeout"] = { uci_option = "pairing_window" },
+      },
+    },
+    -- voice profile
+    {
+      keycap = "profile add Index=(%d+) (%C+) internalnumber=no", -- skip internal profile
+      type = "multiple",
+      maps = {
+        { -- make sure voice profile section is created, this part should be individual
+          keygen = function (t) return format("profile add Index=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_profile_get_available_secname,
+          map = { -- add a named voice profile section with an uci_sectype
+            ["Index"] = { uci_option = "dummy", uci_sectype = "profile", },
+          },
+        }, -- maps[1]
+        {
+          keygen = function (t) return format("profile add Index=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_profile_get_available_secname,
+          map = {
+            ["Index"] = { uci_option = "config", value = "mmpbxrvsipnet", }, --hard coded for Telia
+          },
+        }, -- maps[2]
+        { -- make sure voice profile section is created, this part should be individual
+          keygen = function (t) return format("profile add Index=%s %%C+", t[1]) end,
+          uci_config = "mmpbxrvsipnet",
+          uci_secname = ch.voice_profile_get_available_secname,
+          map = { -- add a named voice profile section with an uci_sectype
+            ["Index"] = { uci_option = "dummy", uci_sectype = "profile", },
+          },
+        }, -- maps[3]
+        {
+          keygen = function (t) return format("profile add Index=%s %%C+", t[1]) end,
+          uci_config = "mmpbxrvsipnet",
+          uci_secname = ch.voice_profile_get_available_secname,
+          map = {
+            ["Index"]       = { uci_option = "network", value = "sip_net", }, --hard coded for Telia
+            ["SIP_URI"]     = { uci_option = "uri", value = ch.get_uri },
+            ["username"]    = { uci_option = "user_name" },
+            ["password"]    = { uci_option = "password", value = ch.decrypt },
+            ["displayname"] = { uci_option = "display_name" },
+            ["enable"]      = { uci_option = "enabled", value = ch.convert_bool },
+          },
+        }, -- maps[4]
+        { -- add mmpbx incoming_map
+          keygen = function (t) return format("uamap add profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          map = {
+            ["profile"] = { uci_option = "dummy", uci_sectype = "incoming_map", action = "add" },
+          },
+        }, -- maps[5]
+        { -- add mmpbx incoming_map
+          keygen = function (t) return format("uamap add profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = ch.voice_uamap_get_uci_secname,
+          map = {
+            ["profile"] = { uci_option = "profile", value = ch.voice_profile_get_available_secname, },
+            ["voiceport"] = { uci_option = "device", action = "add_list", value = voice_convert_device_list, },
+          },
+        }, -- maps[6]
+        { -- mmpbx outgoing_map for FXS1(fxs_dev_0)
+          keygen = function (t) return format("portmap add voiceport=FXS1 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["FXS1"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["FXS1"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["FXS1"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[7]
+        { -- mmpbx outgoing_map for FXS2(fxs_dev_1)
+          keygen = function (t) return format("portmap add voiceport=FXS2 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["FXS2"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["FXS2"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["FXS2"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[8]
+        { -- mmpbx outgoing_map for DECT1(dect_dev_0)
+          keygen = function (t) return format("portmap add voiceport=DECT1 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT1"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT1"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT1"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[9]
+        { -- mmpbx outgoing_map for DECT2(dect_dev_1)
+          keygen = function (t) return format("portmap add voiceport=DECT2 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT2"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT2"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT2"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[10]
+        { -- mmpbx outgoing_map for DECT3(dect_dev_2)
+          keygen = function (t) return format("portmap add voiceport=DECT3 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT3"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT3"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT3"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[11]
+        { -- mmpbx outgoing_map for DECT4(dect_dev_3)
+          keygen = function (t) return format("portmap add voiceport=DECT4 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT4"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT4"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT4"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[12]
+        { -- mmpbx outgoing_map for DECT5(dect_dev_4)
+          keygen = function (t) return format("portmap add voiceport=DECT5 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT5"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT5"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT5"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[13]
+        { -- mmpbx outgoing_map for DECT6(dect_dev_5)
+          keygen = function (t) return format("portmap add voiceport=DECT6 profile=%s %%C+", t[1]) end,
+          uci_config = "mmpbx",
+          uci_secname = function() return ch.voice_portmap_get_uci_secname(voice_device_map["DECT6"]) end,
+          map = {
+            ["profile"] = { uci_option = "profile", action = "add_list",
+                            value = function (_,_,lt)
+                                      return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT6"]), "profile",
+                                                ch.voice_profile_get_available_secname(_,_,lt))
+                                    end,
+                          },
+            ["priority"] = { uci_option = "priority", action = "add_list",
+                             value = function (_,lv)
+                                       return ch.voice_portmap_add_list_items(ch.voice_portmap_get_uci_secname(voice_device_map["DECT6"]), "priority",lv)
+                                     end,
+                           },
+          },
+        }, -- maps[14]
+      }, -- maps
+    },
+  },
+
+}
+
+return map_table

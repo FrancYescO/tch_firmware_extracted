@@ -1,0 +1,30 @@
+#!/bin/sh
+
+. /lib/functions/l2tp-ipsec-secrets.sh
+
+local config="l2tpipsecserver"
+
+generate_and_install_chap_secret() {
+    local user="$1"
+    uci_set "${config}" "${user}" "secret" "$(generate_chap_secret)"
+}
+
+generate_and_install_ipsec_PSK() {
+    uci_set "${config}" "ipsec_global" "PSK" "$(generate_ipsec_PSK)"
+}
+
+config_load "${config}"
+
+config_foreach generate_and_install_chap_secret l2tp_user
+generate_and_install_ipsec_PSK
+
+uci commit "${config}"
+
+# Disable the packages that are controlled by l2tpipsecserver.
+# Since they have their own START value,
+# they would start even if the l2tpipsecserver is disabled by default.
+/etc/init.d/xl2tpd disable
+
+# Finally, put all settings to the configuration files
+/usr/lib/l2tpipsecserver/setup.sh
+

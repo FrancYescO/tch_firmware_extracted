@@ -1,0 +1,242 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008-2011 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+START=60
+MIN_FREE_KBYTES_FOR_SAMBA=8192
+
+smb_header() {
+	local interface
+	config_get interface $1 interface "loopback lan"
+
+	# resolve interfaces
+	local interfaces=$(
+		include /lib/network
+		scan_interfaces
+
+		local net
+		for net in $interface; do
+			local ifname
+			config_get ifname "$net" ifname
+			[ -n "$ifname" ] && {
+				local ipaddr netmask
+				config_get ipaddr  "$net" ipaddr
+				config_get netmask "$net" netmask
+				[ -n "$ipaddr" ] && echo -n "$ipaddr/${netmask:-255.255.255.255} "
+
+				local ip6addr
+				config_get ip6addr "$net" ip6addr
+				[ -n "$ip6addr" ] && echo -n "$ip6addr "
+			}
+
+			echo -n "${ifname:-$net} "
+		done
+	)
+
+	local enabled name workgroup description charset
+	local hostname="$(uci_get system.@system[0].hostname)"
+
+	config_get_bool enabled $1 enabled    '0'
+	config_get name        $1 name        "${hostname:-OpenWrt}"
+	config_get workgroup   $1 workgroup   "${hostname:-OpenWrt}"
+	config_get description $1 description "Samba on ${hostname:-OpenWrt}"
+	config_get charset     $1 charset     "UTF-8"
+
+	if [ "$enabled" -eq 0 ]; then
+		eval ${2}=0
+		return
+	else
+		eval ${2}=1
+	fi
+
+	mkdir -p /var/etc
+	sed -e "s#|NAME|#$name#g" \
+	    -e "s#|WORKGROUP|#$workgroup#g" \
+	    -e "s#|DESCRIPTION|#$description#g" \
+	    -e "s#|INTERFACES|#$interfaces#g" \
+	    -e "s#|CHARSET|#$charset#g" \
+	    /etc/samba/smb.conf.template > /var/etc/smb.conf
+
+	local homes
+	config_get_bool homes $1 homes 0
+	[ $homes -gt 0 ] && {
+		cat <<EOT >> /var/etc/smb.conf
+
+[homes]
+	comment     = Home Directories
+	browsable   = no
+	read only   = no
+	create mode = 0750
+EOT
+	}
+
+	[ -L /etc/samba/smb.conf ] || ln -nsf /var/etc/smb.conf /etc/samba/smb.conf
+}
+
+convert_uri_to_printername(){
+  local uri=$1
+  local temp_printer_name
+  local printer_name_part_1
+  local printer_name_part_2
+
+  # a uri is like this: "usb://Lexmark/Lexmark%20E120n?serial=9943P88"
+  # after the conversion, the printer name is "Lexmark_Lexmark-E120n_9943P88"
+  temp_printer_name=${uri##*//}
+  printer_name_part_1=${temp_printer_name%%/*}
+  temp_printer_name=${temp_printer_name##*/}
+  printer_name_part_2=${temp_printer_name/\?serial=/_}
+
+  printer_name="$printer_name_part_1""_""$printer_name_part_2"
+  #replace '#' and "%20" with '-'; a printer name cannot include '#'
+  printer_name=${printer_name//%20/-}
+  printer_name=${printer_name//#/-}
+}
+
+add_printers(){
+  local line
+  local uri
+  local printer_file="/tmp/UsbPrinters"
+  local saved_uri
+  local found
+
+  /usr/lib/cups/backend/usb | while read line
+  do
+    uri=`echo "$line" | grep "direct usb:" | cut -d ' ' -f 2`
+    if [ -n $uri ] ; then
+      #add the new printer
+      echo $uri >> $printer_file
+      convert_uri_to_printername $uri
+
+      echo "Add printer:$printer_name"
+      lpadmin -p "$printer_name" -v $uri -E
+    fi
+  done
+}
+
+remove_printers(){
+  local line
+  local uri
+  local saved_uri
+  local found
+  local printer
+  local printer_file="/tmp/UsbPrinters"
+
+  cat /etc/printcap | while read line
+  do
+    printer=`echo "$line" | grep "|" | cut -d '|' -f 1`
+    if [ -n $printer ]; then
+      lpadmin -x $printer
+    fi
+  done
+
+  [ ! -f "$printer_file" ] && return
+
+  cat $printer_file | while read saved_uri
+  do
+    if [ -n $saved_uri ]; then
+      convert_uri_to_printername $saved_uri
+      echo "Remove printer:$printer_name"
+      lpadmin -x "$printer_name"
+    fi
+  done
+
+  rm $printer_file
+}
+
+smb_add_share() {
+	local name
+	local path
+	local users
+	local read_only
+	local guest_ok
+	local create_mask
+	local dir_mask
+	local enabled
+	local printable
+	local printing
+	local browsable
+	local writable
+
+	config_get name $1 name
+	config_get path $1 path
+	config_get users $1 users
+	config_get read_only $1 read_only
+	config_get guest_ok $1 guest_ok
+	config_get create_mask $1 create_mask
+	config_get dir_mask $1 dir_mask
+	config_get enabled $1 enabled
+	config_get printable $1 printable
+	config_get printing $1 printing
+	config_get browsable $1 browsable
+	config_get writable $1 writable
+	config_get min_print_space $1 min_print_space
+
+	[ -z "$name" -o -z "$path" ] && return 1
+	[ "$enabled" -eq 0 ] && return 1
+	 
+	echo -e "\n[$name]\n\tpath = $path" >> /var/etc/smb.conf
+	[ -n "$users" ] && echo -e "\tvalid users = $users" >> /var/etc/smb.conf
+	[ -n "$read_only" ] && echo -e "\tread only = $read_only" >> /var/etc/smb.conf
+	[ -n "$guest_ok" ] && echo -e "\tguest ok = $guest_ok" >> /var/etc/smb.conf
+	[ -n "$create_mask" ] && echo -e "\tcreate mask = $create_mask" >> /var/etc/smb.conf
+	[ -n "$dir_mask" ] && echo -e "\tdirectory mask = $dir_mask" >> /var/etc/smb.conf
+	[ -n "$printable" ] && echo -e "\tprintable = $printable" >> /var/etc/smb.conf
+	[ -n "$printing" ] && echo -e "\tprinting = $printing" >> /var/etc/smb.conf
+	[ -n "$browsable" ] && echo -e "\tbrowsable = $browsable" >> /var/etc/smb.conf
+	[ -n "$writable" ] && echo -e "\twritable = $writable" >> /var/etc/smb.conf
+	[ -n "$min_print_space" ] && echo -e "\tmin print space = $min_print_space" >> /var/etc/smb.conf
+	if [ $name == "printers" ] ; then
+	  mkdir -p $path
+	  chmod 1777 $path
+	  remove_printers
+	  add_printers
+	fi
+	echo -e "\tdfree cache time = 5" >> /var/etc/smb.conf
+	echo -e "\tdfree command = /usr/bin/dfree" >> /var/etc/smb.conf
+}
+
+start() {
+	local sambaEnabled=0
+	local memsize=`cat /proc/meminfo | grep MemTotal | awk '{ print $2 }'`
+	config_load samba
+	config_foreach smb_header samba "sambaEnabled"
+	#echo $sambaEnabled
+	[ "$sambaEnabled" -eq 0 ] && return 1
+
+	if [ $memsize -gt 100000 ] ; then
+		MIN_FREE_KBYTES=$(cat /proc/sys/vm/min_free_kbytes)
+		uci -P /var/state set samba.info=status
+		uci -P /var/state set samba.info.min_free_kbytes=$MIN_FREE_KBYTES
+		uci -P /var/state commit samba
+		if [ $MIN_FREE_KBYTES_FOR_SAMBA -gt $MIN_FREE_KBYTES ] ; then
+			# This is a temporary workaround for high end platforms with samba enabled,
+			# in order to reduce the memory fragmentation (which may be cause by Broadcom Eth driver).
+			# If a new Broadcom 14.06L release is integrated, This Workaround SHALL be checked if still necessary.
+			echo $MIN_FREE_KBYTES_FOR_SAMBA > /proc/sys/vm/min_free_kbytes
+		fi
+	fi
+	config_foreach smb_add_share sambashare
+	service_start /usr/sbin/smbd -D
+}
+
+stop() {
+	local memsize=`cat /proc/meminfo | grep MemTotal | awk '{ print $2 }'`
+	local current_min_free=`cat /proc/sys/vm/min_free_kbytes`
+	service_stop /usr/sbin/smbd
+	if [ $memsize -gt 100000 ] ; then
+		MIN_FREE_KBYTES=`uci -P /var/state get samba.info.min_free_kbytes`
+		if [ $current_min_free -ne $MIN_FREE_KBYTES ] ; then
+			echo $MIN_FREE_KBYTES > /proc/sys/vm/min_free_kbytes
+			local restore_connected_devices=`uci -P /var/state get samba.info.connecteddevices`
+			uci -P /var/state revert samba
+			if [ -n "$restore_connected_devices" ]; then
+				uci -P /var/state set samba.info=status
+				uci -P /var/state set samba.info.connecteddevices="$restore_connected_devices"
+				uci -P /var/state commit samba
+			fi
+		fi
+	fi
+}

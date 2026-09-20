@@ -1,0 +1,40 @@
+#!/bin/sh
+# do not run during /etc/init.d/network boot()
+# ntp will be started in /etc/init.d/sysntpd
+[ -f /var/state/bootnetwork ] && exit 0
+
+[ "$ACTION" = ifup -o "$ACTION" = ifupdate ] || exit 0
+[ "$ACTION" = ifupdate -a -z "$IFUPDATE_DATA" ] && exit 0
+
+/etc/init.d/sysntpd enabled || exit 0
+
+is_valid_interface() {
+	local list=$1
+	[ -z "$list" ] && return 0
+
+	case " $list " in
+		*" $INTERFACE "*)
+			return 0
+		;;
+		*)
+			return 1
+		;;
+	esac
+}
+
+interface_has_ntp_servers() {
+	local status=$(ubus call network.interface.$INTERFACE status)
+	local ntpserver=$(jsonfilter -s "$status" -e '$["data"]["ntpserver"]')
+
+	[ -z "$ntpserver" ] && return 1
+
+	return 0
+}
+
+config_load system
+config_get use_dhcp ntp use_dhcp 0
+config_get dhcp_interface ntp dhcp_interface
+
+[ $use_dhcp = 1 ] && is_valid_interface "$dhcp_interface" && interface_has_ntp_servers || exit 0
+
+/etc/init.d/sysntpd reload

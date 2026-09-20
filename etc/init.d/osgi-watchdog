@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_WRITE_PID=1
+SERVICE_PID_FILE=/var/run/osgi-watchdog.pid
+SERVICE_DAEMONIZE=1
+unset SERVICE_MATCH_EXEC
+. /lib/functions.sh
+config_load "osgi"
+
+start() {
+	if [ -f $SERVICE_PID_FILE ] || ! [ -d /cgroups/cpumemblk/osgi ]; then
+		return 1
+	fi
+	logger -t osgi-watchdog "Starting OSGi watchdog"
+	local restart_count
+	config_get restart_count config restart_count_after_oom
+
+        service_start /usr/bin/osgi-watchdog $restart_count
+}
+
+stop() {
+	logger -t osgi-watchdog "Stopping OSGi watchdog"
+        service_stop /usr/bin/osgi-watchdog
+	if [ -f $SERVICE_PID_FILE ]; then
+		rm -f $SERVICE_PID_FILE
+	fi
+}
+
+restart() {
+	logger -t osgi-watchdog "Stopping OSGi watchdog"
+	stop
+	logger -t osgi-watchdog "Starting OSGi watchdog"
+	start
+}

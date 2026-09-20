@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+STOP=90
+
+APP=/usr/bin/lte-doctor-logger
+PID_FILE=/var/run/$(basename ${APP}).pid
+
+start() {
+    local _ENABLED=$(uci_get ltedoctor @logger[0] enabled "1")
+    if [ "$_ENABLED" = "1" ]; then
+	logger -t "lte-doctor" "Starting LTE Doctor"
+	local DB_PATH=$(uci_get lte-doctor @logger[0] path "/tmp/lte-doctor.db")
+	local INTERVAL=$(uci_get lte-doctor @logger[0] interval "5")
+	local PERIOD=$(uci_get lte-doctor @logger[0] period "1")
+	local DAEMON_OPTS="$INTERVAL $PERIOD $DB_PATH"
+	start-stop-daemon -S -x $APP -p "$PID_FILE" -m -b -- $DAEMON_OPTS
+    else
+	logger -t mobiled "LTE Doctor disabled"
+    fi
+}
+
+stop() {
+    start-stop-daemon -K -p "$PID_FILE" -s TERM
+    sleep 2
+    rm -rf "$PID_FILE"
+}

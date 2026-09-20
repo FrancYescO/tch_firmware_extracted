@@ -1,0 +1,61 @@
+local logger = require("transformer.logger")
+local log = logger.new("rpc.xdsl", 2)
+local register = register;
+
+local xdsl_ = {
+    objectType = {
+        name = 'rpc.xdsl.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+	      status = {
+	      	access = "readOnly",
+	      	type = "string"
+	      },   
+	      statuscode = {
+	      	access = "readOnly",
+	      	type = "string"
+	      },   
+
+        }
+    }
+}
+
+local conn = mapper("ubus").connect()
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function getDataForXdsl()
+    local result = conn:call("xdsl", "status", {  })
+    if result == nil then
+        log:error("Cannot retrieve radio info for radio " .. radio)
+        return {}
+    end
+    return result
+end
+
+local function getall(mapping, key)
+	local state = getDataForXdsl()
+	local sanitizedData = {}
+	for k,v in pairs(state) do
+		sanitizedData[k] = nilToEmptyString(v)
+	end
+	return sanitizedData
+end
+
+local function get(mapping, paramName, key)
+	local state = getDataForXdsl()
+	return nilToEmptyString(state[paramName]);
+end
+
+xdsl_.getall = getall
+xdsl_.get = get
+
+register(xdsl_)

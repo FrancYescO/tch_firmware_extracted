@@ -1,0 +1,81 @@
+local popen = io.popen
+local match = string.match
+
+local function getNumberOfConnectedClients()
+    local clients = "0"
+    local fd = popen("ipsec status")
+    if fd then
+        for line in fd:lines() do
+            local m = match(line, '.*Security Associations.*(%d+).*up')
+            if m then
+                clients = m
+                break
+            end
+        end
+        fd:close()
+    end
+    return clients
+end
+
+local generators = {
+  -- The generator functions known to /lib/functions/l2tp-ipsec-secrets.sh
+  generateChapSecret = "generate_chap_secret",
+  generateIPSecPSK = "generate_ipsec_PSK",
+}
+
+local function generateSecret(_, pname)
+    local secret = ""
+    local generator = generators[pname]
+    if generator then
+        local fd, msg = popen(". /lib/functions/l2tp-ipsec-secrets.sh; " .. generator)
+        if fd then
+          secret = fd:read("*l") or ""
+          fd:close()
+        end
+    else
+        return nil, "No secret generator found"
+    end
+    return secret
+end
+
+local l2tpipsecserver_ = {
+    objectType = {
+        name = 'rpc.l2tpipsecserver.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            numberOfConnectedClients = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            generateChapSecret = {
+                access = "readOnly",
+                type = "string",
+            },
+            generateIPSecPSK = {
+                access = "readOnly",
+                type = "string",
+            }
+        }
+    },
+    get = {
+        numberOfConnectedClients = function()
+            return getNumberOfConnectedClients()
+        end,
+        generateChapSecret = generateSecret,
+        generateIPSecPSK = generateSecret,
+    }
+}
+
+local function getall()
+    local values = {}
+    for param, generator in pairs(generators) do
+        values[param] = generateSecret(_, generator)
+    end
+    values["numberOfConnectedClients"] = getNumberOfConnectedClients()
+    return values
+end
+
+l2tpipsecserver_.getall = getall
+register(l2tpipsecserver_)

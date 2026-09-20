@@ -1,0 +1,62 @@
+#!/bin/sh
+
+. /lib/functions/network.sh
+
+/etc/init.d/ipsec enabled || exit 0
+
+need_ipsec_reload=no
+
+ipsec_remote_check()
+{
+	local remotegw enabled
+	local dev ipv4addrs
+	local xfrm_policy_present=no
+
+	config_get remotegw "$1" gateway
+	config_get enabled "$1" enabled
+
+	if [ "$remotegw" != "" -a "$enabled" = "1" ]; then
+		dev="$(ip -o route get $remotegw 2> /dev/null | awk '{for(i=1;i<NF;i++) {if($i=="dev") print $(i+1)}}')"
+	else
+		return 1
+	fi
+
+	[ "$dev" != "$DEVICE" ] && return 0
+
+	# Check whether corresponding xfrm policy already exist or not
+	network_get_ipaddrs ipv4addrs $INTERFACE && {
+		for addr in $ipv4addrs
+		do
+			# Here simply grep to decide whether corresponding xfrm policy exists
+			[ -n "$(ip xfrm policy 2> /dev/null | grep $addr | grep $remotegw)" ] && xfrm_policy_present=yes
+		done
+	}
+
+	# Reload ipsec when there is no corresponding xfrm policy
+	[ "$xfrm_policy_present" = "no" ] && need_ipsec_reload=yes
+
+	return 0
+}
+
+check_ipsec_interface()
+{
+	for intf in $(config_get  "$1" interface)
+	do
+		if [ "$intf" == "$INTERFACE" ]; then
+			if [ "$ACTION" == "ifup" ]; then
+				/etc/init.d/ipsec reload
+			else
+				config_foreach ipsec_remote_check remote
+				if [ "${need_ipsec_reload}" = "yes" ]; then
+					/etc/init.d/ipsec reload
+				fi
+			fi
+		fi
+	done
+	return 0
+}
+
+[ "$ACTION" = "ifup" -o "$ACTION" = "ifupdate" -a -n "$IFUPDATE_ADDRESSES" ] && {
+	config_load "ipsec"
+        config_foreach check_ipsec_interface ipsec
+}
