@@ -1,0 +1,80 @@
+-- Manually generated
+
+local Device_Services_X_TELSTRA_GUIAccessOnly_ = {
+  objectType = {
+    name = "Device.Services.X_TELSTRA_GUIAccessOnly.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+	default = "0",
+        description = "Enable or disable the Ethernet/WiFi Access",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local forEachOnUci = uciHelper.foreach_on_uci
+local setOnUci = uciHelper.set_on_uci
+local fwBinding = { config = "firewall" }
+local isConfigChanged = false
+
+local function setUciParam(sectionName, paramName, value)
+  fwBinding.sectionname = sectionName
+  fwBinding.option = paramName
+  setOnUci(fwBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+local function getSectionName()
+    fwBinding.sectionname = "rule"
+    local sectionName = ""
+    forEachOnUci(fwBinding, function(s)
+      if s["name"] == "GUI_Access_Only" then
+        sectionName = s[".name"]
+      end
+    end)
+    return sectionName
+end
+
+Device_Services_X_TELSTRA_GUIAccessOnly_.get = {
+  Enable = function(mapping, param)
+    local section = getSectionName()
+    fwBinding.sectionname = section
+    fwBinding.option = "enabled"
+    fwBinding.default = "0"
+    return uciHelper.get_from_uci(fwBinding)
+  end,
+}
+
+Device_Services_X_TELSTRA_GUIAccessOnly_.set = {
+  Enable = function(mapping, param, value)
+    local section = getSectionName()
+    setUciParam(section, "enabled", value)
+    if value == "1" then
+      commitapply:newset("guiaccessonly")
+    end
+    isConfigChanged = true
+  end,
+}
+
+Device_Services_X_TELSTRA_GUIAccessOnly_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(fwBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_Services_X_TELSTRA_GUIAccessOnly_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(fwBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_Services_X_TELSTRA_GUIAccessOnly_)

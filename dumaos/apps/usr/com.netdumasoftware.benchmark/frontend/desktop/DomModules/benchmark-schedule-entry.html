@@ -1,0 +1,92 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-pages/iron-pages.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/benchmark-rating-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-days/duma-days.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-speed-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-ping-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-bloat-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script src="/apps/com.netdumasoftware.benchmark/desktop/Scripts/shared.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="benchmark-schedule-entry"> <template> <style is="custom-style" include="duma-theme iron-flex"> :host  {
+        min-width: 126px;
+        padding: 16px 0 0 0;
+        @apply(--layout-self-stretch);
+        @apply(--layout-vertical);
+        @apply(--layout-center);
+        transition: background 150ms ease-in-out;
+        text-align: center;
+        position: relative;
+        cursor: pointer;
+      }
+      :host:hover {
+        background-color: rgba(var(--primary-background-rgb), 0.5) !important;
+      }      
+      ::content .schedule-header {
+        height: 48px;
+        padding: 0 16px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      ::content .schedule-date {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        text-overflow: ellipsis;
+        width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        margin-top: 3px;
+        color: var(--secondary-text-color);
+      }
+      ::content .schedule-date duma-days {
+        width: 90%;
+      }
+      ::content .checkbox-column {
+        width: 100%;
+        padding-top: 20px;
+       }
+      ::content .schedule-row {
+        height: 44px;
+        display: block;
+      }
+      ::content .schedule-row paper-checkbox {
+        padding: 8px 8px 8px 16px;
+      }
+      ::content .bg {
+        background-color: rgba(var(--primary-background-rgb), 0.25);
+      }
+      ::content .schedule-row paper-icon-button#deleteTest {
+        margin: 4px;
+      } </style> <!-- schedule Rating Entry dom start --> <div class="schedule-header"> <div class="schedule-time"> <paper-icon-button icon="delete-forever" on-click="_deleteClick"></paper-icon-button> </div> </div> <div class="checkbox-column"> <div class="schedule-row">[[_getNext(schedule.next,'time')]]</div> <div class="schedule-row">[[_getNext(schedule.next,'date')]]</div> <div class="schedule-row"> <template is="dom-if" if="[[!_isShowDays(schedule)]]"> <div class="schedule-date">[[schedule.date]]</div> </template> <template is="dom-if" if="[[_isShowDays(schedule)]]"> <div class="schedule-date"><duma-days cron="[[schedule.cron]]"></duma-days></div> </template> </div> </div> <!-- Checkboxes for individual enable/disable of tests --> <!-- <div class="checkbox-column">
+      <div class="schedule-row"><paper-checkbox on-click="_checkboxClick"></paper-checkbox></div>
+      <div class="schedule-row"><paper-checkbox on-click="_checkboxClick"></paper-checkbox></div>
+      <div class="schedule-row"><paper-checkbox on-click="_checkboxClick"></paper-checkbox></div>
+    </div> --> </template> <script> Polymer({
+      is: 'benchmark-schedule-entry',
+      properties:
+      {
+        schedule: {
+          type: Object,
+          value: null
+        }
+      },
+      _checkboxClick: function(event){
+        event.stopPropagation();
+      },
+      _isShowDays: function(schedule){
+        return schedule.date === "SHOW_DAYS";
+      },
+      _getNext: function(next,part){
+        if(!next) return "<%= i18n.overAYear %>"
+        if(part === "time")
+          return next.toLocaleString({},{hour:"2-digit",minute:"2-digit"});
+        else
+          return next.toLocaleString({},{day:"2-digit",month:"2-digit",year:"2-digit"});
+      },
+      _deleteClick: function(event){
+        event.stopPropagation();
+        $("duma-alert")[0].show(
+          "<%= i18n.confirmDelete %>",
+          [
+            { text: "<%= i18n.cancel %>", action: "dismiss" },
+            { text: "<%= i18n.confirm %>", action: "confirm", callback: function () {
+              long_rpc_promise("com.netdumasoftware.benchmark","delete_cron_rule",[this.schedule.rule.id]).done(function(){
+                $(this).closest("benchmark-schedules")[0].reload_schedules();
+              }.bind(this));
+              }.bind(this)
+            }
+          ]
+        );
+      },
+    }); </script> </dom-module> 

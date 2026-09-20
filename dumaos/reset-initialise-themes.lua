@@ -1,0 +1,2 @@
+#!/usr/bin/lua
+package.path=package.path..";/dumaos/api/?.lua;/dumaos/api/libs/?.lua"require("libos")local e=require("json")local a="/dumaos/themes"local s=string.format("%s/cloud",a)local o=string.format("%s/ready",a)e.save(o,false)local t=e.load(string.format("%s/default/manifest.json",a))os.config_set("DumaOS_Theme","default")os.config_set("DumaOS_Theme_Version",t.version)os.execute(string.format("rm -rf %s && rm -rf  %s/* && mkdir -p %s",s,s,s))os.execute(string.format("ln -s %s/default %s/default",a,s))os.execute("sync")e.save(o,true)

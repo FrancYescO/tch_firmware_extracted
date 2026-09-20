@@ -1,0 +1,60 @@
+local rpc_vendorextension_ = {
+  objectType = {
+    name = "rpc.vendorextensions.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      MulticastHandler = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Reboot",
+          "RTFD1",
+          "RTFD2",
+        },
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local configChanged
+local vendorExtensionBinding = { config = "vendorextensions", sectionname = "multiap_vendorextensions", option = "MulticastHandler" }
+
+rpc_vendorextension_.get = {
+  MulticastHandler = function(mapping, param)
+    return uciHelper.get_from_uci(vendorExtensionBinding)
+  end
+}
+
+rpc_vendorextension_.set = {
+  MulticastHandler = function(mapping, param, value)
+    local fd = io.open("/tmp/.multicast_handler", "w")
+    if fd then
+      fd:write(value, "\n")
+      fd:close()
+    else
+      return nil, "internal write error"
+    end
+
+    uciHelper.set_on_uci(vendorExtensionBinding, value, commitapply)
+    configChanged = true
+  end
+}
+
+rpc_vendorextension_.commit = function()
+  if configChanged then
+    uciHelper.commit(vendorExtensionBinding)
+  end
+  configChanged = false
+end
+
+rpc_vendorextension_.revert = function()
+  if configChanged then
+    uciHelper.revert(vendorExtensionBinding)
+  end
+  configChanged = false
+end
+
+register(rpc_vendorextension_)

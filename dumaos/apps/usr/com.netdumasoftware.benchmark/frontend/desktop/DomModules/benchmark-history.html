@@ -1,0 +1,218 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-slider/paper-slider.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/benchmark-history-entry.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="benchmark-history"> <template> <style is="custom-style" include="duma-theme iron-flex"> :host {
+        display: block;
+      }
+      ::content #historyTable {
+        width: 100%;
+        transform-origin: top right;
+        @apply(--layout-horizontal);
+        position: relative;
+        z-index: -1;
+      }
+      ::content .historyTable-wrap {
+        @apply(--layout-horizontal);
+        border: thin solid var(--divider-color);
+        border-width: thin 0 thin 0;
+        position: relative;
+        z-index: 0;
+      }
+      ::content #header {
+        background-color: var(--transparent-background-color);
+        @apply(--layout-vertical);
+      }
+      ::content #header > div:not(:first-child) {
+        border-top: thin solid var(--divider-color);
+      }
+      ::content .history-title {
+        @apply(--paper-font-subhead);
+        flex-grow: 1;
+      }
+      ::content #header .history-header {
+        height : 64px;
+      }
+      ::content #header .history-row {
+        height: 48px;
+        line-height: 48px;
+        padding: 0 16px;
+        white-space: nowrap;
+        text-align: end;
+      }
+      ::content #tableWrap  {
+        overflow: hidden;
+        width: 100%;
+      }
+      ::content #slider {
+        --paper-slider-active-color: transparent;
+      }
+      ::content .slider-labels  {
+        @apply(--layout-horizontal);
+      }
+      ::content .slider-labels > div:first-child {
+        @apply(--layout-flex);
+      }
+      :host ::content benchmark-history-entry:nth-child(even){
+        background: rgba(var(--primary-background-rgb), 0.25);
+      } </style> <div class="layout vertical"> <div class="historyTable-wrap"> <!-- Row titles --> <div id="header"> <div class="history-header"></div> <!-- Spacer so titles align with  rows --> <div class="history-row"><%= i18n.speed %></div> <div class="history-row"><%= i18n.ping %></div> <div class="history-row"><%= i18n.buffer %></div> </div> <!-- Entries --> <div id="historyTable"> </div> </div> <div class="inner"> <paper-slider id="slider" value="100" immediate-value="{{sliderPosition}}"></paper-slider> <div class="slider-labels"> <div><%= i18n.oldest %></div> <div><%= i18n.latest %></div> </div> </div> </div> </template> <script> Polymer({
+      is: 'benchmark-history',
+      properties:
+      {
+        sliderPosition:
+        {
+          type: Number,
+          observer: '_sliderPositionChanged',
+        },
+        testProcessor: Object,
+        historyUsageCount:
+        {
+          type: String,
+          value: "",
+        },
+        countAvailable:
+        {
+          type: Boolean,
+          value: false,
+        }
+      },
+
+      ready: function ()
+      {
+        window.addEventListener("resize", () => this.setSliderPosition(this.sliderPos));
+      },
+
+      ReloadHistory()
+      {
+        $("#historyTable", this).empty();
+        this.countAvailable = false;
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).done(this.GetHistoryCallback.bind(this));
+      },
+
+      Init()
+      {
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).done(this.GetHistoryCallback.bind(this));
+      },
+
+      SetSpeeds(upload,download)
+      {
+        this.downloadSpeed = download || this.downloadSpeed;
+        this.uploadSpeed = upload || this.uploadSpeed;
+        $("benchmark-history-entry",this).each(function(index,elem){
+          elem.networkSpeedChange(this.uploadSpeed,this.downloadSpeed);
+        }.bind(this))
+      },
+
+      GetHistoryCallback(result)
+      {
+        var data = result[0];
+
+        // Check if there is any tests to process. Stops error on first time run
+        if (data.length == 0)
+          return;
+
+        if (data[0] != "version:1.1.0")
+        {
+          alert("<%= i18n.alertIncorrectVersion %>");
+          return;
+        }
+
+        var numTests = data.length - 2;
+
+        var table = $("#historyTable", this)[0];
+
+        var maxSpeed = this.uploadSpeed;
+
+        var maxTests = parseInt(data[1].split(":")[5]);
+        this.historyUsageCount = numTests + "/" + maxTests;
+        this.countAvailable = true;
+
+        for (var i = 0; i < numTests; i++)
+        {
+          var entryInfo = data[i + 2].split(":");
+
+          var entry = document.createElement("benchmark-history-entry");
+
+          // Date
+          var dateTime = new Date(entryInfo[1] * 1000); // JS timestamp is ms since 1970 rather than standard seconds
+
+          entry.date = dateTime.toLocaleDateString([], {day: '2-digit', month: 'short', year: '2-digit'});
+          entry.time = dateTime.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'});
+
+          var index = parseInt(entryInfo[0]);
+
+          // Values
+          if (entryInfo.length > 2)
+          {
+            entry.pass(index,                     // Index
+                       parseFloat(entryInfo[2]),  // Upload
+                       this.uploadSpeed,          // User upload speed
+                       parseFloat(entryInfo[3]),  // Download
+                       this.downloadSpeed,        // User download speed
+                       parseFloat(entryInfo[4]),  // Ping
+                       parseFloat(entryInfo[5]),  // Jitter
+                       parseFloat(entryInfo[6]),  // Drop rate
+                       parseFloat(entryInfo[8]),  // Bloat upload
+                       parseFloat(entryInfo[9]),  // Bloat download
+                       parseFloat(entryInfo[7])); // Bloat idle
+
+            $(entry, this).click(function (localIndex)
+            {
+              this.testProcessor.SetLoading(true);
+              long_rpc_promise("com.netdumasoftware.benchmark", "get_file_data", [localIndex]).done(this.LoadGraph.bind(this))
+            }.bind(this, index));
+          }
+          else
+          {
+            // Failed test
+            entry.fail(index);
+          }
+
+          entry.addEventListener("reload-history", function() { this.ReloadHistory(); }.bind(this));
+
+          Polymer.dom(table).appendChild(entry);
+        }
+
+        // Wait for child to render before setting slider position
+        Polymer.RenderStatus.afterNextRender(this, () =>
+        {
+          this.setSliderPosition(100);
+        });
+      },
+
+      LoadGraph(result)
+      {
+        this.testProcessor.ClearGraphs();
+
+        for (var i = 0; i < result[0].length; i++)
+        {
+          if (this.testProcessor.SendResult(result[0][i])[0] == -1)
+          {
+            alert("<%= i18n.alertIncorrectVersion %>");
+            break;
+          }
+        }
+
+        this.testProcessor.UpdateGraph(-2);
+        this.testProcessor.SetLoading(false);
+      },
+
+      _sliderPositionChanged: function(newValue, oldValue)
+      {
+        this.setSliderPosition(newValue);
+      },
+
+      setSliderPosition(value)
+      {
+        this.sliderPos = value;
+        var table = $("#historyTable", this);
+        var header = $("#header", this);
+        var children = table.children();
+        var sumWidth = 0;
+        for(var c = 0; c < children.length; c++){
+          sumWidth += children[c].clientWidth;
+        }
+        var bonusOffset = (table[0].scrollWidth > table.width()) ? header.width() : (sumWidth >= (table.width()) ? header.width() : 0);
+        var pos = (table[0].scrollWidth - table.width() + bonusOffset) * (value / 100)
+        table.css(
+        {
+         "transform": "translateX(-" + pos + "px)"
+        });
+      }
+    }); </script> </dom-module> 

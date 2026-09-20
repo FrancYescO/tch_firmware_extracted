@@ -1,0 +1,134 @@
+#!/bin/sh
+
+uci_commits(){
+if [ "$1" = "resume" ];then
+  uci set dumaos.tr69.dumaos_status=1
+elif [ "$1" = "suspend" ];then
+  uci set dumaos.tr69.dumaos_status=0
+elif [ "$1" = "start" ];then
+  uci set dumaos.tr69.dumaos_enabled=1
+  uci set dumaos.tr69.dumaos_status=1
+elif [ "$1" = "stop" ];then
+  uci set dumaos.tr69.dumaos_enabled=0
+  uci set dumaos.tr69.dumaos_status=2
+elif [ "$1" = "started" ];then
+  uci set dumaos.tr69.dumaos_started=1      	
+elif [ "$1" = "cleanup" ];then
+  uci set dumaos.tr69.dumaos_started=0	
+fi
+uci commit dumaos
+}
+
+generate_dumaos_config(){
+if [ ! -e "/etc/config/dumaos" ];then
+  touch /etc/config/dumaos
+fi
+uci set dumaos.tr69=tr69
+uci set dumaos.tr69.dumaos_enabled=0
+uci set dumaos.tr69.dumaos_started=0
+uci set dumaos.tr69.dumaos_status=2
+if [ "$(cat /dumaossystem/model)" = "LH1000" ];then
+  uci set dumaos.tr69.UpstreamPlanRate=20000000
+  uci set dumaos.tr69.DownstreamPlanRate=50000000
+fi	
+uci commit dumaos
+}	
+
+reload_services(){
+if [ "$1" = "start" ];then
+  STATE=start
+  STATUS=strt
+elif [ "$1" = "stop" ];then
+  STATE=stop
+  STATUS=stp
+elif [ "$1" = "resume" ];then
+  STATE=start	
+  STATUS=resume
+elif [ "$1" = "suspend" ];then
+  STATE=stop
+  STATUS=suspend
+elif [ "$1" = "sspend" ];then
+  STATE=stop
+  STATUS=sspend  
+fi
+if [ "$STATUS" = "strt" -o "$STATUS" = "resume" ];then
+  /etc/init.d/ctwatch "$STATE"
+  /etc/init.d/connwatch "$STATE"
+  /etc/init.d/arpwatch "$STATE"
+fi
+if [ "$STATUS" = "suspend" ];then
+  /etc/init.d/ctwatch "$STATE"
+  /etc/init.d/connwatch "$STATE"
+  /etc/init.d/arpwatch "$STATE"
+  return 0
+fi	
+/etc/init.d/dumaos "$STATE" "$STATUS" &
+}	
+
+if [ "$ACTION" = "dumaos_uci_init" ];then
+	generate_dumaos_config
+fi
+	
+if [ "$ACTION" = "dumaos_enabled" ];then
+	DUMA_STATUS=$(uci show dumaos | grep "dumaos_enabled" | grep -v grep | wc -l)
+	if [ "$DUMA_STATUS" = "0" ];then
+		generate_dumaos_config
+		uci_commits "start"
+	elif [ "$DUMA_STATUS" = "1" ];then
+		uci_commits "start"
+	fi
+	if [ "$(ps ww | grep "procmanager" | grep -v grep | wc -l)" -lt 1 ];then
+        	reload_services "start"
+	fi
+fi	
+
+if [ "$ACTION" = "dumaos_disabled" ];then
+        DUMA_STATUS=$(uci show dumaos | grep "dumaos_enabled" | grep -v grep | wc -l)
+        if [ "$DUMA_STATUS" = "1" ];then
+                uci_commits "stop"
+        elif [ "$DUMA_STATUS" = "0" ];then
+                generate_dumaos_config
+		uci_commits "stop"
+        fi
+	reload_services "stop"
+fi
+
+if [ "$ACTION" = "dumaos_started" ];then
+	DUMA_LOADED=$(ubus list | grep "com.netdumasoftware.procmanager" | grep -v grep | wc -l)
+	if [ "$DUMA_LOADED" = "1" ];then
+		uci_commits "started"
+	fi
+fi
+
+if [ "$ACTION" = "rappstart" ];then
+                if [ "$(ubus list | grep com.netdumasoftware.procmanager | grep -v grep | wc -l)" = 1 ];then
+                	uci_commits "started"
+		fi
+fi
+
+if [ "$ACTION" = "cleanup" ];then
+  uci_commits "cleanup"
+fi
+
+if [ "$ACTION" = "dumaos_resume" ];then
+  uci_commits "resume"
+  reload_services "resume"
+fi
+
+if [ "$ACTION" = "dumaos_suspend" ];then
+  reload_services "sspend"
+fi
+
+if [ "$ACTION" = "suspend" ];then
+  uci_commits "suspend"
+  reload_services "suspend"
+fi
+
+if [ "$ACTION" = "stop" ];then
+  uci_commits "stop"
+  reload_services "suspend"
+fi
+
+if [ "$ACTION" = "resume_status" ];then
+  uci_commits "resume"
+fi

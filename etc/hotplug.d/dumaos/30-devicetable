@@ -1,0 +1,57 @@
+#!/bin/sh
+
+#-- @depends eval; grep; cut; sed
+#-- @test which eval && which grep && which cut && which sed
+
+if [ "$ACTION" = "devicestable" ];then
+MODEL=$(cat /dumaossystem/model)
+if [ "$MODEL" = "LH1000" ]; then
+WANIP=$(ubus call network.interface.wan status | grep "\"address\":" | cut -d':' -f 2 | sed 's/ //g;s/\"//g')
+if [ "$WANIP" = "0.0.0.0" ];then
+ETHSTATUS_0="LinkDown"
+else
+ETHSTATUS_0="1000M/FULL"
+fi
+elif [ "$MODEL" = "DJA0231" ]; then
+UPDOWN=$(ethctl eth4 media-type | grep "is up" | wc -l)
+if [ "$UPDOWN" = "0" ];then   
+eval ETHSTATUS_4="LinkDown"  
+else                          
+eval ETHSTATUS_4="1000M/FULL"
+fi 
+fi
+
+if [ "$MODEL" = "LH1000" ]; then
+for i in 1 2 3 4;do
+UPDOWN=$(ethctl eth$i media-type | grep "is up" | wc -l)
+if [ "$UPDOWN" = "0" ];then 
+eval ETHSTATUS_$i="LinkDown"
+else                          
+eval ETHSTATUS_$i="1000M/FULL"
+fi
+done
+elif [ "$MODEL" = "DJA0231" ]; then
+for i in 0 1 2 3;do
+UPDOWN=$(ethctl eth$i media-type | grep "is up" | wc -l)
+if [ "$UPDOWN" = "0" ];then     
+eval ETHSTATUS_$i="LinkDown"    
+else                               
+eval ETHSTATUS_$i="1000M/FULL"     
+fi                                 
+done
+fi
+
+if [ "$MODEL" = "LH1000" ]; then
+for port in 0 1 2 3 4;do
+        STATUS="ETHSTATUS_$port"   
+        eval ETH_VALUE="\$$STATUS" 
+        echo "$ETH_VALUE"          
+done 
+elif [ "$MODEL" = "DJA0231" ]; then                     
+for port in 4 0 1 2 3;do            
+        STATUS="ETHSTATUS_$port"   
+        eval ETH_VALUE="\$$STATUS" 
+        echo "$ETH_VALUE"          
+done 
+fi
+fi

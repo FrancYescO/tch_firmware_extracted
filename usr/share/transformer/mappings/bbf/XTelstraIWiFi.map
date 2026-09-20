@@ -1,0 +1,481 @@
+local uci_helper = mapper("ucihelper")
+local transactions = {}
+local binding = { config = "hotspotd" }
+local dhcp_binding = { config = "dhcp", sectionname = "fonopen", option = "leasetime" }
+local cvtBoolean = setmetatable({
+    ["true"] = "1",
+    ["false"] = "0",
+    ["1"] = "true",
+    ["0"] = "false",
+}, { __index = function() return "0" end })
+
+local cvtStatus = setmetatable({
+    ["down"] = "Disabled",
+    ["up"] = "Enabled",
+}, { __index = function() return "0" end })
+
+local Multi_Services_X_TELSTRA_IWIFI_i_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "XTelstraIWiFiNumberOfEntries",
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            BandwidthEgress = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "0",
+            },
+            BandwidthIngress = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "0",
+            },
+            BandwidthThreshold = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "2000",
+            },
+            BandwidthHysteresis = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "500",
+            },
+            DHCPLeaseTime = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "600",
+            },
+            IdleTimeout = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "600",
+            },
+            StaticWhitelist = {
+                access = "readWrite",
+                type = "string",
+                max = "2048",
+            },
+            DynamicWhitelist = {
+                access = "readWrite",
+                type = "string",
+                max = "2048",
+            },
+            VenueClass = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "0",
+            },
+            LocationName = {
+              access = "readWrite",
+              type = "string",
+              max = "64",
+            },
+            -- ProfileNumberOfEntries
+            -- End of Configuration paramters
+            -- Diagnostic parameters
+            Status = {
+                access = "readOnly",
+                type = "string",
+                max = "32",
+                default = "Disabled",
+            },
+            ExtendedStatus = {
+                access = "readOnly",
+                type = "string",
+                max = "1024",
+            },
+            -- End of Diagnostic parameters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_.entries = function(mapping, parentkey)
+    local entries = {}
+    entries[#entries + 1] = "FON_Telstra"
+    return entries
+end
+
+local function getExtendedStatus(logfile)
+    local res = ""
+    if logfile ~= "" then
+        local file = io.open(logfile,"r")
+        if file then
+            local lines = {}
+            for line in file:lines() do
+                lines[#lines+1] = line
+            end
+            local max_size = tonumber(Multi_Services_X_TELSTRA_IWIFI_i_.objectType.parameters.ExtendedStatus.max) or 0
+            for i=#lines,1,-1 do
+                if string.len(res) + string.len(lines[i]) >= max_size then
+                    break
+                end
+                if i == #lines then
+                    res = lines[i]
+                else
+                    res = res .. "\n" .. lines[i]
+                end
+            end
+        file:close()
+        end
+    end
+    return res
+end
+
+local function getDHCPLeaseTime()
+    local v = uci_helper.get_from_uci(dhcp_binding)
+    if v ~= "" then
+        local hour = string.match(v, "(%d+)h")
+        local minute = string.match(v, "(%d+)m")
+        local second = string.match(v, "(%d+)s")
+        hour = hour or 0
+        minute = minute or 0
+        second = second or 0
+        return tostring(hour*3600 + minute*60 + second)
+    end
+    return "600"
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_.getall = function(mapping, key)
+    local data = {
+        Enable = "0",
+        BandwidthEgress = "0",
+        BandwidthIngress = "0",
+        BandwidthThreshold = "2000",
+        BandwidthHysteresis = "500",
+        DHCPLeaseTime = "600",
+        IdleTimeout = "600",
+        StaticWhitelist = "",
+        DynamicWhitelist = "",
+        VenueClass = "0",
+        Status = "Disabled",
+        ExtendedStatus = "",
+        LocationName = "",
+    }
+    binding.sectionname = "state"
+    local v = uci_helper.getall_from_uci(binding)
+    data.Enable = v and v.deploy and cvtBoolean[v.deploy] or data.Enable
+    data.Status = v and v.status and cvtStatus[v.status] or data.Status
+    local logfile = v.extendedstatuslog or ""
+    data.ExtendedStatus = getExtendedStatus(logfile)
+
+    binding.sectionname = "main"
+    local v = uci_helper.getall_from_uci(binding)
+    data.VenueClass = v.venue_class and string.match(v.venue_class, "%d+") and v.venue_class or data.VenueClass
+    data.BandwidthThreshold = v.bandwidth_threshold and string.match(v.bandwidth_threshold, "%d+") and v.bandwidth_threshold or data.BandwidthThreshold
+    data.BandwidthHysteresis = v.bandwidth_hysteresis and string.match(v.bandwidth_hysteresis, "%d+") and v.bandwidth_hysteresis or data.BandwidthHysteresis
+    data.LocationName = v.location_name or data.LocationName
+
+    binding.sectionname = "traffic"
+    local v = uci_helper.getall_from_uci(binding)
+    data.BandwidthEgress = v.overall_kbit_out and string.match(v.overall_kbit_out, "%d+") and v.overall_kbit_out or data.BandwidthEgress
+    data.BandwidthIngress = v.overall_kbit_in and string.match(v.overall_kbit_in, "%d+") and v.overall_kbit_in or data.BandwidthIngress
+
+    binding.sectionname = "whitelist"
+    local v = uci_helper.getall_from_uci(binding)
+    data.StaticWhitelist = v.static and type(v.static) == "table" and table.concat(v.static, ",") or data.StaticWhitelist
+    data.DynamicWhitelist = v.domain and type(v.domain) == "table" and table.concat(v.domain, ",") or data.DynamicWhitelist
+
+    binding.sectionname = "client"
+    binding.option = "idle_max"
+    local v = uci_helper.get_from_uci(binding)
+    data.IdleTimeout = string.match(v, "%d+") and v or data.IdleTimeout
+
+    data.DHCPLeaseTime = getDHCPLeaseTime()
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_.get = {
+    Enable = function(mapping, param, key)
+        binding.sectionname = "state"
+        binding.option = "deploy"
+        return cvtBoolean[uci_helper.get_from_uci(binding)]
+    end,
+    BandwidthEgress = function(mapping, param, key)
+        binding.sectionname = "traffic"
+        binding.option = "overall_kbit_out"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "0"
+    end,
+    BandwidthIngress = function(mapping, param, key)
+        binding.sectionname = "traffic"
+        binding.option = "overall_kbit_in"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "0"
+    end,
+    BandwidthThreshold = function(mapping, param, key)
+        binding.sectionname = "main"
+        binding.option = "bandwidth_threshold"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "2000"
+    end,
+    BandwidthHysteresis = function(mapping, param, key)
+        binding.sectionname = "main"
+        binding.option = "bandwidth_hysteresis"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "500"
+    end,
+    DHCPLeaseTime = function(mapping, param, key)
+        return getDHCPLeaseTime()
+    end,
+    IdleTimeout = function(mapping, param, key)
+        binding.sectionname = "client"
+        binding.option = "idle_max"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "600"
+    end,
+    StaticWhitelist = function(mapping, param, key)
+        binding.sectionname = "whitelist"
+        binding.option = "static"
+        local value = uci_helper.get_from_uci(binding)
+        if type(value) == "table" then
+            return table.concat(value, ",")
+        end
+        return ""
+    end,
+    DynamicWhitelist = function(mapping, param, key)
+        binding.sectionname = "whitelist"
+        binding.option = "domain"
+        local value = uci_helper.get_from_uci(binding)
+        if type(value) == "table" then
+            return table.concat(value, ",")
+        end
+        return ""
+    end,
+    VenueClass = function(mapping, param, key)
+        binding.sectionname = "main"
+        binding.option = "venue_class"
+        local value = uci_helper.get_from_uci(binding)
+        if string.match(value, "%d+") then
+            return value
+        end
+        return "0"
+    end,
+    LocationName = function(mapping, param, key)
+      binding.sectionname = "main"
+      binding.option = "location_name"
+      local value = uci_helper.get_from_uci(binding)
+      return value or ""
+    end,
+    Status = function(mapping, param, key)
+        binding.sectionname = "state"
+        binding.option = "status"
+        return cvtStatus[uci_helper.get_from_uci(binding)]
+    end,
+    ExtendedStatus = function(mapping, param, key)
+        binding.sectionname = "state"
+        binding.option = "extendedstatuslog"
+        local logfile = uci_helper.get_from_uci(binding)
+        return getExtendedStatus(logfile)
+    end,
+}
+
+local function getIntPart(x)
+    if x <= 0 then
+        return math.ceil(x);
+    end
+    if math.ceil(x) ~= x then
+        x = math.ceil(x) - 1
+    end
+    return x
+end
+
+-- Workaround for missing functionality in ucihelper
+local uci = require("uci")
+local function set_on_uci_state(binding, value, commitapply)
+  local cursor = uci.cursor(UCI_CONFIG, "/var/state")
+  cursor:add_delta("/var/state")
+  -- simplified copy from ucihelper.set_on_uci
+  local config = binding.config
+  local section = binding.sectionname
+  local option = binding.option
+  local stype = binding.sectiontype or "?"
+  if not config then
+    error("No config could be found in the given binding", 2)
+  end
+  if not section then
+    error("No section name could be found in the given binding", 2)
+  end
+  if not value then
+    error("No value given to be set on UCI", 2)
+  end
+  local result = cursor:load(config)
+  if result then
+    if binding.extended then
+      if option then
+        result = cursor:set(config .. "." .. section .. "." .. option .. "=" .. value)
+      else
+        result = cursor:set(config .. "." .. section                  .. "=" .. value)
+      end
+    else
+      if option then
+        result = cursor:set(config, section, option, value)
+      else
+        result = cursor:set(config, section,         value)
+      end
+    end
+  end
+  if result then
+    -- We save here so the set is persisted to file, although it is not
+    -- yet committed! We persist to file, so if we lose or reload our cursor for
+    -- some reason, the set won't be lost.
+    result = cursor:save(config)
+  end
+  if result and commitapply then
+    if option then
+      commitapply:newset(config .. "." .. stype .. '.' .. section .. "." .. option)
+    else
+      commitapply:newadd(config .. "." .. stype .. '.' .. section)
+    end
+  end
+  cursor:unload(config)
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_.set = {
+    Enable = function(mapping, param, value, key)
+        binding.sectionname = "state"
+        binding.option = "deploy"
+        local old_value = cvtBoolean[uci_helper.get_from_uci(binding)]
+        if value ~= old_value then
+            set_on_uci_state(binding, cvtBoolean[value], commitapply)
+            binding.option = "_orig_deploy"
+            set_on_uci_state(binding, cvtBoolean[value], commitapply)
+            transactions[binding.config] = true
+        end
+    end,
+    BandwidthEgress = function(mapping, param, value, key)
+        binding.sectionname = "traffic"
+        binding.option = "overall_kbit_out"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    BandwidthIngress = function(mapping, param, value, key)
+        binding.sectionname = "traffic"
+        binding.option = "overall_kbit_in"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    BandwidthThreshold = function(mapping, param, value, key)
+        binding.sectionname = "main"
+        binding.option = "bandwidth_threshold"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    BandwidthHysteresis = function(mapping, param, value, key)
+        binding.sectionname = "main"
+        binding.option = "bandwidth_hysteresis"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    DHCPLeaseTime = function(mapping, param, value, key)
+        local hour = getIntPart(value/3600)
+        local minute = getIntPart(math.fmod(value, 3600)/60)
+        local second = math.fmod(value, 60)
+        local time = ""
+        if hour > 0 then
+            time = hour .. "h"
+        end
+        if minute > 0 then
+            time = time .. minute .. "m"
+        end
+        if second > 0 then
+            time = time .. second .. "s"
+        end
+        uci_helper.set_on_uci(dhcp_binding, time, commitapply)
+        transactions[dhcp_binding.config] = true
+    end,
+    IdleTimeout = function(mapping, param, value, key)
+        binding.sectionname = "client"
+        binding.option = "idle_max"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    StaticWhitelist = function(mapping, param, value, key)
+        binding.sectionname = "whitelist"
+        binding.option = "static"
+        local tvalue = {}
+        for v in string.gmatch(value, "[^,%s]+") do
+            tvalue[#tvalue + 1] = v
+        end
+        uci_helper.set_on_uci(binding, tvalue, commitapply)
+        transactions[binding.config] = true
+    end,
+    DynamicWhitelist = function(mapping, param, value, key)
+        binding.sectionname = "whitelist"
+        binding.option = "domain"
+        local tvalue = {}
+        for v in string.gmatch(value, "[^,%s]+") do
+            tvalue[#tvalue + 1] = v
+        end
+        uci_helper.set_on_uci(binding, tvalue, commitapply)
+        transactions[binding.config] = true
+    end,
+    VenueClass = function(mapping, param, value, key)
+        binding.sectionname = "main"
+        binding.option = "venue_class"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    LocationName = function(mapping, param, value, key)
+      binding.sectionname = "main"
+      binding.option = "location_name"
+      uci_helper.set_on_uci(binding, value, commitapply)
+      transactions[binding.config] = true
+    end,
+}
+
+local function ubus_event_cb(mapping, event, data)
+    if data.ExtendedStatus and data.ExtendedStatus == "ValueChange" then
+        return { { key = "FON_Telstra", paramname = "ExtendedStatus" } }
+    end
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_.add_watchers = function(mapping)
+    local ubus_evsrc = eventsource("ubus")
+    ubus_evsrc.watch_event(mapping, ubus_event_cb, "hotspotd")
+end
+Multi_Services_X_TELSTRA_IWIFI_i_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

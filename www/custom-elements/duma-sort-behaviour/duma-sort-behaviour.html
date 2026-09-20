@@ -1,0 +1,122 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <script> var Duma = Duma || {};
+  Duma.SortBehaviour = {
+    properties: {
+      sortingMethods: {
+        type: Array,
+        value: []
+      },
+      sortKey: {
+        type: Function,
+        value: "",
+        observer: "_sortChanged"
+      },
+      sortAscending: {
+        type: Boolean,
+        value: true,
+        observer: "_sortChanged"
+      },
+      sortFunction: Function,
+    },
+
+    listeners: {
+      click: '_onSortClick'
+    },
+
+    _onSortClick: function(event){
+      var sortElem = $(event.target).closest("[sort-click]");
+      if(sortElem[0]){
+        var sort = sortElem.attr("sort-click");
+        if(typeof sort !== "function"){
+          if(sort === this.sortKey){
+            this._toggleAscending();
+          }else{
+            this.sortAscending = this._getSortDefault(sort);
+            this.sortKey = sort;
+          }
+        }
+      }
+    },
+
+    _toggleAscending: function(){
+      this.sortAscending = !this.sortAscending;
+    },
+
+    _getSortIcon: function(match,key,ascending){
+      if(match !== key)
+        return "blank";
+      else {
+        return ascending ? "arrow-drop-up" : "arrow-drop-down";
+      }
+    },
+
+    _sortChanged: function(val){
+      var key;
+      var asc;
+      if(typeof val === "string"){
+        key = val;
+        asc = this.sortAscending;
+      }else if(typeof val === "boolean"){
+        key = this.sortKey;
+        asc = val;
+      }
+      if(typeof key !== "string") return;
+      
+      var func = this._getSortFunc(key);
+
+      this.sortFunction = function(){
+        return (asc === true ? 1 : -1) * func.apply(this,arguments);
+      }
+    },
+    addSortingMethod: function(key,func,defaultAscending){
+      if(typeof func !== "function"){
+        switch(typeof func){
+          case "string":
+            func = function(a,b){
+              return a > b ? 1 : -1;
+            }
+            break;
+          case "number":
+            func = function(a,b){
+              return a - b;
+            }
+            break;
+        }
+      }
+      this.sortingMethods.push({
+        key: key,
+        func: func,
+        defaultAscending: !!defaultAscending
+      })
+    },
+
+    _getSortMethod: function(key){
+      if(this.sortingMethods && this.sortingMethods.length)
+        for(var i = 0; i < this.sortingMethods.length; i++){
+          var m = this.sortingMethods[i];
+          if(m.key === key){
+            return m;
+          }
+        }
+      return null;
+    },
+
+    _getSortDefault: function(key){
+      var m = this._getSortMethod(key);
+      return !!(m && m.defaultAscending); 
+    },
+    _getSortFunc: function(key){
+      var m = this._getSortMethod(key);
+      if(m){
+        return m.func;
+      }
+      return function(){
+        return 0;
+      };
+    },
+    noSort: function(){
+      this.sortKey = "";
+    },
+  }; </script> 
