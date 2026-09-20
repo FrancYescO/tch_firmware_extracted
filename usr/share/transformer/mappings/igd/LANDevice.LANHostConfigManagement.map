@@ -1,0 +1,431 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DHCPServerConfigurable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      DHCPServerEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      DHCPRelay = {
+        access = "readOnly",
+        status = "deprecated",
+        type = "boolean",
+      },
+      MinAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      MaxAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      ReservedAddresses = {
+        access = "readWrite",
+        list = true,
+        max = "256",
+        type = "string",
+      },
+      SubnetMask = {
+        access = "readWrite",
+        type = "string",
+      },
+      DNSServers = {
+        access = "readWrite",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      DomainName = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      IPRouters = {
+        access = "readWrite",
+        list = true,
+        max = "64",
+        type = "string",
+      },
+      DHCPLeaseTime = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      UseAllocatedWAN = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Normal",
+          "UseAllocatedSubnet",
+          "Passthrough",
+        },
+      },
+      AssociatedConnection = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      PassthroughLease = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      PassthroughMACAddress = {
+        access = "readWrite",
+        type = "string",
+      },
+      AllowedMACAddresses = {
+        access = "readWrite",
+        list = true,
+        max = "512",
+        type = "string",
+      },
+      -- IPInterfaceNumberOfEntries
+      -- automatically created when InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}. is loaded
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local bit = require("bit")
+local table, select, tostring, tonumber, error, open, execute = table, select, tostring, tonumber, error, io.open, os.execute
+
+-- Return number representing the IP address / netmask (first byte is first part ...)
+local ipmatch = "(%d+)%.(%d+)%.(%d+)%.(%d+)"
+local function ipv42num(ipstr)
+    local result = 0
+    local ipblocks = { string.match(ipstr, ipmatch) }
+    if #ipblocks < 4 then
+        return nil
+    end
+
+    for _,v in ipairs(ipblocks) do
+        result = bit.lshift(result, 8) + v
+    end
+    return result
+end
+
+local function num2ipv4(ip)
+    local ret = bit.band(ip, 255)
+    local ip = bit.rshift(ip,8)
+    for i=1,3 do
+        ret = bit.band(ip,255) .. "." .. ret
+        ip = bit.rshift(ip,8)
+    end
+    return ret
+end
+
+local function getDNSMASQConfig(param)
+    local result
+    result = uci_helper.get_from_uci({
+        extended = 1, config = "dhcp", sectionname = "@dnsmasq[0]", option = param
+    })
+    return result
+end
+
+local function getDHCPConfigSectionForIntf(key)
+    local result
+    local binding = {config="dhcp",sectionname="dhcp"}
+    uci_helper.foreach_on_uci(binding, function(s)
+    -- iterate over the dhcp pools and take the first one that has the interface name (key) as the interface
+    -- TODO once we add configuration of specific dhcp pools for given options, return the "generic" pool
+    -- TODO (the one with no selection)
+        if s['interface'] == key then
+            result = s['.name']
+            return false
+        end
+    end)
+    return result
+end
+
+local function getDHCPConfigForSection(section, param)
+    local result = uci_helper.get_from_uci({
+        config = "dhcp", sectionname = section, option = param
+    })
+    return result
+end
+
+local function getDHCPConfig(key, param)
+    local result
+    local section = getDHCPConfigSectionForIntf(key)
+    if section == nil then
+        return nil, "DHCP section not found"
+    end
+    return getDHCPConfigForSection(section, param)
+end
+
+local function setDHCPConfigForSection(section, param, value)
+    uci_helper.set_on_uci({
+        config = "dhcp", sectionname = section, option = param
+    }, value, commitapply)
+end
+
+local function setDHCPConfig(key, param, value)
+    local section = getDHCPConfigSectionForIntf(key)
+    if section == nil then
+        return nil, "DHCP section not found"
+    end
+    setDHCPConfigForSection(section, param, value)
+end
+
+local function convertTimeStringToInt(timest)
+    -- take timest as an input, check if the last character is m or h
+    -- if so, try to convert the rest of the string to a number and multiply by the corresponding factor for s conversion
+    -- otherwise, try to convert the whole string to a number
+    local factor = 1
+    local endstring = -2
+    local unit = timest:sub(-1,-1)
+    local duration
+
+    if unit == "m" then
+        factor = 60
+    elseif unit == "h" then
+        factor = 3600
+    else
+        endstring = -1
+    end
+    duration = tonumber(timest:sub(1,endstring))
+    return factor * duration
+end
+
+local function getDHCPdata(key)
+    local network_cfg = uci_helper.getall_from_uci({
+        config = "network", sectionname = key
+    })
+    local baseip = ipv42num(network_cfg[ "ipaddr"] or '')
+    local netmask = ipv42num(network_cfg["netmask"] or '')
+    local section = getDHCPConfigSectionForIntf(key)
+    local dhcp_cfg
+    if section then
+        dhcp_cfg = uci_helper.getall_from_uci({
+            config = "dhcp", sectionname = section
+        })
+    else
+        dhcp_cfg = {}
+    end
+    local start = tonumber(dhcp_cfg[ "start"] or "100")
+    local numips = tonumber(dhcp_cfg["limit"] or "150")
+    local network = bit.band(baseip, netmask)
+    local ipmin = network + 1
+    local ipmax = bit.bor(network, bit.bnot(netmask)) - 1
+    local ipstart = bit.bor(network, bit.band(start, bit.bnot(netmask)))
+    local ipend = ipstart+numips
+
+    return {
+        gw = baseip,
+        network = network,
+        ipmin = ipmin,
+        ipmax = ipmax,
+        ipstart = ipstart,
+        ipend = ipend,
+        start = start,
+        numips = numips,
+        leasetime = dhcp_cfg["leasetime"] or '12h',
+        intf = dhcp_cfg["interface"],
+        ignore = dhcp_cfg["ignore"],
+    }
+end
+
+local InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_get = {
+    DHCPServerConfigurable = "1",
+    DHCPServerEnable = function(mapping, param, key)
+        local intf = getDHCPConfig(key, "interface")
+        local ignore = getDHCPConfig(key, "ignore")
+        -- consider that the DHCP server is disabled if there is no IP pool defined for the interface or if the
+        -- ignore parameter is set to 1
+        if not intf or ignore == "1" then
+            return "0"
+        else
+            return "1"
+        end
+    end,
+    DHCPRelay = "0", -- We don't want to be a DHCP relay
+    MinAddress = function(mapping, param, key)
+        local data = getDHCPdata(key)
+        return num2ipv4(data.ipstart)
+    end,
+    MaxAddress = function(mapping, param, key)
+        local data = getDHCPdata(key)
+        return num2ipv4(data.ipend)
+    end,
+    ReservedAddresses = function(mapping, param, key)
+        return ""
+    end,
+    SubnetMask = function(mapping, param, key)
+        -- get that for the given interface from state in UCI
+        local result = uci_helper.get_from_uci({
+            config = "network", sectionname = key, option = "netmask"
+        })
+        return result or ""
+    end,
+    DNSServers = function(mapping, param, key)
+        -- get gw address on given interface from network in UCI
+        local result = uci_helper.get_from_uci({
+            config = "network", sectionname = key, option = "ipaddr"
+        })
+        return result or ""
+    end,
+    DomainName = function(mapping, param, key)
+        return getDNSMASQConfig("domain") or ""
+    end,
+    IPRouters = function(mapping, param, key)
+    -- get gw address on given interface from network in UCI
+        local result = uci_helper.get_from_uci({
+            config = "network", sectionname = key, option = "ipaddr"
+        })
+        return result or ""
+    end,
+    DHCPLeaseTime = function(mapping, param, key)
+        return tostring(convertTimeStringToInt(getDHCPConfig(key, "leasetime") or "12h")) or ""
+    end,
+    UseAllocatedWAN = "Normal",
+    AssociatedConnection = function(mapping, param, key)
+        return "" -- TODO need to discuss with Dirk since this raises the exact problem he mentioned
+    end,
+    PassthroughLease = "600",
+    PassthroughMACAddress = "",
+    AllowedMACAddresses = function(mapping, param, key)
+        return "" -- TODO
+    end,
+}
+
+
+local function InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_getall(mapping, key)
+    local network_cfg = uci_helper.getall_from_uci({
+        config = "network", sectionname = key
+    })
+    local dhcp_data = getDHCPdata(key)
+    -- consider that the DHCP server is disabled if there is no IP pool defined for the interface or if the
+    -- ignore parameter is set to 1
+    local DHCPServerEnable
+    if not dhcp_data['intf'] or dhcp_data['ignore'] == "1" then
+       DHCPServerEnable = '0'
+    else
+       DHCPServerEnable = '1'
+    end
+    return {
+        DHCPServerConfigurable = "1",
+        DHCPRelay = "0", -- We don't want to be a DHCP relay
+        MinAddress = num2ipv4(dhcp_data.ipstart),
+        MaxAddress = num2ipv4(dhcp_data.ipend),
+        ReservedAddresses = "",
+        SubnetMask = network_cfg["netmask"] or '',
+        DNSServers = network_cfg["ipaddr"] or '',
+        IPRouters = network_cfg["ipaddr"] or '',
+        DHCPLeaseTime = tostring(convertTimeStringToInt(getDHCPConfig(key, "leasetime") or "12h")) or "",
+        UseAllocatedWAN = "Normal",
+        AssociatedConnection = "",
+        PassthroughLease = "600",
+        PassthroughMACAddress = "",
+        AllowedMACAddresses = "",
+        DHCPServerEnable = DHCPServerEnable,
+    }
+end
+
+local function notSupported(_, param)
+    return nil, "Setting param " .. param .. " not supported"
+end
+
+local InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_set = {
+    DHCPServerConfigurable = notSupported,
+    DHCPServerEnable = function(mapping, param, value, key)
+        local state
+        if value == "0" then
+            state = "1"
+        else
+            state = "0"
+        end
+        setDHCPConfig(key, "ignore", state)
+    end,
+    DHCPRelay = notSupported,
+    MinAddress = function(mapping, param, value, key)
+        local data = getDHCPdata(key)
+        local newstart = ipv42num(value)
+
+        if newstart < data.ipmin or newstart >= data.ipend then
+           return nil, "Invalid start address"
+        end
+        setDHCPConfig(key, "start", newstart-data.network)
+        setDHCPConfig(key, "limit", data.ipend - newstart)
+    end,
+    MaxAddress = function(mapping, param, value, key)
+        local data = getDHCPdata(key)
+        local newend = ipv42num(value)
+        if newend < data.ipstart or newend > data.ipmax + 1 then
+            return nil, "Invalid end address"
+        end
+        setDHCPConfig(key, "limit", newend-data.ipstart)
+    end,
+    ReservedAddresses = notSupported,
+    SubnetMask = function(mapping, param, value, key)
+        uci_helper.set_on_uci({
+            config = "network", sectionname = key, option = "netmask"
+        }, value, commitapply)
+    end,
+    DNSServers = notSupported,
+    DomainName = function(mapping, param, value, key)
+        uci_helper.set_on_uci({
+            extended = 1, config = "dhcp", sectionname = "@dnsmasq[0]", option = "domain"
+        }, value, commitapply)
+    end,
+    IPRouters = notSupported,
+    DHCPLeaseTime = function(mapping, param, value, key)
+        local valmin = math.floor(value / 60)
+        local valhour = math.floor(value / 3600)
+        local errhour = value - valhour*3600
+        if errhour > 0 then
+            setDHCPConfig(key, "leasetime", valmin .. "m")
+        else
+            setDHCPConfig(key, "leasetime", valhour .. "h")
+        end
+    end,
+    UseAllocatedWAN = notSupported,
+    AssociatedConnection = notSupported,
+    PassthroughLease = notSupported,
+    PassthroughMACAddress = notSupported,
+    AllowedMACAddresses = notSupported,
+}
+
+local function commit()
+    uci_helper.commit({config = "dhcp"})
+    uci_helper.commit({config = "network"})
+end
+
+local function revert()
+    uci_helper.revert({config = "network"})
+    uci_helper.revert({config = "dhcp"})
+end
+
+local logger = require("transformer.logger")
+
+local function translate_cb(mapping, action, config, sectiontype, sectionname, option)
+  logger:debug("translate_cb called")
+  return { { key = sectionname, paramname = "DHCPServerEnable" } }
+end
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.add_watchers = function(mapping)
+  logger:debug("add_watchers called")
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = translate_cb }, "dhcp", "dhcp", nil, "ignore")
+end
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.get = InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_get
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.getall= InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_getall
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.set = InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_set
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.commit = commit
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_.revert = revert
+
+register(InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_)
+

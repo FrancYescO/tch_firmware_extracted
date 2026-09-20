@@ -1,0 +1,1243 @@
+local match, format = string.match, string.format
+local tostring, tonumber, ipairs, pairs, setmetatable = tostring, tonumber, ipairs, pairs, setmetatable
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+
+local service_binding = { config = "mmpbx", sectionname = "service"}
+local mt = { __index = function() return "" end }
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.",
+        access = "readWrite",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "NumberOfLines",
+        enableParameter = "Enable",
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "Disabled",
+                    "Quiescent",
+                    "Enabled",
+                },
+                default = "Disabled",
+            },
+            --      DirectoryNumber = {
+            --        access = "readWrite",
+            --        type = "string",
+            --        max = "32",
+            --        default = "",
+            --      },
+            Status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Up",
+                    "Initializing",
+                    "Registering",
+                    "Unregistering",
+                    "Error",
+                    "Testing",
+                    "Quiescent",
+                    "Disabled",
+                },
+                default = "Disabled",
+            },
+            CallState = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "string",
+                enumeration = {
+                    "Idle",
+                    "Calling",
+                    "Ringing",
+                    "Connecting",
+                    "InCall",
+                    "Hold",
+                    "Disconnecting",
+                },
+                default = "Idle",
+            },
+            --      PhyReferenceList = {
+            --        access = "readWrite",
+            --        list = true,
+            --        max = "32",
+            --        type = "string",
+            --      },
+            --      RingMuteStatus = {
+            --        access = "readOnly",
+            --        type = "boolean",
+            --      },
+            --      RingVolumeStatus = {
+            --        access = "readOnly",
+            --        type = "unsignedInt",
+            --        range = {
+            --          {
+            --            min = "0",
+            --            max = "100",
+            --          },
+            --        },
+            --      },
+        }
+    }
+}
+
+local callstates = setmetatable({
+    MMPBX_CALLSTATE_DIALING = "Calling",
+    MMPBX_CALLSTATE_ALERTING = "Ringing",
+    MMPBX_CALLSTATE_CALL_DELIVERED = "Connecting",
+    MMPBX_CALLSTATE_CONNECTED = "InCall"
+}, { __index = function() return "Idle" end })
+
+local regstatus = setmetatable({
+    Registering = "Registering",
+    Registered = "Up",
+    Unregistering = "Unregistering"
+}, { __index = function() return "Error" end })
+
+local enablestatus = {
+    ['0'] = "Disabled",
+    ['1'] = "Enabled",
+    ['Enabled'] = "1",
+    ['Disabled'] = "0",
+}
+
+local transactions = {}
+local content_calls = {}
+local content_profiles = {}
+local configfiles = {
+    ["sip"] = "mmpbxrvsipnet",
+    ["internal"] = "mmpbxinternalnet",
+}
+
+local function line_commit()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+local function line_revert()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local function getUbusParam (mapping, param_name, key)
+    local igdubus_mapping = {
+        CallState = "callState",
+        Status = "sipRegisterState",
+    }
+    local default_internal_profile = {
+        CallState = "Idle",
+        Status = "Up"
+    }
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    if ( profile_type == "sip") then
+        -- To fix sanity check,  get first IGD
+        local ubus_param = igdubus_mapping[param_name]
+        --CallState is retrieved from mmpbx.call and Status is from mmpbx.call
+        if (ubus_param == "callState") then
+            if content_calls and type(content_calls) == 'table' then
+                for _,v in pairs(content_calls) do
+                    if v[ubus_param] ~= nil and v["profile"] == profile_name then
+                        return callstates[v[ubus_param]]
+                    end
+                end
+            end
+            return "Idle"
+        end
+        if (ubus_param == "sipRegisterState") then
+            local regStatus = content_profiles and content_profiles[profile_name] and content_profiles[profile_name][ubus_param] or ""
+            return regstatus[regStatus]
+        end
+    else
+        --fxo profile is unsupported now
+        error ("profile is unsupported now")
+    end
+end
+
+local function getAllLines (mapping, key)
+    local data = {}
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+--  only show sip profiles
+    if (profile_type == "sip" ) then
+        local binding = { config = configfiles[profile_type], sectionname = profile_name, option = "enabled", default = "0" }
+        local op_enable = uci_helper.get_from_uci(binding)
+        data["Enable"] = enablestatus[op_enable]
+
+        data["CallState"] = "Idle"
+        if profile_type == "sip" then
+            if content_calls and type(content_calls) == 'table' then
+                for _,v in pairs(content_calls) do
+                    if v["callState"] ~= nil and v["profile"] == profile_name then
+                        return callstates[v["callState"]]
+                    end
+                end
+            end
+            local regStatus = content_profiles and content_profiles[profile_name] and content_profiles[profile_name].sipRegisterState or ""
+            data["Status"] = regstatus[regStatus]
+        end
+    else
+        error ("profile is unsupported now")
+    end
+    return data
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.entries = function ()
+    local entries = {}
+    local binding = { config = "mmpbx", sectionname = "profile" }
+
+    content_calls = {}
+    content_profiles = {}
+
+    uci_helper.foreach_on_uci(binding, function(s)
+        local profile_type = match(s['.name'], "^(%w+)_")
+        -- only show SIP profiles, not internal ones
+        if profile_type == "sip" then
+            entries[#entries + 1] = s['.name']
+        end
+    end)
+
+    content_calls = conn:call("mmpbx.call", "get", {})
+    content_profiles = conn:call("mmpbx.profile", "get", {})
+
+    return entries
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.getall = getAllLines
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.get = {
+    Enable = function (mapping, paramname, key)
+        local binding = { config = configfiles["sip"], sectionname = key, option = "enabled", default = "0" }
+        local enable = uci_helper.get_from_uci(binding)
+        return enablestatus[enable]
+    end,
+    CallState = function (mapping, paramname, key)
+        return getUbusParam (mapping, paramname, key)
+    end,
+    Status = function (mapping, paramname, key)
+        return getUbusParam (mapping, paramname, key)
+    end,
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.set = {
+    Enable = function (mapping, paramname, paramvalue, key)
+        local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+        local binding = { config = configfiles[profile_type], sectionname = profile_name, option = "enabled" }
+
+        local value = "0"
+        value = enablestatus[paramvalue]
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+}
+
+local function addDefaultServiceForNewSIPProfile(profile_name)
+    local type = ""
+    local content = {}
+    local services_default_cfg = {
+        ACR = {
+            provision = "0",
+            activate = "0",
+        },
+        CLIP = {
+            provision = "1",
+            activate = "1",
+        },
+        HOLD = {
+            provision = "1",
+            activate = "1",
+        },
+        CFBS = {
+            provision = "0",
+            activate = "0",
+        },
+        CFNR = {
+            provision = "0",
+            activate = "0",
+            timeout = "60",
+        },
+        CFU = {
+            provision = "0",
+            activate = "0",
+        },
+        CLIR = {
+            provision = "0",
+            activate = "0",
+        },
+    }
+
+    local binding = {
+        config = "mmpbx",
+    }
+
+    uci_helper.foreach_on_uci(service_binding, function(s)
+         if services_default_cfg[s["type"]] then
+             local profiles = s["profile"] or {}
+             profiles[#profiles+1] = profile_name
+             binding.sectionname = s[".name"]
+             binding.option = "profile"
+             uci_helper.set_on_uci(binding, profiles, commitapply)
+             services_default_cfg[s["type"]] = nil
+         end
+    end)
+
+    for k,v in pairs (services_default_cfg) do
+        local service_name = uci_helper.add_on_uci(service_binding)
+        transactions[service_binding.config] = true
+        binding.sectionname = service_name
+
+        for param, value in pairs (v) do
+            binding.option = param
+            uci_helper.set_on_uci(binding, value, commitapply)
+        end
+        binding.option = "type"
+        uci_helper.set_on_uci(binding, k, commitapply)
+        binding.option = "profile"
+        uci_helper.set_on_uci(binding, {profile_name}, commitapply)
+    end
+end
+
+local function getHighestSipId()
+    local highest = 0
+    local binding = { config = "mmpbxrvsipnet", sectionname = "profile" }
+    uci_helper.foreach_on_uci(binding, function(s)
+        local id = tonumber(match(s['.name'], "(%d+)$"))
+        if (highest < id) then
+             highest = id
+        end
+    end)
+    return highest + 1
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.add = function (mapping, name)
+    local highestSipId = getHighestSipId()
+    local profile_name = format ("sip_profile_%s", highestSipId)
+    highestSipId = highestSipId + 1
+    local binding = {
+        config = "mmpbx",
+        sectionname = profile_name,
+    }
+    uci_helper.set_on_uci(binding, "profile", commitapply)
+    binding.option = "config"
+    uci_helper.set_on_uci(binding, "mmpbxrvsipnet", commitapply)
+    addDefaultServiceForNewSIPProfile(profile_name)
+    transactions[binding.config] = true
+    local defaultvalue = format ("profile%s", highestSipId)
+    binding.config = "mmpbxrvsipnet"
+    binding.sectionname = profile_name
+    binding.option = nil
+    uci_helper.set_on_uci(binding, "profile", commitapply)
+    local sipconfig_defaults = {
+        network = "sip_net",
+        uri = defaultvalue,
+        user_name = defaultvalue,
+        password = defaultvalue,
+        display_name = defaultvalue,
+        enabled = "0",
+    }
+    for k,v in pairs(sipconfig_defaults) do
+        binding.option = k
+        uci_helper.set_on_uci(binding, v, commitapply)
+    end
+    transactions[binding.config] = true
+    return profile_name
+end
+
+local function delAllRelatedServices (profile_name)
+    local binding = {
+        config = "mmpbx",
+    }
+    uci_helper.foreach_on_uci(service_binding, function(s)
+        local op_profile = s["profile"]
+        if op_profile then
+             if #op_profile == 1 then
+                 for _,v in pairs(op_profile) do
+                     if v == profile_name then
+                        binding.sectionname = s['.name']
+                        uci_helper.delete_on_uci (binding, commitapply)
+                     end
+                 end
+             else
+                 local needProfileChange = false
+                 local newprofile = {}
+                 for _,v in pairs(op_profile) do
+                     if v ~= profile_name then
+                         newprofile[#newprofile+1] = v
+                     else
+                         needProfileChange = true
+                     end
+                 end
+                 if needProfileChange then
+                    binding.sectionname = s['.name']
+                    binding.option = "profile"
+                    uci_helper.set_on_uci (binding, newprofile, commitapply)
+                 end
+             end
+        end
+    end)
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.delete = function (mapping, key)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    if (profile_type == "sip") then
+        local binding = {
+            config = "mmpbx",
+            sectionname = profile_name
+        }
+        uci_helper.delete_on_uci(binding, commitapply)
+        delAllRelatedServices(profile_name)
+        transactions[binding.config] = true
+        binding.config = "mmpbxrvsipnet"
+        uci_helper.delete_on_uci(binding, commitapply)
+        transactions[binding.config] = true
+        return true
+    elseif (profile_type == "internal") then
+        return nil, "internal profile should not be deleted"
+    end
+end
+
+local function sip_watch_cb(mapping, action, config, sectiontype, sectionname, option)
+  if option == "enabled" then
+    return { {key = sectionname, paramname = "Enable"} }
+  end
+end
+
+local function internal_watch_cb(mapping, action, config, sectiontype, sectionname, option)
+  if option == "enabled" then
+    return { {key = sectionname, paramname = "Enable"} }
+  end
+end
+
+local function mmpbx_profile_event(mapping, event, msg)
+  if not msg.sip then
+    return
+  end
+  if msg.sip.oldest and msg.sip.newest and msg.sip.oldest.registered and msg.sip.newest.registered then
+    local oldest = msg.sip.oldest.registered
+    local newest = msg.sip.newest.registered
+    if (oldest == "Unregistered" and newest == "Registered") or
+       (oldest == "Registered" and newest == "Unregistered") then
+      return { { key = msg.name, paramname = "Status" } }
+    end
+  end
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.add_watchers = function (mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = sip_watch_cb }, configfiles["sip"], "profile", nil, "enabled")
+  uci_evsrc.watch(mapping, { set = internal_watch_cb }, configfiles["internal"], "profile", nil, "enabled")
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, mmpbx_profile_event, "mmpbx.profile.status")
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.commit = line_commit
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_.revert = line_revert
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_)
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.SIP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            AuthUserName = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+                default = "",
+            },
+            AuthPassword = {
+                access = "readWrite",
+                hidden = "true",
+                type = "string",
+                max = "128",
+                default = "",
+            },
+            URI = {
+                access = "readWrite",
+                type = "string",
+                max = "389",
+            },
+            -- SIPEventSubscribeNumberOfElements
+            -- automatically created when InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.SIP.EventSubscribe.{i}. is loaded
+        }
+    }
+}
+
+local sip_igd2uci = {
+    AuthUserName = "user_name",
+    AuthPassword = "password",
+    URI = "uri"
+}
+
+local sip_uci2igd = {
+    user_name = "AuthUserName",
+    password = "AuthPassword",
+    uri = "URI",
+}
+
+local sip_binding = {config = configfiles["sip"]}
+
+local function getSipParam(mapping, paramname, key)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+
+    if (profile_type == "sip") then
+        sip_binding.sectionname = profile_name
+        sip_binding.option = sip_igd2uci[paramname]
+        return uci_helper.get_from_uci(sip_binding)
+    end
+
+    if (profile_type == "internal" and paramname == "URI") then
+        return profile_name
+    end
+
+    ----fxo profile is unsupported now
+    --if (profile_type == "fxo") then
+    --    return ""
+    --end
+    return ""
+end
+
+local function setSipParam(mapping, paramname, paramvalue, key)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    if (profile_type == "sip") then
+        sip_binding.sectionname = profile_name
+        sip_binding.option = sip_igd2uci[paramname]
+        uci_helper.set_on_uci(sip_binding, paramvalue, commitapply)
+        transactions[sip_binding.config] = true
+    elseif (profile_type == "internal") then
+        error ("internal profile should not be set")
+    elseif (profile_type == "fxo") then
+        --fxo profile is unsupported now
+    end
+end
+
+local function getAllSIP(mapping, key)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    local data = {
+        AuthUserName = "",
+        AuthPassword = "",
+        URI = "",
+    }
+    if (profile_type == "sip") then
+        sip_binding.sectionname = profile_name
+        sip_binding.option = nil
+        local content = uci_helper.getall_from_uci(sip_binding)
+        data.AuthUserName = content.user_name or ""
+        data.URI = content.uri or ""
+    end
+    if (profile_type == "internal") then
+        data.URI = profile_name
+    end
+    ----fxo profile is unsupported now
+    --if (profile_type == "fxo") then
+    --end
+    return data
+end
+
+local function line_sip_watch_cb(mapping, action, config, sectiontype, sectionname, option)
+    if sip_uci2igd[option] then
+        return { {key = sectionname, paramname = sip_uci2igd[option]}}
+    end
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.add_watchers = function (mapping)
+    local uci_evsrc = eventsource("uci")
+    for k,_ in pairs(sip_uci2igd) do
+        uci_evsrc.watch(mapping, { set = line_sip_watch_cb }, configfiles["sip"], "profile", nil, k)
+    end
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.getall = getAllSIP
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.get = getSipParam
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.set = setSipParam
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.commit = line_commit
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_.revert = line_revert
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_SIP_)
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.CallingFeatures.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            CallerIDEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallerIDNameEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallerIDName = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+            },
+            CallWaitingEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            --      CallWaitingStatus = {
+            --        access = "readOnly",
+            --        type = "string",
+            --        enumeration = {
+            --          "Disabled",
+            --          "Idle",
+            --          "SecondaryRinging",
+            --          "SecondaryConnecting",
+            --          "SecondaryConnected",
+            --        },
+            --      },
+            MaxSessions = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            --      ConferenceCallingStatus = {
+            --        access = "readOnly",
+            --        type = "string",
+            --        enumeration = {
+            --          "Disabled",
+            --          "Idle",
+            --          "SecondaryCalling",
+            --          "SecondaryConnecting",
+            --          "SecondaryConnected",
+            --          "InConferenceCall",
+            --        },
+            --      },
+            --      ConferenceCallingSessionCount = {
+            --        access = "readOnly",
+            --        type = "unsignedInt",
+            --        range = {
+            --          {
+            --            min = "0",
+            --            max = "0",
+            --          },
+            --          {
+            --            min = "1",
+            --            max = "1",
+            --          },
+            --          {
+            --            min = "1",
+            --          },
+            --        },
+            --      },
+            CallForwardUnconditionalEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardUnconditionalNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            CallForwardOnBusyEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardOnBusyNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            CallForwardOnNoAnswerEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardOnNoAnswerNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            --      CallForwardOnNoAnswerRingCount = {
+            --        access = "readWrite",
+            --        type = "unsignedInt",
+            --      },
+            CallTransferEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            --      MWIEnable = {
+            --        access = "readWrite",
+            --        type = "boolean",
+            --      },
+            --      MessageWaiting = {
+            --        access = "readOnly",
+            --        type = "boolean",
+            --      },
+            AnonymousCallBlockEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            AnonymousCalEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            --      DoNotDisturbEnable = {
+            --        access = "readWrite",
+            --        type = "boolean",
+            --      },
+            --      CallReturnEnable = {
+            --        access = "readWrite",
+            --        type = "boolean",
+            --      },
+            --      RepeatDialEnable = {
+            --        access = "readWrite",
+            --        type = "boolean",
+            --      },
+        }
+    }
+}
+
+local outgoingmap_binding = {config="mmpbx", sectionname="outgoing_map"}
+
+local function getSipHighestPriorityPort(profile_name)
+    local port = ""
+    local priority = 65535
+
+    uci_helper.foreach_on_uci(outgoingmap_binding, function(s)
+        if s.profile and type(s.profile) == "table" then
+            for i,v in ipairs(s.profile) do
+                if (v == profile_name) then
+                    local level = tonumber(s.priority[i])
+                    if (priority > level or (priority == level and s.device == "fxs_dev_0")) then
+                        port = s.device
+                        priority = level
+                    end
+                    break
+                end
+            end
+        end
+    end)
+    return port
+end
+
+local internalmap_binding = {config="mmpbx", sectionname="internal_map"}
+
+local function getInternalPort(profile_name)
+    local port = "fxs_dev_0"
+
+    uci_helper.foreach_on_uci(internalmap_binding, function(s)
+        if (s.profile == profile_name and s.voicePort and type(s.voicePort) == "table") then
+            port = s.voicePort[1] or port
+            return false
+        end
+    end)
+    return port
+end
+
+local function getSerivceParam(key, service, option, isdevice)
+    local res = ""
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+
+    uci_helper.foreach_on_uci(service_binding, function(s)
+        if (s.type == service) then
+            if not isdevice then
+                if (s.profile and string.match(table.concat(s.profile, " "), profile_name)) then
+                    if (profile_type == "sip") then
+                        res = s[option]
+                    elseif (profile_type == "internal" and option == "provisioned") then
+                        res  = "0"
+                    end
+                end
+            else
+                local port = ""
+                if (profile_type == "sip") then
+                    port = getSipHighestPriorityPort(profile_name)
+                elseif (profile_type == "internal") then
+                    port = getInternalPort(profile_name)
+                end
+                if (s.device and string.match(table.concat(s.device, " "), port)) then
+                    res = s[option]
+                end
+            end
+            return false
+        end
+    end)
+    return res or ""
+end
+
+local function setServiceStatus(key, service, value, hasdest, isdevice)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    local binding = { config = "mmpbx" }
+
+    if (profile_type == "sip") then
+        uci_helper.foreach_on_uci(service_binding, function(s)
+            binding.sectionname = s['.name']
+            if (s["type"] == service) then
+                if not isdevice then
+                    if (s["profile"] and string.match(table.concat(s["profile"], " "), profile_name)) then
+                        binding.option = "provisioned"
+                        uci_helper.set_on_uci(binding, value, commitapply)
+                        if hasdest then
+                            if (s["destination"] or s["destination"] == "") then
+                                value = "0"
+                            end
+                        end
+                        binding.option = "activated"
+                        uci_helper.set_on_uci(binding, value, commitapply)
+                    end
+                else
+                    local port = getSipHighestPriorityPort(profile_name)
+                    if (s["device"] and string.match(table.concat(s["device"], " "), port)) then
+                        binding.option = "provisioned"
+                        uci_helper.set_on_uci(binding, value, commitapply)
+                        binding.option = "activated"
+                        uci_helper.set_on_uci(binding, value, commitapply)
+                    end
+                end
+                transactions[binding.config] = true
+                return false
+            end
+        end)
+    elseif (profile_type == "internal") then
+        return nil, "internal profile should not be set"
+    end
+end
+
+local function setServiceOption(key, service, paramname, value)
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    local binding = { config = "mmpbx" }
+
+    if (profile_type == "sip") then
+        uci_helper.foreach_on_uci(service_binding, function(s)
+            binding.sectionname = s['.name']
+            if (s["type"] == service) then
+                if (s["profile"] and string.match(table.concat(s["profile"], " "), profile_name)) then
+                    binding.option = paramname
+                    uci_helper.set_on_uci(binding, value, commitapply)
+                    transactions[binding.config] = true
+                end
+                return false
+            end
+        end)
+    elseif (profile_type == "internal") then
+        return nil, "internal profile should not be set"
+    end
+end
+
+local convertBoolean = setmetatable({
+    ['0'] = '1',
+    ['1'] = '0',
+}, mt)
+
+local function getAllCallFeatures(mapping, key)
+    local port = ""
+    local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+    -- For the params missing, the normal get will always be used.
+    -- To avoid normal get being used for internalprofile, data table should be better init firstly
+    -- Or much delay will be introduced
+    local data = {
+        CallerIDEnable = "1",
+        CallerIDNameEnable = "1",
+        AnonymousCalEnable = "0",
+        CallForwardUnconditionalEnable = "0",
+        CallForwardUnconditionalNumber = "",
+        CallForwardOnBusyEnable = "0",
+        CallForwardOnBusyNumber = "",
+        CallForwardOnNoAnswerEnable = "0",
+        CallForwardOnNoAnswerNumber = "",
+        AnonymousCallBlockEnable = "0",
+        CallWaitingEnable = "1",
+        CallTransferEnable = "1",
+        CallerIDName = "",
+        MaxSessions = "2",
+    }
+
+    if (profile_type == "sip") then
+        port = getSipHighestPriorityPort(profile_name)
+    elseif (profile_type == "internal") then
+        port = getInternalPort(profile_name)
+    end
+    uci_helper.foreach_on_uci(service_binding, function(s)
+        local hasprofile = s.profile and string.match(table.concat(s.profile, " "), profile_name)
+        local hasdevice = s.device and string.match(table.concat(s.device, " "), port)
+
+        local type = s["type"]
+        local provisioned = s["provisioned"] or ""
+        if (type == "CLIR" and hasprofile) then
+            data["CallerIDEnable"] = convertBoolean[provisioned]
+            data["CallerIDNameEnable"] = convertBoolean[provisioned]
+            data["AnonymousCalEnable"] = provisioned
+        elseif (type == "CFU" and hasprofile) then
+            data["CallForwardUnconditionalEnable"] = provisioned
+            data["CallForwardUnconditionalNumber"] = s["destination"] or ""
+        elseif (type == "CFBS" and hasprofile) then
+            data["CallForwardOnBusyEnable"] = provisioned
+            data["CallForwardOnBusyNumber"] = s["destination"] or ""
+        elseif (type == "CFNR" and hasprofile) then
+            data["CallForwardOnNoAnswerEnable"] = provisioned
+            data["CallForwardOnNoAnswerNumber"] = s["destination"] or ""
+        elseif (type == "ACR" and hasprofile) then
+            data["AnonymousCallBlockEnable"] = provisioned
+        elseif (type == "CALL_WAITING" and hasdevice) then
+            data["CallWaitingEnable"] = provisioned
+        elseif (type == "TRANSFER" and hasdevice) then
+            data["CallTransferEnable"] = provisioned
+        end
+    end)
+
+    if (profile_type == "sip") then
+        local binding = { config = configfiles[profile_type], sectionname = profile_name, option = "display_name" }
+        data["CallerIDName"] = uci_helper.get_from_uci(binding)
+    end
+
+    return data
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.getall = getAllCallFeatures
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.get = {
+    CallerIDEnable = function (mapping, paramname, key)
+        local status = getSerivceParam (key, "CLIR", "provisioned")
+        return convertBoolean[status]
+    end,
+    CallerIDNameEnable = function (mapping, paramname, key)
+        local status = getSerivceParam (key, "CLIR", "provisioned")
+        return convertBoolean[status]
+    end,
+    CallerIDName = function (mapping, paramname, key)
+        local res = ""
+        local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+        if (profile_type == "sip") then
+            local binding = { config = configfiles[profile_type], sectionname = profile_name, option = "display_name" }
+            res = uci_helper.get_from_uci(binding)
+        end
+        return res
+    end,
+    CallWaitingEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "CALL_WAITING", "provisioned", true)
+    end,
+    MaxSessions = "2",
+    CallForwardUnconditionalEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFU", "provisioned")
+    end,
+    CallForwardUnconditionalNumber = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFU", "destination")
+    end,
+    CallForwardOnBusyEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFBS", "provisioned")
+    end,
+    CallForwardOnBusyNumber = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFBS", "destination")
+    end,
+    CallForwardOnNoAnswerEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFNR", "provisioned")
+    end,
+    CallForwardOnNoAnswerNumber = function (mapping, paramname, key)
+        return getSerivceParam (key, "CFNR", "destination")
+    end,
+    CallTransferEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "TRANSFER", "provisioned", true)
+    end,
+    AnonymousCallBlockEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "ACR", "provisioned")
+    end,
+    AnonymousCalEnable = function (mapping, paramname, key)
+        return getSerivceParam (key, "CLIR", "provisioned")
+    end,
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.set = {
+    CallerIDEnable = function (mapping, paramname, paramvalue, key)
+        local value = convertBoolean[paramvalue]
+        setServiceStatus (key, "CLIR", value)
+    end,
+    CallerIDNameEnable = function (mapping, paramname, paramvalue, key)
+        local value = convertBoolean[paramvalue]
+        setServiceStatus (key, "CLIR", value)
+    end,
+    CallerIDName = function (mapping, paramname, paramvalue, key)
+        local profile_name, profile_type = match(key, "^((%w+)_[%w_]+)$")
+        if (profile_type == "sip") then
+            local binding = { config = configfiles[profile_type], sectionname = profile_name, option = "display_name" }
+            uci_helper.set_on_uci(binding, paramvalue, commitapply)
+            transactions[binding.config] = true
+        elseif (profile_type == "internal") then
+            return nil, "internal profile should not be set"
+        end
+    end,
+    CallWaitingEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "CALL_WAITING", paramvalue, false, true)
+    end,
+    MaxSessions = function (mapping, paramname, paramvalue, key)
+        return nil, "Not supported currently"
+    end,
+    CallForwardUnconditionalEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "CFU", paramvalue, true)
+    end,
+    CallForwardUnconditionalNumber = function (mapping, paramname, paramvalue, key)
+        setServiceOption (key, "CFU", "destination", paramvalue)
+    end,
+    CallForwardOnBusyEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "CFBS", paramvalue, true)
+    end,
+    CallForwardOnBusyNumber = function (mapping, paramname, paramvalue, key)
+        setServiceOption (key, "CFBS", "destination", paramvalue)
+    end,
+    CallForwardOnNoAnswerEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "CFNR", paramvalue, true)
+    end,
+    CallForwardOnNoAnswerNumber = function (mapping, paramname, paramvalue, key)
+        setServiceOption (key, "CFNR", "destination", paramvalue)
+    end,
+    CallTransferEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "TRANSFER", paramvalue, false, true)
+    end,
+    AnonymousCallBlockEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "ACR", paramvalue)
+    end,
+    AnonymousCalEnable = function (mapping, paramname, paramvalue, key)
+        setServiceStatus (key, "CLIR", paramvalue)
+    end,
+
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.commit = line_commit
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_.revert = line_revert
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_CallingFeatures_)
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.Codec.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            --      TransmitCodec = {
+            --        access = "readOnly",
+            --        type = "string",
+            --        max = "64",
+            --        enumeration = {
+            --          "G.711MuLaw",
+            --          "G.711ALaw",
+            --          "G.726",
+            --          "G.729",
+            --          "G.729a",
+            --          "G.729e",
+            --          "G.728",
+            --          "G.723.1",
+            --          "G.722",
+            --          "G.722.1",
+            --          "G.722.2",
+            --          "GSM-FR",
+            --          "GSM-HR",
+            --          "GSM-EFR",
+            --          "iLBC",
+            --        },
+            --      },
+            --      ReceiveCodec = {
+            --        access = "readOnly",
+            --        type = "string",
+            --        enumeration = {
+            --          "G.711MuLaw",
+            --          "G.711ALaw",
+            --          "G.726",
+            --          "G.729",
+            --          "G.729a",
+            --          "G.729e",
+            --          "G.728",
+            --          "G.723.1",
+            --          "G.722",
+            --          "G.722.1",
+            --          "G.722.2",
+            --          "GSM-FR",
+            --          "GSM-HR",
+            --          "GSM-EFR",
+            --          "iLBC",
+            --        },
+            --        max = "64",
+            --      },
+            --      TransmitBitRate = {
+            --        access = "readOnly",
+            --        type = "unsignedInt",
+            --      },
+            --      ReceiveBitRate = {
+            --        access = "readOnly",
+            --        type = "unsignedInt",
+            --      },
+            --      TransmitSilenceSuppression = {
+            --        access = "readOnly",
+            --        type = "boolean",
+            --      },
+            --      ReceiveSilenceSuppression = {
+            --        access = "readOnly",
+            --        type = "boolean",
+            --      },
+            --      TransmitPacketizationPeriod = {
+            --        access = "readOnly",
+            --        type = "unsignedInt",
+            --      },
+        }
+    }
+}
+
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_)
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.Codec.List.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            EntryID = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+            },
+            Codec = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+            },
+            BitRate = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            --      PacketizationPeriod = {
+            --        access = "readWrite",
+            --        list = true,
+            --        type = "string",
+            --        max = "64",
+            --      },
+            SilenceSuppression = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "true",
+            },
+            Priority = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                default = "1",
+            },
+        }
+    }
+}
+
+local codecrates = setmetatable({
+    PCMU = "64000",
+    PCMA = "64000",
+    G722 = "64000",
+    ["G726-16"] = "16000",
+    ["G726-24"] = "24000",
+    ["G726-32"] = "32000",
+    ["G726-40"] = "40000",
+    G729 = "8000",
+    G723 = "6300"
+}, mt)
+
+local codec_binding = {config = "mmpbx", sectionname = "codec_filter"}
+local content_codec_filters = {}
+
+local function getCodecSection(key)
+    key = match(key, "^([^_]+)_")
+    return setmetatable(content_codec_filters[key] or {}, mt)
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.entries = function(mapping, parentkey)
+    local entries = {}
+    local missing_ID = {}
+    local max_ID = 0
+    local res = uci_helper.foreach_on_uci(codec_binding, function(s)
+        if not s._key then
+            s._key = uci_helper.generate_key_on_uci({ config = "mmpbx", sectionname = s[".name"] })
+        end
+        if not s._entryID then
+            missing_ID[#missing_ID + 1] = s[".name"]
+        else
+            local entryID = tonumber(s._entryID)
+            if entryID > max_ID then
+                max_ID = entryID
+            end
+        end
+        entries[#entries + 1] = format("%s_%s", s._key, parentkey)
+        content_codec_filters[s._key] = s
+    end)
+    if res then
+        uci_helper.commit_keys(codec_binding)
+    else
+        uci_helper.revert_keys(codec_binding)
+    end
+    if #missing_ID > 0 then
+        for _, name in ipairs(missing_ID) do
+            max_ID = max_ID + 1
+            uci_helper.set_on_uci({ config = "mmpbx", sectionname = name, option = "_entryID" }, max_ID)
+        end
+        uci_helper.commit(codec_binding)
+    end
+    return entries
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.getall = function(mapping, key)
+    local v = getCodecSection(key)
+    return {
+        EntryID = v._entryID,
+        Codec = v.name,
+        BitRate = codecrates[v.name],
+        SilenceSuppression = v.remove_silence_suppression,
+        Enable = v.allow,
+        Priority = v.priority
+    }
+end
+
+local codec_mapping = {
+    ["EntryID"] = "_entryID",
+    ["Codec"] = "name",
+    ["BitRate"] = "name",
+    ["SilenceSuppression"] = "remove_silence_suppression",
+    ["Enable"] = "allow",
+    ["Priority"] = "priority",
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.get = function(mapping, paramname, key)
+    if paramname == "BitRate" then
+        return codecrates[getCodecSection(key)[codec_mapping[paramname]]]
+    else
+        return getCodecSection(key)[codec_mapping[paramname]]
+    end
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.set = function(mapping, paramname, paramvalue, key)
+    if codec_mapping[paramname] then
+        local binding = {
+            config = "mmpbx",
+            sectionname = getCodecSection(key)['.name'],
+            option = codec_mapping[paramname],
+        }
+        uci_helper.set_on_uci(binding, paramvalue, commitapply)
+        transactions[binding.config] = true
+    else
+        return nil, "Invalid parameter"
+    end
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.commit = line_commit
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_.revert = line_revert
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_Line_i_Codec_List_i_)

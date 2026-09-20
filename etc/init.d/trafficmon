@@ -1,0 +1,23 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+APP=trafficmon
+DATA_DIR=/var/$APP
+CRONTABS=/etc/crontabs
+CRONRULE=$CRONTABS/root
+
+start() {
+    if !(grep -q "\*/10 \* \* \* \* /sbin/trafficmon.lua" $CRONRULE 2>/dev/null); then
+        mkdir -p $CRONTABS
+        echo "*/10 * * * * /sbin/trafficmon.lua" >> $CRONRULE
+        if !(grep -q "crond" $(ps) 2>/dev/null); then
+            /etc/init.d/cron start
+        fi
+    fi
+    mkdir -p $DATA_DIR
+    trafficmon.lua -i
+}
+
+stop() {
+    rm -rf $DATA_DIR
+}

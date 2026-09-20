@@ -1,0 +1,72 @@
+local uci_helper = mapper("ucihelper")
+
+local InternetGatewayDevice_Services_VoiceService_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Services.VoiceService.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    numEntriesParameter = "VoiceServiceNumberOfEntries",
+    parameters = {
+      X_000E50_FXOState = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_000E50_FXSState = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      -- VoiceProfileNumberOfEntries
+      -- automatically created when InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}. is loaded
+    }
+  }
+}
+
+InternetGatewayDevice_Services_VoiceService_i_.entries = function(mapping, parentkey)
+    local entries = {"UserAgent"}
+    return entries
+end
+
+InternetGatewayDevice_Services_VoiceService_i_.get = {
+   X_000E50_FXOState = function (mapping, paramname, key)
+       return uci_helper.get_from_uci({config = "mmpbxbrcmfxonet", sectionname = "fxo_profile", option = "enabled", default = "0"})
+   end,
+
+   X_000E50_FXSState = function (mapping, paramname, key)
+       return uci_helper.get_from_uci({config = "mmpbxbrcmfxsdev", sectionname = "fxs_dev_0", option = "relay_state", default = "0"})
+   end,
+}
+
+local transactions = {}
+
+InternetGatewayDevice_Services_VoiceService_i_.set = {
+   X_000E50_FXOState = function (mapping, paramname, paramvalue, key)
+       uci_helper.set_on_uci({config = "mmpbxbrcmfxonet", sectionname = "fxo_profile", option = "enabled"}, paramvalue, commitapply)
+       transactions["mmpbxbrcmfxonet"] = true;
+  end,
+  X_000E50_FXSState = function (mapping, paramname, paramvalue, key)
+       uci_helper.set_on_uci({config = "mmpbxbrcmfxsdev", sectionname = "fxs_dev_0", option = "relay_state"}, paramvalue, commitapply)
+       uci_helper.set_on_uci({config = "mmpbxbrcmfxsdev", sectionname = "fxs_dev_1", option = "relay_state"}, paramvalue, commitapply)
+       transactions["mmpbxbrcmfxsdev"] = true;
+  end,
+}
+
+InternetGatewayDevice_Services_VoiceService_i_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+InternetGatewayDevice_Services_VoiceService_i_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+register(InternetGatewayDevice_Services_VoiceService_i_)

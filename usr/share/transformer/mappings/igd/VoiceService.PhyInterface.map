@@ -1,0 +1,72 @@
+local match = string.match
+local uci_helper = mapper("ucihelper")
+
+local InternetGatewayDevice_Services_VoiceService_i_PhyInterface_i_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.PhyInterface.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            PhyPort = {
+                access = "readOnly",
+                type = "string",
+                max = "2",
+            },
+            InterfaceID = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+            },
+            Description = {
+                access = "readOnly",
+                type = "string",
+                max = "32",
+            },
+        }
+    }
+}
+
+local entries = {
+    "fxs_dev_0",
+    "fxs_dev_1",
+    "dect_dev_0",
+    "dect_dev_1",
+    "dect_dev_2",
+    "dect_dev_3",
+    "dect_dev_4",
+    "dect_dev_5"
+}
+
+InternetGatewayDevice_Services_VoiceService_i_PhyInterface_i_.entries = function()
+    return entries
+end
+
+local devicebinding = { config = "mmpbx", sectionname = "device" }
+local descriptionbinding = { option = "user_friendly_name" }
+
+InternetGatewayDevice_Services_VoiceService_i_PhyInterface_i_.get = {
+    PhyPort = function (mapping, paramname, key)
+        return match(key, "(%d+)$")
+    end,
+    InterfaceID = function (mapping, paramname, key)
+        return match(key, "(%d+)$")
+    end,
+    Description = function (mapping, paramname, key)
+        local res = ""
+        uci_helper.foreach_on_uci(devicebinding, function(s)
+            if (s['.name'] == key) then
+                descriptionbinding.config = s.config
+                descriptionbinding.sectionname = key
+                res = uci_helper.get_from_uci(descriptionbinding)
+                return false
+            end
+        end)
+        return res
+    end
+}
+register(InternetGatewayDevice_Services_VoiceService_i_PhyInterface_i_)

@@ -1,0 +1,76 @@
+#!/bin/sh /etc/rc.common
+
+START=19
+
+start()
+{
+	# source here and not globally to avoid errors in rootfs-prepare build target of package/Makefile
+	. /lib/network/config.sh
+	. /lib/functions.sh
+	. /lib/functions/network.sh
+	. /lib/functions/functions-tch.sh
+
+	logger -t mwan "Starting mwan"
+
+	mkdir -p /var/etc
+	config_load mwan
+	config_foreach mwan_parse_host host
+	mv -f /var/etc/mwan.config.$$ /var/etc/mwan.config 2>/dev/null
+	config_foreach mwan_ifup policy
+
+	return 0
+}
+
+mwan_parse_host()
+{
+	local policy
+	config_get policy $1 policy
+
+	local path
+	config_get path $1 path
+
+	local arg
+	config_get arg $1 arg
+
+	local interface
+	config_get interface $policy interface
+	local table_id=$(uci get network.$interface.ip4table)
+
+	if [ -n "$table_id" ]; then
+		local nfmark
+		mwan_get_mark_number "$policy" "nfmark"
+		[ -n "$nfmark" ] || exit 0
+
+		for p in $path; do
+			echo "$p $nfmark $arg" >>/var/etc/mwan.config.$$
+		done
+	fi
+
+}
+
+mwan_ifup()
+{
+	local interface
+	config_get interface $1 interface
+
+	ACTION=ifup
+
+	local device=$(uci get -p /var/state network.$interface.ifname)
+	[ "$device" ] && [ "$(ifconfig $device 2>&1 >/dev/null; echo $?)" = "0" ] && {
+		INTERFACE=$interface DEVICE=$device . /etc/hotplug.d/iface/15-mwan
+	}
+}
+
+stop()
+{
+	# source here and not globally to avoid errors in rootfs-prepare build target of package/Makefile
+	. /lib/network/config.sh
+
+	logger -t mwan "Stopping mwan"
+
+	ACTION=stop
+
+	. /etc/hotplug.d/iface/15-mwan
+
+	return 0
+}

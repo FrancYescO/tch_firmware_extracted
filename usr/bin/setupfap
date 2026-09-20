@@ -1,0 +1,220 @@
+#!/usr/bin/env lua
+local string = require('string')
+local cursor = require('uci').cursor()
+local os = require('os')
+local io = require('io')
+local math = require('math')
+-- we get the ip-interface get the lower level devices
+local interfaces = cursor:get("network",arg[1],"ifname")
+local ethinterfaces ={}
+local manual = false
+local fd,retstr,portstr,wanstr,wanport
+local logging_enable = false
+
+local function log_execute(str)
+  if logging_enable == true then
+      print(str)
+  end
+  os.execute(str)
+end
+
+local function ethernet_set_manual(interface)
+  if manual ~= true then
+    log_execute("fapctl tm --mode --if ".. interface .." --manual")
+    log_execute("fapctl tm --enable --if ".. interface .." --manual")
+  end
+  manual = true
+end
+
+local function configure_ethernet_interface(interface)
+  manual = false
+  local classgroup
+  local policy
+  local classes
+  local classesstring
+  local trafficdescriptor
+-- get the ethernet interfaces that are running and synced at 1 Gb/s
+  os.execute("ifconfig ".. interface .." > /tmp/ethifconfig")
+  fd = assert(io.open("/tmp/ethifconfig","r"))
+  retstr = fd:read("*a")
+  if string.match(retstr,"RUNNING") ~= nil then
+    os.execute("ethctl ".. interface .." media-type 2>/tmp/ethmediatype")
+    fd = assert(io.open("/tmp/ethmediatype","r"))
+    retstr = fd:read("*a")
+    if string.match(retstr,"1000") == nil then
+      ethinterfaces[#ethinterfaces + 1] = interface
+    end
+  end
+  if fd ~= nil then io.close(fd) end
+
+--reset the fap configuration
+  os.execute("fapctl tm --reset --if ".. interface .." --manual")
+  --check if there is a port based shaping configured
+  trafficdescriptor = cursor:get("ethernet", interface, "td")
+  if trafficdescriptor ~= nil then
+    manual = true
+    log_execute("fapctl tm --mode --if ".. interface .." --manual")
+    log_execute("fapctl tm --enable --if ".. interface .." --manual")
+    local mbr = cursor:get("ethernet", trafficdescriptor, "mbr")
+    local mbs = cursor:get("ethernet", trafficdescriptor, "mbs")
+    local ratio = cursor:get("ethernet", trafficdescriptor, "ratio")
+    local rate = cursor:get("ethernet", trafficdescriptor, "rate")
+    if mbr ~= nil and mbs ~= nil then
+      if rate ~= nil then
+        log_execute("fapctl tm --ifcfg --if ".. interface .." --manual --kbps ".. mbr .." --mbs ".. mbs .." --rate")
+      elseif ratio ~= nil then
+        log_execute("fapctl tm --ifcfg --if ".. interface .." --manual --kbps ".. mbr .." --mbs ".. mbs .." --ratio")
+      else
+        log_execute("fapctl tm --ifcfg --if ".. interface .." --manual --kbps ".. mbr .." --mbs ".. mbs)
+      end
+    else
+      print("Incorrect configuration: please specify ethernet mbs and mbr for "..interface)
+    end
+  end
+
+  cursor:foreach("qos", "interface", function(s)
+        --check if there is per queue shaping configured
+    if s[".name"] == arg[1] then
+      classgroup=s["classgroup"]
+      classesstring = cursor:get("qos",classgroup,"classes")
+      classes=string.gmatch(classesstring,"(%S+)%s*")
+      local numclasses =0
+      for class in classes do
+        local weight = cursor:get("qos", class, "weight")
+        local mbr = cursor:get("qos", class, "mbr")
+        local pbr = cursor:get("qos", class, "pbr")
+        local mbs = cursor:get("qos", class, "mbs")
+
+        if weight ~= nil then
+          ethernet_set_manual(interface)
+          log_execute("fapctl tm --queueweight --if ".. interface .." --manual --queue ".. numclasses .." --weight ".. weight)
+        end
+        if mbr ~= nil then
+          if mbs ~= nil then
+            ethernet_set_manual(interface)
+            log_execute("fapctl tm --queuecfg --if ".. interface .." --manual --queue ".. numclasses .." --min --kbps ".. mbr .." --mbs ".. mbs)
+          else
+            print("Incorrect configuration: please specify qos mbs for ".. interface)
+          end
+        end
+        if pbr ~= nil then
+          if mbs ~= nil then
+            ethernet_set_manual(interface)
+            log_execute("fapctl tm --queuecfg --if ".. interface .." --manual --queue ".. numclasses .." --max --kbps ".. pbr .." --mbs ".. mbs)
+            else
+              print("Incorrect configuration: please specify qos mbs for ".. interface)
+            end
+        end
+        numclasses = numclasses + 1
+        if numclasses > 7 then
+          print("Incorrect configuration: no more then 8 classes supported")
+          break
+       end
+      end
+
+     -- configure the queue scheduling
+      policy=cursor:get("qos", classgroup, "policy")
+      if policy ~= nil then
+        if(policy == "sp_wrr") then
+           local lastprioqueue=8
+           policy = "spwrr"
+           --classes is iterator function so we need to reparse again
+           classes=string.gmatch(classesstring,"(%S+)%s*")
+           for class in classes do
+             if cursor:get("qos", class, "weight") == nil then
+               local prio=cursor:get("qos", class, "priority")
+               if tonumber(prio) < tonumber(lastprioqueue) then
+                 lastprioqueue = prio
+                end
+              end
+            end
+            if manual == true then
+              log_execute("fapctl tm --arbitercfg --if ".. interface .." --manual --".. policy .." --lowprioq ".. lastprioqueue)
+            else
+              log_execute("fapctl tm --arbitercfg --if ".. interface .." --auto --".. policy .." --lowprioq ".. lastprioqueue)
+            end
+          elseif policy == "sp" or policy == "wrr" or policy == "wfq" then
+            if manual == true then
+              log_execute("fapctl tm --arbitercfg --if ".. interface .." --manual --".. policy)
+            else
+              log_execute("fapctl tm --arbitercfg --if ".. interface .." --auto --".. policy)
+            end
+         else
+           print("Incorrect configuration: the policy contains a none supported value")
+         end
+      end
+    end
+    --apply changes
+    if manual == false then
+      log_execute("fapctl tm --mode --if ".. interface .." --auto")
+      log_execute("fapctl tm --disable --if ".. interface .." --manual")
+    else
+      log_execute("fapctl tm --disable --if ".. interface .." --auto")
+    end
+    log_execute("fapctl tm --apply --if ".. interface)
+  end)
+end
+
+
+-- check if it is a fap based board
+if io.open("/usr/bin/fapctl") ~= nil then
+  -- build translation table form ethx to switch port number
+  os.execute("ethswctl -c wan > /tmp/ethwanstr")
+  fd = assert(io.open("/tmp/ethwanstr","r"))
+  retstr = fd:read("*l")
+  if retstr ~= nil then
+    wanstr=string.match(retstr,"eth%d")
+  end
+  if fd ~= nil then io.close(fd) end
+  for  i = 0, 7 do
+     os.execute("ethswctl getifname " ..i.." > /tmp/ethportmap")
+     fd = assert(io.open("/tmp/ethportmap","r"))
+     retstr = fd:read("*l")
+     if retstr ~= nil then
+       portstr = string.match(retstr,"eth%d")
+       if wanstr == portstr then
+         wanport=i
+      end
+     end
+  end
+  if fd ~= nil then io.close(fd) end
+
+  os.execute("rm /tmp/ethportmap")
+  if type(interfaces) == "string" then
+    for interface in string.gmatch(interfaces,"eth%d") do
+      configure_ethernet_interface(interface)
+    end
+  else
+    for _,interface in ipairs(interfaces) do
+      if string.match(interface,"eth%d")  ~= nil then
+        configure_ethernet_interface(interface)
+      end
+    end
+  end
+  os.execute("rm /tmp/ethifconfig")
+  os.execute("rm /tmp/ethmediatype")
+  -- if dual fap send frames from wan port to dma channel 1
+  fd = io.open("/usr/bin/gmacctl")
+  if wanstr ~= nil and fd ~= nil then
+    io.close(fd)
+    log_execute("ethswctl -c cosq -p ".. wanport .." -q 0 -v 1")
+  else
+    if wanport ~= nil then
+      log_execute("ethswctl -c cosq -p ".. wanport .." -q 0 -v 0")
+    end
+  end
+  for _,interface in ipairs(ethinterfaces) do
+    if interface == wanstr then
+      --setup port map form tm queue to switch queue
+      for i = 0, 7 do
+        local j = math.floor(i/2)
+        log_execute("fapctl tm --tmq2swq --if ".. interface .." --queue ".. i .." --swqueue ".. j)
+      end
+    else
+      --setup port map form tm queue to switch queue
+      for i = 0,3 do
+        log_execute("fapctl tm --tmq2swq --if ".. interface .." --queue ".. i .." --swqueue ".. i)
+      end
+    end
+  end
+end

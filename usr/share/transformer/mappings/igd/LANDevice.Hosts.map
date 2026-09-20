@@ -1,0 +1,322 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_LANDevice_i_Hosts_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.Hosts.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- HostNumberOfEntries
+      -- automatically created when InternetGatewayDevice.LANDevice.{i}.Hosts.Host.{i}. is loaded
+    }
+  }
+}
+
+register(InternetGatewayDevice_LANDevice_i_Hosts_)
+
+
+local InternetGatewayDevice_LANDevice_i_Hosts_Host_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.Hosts.Host.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "HostNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      AddressSource = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "DHCP",
+          "Static",
+          "AutoIP",
+        },
+      },
+      LeaseTimeRemaining = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      HostName = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      InterfaceType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Ethernet",
+          "USB",
+          "802.11",
+          "HomePNA",
+          "HomePlug",
+          "Other",
+        },
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local common = mapper('nwcommon')
+local bit = require("bit")
+local conn = mapper("ubus").connect()
+
+local gmatch = string.gmatch
+local devlookup={}
+
+-- Return number representing the IP address / netmask (first byte is first part ...)
+local ipmatch = "(%d+)%.(%d+)%.(%d+)%.(%d+)"
+local function ipv42num(ipstr)
+    local result = 0
+    local ipblocks = { string.match(ipstr, ipmatch) }
+    if #ipblocks < 4 then
+        return nil
+    end
+
+    for _,v in ipairs(ipblocks) do
+        result = bit.lshift(result, 8) + v
+    end
+    return result
+end
+local autoip = ipv42num("169.254.0.0")
+local netmask16 = ipv42num("255.255.0.0")
+
+local dev2intf_map = {}
+
+local function key2dev(key)
+  local split = gmatch(key, "[^|]+")
+  local net,mac = split(),split()
+  local device = conn:call("hostmanager.device", "get",{["mac-address"]=mac})
+  -- only one entry should be present
+  for k,v in pairs(device)
+  do
+     if v["l2interface"] and dev2intf_map[v["l2interface"]] == net then
+	return v
+     end
+  end
+end
+
+ local map={
+        ["ethernet"]="Ethernet",
+        ["wireless"]="802.11",
+        ["usb"]="USB",
+        ["homepna"]="HomePNA",
+        ["homeplug"]="HomePlug"
+      }
+
+InternetGatewayDevice_LANDevice_i_Hosts_Host_i_.entries = function(mapping, param)
+  local devices = conn:call("hostmanager.device", "get", {})
+     if devices == nil
+     then error("no hosts to retrieve")
+     end
+
+  dev2intf_map = {}
+  local Hosts = {}
+  for k, v in pairs(devices) do
+     -- Only include entries that belong to the same logical interface
+     -- of the parent LANDevice_i index
+     if v["l2interface"] then
+        local intf = common.dev2interface(v["l2interface"])
+        dev2intf_map[v["l2interface"]] = intf
+        if intf ==  param then
+           Hosts[#Hosts+1]=string.format("%s|%s|", param, v["mac-address"])
+        end
+     end
+  end
+  return Hosts
+end
+
+local maclist = {}
+local function ubus_event_cb(mapping, event, data)
+  if data["mac-address"] and data["l2interface"] then
+      if not maclist[data["mac-address"]] then
+          local intf = common.dev2interface(data["l2interface"])
+          maclist[data["mac-address"]] = true
+          return { { key = intf, paramname = "HostNumberOfEntries" } }
+      end
+  end
+end
+
+InternetGatewayDevice_LANDevice_i_Hosts_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, ubus_event_cb, "hostmanager.devicechanged")
+end
+
+
+InternetGatewayDevice_LANDevice_i_Hosts_Host_i_.get = {
+    IPAddress = function (mapping, param, key)
+      local dev=key2dev(key)
+      if dev and dev['ipv4'] then
+        local addresses={}
+        -- only append ip addresses if connected
+        for k,v in pairs(dev["ipv4"]) do
+          if v["state"]=="connected" then
+             addresses[#addresses+1]=v["address"]
+          end
+        end
+        return table.concat(addresses, ' ')
+     else
+        return ""
+     end
+   end,
+   AddressSource  = function (mapping, param, key)
+    local dev=key2dev(key)
+    if dev and dev["ipv4"] then
+      local sources = {}
+      for k,v in pairs(dev["ipv4"])
+      do
+        if v["state"]=="connected" then
+          -- 1) check for autoip netmask (in 169.254.0.0/16 network)
+          -- 2) check for dynamic (dhcp) config
+          -- 3) default to static
+          local ip = ipv42num(v["address"])
+          if ip == nil then
+            sources[#sources+1] = "Static"
+          else
+            local auto = bit.bxor(autoip, bit.band(ip, netmask16))
+            if auto == 0 then
+              sources[#sources+1] = "AutoIP"
+            elseif v["configuration"] == "dynamic" then
+              sources[#sources+1] = "DHCP"
+            else
+              sources[#sources+1] = "Static"
+            end
+          end
+        end
+      end
+      return table.concat(sources, ' ')
+    else
+      return ''
+    end
+    end,
+   LeaseTimeRemaining  = function (mapping, param, key)
+    local path="/tmp/dhcp.leases"
+    local fd, msg = io.open(path)
+    assert(fd)
+    local leasetable=fd:read("*all")
+    local dev=key2dev(key)
+    if dev==nil then return "" end
+     for leasetime,macaddr in gmatch(leasetable, "(%d+)%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+")
+     do
+       if   dev["mac-address"] == macaddr
+       then
+        fd:close()
+         return leasetime
+       end
+     end
+    fd:close()
+    return ""
+   end,
+   MACAddress = function (mapping, param, key)
+      local split = gmatch(key, "[^|]+")
+      local net,mac = split(),split()
+      return mac
+   end,
+   HostName = function (mapping, param, key)
+   local path="/tmp/dhcp.leases"
+   local fd, msg = io.open(path)
+   assert(fd)
+   local leasetable=fd:read("*all")
+   fd:close()
+   local dev=key2dev(key)
+   if dev==nil then return "" end
+   for leasetime,macaddr,hostname in gmatch(leasetable, "(%d+)%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+%S+%s+(%S+)%s+")
+   do
+       if   dev["mac-address"] == macaddr
+       then return hostname
+       end
+   end
+   return ""
+   end,
+   InterfaceType = function (mapping, param, key)
+      local dev=key2dev(key)
+      if dev==nil then return "" end
+      local tech=dev["technology"]
+      return map[tech] or 'Other'
+   end,
+   Active = function (mapping, param, key)
+      local dev=key2dev(key)
+      if dev==nil then return "" end
+      return dev["state"] == "connected" and '1' or '0'
+   end,
+ }
+
+InternetGatewayDevice_LANDevice_i_Hosts_Host_i_.getall = function(mapping, key)
+    local dev=key2dev(key)
+    local allValues = {
+      IPAddress='',
+      AddressSource = '',
+      LeaseTimeRemaining = '',
+      HostName = '',
+      LeaseTimeRemaining = '',
+      HostName = '',
+      InterfaceType = '',
+      Active = '',
+    }
+
+    if dev and dev['ipv4'] then
+      local addresses={}
+      local sources = {}
+      -- only append ip addresses if connected
+      for k,v in pairs(dev["ipv4"]) do
+        if v["state"]=="connected" then
+          addresses[#addresses+1]=v["address"]
+          -- 1) check for autoip netmask (in 169.254.0.0/16 network)
+          -- 2) check for dynamic (dhcp) config
+          -- 3) default to static
+          local ip = ipv42num(v["address"])
+          if ip == nil then
+            sources[#sources+1] = "Static"
+          else
+            local auto = bit.bxor(autoip, bit.band(ip, netmask16))
+            if auto == 0 then
+              sources[#sources+1] = "AutoIP"
+            elseif v["configuration"] == "dynamic" then
+              sources[#sources+1] = "DHCP"
+            else
+              sources[#sources+1] = "Static"
+            end
+          end
+        end
+      end
+      allValues.IPAddress = table.concat(addresses, ' ')
+      allValues.AddressSource =  table.concat(sources, ' ')
+
+      local path="/tmp/dhcp.leases"
+      local fd, msg = io.open(path)
+      assert(fd)
+      local leasetable=fd:read("*all")
+      for leasetime,macaddr,hostname in gmatch(leasetable, "(%d+)%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+%S+%s+(%S+)%s+") do
+        if dev["mac-address"] == macaddr then
+          allValues.LeaseTimeRemaining  = leasetime
+          allValues.HostName = hostname
+        end
+      end
+      fd:close()
+
+      allValues.InterfaceType = dev["technology"] or 'Other'
+      allValues.Active = "connected" and '1' or '0'
+    end
+    return allValues
+end
+
+register(InternetGatewayDevice_LANDevice_i_Hosts_Host_i_)

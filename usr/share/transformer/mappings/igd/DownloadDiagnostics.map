@@ -1,0 +1,270 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local common = mapper("nwcommon")
+local lfs = require("lfs")
+--local logger = require("transformer.logger")
+--local log = logger.new("tr143", 2)
+local match, format, gsub = string.match, string.format, string.gsub
+local common = mapper('nwcommon')
+local get_ubus_interface_status = common.get_ubus_interface_status
+
+local InternetGatewayDevice_DownloadDiagnostics_ = {
+    objectType = {
+        name = "InternetGatewayDevice.DownloadDiagnostics.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            DiagnosticsState = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+                enumeration = {
+                    "None",
+                    "Requested",
+                    "Completed",
+                    "Error_InitConnectionFailed",
+                    "Error_NoResponse",
+                    "Error_TransferFailed",
+                    "Error_PasswordRequestFailed",
+                    "Error_LoginFailed",
+                    "Error_NoTransferMode",
+                    "Error_NoPASV",
+                    "Error_IncorrectSize",
+                    "Error_Timeout",
+                },
+            },
+            Interface = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+            },
+            DownloadURL = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+            },
+            DSCP = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "63",
+                    },
+                },
+            },
+            EthernetPriority = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "7",
+                    },
+                },
+            },
+            ROMTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "dateTime",
+            },
+            BOMTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "dateTime",
+            },
+            EOMTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "dateTime",
+            },
+            TestBytesReceived = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+            },
+            TotalBytesReceived = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "unsignedInt",
+            },
+            TCPOpenRequestTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "dateTime",
+            },
+            TCPOpenResponseTime = {
+                access = "readOnly",
+                activeNotify = "canDeny",
+                type = "dateTime",
+            },
+        }
+    }
+}
+
+local outfilePath = "/tmp/tr143"
+local outfile = outfilePath.."/download_test.out"
+local paraList = {
+    DiagnosticsState = "None",
+    Interface = "",
+    DownloadURL = "",
+    DSCP = "0",
+    EthernetPriority = "0",
+    ROMTime = "",
+    BOMTime = "",
+    EOMTime = "",
+    TotalBytesReceived = "0",
+    TestBytesReceived = "0",
+    TCPOpenRequestTime = "",
+    TCPOpenResponseTime = "",
+}
+local revert_data = {}
+
+local function getTestResult (file)
+    local fd = io.open(file, "r")
+    if (fd ~= nil) then
+        local line = fd:read("*l")
+        while (line ~= nil) do
+            --line format: name = value such as SourceIPAddress = 10.11.58.95
+            local name, value = match (line, "^(%w+)\s*=\s*(.+)\s*$")
+            if paraList[name] then
+                paraList[name] = value
+            end
+            line = fd:read("*l")
+        end
+        fd:close()
+    else
+    end
+end
+
+local function get(mapping, pname, key, parentkey)
+    getTestResult(outfile)
+    return paraList[pname]
+end
+
+local function getall(mapping, key)
+    getTestResult(outfile)
+    return paraList
+end
+
+local function stop_test()
+    os.execute("killall -9 tr143_diag")
+end
+
+local function reset()
+    stop_test()
+    paraList["DiagnosticsState"] = "None"
+    os.remove(outfile)
+end
+
+local function set(mapping, pname, pvalue, key)
+    local pl = paraList
+    if pname == "Interface" then
+        -- Check if it is an allowed path but do not change pvalue here.
+        -- Empty Interface is acceptable and will be handled in commit phase.
+        if pvalue ~= "" then
+           if not (match(pvalue, "InternetGatewayDevice%.LANDevice%.%d+%.LANHostConfigManagement%.IPInterface%.%d+") or
+              match(pvalue, "InternetGatewayDevice%.WANDevice%.%d+%.WANConnectionDevice%.%d+.WANPPPConnection%.%d+") or
+              match(pvalue, "InternetGatewayDevice%.WANDevice%.%d+%.WANConnectionDevice%.%d+.WANIPConnection%.%d+")) then
+              return nil, "invalid value"
+           end
+           local intf = tokey(pvalue)
+           if (intf and not match(pvalue, "InternetGatewayDevice%.LANDevice%.%d+%.LANHostConfigManagement%.IPInterface%.%d+")) then
+               intf = common.split_key(intf)
+           end
+           if (not intf) then
+               return nil, "Invalid interface instance"
+           end
+        end
+    elseif pname == "DownloadURL" then
+        if not match(pvalue, "^http://") then
+            return nil, "invalid value"
+        end
+    elseif pname == "DiagnosticsState" then
+        if pvalue ~= "Requested" then
+            return nil, "invalid value"
+        end
+    end
+
+    revert_data[pname] = pl[pname]
+    pl[pname] = pvalue
+end
+
+local function revert(mapping)
+    for k,v in pairs(revert_data) do
+        paraList[k] = v
+    end
+end
+
+local function get_intf_by_url(url)
+    local host = match(url, "http://(.-)/")
+    host = gsub(host, ":.*", "") -- remove :port to get pure host or ip address
+    if not match(host, "(%d+.%d+.%d+.%d+)") then
+        -- if domain name, resolve to ip address
+        local cmdline = host and format("nslookup %s 2>&1", host)
+        local p = assert(io.popen(cmdline))
+        local output = p:read("*a")
+        p:close()
+        host  = match(output, "Address.*:%s*(%d+.%d+.%d+.%d+).*")
+    end
+    -- get interface by route
+    local cmdline = host and format("ip route get %s 2>&1", host)
+    local p = assert(io.popen(cmdline))
+    local output = p:read("*a")
+    p:close()
+    local intf = match(output, "dev%s+([%w_-]+)")
+    return intf
+end
+
+local function commit(mapping)
+    local pl = paraList
+    if pl["DiagnosticsState"] == "Requested" and revert_data["DiagnosticsState"]then
+        if pl["DownloadURL"] == "" then
+            return nil, "invalid value"
+        end
+        local cmd = format("/usr/bin/tr143_diag --dir down --url %s --resfile %s", pl["DownloadURL"], outfile)
+        local intf, dscp = "", ""
+
+        if pl["Interface"] ~= "" then
+            -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
+            local interface = tokey(pl["Interface"])
+            if (interface and not match(pl["Interface"], "InternetGatewayDevice%.LANDevice%.%d+%.LANHostConfigManagement%.IPInterface%.%d+")) then
+                interface = common.split_key(interface)
+            end
+
+            local v = get_ubus_interface_status(interface)
+            intf = (v and v['l3_device']) or ""
+        else
+            intf = get_intf_by_url(pl["DownloadURL"])
+            if not intf then
+                local v = get_ubus_interface_status("wan")
+                intf = (v and v['l3_device']) or ""
+            end
+        end
+
+        if intf ~= "" then
+            intf = format("--intf %s", intf)
+        end
+        if pl["DSCP"] ~= "" then
+            dscp = format("--dscp %s", pl["DSCP"])
+        end
+
+        lfs.mkdir(outfilePath)
+        stop_test()
+        cmd = format("%s %s %s &", cmd, intf, dscp)
+        os.execute(cmd)
+        --log:error(format("%s", cmd))
+    else
+        reset()
+    end
+    revert_data = {}
+end
+
+InternetGatewayDevice_DownloadDiagnostics_.commit = commit
+InternetGatewayDevice_DownloadDiagnostics_.revert = revert
+InternetGatewayDevice_DownloadDiagnostics_.set = set
+InternetGatewayDevice_DownloadDiagnostics_.get = get
+InternetGatewayDevice_DownloadDiagnostics_.getall = getall
+register(InternetGatewayDevice_DownloadDiagnostics_)
+

@@ -1,0 +1,585 @@
+local format = string.format
+local conn = mapper("ubus").connect()
+
+local mmpbx_profile = {
+    objectType = {
+        name = "rpc.mmpbx.profile.@.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = math.huge,
+        parameters = {
+            networkName = {
+                access = "readOnly",
+                type = "string",
+            },
+            enable = {
+                access = "readOnly",
+                type = "string",
+            },
+            usable = {
+                access = "readOnly",
+                type = "string",
+            },
+            networkType = {
+                access = "readOnly",
+                type = "string",
+            },
+            sipRegisterState = {
+                access = "readOnly",
+                type = "string",
+            },
+            failReason = {
+                access = "readOnly",
+                type = "string",
+            },
+            uri = {
+                access = "readOnly",
+                type = "string",
+            },
+            callState = {
+                access = "readOnly",
+                type = "string",
+            },
+        }
+    }
+}
+
+local function entriesProfile ()
+    local profiles, entries = {}, {}
+    profiles = conn:call("mmpbx.profile", "get", {} )
+    if profiles then
+        for name, _ in pairs (profiles) do
+            entries[#entries+1] = name
+        end
+    end
+    return entries
+end
+
+local function get(mapping, paramname, key)
+    local content = {}
+    if paramname == "callState" then
+        content = conn:call("mmpbx.call", "get", {})
+        if content then
+            for _,v in pairs(content) do
+                if v.profile == key then
+                    return v[paramname]
+                end
+            end
+            return "MMPBX_CALLSTATE_IDLE"
+        end
+    else
+        content = conn:call("mmpbx.profile", "get", { profile = key } )
+        if content and content[key] and content[key][paramname] then
+            return content[key][paramname]
+        end
+    end
+    return ""
+end
+
+local function getAllProfiles(mapping, key)
+    local content = conn:call("mmpbx.profile", "get", { profile = key } )
+    local data = {}
+    if content then
+        for _, v in pairs (content) do
+            if (type(v) == "table") then
+                for param, value in pairs (v) do
+                    data[param] = value
+                end
+            end
+        end
+    end
+    local content = conn:call("mmpbx.call", "get", {})
+    if content then
+        data["callState"] = "MMPBX_CALLSTATE_IDLE"
+        for _,v in pairs(content) do
+            if v.profile == key then
+                data["callState"] = v["callState"]
+                break
+            end
+        end
+    else
+        data["callState"] = ""
+    end
+    return data
+end
+
+mmpbx_profile.entries = entriesProfile
+mmpbx_profile.getall = getAllProfiles
+mmpbx_profile.get = get
+
+register(mmpbx_profile)
+
+-----------------------------------
+--- rpc.mmpbx.sip_profile.@. ------
+-----------------------------------
+local mmpbx_sipprofile = {
+    objectType = {
+      name = "rpc.mmpbx.sip_profile.@.",
+      access = "readWrite",
+      minEntries = 0,
+      maxEntries = math.huge,
+      parameters = {
+          enabled = {
+              access = "readWrite",
+              type = "boolean",
+          },
+          user_name = {
+              access = "readWrite",
+              type = "string",
+          },
+          password = {
+              access = "readWrite",
+              type = "string",
+          },
+          uri = {
+              access = "readWrite",
+              type = "string",
+          },
+          display_name = {
+              access = "readWrite",
+              type = "string",
+          },
+          network = {
+              access = "readWrite",
+              type = "string",
+          },
+          port = {
+              access = "readWrite",
+              type = "string",
+          },
+      }
+    }
+}
+
+local uci_helper = mapper("ucihelper")
+local sipnet_binding = { config="mmpbxrvsipnet" }
+local mmpbx_binding = { config="mmpbx" }
+local binding = {}
+local transactions = {}
+
+local dev_config = {
+    sipdev="mmpbxrvsipdev",
+    dect = "mmpbxbrcmdectdev",
+    fxs  ="mmpbxbrcmfxsdev",
+}
+local fxs_binding = { config=dev_config["fxs"], option="relay_state" }
+
+local revert = {
+    ["1"] = "0",
+    ["0"] = "1",
+}
+
+mmpbx_sipprofile.entries =  function()
+    local entries = {}
+    sipnet_binding.sectionname = "profile"
+    uci_helper.foreach_on_uci(sipnet_binding, function(s)
+       entries[#entries+1] = s['.name']
+    end)
+    return entries
+end
+
+mmpbx_sipprofile.getall = function(mapping, key)
+    sipnet_binding.sectionname = key
+    return uci_helper.getall_from_uci(sipnet_binding)
+end
+
+local order = {
+    f = 1,
+    d = 2,
+    s = 3,
+}
+
+local function get_devices_from_uci(key)
+    mmpbx_binding.sectionname = "incoming_map"
+    local devices
+    uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+        if s.profile == key and type(s.device) == "table" then
+            devices = s.device
+            return
+        end
+    end)
+    if devices then
+        table.sort(devices, function(a,b)
+            local order_a = order[a:sub(1,1)]
+            local order_b = order[b:sub(1,1)]
+            if order_a < order_b or (order_a == order_b and a < b) then
+                return true
+            else
+                return false
+            end
+        end)
+        return table.concat(devices, ",")
+    end
+    return ""
+end
+
+mmpbx_sipprofile.get = function(mapping, param, key)
+    if param == "port" then
+        return get_devices_from_uci(key)
+    else
+        sipnet_binding.sectionname = key
+        sipnet_binding.option = param
+        return uci_helper.get_from_uci(sipnet_binding)
+    end
+end
+
+local all_devices
+local function get_all_devices()
+    local binding = { sectionname = "device"}
+    local devices = {}
+    for k,v in pairs(dev_config) do
+        binding.config = v
+        uci_helper.foreach_on_uci(binding, function(s)
+            devices[#devices+1] = s[".name"]
+        end)
+    end
+    return devices
+end
+
+local function set_port_on_incomingmap(profile, port)
+    mmpbx_binding.sectionname = "incoming_map"
+    mmpbx_binding.option = nil
+    binding.config = "mmpbx"
+    binding.sectionname = nil
+    local dev_num = 0
+    local dev_value
+    uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+        if s.profile == profile then
+            binding.sectionname = s[".name"]
+            if s["device"] and port ~= "none" then
+                dev_num = #s["device"]
+                if dev_num == 1 then
+                    dev_value = s["device"][1]
+                end
+            end
+            return true
+        end
+    end)
+
+    if not binding.sectionname then
+        if port == "none" then
+            return false
+        else
+            local section = uci_helper.add_on_uci(mmpbx_binding)
+            binding.sectionname = section
+            binding.option = "profile"
+            uci_helper.set_on_uci(binding, profile, commitapply)
+        end
+    elseif port == "none" then
+        binding.option = nil
+        uci_helper.delete_on_uci(binding, commitapply)
+        transactions[binding.config] = true
+        return true
+    elseif (port == "common" and dev_num>1) or (port == dev_value) then
+        return false
+    end
+
+    binding.option = "device"
+    all_devices = all_devices or get_all_devices()
+    if port == "common" then
+        uci_helper.set_on_uci(binding, all_devices, commitapply)
+    else
+        uci_helper.set_on_uci(binding, { port }, commitapply)
+    end
+    transactions[binding.config] = true
+    return true
+end
+
+local function create_outgoingmap(device, profile)
+    mmpbx_binding.sectionname = "outgoing_map"
+    local section = uci_helper.add_on_uci(mmpbx_binding)
+    mmpbx_binding.sectionname = section
+    mmpbx_binding.option = "device"
+    uci_helper.set_on_uci(mmpbx_binding, device, commitapply)
+    mmpbx_binding.option = "profile"
+    uci_helper.set_on_uci(mmpbx_binding, { profile }, commitapply)
+    mmpbx_binding.option = "priority"
+    uci_helper.set_on_uci(mmpbx_binding, { "1" }, commitapply)
+    transactions[mmpbx_binding.config] = true
+end
+
+local function set_profile_on_outgoingmap(port, profile)
+    local unchecked_list = {}
+    if port == "common" then
+        for _, k in pairs(all_devices) do
+            unchecked_list[k] = true
+        end
+    elseif port ~= "none" then
+        unchecked_list[port] = true
+    end
+    mmpbx_binding.sectionname = "outgoing_map"
+    mmpbx_binding.option = nil
+    binding.config = "mmpbx"
+    uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+        if s.device then
+            unchecked_list[s.device] = nil
+        end
+        local new_profiles, new_priorities
+        if type(s.priority) == "table" and type(s.profile) == "table" then
+            new_profiles = {}
+            new_priorities = {}
+            local highest = 0
+            for k,v in pairs(s.profile) do
+                if v == profile then
+                    if port == s.device or port == "common" then
+                        new_profiles = nil
+                        new_priorities = nil
+                        break
+                    end
+                else
+                    new_profiles[#new_profiles+1] = v
+                    new_priorities[#new_priorities+1] = s["priority"][k]
+                    local priority = tonumber(s["priority"][k])
+                    if priority > highest then
+                        highest = priority
+                    end
+                end
+            end
+
+            if new_profiles and #new_profiles == #s["profile"] then
+                if port == s.device or port == "common" then
+                    new_profiles[#new_profiles+1] = profile
+                    new_priorities[#new_priorities+1] = tonumber(highest+1)
+                else
+                    new_profiles = nil
+                    new_priorities = nil
+                end
+            end
+        elseif port == s.device or port == "common" then
+            new_profiles = { profile }
+            new_priorities = { "1" }
+        end
+
+        if new_profiles then
+            binding.sectionname = s[".name"]
+            if #new_profiles > 0 then
+                binding.option = "profile"
+                uci_helper.set_on_uci(binding, new_profiles, commitapply)
+                binding.option = "priority"
+                uci_helper.set_on_uci(binding, new_priorities, commitapply)
+                transactions[binding.config] = true
+           elseif #new_profiles == 0 then
+                binding.option = nil
+                uci_helper.delete_on_uci(binding, commitapply)
+                transactions[binding.config] = true
+           end
+        end
+    end)
+
+    for dev,_ in pairs(unchecked_list) do
+        create_outgoingmap(dev, profile)
+    end
+end
+
+local function set_f_port(value, profile)
+    sipnet_binding.sectionname = "profile"
+    local state = "0"
+    uci_helper.foreach_on_uci(sipnet_binding, function(s)
+        if (s["enabled"] == "1" and s[".name"] ~= profile) or value == "1" then
+            state = "1"
+            return true
+        end
+    end)
+    binding.config = "mmpbxbrcmfxonet"
+    binding.sectionname = "fxo_profile"
+    binding.option = "enabled"
+    local old_state = uci_helper.get_from_uci(binding)
+    if old_state ~= revert[state] then
+        uci_helper.set_on_uci(binding, revert[state], commitapply)
+        transactions[binding.config] = true
+    end
+
+    binding.config = dev_config["fxs"]
+    binding.sectionname = "device"
+    uci_helper.foreach_on_uci(binding, function(s)
+         if s["relay_state"] and s["relay_state"] ~= state then
+             fxs_binding.sectionname = s[".name"]
+             uci_helper.set_on_uci(fxs_binding, state, commitapply)
+             transactions[fxs_binding.config] = true
+         end
+    end)
+end
+
+mmpbx_sipprofile.set = function(mapping, param, value, key)
+    if param == "port" then
+        local port = value
+        if value == "" then
+            port = "none"
+        end
+
+        local changed = set_port_on_incomingmap(key, port)
+        if changed then
+            set_profile_on_outgoingmap(port, key)
+        end
+    else
+        sipnet_binding.sectionname = key
+        sipnet_binding.option = param
+        uci_helper.set_on_uci(sipnet_binding, value, commitapply)
+        transactions[sipnet_binding.config] = true
+        if param == "enabled" then
+            set_f_port(value, key)
+        end
+    end
+end
+
+local function getHighestSipId()
+    local highest = 0
+    sipnet_binding.sectionname = "profile"
+    uci_helper.foreach_on_uci(sipnet_binding, function(s)
+        local id = tonumber(s['.name']:match("(%d+)$"))
+        if (highest < id) then
+             highest = id
+        end
+    end)
+    return highest + 1
+end
+
+local service_type = {
+    ACR =true,
+    CFBS = true,
+    CFNR = true,
+    CFU = true,
+    CLIP = true,
+    CLIR = true,
+    HOLD = true,
+    MWI = true,
+    --CONFERENCE = true,
+}
+
+local function add_services(profile)
+    mmpbx_binding.sectionname = "service"
+    local binding = {config="mmpbx"}
+    local added_services={}
+    uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+        if ((s.type and service_type[s.type]) or (s.type == "CONFERENCE" and not s.device)) and not added_services[s.type] then
+            local profiles = s.profile or {}
+            profiles[#profiles+1] = profile
+            binding.sectionname = s[".name"]
+            binding.option = "profile"
+            uci_helper.set_on_uci(binding, profiles, commitapply)
+            added_services[s.type] = true
+        end
+    end)
+end
+
+mmpbx_sipprofile.add = function(mapping, name)
+    local highestSipId = getHighestSipId()
+    local profile_name = format ("sip_profile_%s", highestSipId)
+    sipnet_binding.sectionname = profile_name
+    sipnet_binding.option = nil
+    uci_helper.set_on_uci(sipnet_binding, "profile", commitapply)
+    transactions[sipnet_binding.config] = true
+    mmpbx_binding.sectionname = profile_name
+    mmpbx_binding.option = nil
+    uci_helper.set_on_uci(mmpbx_binding, "profile", commitapply)
+    mmpbx_binding.option = "config"
+    uci_helper.set_on_uci(mmpbx_binding, "mmpbxrvsipnet", commitapply)
+    add_services(profile_name)
+    transactions[mmpbx_binding.config] = true
+    return profile_name
+end
+
+local function delete_services(profile)
+    mmpbx_binding.sectionname = "service"
+    local binding = {config="mmpbx"}
+    uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+         if type(s.profile) == "table" then
+             local new_profiles = {}
+             for _,v in pairs(s.profile) do
+                 if v ~= profile then
+                     new_profiles[#new_profiles+1] = v
+                 end
+             end
+             binding.sectionname = s[".name"]
+             binding.option = "profile"
+             uci_helper.set_on_uci(binding, new_profiles, commitapply)
+             transactions[binding.config] = true
+         end
+    end)
+end
+
+mmpbx_sipprofile.delete = function(mapping, key)
+    sipnet_binding.sectionname = key
+    sipnet_binding.option = nil
+    uci_helper.delete_on_uci(sipnet_binding, commitapply)
+    transactions[sipnet_binding.config] = true
+    mmpbx_binding.sectionname = key
+    mmpbx_binding.option = nil
+    uci_helper.delete_on_uci(mmpbx_binding, commitapply)
+    transactions[mmpbx_binding.config] = true
+    delete_services(key)
+    local port = "none"
+    local changed = set_port_on_incomingmap(key, port)
+    if changed then
+        set_profile_on_outgoingmap(port, key)
+    end
+    set_f_port("0", key)
+    return true
+end
+
+mmpbx_sipprofile.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+end
+
+mmpbx_sipprofile.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+end
+
+register(mmpbx_sipprofile)
+
+-----------------------------------
+--rpc.mmpbx.internal_profile.@. ---
+-----------------------------------
+local mmpbx_internalprofile = {
+    objectType = {
+      name = "rpc.mmpbx.internal_profile.@.",
+      access = "readOnly",
+      minEntries = 0,
+      maxEntries = math.huge,
+      parameters = {
+          enabled = {
+              access = "readOnly",
+              type = "boolean",
+          },
+          number = {
+              access = "readOnly",
+              type = "string",
+          },
+          port = {
+              access = "readOnly",
+              type = "string",
+          },
+      }
+    }
+}
+
+local internalnet_binding = {config="mmpbxinternalnet"}
+
+mmpbx_internalprofile.entries = function()
+    local entries = {}
+    internalnet_binding.sectionname = "profile"
+    uci_helper.foreach_on_uci(internalnet_binding, function(s)
+       entries[#entries+1] = s['.name']
+    end)
+    return entries
+end
+
+mmpbx_internalprofile.get = function(mapping, param, key)
+    if param == "port" then
+        return get_devices_from_uci(key)
+    else
+        internalnet_binding.sectionname = key
+        internalnet_binding.option = param
+        return uci_helper.get_from_uci(internalnet_binding)
+    end
+end
+
+register(mmpbx_internalprofile)

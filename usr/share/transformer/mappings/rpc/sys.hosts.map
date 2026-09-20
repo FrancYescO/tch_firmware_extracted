@@ -1,0 +1,436 @@
+local require = require
+local register = register
+local table, pairs, tostring, error = table, pairs, tostring, error
+local string = string
+local popen = io.popen
+
+-- sys.hosts
+local Sys_Hosts_ = {
+  objectType = {
+    name = "sys.hosts.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      WirelessNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      EthernetNumberOfEntries = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+local function getDeviceNumberOfEntries(technology)
+  local devices = conn:call("hostmanager.device", "get", {})
+  if devices == nil then
+     error("retrieving hosts failed")
+  end
+  local numberOfHosts = 0
+  for _, v in pairs(devices) do
+      if v["technology"] == technology and v["l3interface"] == "br-lan" then
+         numberOfHosts = numberOfHosts + 1
+      end
+  end
+  return tostring(numberOfHosts)
+end
+
+Sys_Hosts_.get = {
+  WirelessNumberOfEntries = function(mapping, param, key)
+	return getDeviceNumberOfEntries("wireless")
+  end,
+  EthernetNumberOfEntries = function(mapping, param, key)
+	return getDeviceNumberOfEntries("ethernet")
+  end,
+}
+
+register(Sys_Hosts_)
+
+-- sys.hosts.host.{i}
+local Sys_Hosts_Host_i_ = {
+  objectType = {
+    name = "sys.hosts.host.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "HostNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      HostName = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      InterfaceType = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Ethernet",
+          "USB",
+          "802.11",
+          "HomePNA",
+          "HomePlug",
+          "Other",
+        }
+      },
+      L2Interface = {
+         access = "readOnly",
+         type = "string",
+      },
+      L3Interface = {
+         access = "readOnly",
+         type = "string",
+      },
+      State = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      Port = {
+        access = "readOnly",
+        type = "string",
+      },
+      Speed = {
+         access = "readOnly",
+         type = "string",
+      }
+    }
+  }
+}
+
+-- Convert a device key to device information
+local function key2dev(key)
+  local device = conn:call("hostmanager.device", "get", { ["mac-address"] = key })
+  -- only one entry should be present
+  for _,v in pairs(device) do
+    return v
+  end
+end
+
+-- Extract an IP address from the given value and add it to the list
+local function extractAddress(value, addresses)
+  if value["state"] == "connected" then
+    if addresses == "" then
+      addresses = value["address"]
+    else
+      addresses = addresses .. " " .. value["address"]
+    end
+  end
+  return addresses
+end
+
+Sys_Hosts_Host_i_.entries = function(mapping)
+  local devices = conn:call("hostmanager.device", "get", {})
+  if devices == nil then
+    error("retrieving hosts failed")
+  end
+  local Hosts = {}
+  for _, v in pairs(devices) do
+    --remove the "br-lan" filter to show all the devices on RPC, including the devices connected to wifi guest.
+    --the EthernetNumberOfEntries and WirelessNumberOfEntries are the number of the devices on br-lan
+    --We need to do the filter in other place if possible.
+    --if (v["technology"] == "wireless" or v["technology"] == "ethernet") and v["l3interface"] == "br-lan" then
+    if (v["technology"] == "wireless" or v["technology"] == "ethernet") then
+        Hosts[#Hosts+1] = v["mac-address"]
+    end
+  end
+  return Hosts
+end
+
+local function extractIPAddresses(dev)
+    local addresses = ""
+    if dev ~= nil then
+        -- Extract IPv4 addresses
+        if dev["ipv4"] ~= nil then
+            for _,value in pairs(dev["ipv4"]) do
+                addresses = extractAddress(value, addresses)
+            end
+        end
+        -- Extract IPv6 addresses
+        if dev["ipv6"] ~= nil then
+            for _,value in pairs(dev["ipv6"]) do
+                addresses = extractAddress(value, addresses)
+            end
+        end
+    end
+    return addresses
+end
+
+local function extractHostName(dev)
+    if dev ~= nil and dev["hostname"] ~= nil then
+        return dev["hostname"]
+    end
+    return ""
+end
+
+local function extractInterfaceType(dev)
+    if dev["technology"] ~= nil then
+        return dev["technology"]
+    end
+    return ""
+end
+
+local function extractL2Interface(dev)
+    if dev["l2interface"] ~= nil then
+        return dev["l2interface"]
+    end
+    return ""
+end
+
+local function extractl3interface(dev)
+    if dev["l3interface"] ~= nil then
+        return dev["l3interface"]
+    end
+    return ""
+end
+
+local function extractState(dev)
+    if dev["state"] == "connected" then
+        return "1"
+    end
+    return "0"
+end
+
+local function extractPort(dev)
+    -- [CL] Some platforms don't have l2interfaces that make sense (e.g. without switch driver)
+    -- [CL] If the device in the hostmanager ubus call knows what port a device is attached to, let's trust it
+    -- [CL] Hacking this into the generic sys.hosts.map file until someone can explain me how to properly customize this without
+    -- [CL] copying the entire file and hence losing all future functionality/bugfixes since noone looks at our platforms anyway.
+
+    if dev["switchport"] ~= nil then
+        return tostring(dev["switchport"])
+    else
+        if dev["technology"] == "ethernet" and dev["l3interface"] == "br-lan" and dev["l2interface"] ~= nil then
+            local portNumber = string.match(dev["l2interface"],"%a*(%d+)")
+            if portNumber ~= nil then
+                portNumber = portNumber + 1
+                return tostring(portNumber)
+            end
+            return ""
+        end
+        return ""
+    end
+end
+
+local function getInterfaceState(l2interface)
+    local log = popen("/usr/bin/ethctl " .. l2interface .. " media-type 2>&1")
+    if log == nil then
+        return ""
+    end
+    local logString = log:read("*a")
+    if logString == nil then
+        return ""
+    end
+    local speed = string.match(logString, "%d+") -- Only numbers present
+    if speed ~= nil then
+        return speed
+    end
+    return ""
+end
+
+local function extractSpeed(dev)
+    if dev["technology"] == "wireless" then
+        if dev["wireless"] and dev["wireless"]["tx_phy_rate"] ~= nil then
+            return tostring(dev["wireless"]["tx_phy_rate"] / 1000)
+        end
+        return ""
+    elseif dev["technology"] == "ethernet" then
+        if dev["l2interface"] ~= nil and dev["l2interface"] ~= "" then
+            return getInterfaceState(dev["l2interface"])
+        elseif dev["l3interface"] ~= nil then
+            return getInterfaceState(dev["l3interface"])
+        end
+        return ""
+    end
+    return ""
+end
+
+Sys_Hosts_Host_i_.getall = function(mapping, key)
+    local dev = key2dev(key)
+    return {
+        MACAddress = key,
+        IPAddress = extractIPAddresses(dev),
+        HostName = extractHostName(dev),
+        InterfaceType = extractInterfaceType(dev),
+        L2Interface = extractL2Interface(dev),
+        L3Interface = extractl3interface(dev),
+        State = extractState(dev),
+        Port = extractPort(dev),
+        Speed = extractSpeed(dev)
+    }
+end
+
+Sys_Hosts_Host_i_.get = {
+  IPAddress = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractIPAddresses(dev)
+  end,
+  MACAddress = function(mapping, param, key)
+    return key
+  end,
+  HostName = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractHostName(dev)
+  end,
+  InterfaceType = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractInterfaceType(dev)
+  end,
+  L2Interface = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractL2Interface(dev)
+  end,
+  L3Interface = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractl3interface(dev)
+  end,
+  State = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractState(dev)
+  end,
+  Port = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractPort(dev)
+  end,
+  Speed = function(mapping, param, key)
+    local dev = key2dev(key)
+    return extractSpeed(dev)
+  end
+}
+
+register(Sys_Hosts_Host_i_)
+
+-- sys.hosts.host.{i}.tod
+
+-- We're going to get this multi-instance working as single-instance child
+-- for a multi-instance parent ('sys.hosts.host.{i}')
+local mapinfo_tod_uci = {
+    config = "tod",
+    type = "host",
+    options = { "id", "type", "enabled", "mode", "start_time", "stop_time" },
+    lists = { "weekdays" },
+}
+local mapping_tod_uci = mapper("uci_1to1").createMultiMap(mapinfo_tod_uci)
+
+local Sys_Hosts_Host_i_tod_i = {
+  objectType = {
+    name = "sys.hosts.host.{i}.tod.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      enabled    = mapping_tod_uci.objectType.parameters["enabled"],
+      type       = mapping_tod_uci.objectType.parameters["type"],
+      mode       = mapping_tod_uci.objectType.parameters["mode"],
+      start_time = mapping_tod_uci.objectType.parameters["start_time"],
+      stop_time  = mapping_tod_uci.objectType.parameters["stop_time"],
+    },
+  },
+}
+
+local ucihelper = mapper("ucihelper")
+
+-- There's a dependency for entries() in parent mapping
+Sys_Hosts_Host_i_.mapping_tod = Sys_Hosts_Host_i_tod_i
+
+Sys_Hosts_Host_i_tod_i.entries = function(mapping, parentkey)
+  local res = {}
+  -- It's necessary to invoke mapping_tod_uci.entries(mapping_tod_uci),
+  -- otherwise, the mapping_tod_uci.instances will not be created,
+  -- then following get/set/... will be failed
+  if table.getn(mapping_tod_uci.entries(mapping_tod_uci)) == 0 then return res end
+  local uci_binding = {
+    config = mapping_tod_uci.binding["config"],
+    sectionname = mapping_tod_uci.binding["type"],
+    state = mapping_tod_uci.binding["state"],
+  }
+  local function cb(t)
+    local id = t["id"]
+    if id ~= nil and id == parentkey then
+       res[#res+1] = t["_key"]
+    end
+  end
+  ucihelper.foreach_on_uci(uci_binding, cb)
+  return res
+end
+
+Sys_Hosts_Host_i_tod_i.get = function(mapping, paramname, key)
+  return mapping_tod_uci.get(mapping_tod_uci, paramname, key)
+end
+
+Sys_Hosts_Host_i_tod_i.getall = function(mapping, key)
+  return mapping_tod_uci.getall(mapping_tod_uci, key)
+end
+
+Sys_Hosts_Host_i_tod_i.set = function(mapping, paramname, value, key)
+  return mapping_tod_uci.set(mapping_tod_uci, paramname, value, key)
+end
+
+Sys_Hosts_Host_i_tod_i.commit = function()
+  return mapping_tod_uci.commit(mapping_tod_uci)
+end
+
+Sys_Hosts_Host_i_tod_i.revert = function()
+  return mapping_tod_uci.revert(mapping_tod_uci)
+end
+
+register(Sys_Hosts_Host_i_tod_i)
+
+-- submappings (lists: sys.hosts.host.{i}.tod.{i}.weekdays.@.)
+local function tod_sub_get(mapping, paramname, key, parentkey)
+  return mapping.mapping_uci.get(mapping.mapping_uci, paramname, key, parentkey)
+end
+
+local function tod_sub_set(mapping, paramname, value, key, parentkey)
+  return mapping.mapping_uci.set(mapping.mapping_uci, paramname, value, key, parentkey)
+end
+
+local function tod_sub_add(mapping, name, parentkey)
+  return mapping.mapping_uci.add(mapping.mapping_uci, name, parentkey)
+end
+
+local function tod_sub_delete(mapping, key, parentkey)
+  return mapping.mapping_uci.delete(mapping.mapping_uci, key, parentkey)
+end
+
+local function tod_sub_deleteall(mapping, parentkey)
+  return mapping.mapping_uci.deleteall(mapping.mapping_uci, parentkey)
+end
+
+local function tod_sub_entries(mapping, parentkey)
+  return mapping.mapping_uci.entries(mapping.mapping_uci, parentkey)
+end
+
+for _, submapping_uci in ipairs(mapping_tod_uci.submappings) do
+  local submapping = {
+    objectType = {
+      name = Sys_Hosts_Host_i_tod_i.objectType.name .. submapping_uci.binding.option .. ".@.",
+      access = submapping_uci.objectType.access,
+      numEntriesParameter = submapping_uci.objectType.numEntriesParameter,
+      minEntries = submapping_uci.objectType.minEntries,
+      maxEntries = submapping_uci.objectType.maxEntries,
+      parameters = submapping_uci.objectType.parameters,
+    },
+    get = tod_sub_get,
+    set = tod_sub_set,
+    add = tod_sub_add,
+    delete = tod_sub_delete,
+    deleteall = tod_sub_deleteall,
+    entries = tod_sub_entries,
+    mapping_uci = submapping_uci,
+  }
+
+  register(submapping)
+end

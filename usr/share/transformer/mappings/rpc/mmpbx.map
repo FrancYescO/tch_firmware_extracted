@@ -1,0 +1,44 @@
+local conn = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+
+local mmpbx = {
+    objectType = {
+        name = "rpc.mmpbx.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            resetCallStats = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+            },
+            state = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "STARTING",
+                    "RUNNING",
+                    "STOPPING",
+                    "NA",
+                },
+                default = "NA",
+            },
+        },
+    }
+}
+local function set(mapping, paramName, paramValue, key)
+    conn:call("mmpbx.profile.stats", "reset", {})
+    conn:call("mmpbx.device.stats", "reset", {})
+    return nil
+end
+
+mmpbx.get = {
+    resetCallStats = "false",
+    state = function(mapping, paramName, key)
+        return uci_helper.get_from_uci({config="mmpbx", sectionname="state"})
+    end,
+}
+
+mmpbx.set = set
+register(mmpbx)

@@ -1,0 +1,179 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2010 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+#set -x
+
+START=99
+
+MINIDLNA_CONFIG_FILE="/var/etc/minidlna.conf"
+MINIDLNA_PID="/var/run/minidlna.pid"
+export MINIDLNA_D_PID="/var/run/minidlna_d.pid"
+MINIDLAN_BOOT="/var/run/minidlna_boot"
+MINIDLAN_Q="/var/run/minidlna_Q"
+
+minidlna_print() {
+	logger -t minidlna "$1"
+}
+
+minidlna_set_pid_check() {
+	local proc_name="$1"
+	local pid="$2"
+	[ -n "$pid" ] && pid_check="`ps -w | grep $pid | egrep -e \"$proc_name\"`"
+}
+
+minidlna_kill() {
+	local pid_file="$1"
+	local proc_name="$2"
+	local pid
+	local pid_check
+
+	#set -x
+
+	[ -r $pid_file ] && pid="`cat $pid_file`"
+	[ -z "$proc_name" ] && minidlna_print "WARNING : no process name specified for $pid_file"
+
+	minidlna_set_pid_check $proc_name $pid
+	[ -n "$pid_check" ] && {
+		kill -TERM $pid
+		sleep 5
+		minidlna_set_pid_check $proc_name $pid
+		[ -n "$pid_check" ] && {
+			minidlna_print "WARNING kill -TERM failed ($pid_file $proc_name)"
+			kill -KILL $pid
+			minidlna_set_pid_check $proc_name $pid
+			[ -n "$pid_check" ] && {
+				minidlna_print "WARNING kill -KILL failed ($pid_file $proc_name)"
+			}
+		}
+	}
+	[ -z "$pid_check" ] && rm -f $MINIDLNA_PID
+	set +x
+}
+
+minidlna_cfg_append() {
+	echo "$1" >> "$MINIDLNA_CONFIG_FILE"
+}
+
+minidlna_cfg_addbool() {
+	local cfg="$1"
+	local key="$2"
+	local def="$3"
+	local val
+
+	config_get_bool val "$cfg" "$key" "$def"
+	[ "$val" -gt 0 ] && val="yes" || val="no"
+	minidlna_cfg_append "$key=$val"
+}
+
+minidlna_cfg_addstr() {
+	local cfg="$1"
+	local key="$2"
+	local def="$3"
+	local val
+
+	config_get val "$cfg" "$key" "$def"
+	[ -n "$val" ] && minidlna_cfg_append "$key=$val"
+}
+
+minidlna_cfg_add_media_dir() {
+	local val=$1
+
+	minidlna_cfg_append "media_dir=$val"
+}
+
+minidlna_create_config() {
+	local cfg=$1
+	local port
+	local interface
+
+	config_get port $cfg port
+	config_get interface $cfg interface
+
+	[ -z "$interface" -o -t "$port" ] && return 1
+
+	echo "# this file is generated automatically, don't edit" > "$MINIDLNA_CONFIG_FILE"
+
+	minidlna_cfg_append "port=$port"
+	minidlna_cfg_append "network_interface=$interface"
+
+	minidlna_cfg_addstr $cfg friendly_name
+	minidlna_cfg_addstr $cfg db_dir
+	minidlna_cfg_addstr $cfg log_dir
+	minidlna_cfg_addstr $cfg log_level
+	minidlna_cfg_addbool $cfg inotify '1'
+	minidlna_cfg_addbool $cfg enable_tivo '0'
+	minidlna_cfg_addbool $cfg strict_dlna '0'
+	minidlna_cfg_addstr $cfg album_art_names
+	minidlna_cfg_addstr $cfg presentation_url
+	minidlna_cfg_addstr $cfg notify_interval '900'
+	minidlna_cfg_addstr $cfg serial '12345678'
+	minidlna_cfg_addstr $cfg model_number '1'
+	minidlna_cfg_addstr $cfg minissdpsocket
+	minidlna_cfg_addstr $cfg root_container '.'
+	minidlna_cfg_addstr $cfg uuid
+	config_list_foreach "$cfg" "media_dir" minidlna_cfg_add_media_dir
+
+	return 0
+}
+
+start() {
+	local enabled
+	local db_dir
+	local log_dir
+
+	minidlna_print " ==== minidlna-start ==="
+
+	[ -z "$ACTION" -a ! -e $MINIDLAN_BOOT ] && {
+     minidlna_print "Start service (manual)"
+           echo "`date` :man" > $MINIDLAN_BOOT
+  }
+
+	# check if boot is ongoing (ACTION => script called from hotplugin context)
+    [ -n "$ACTION" -a ! -e $MINIDLAN_BOOT ] && {
+	     minidlna_print "Service queued"
+           echo "`date` :req" >> $MINIDLAN_Q
+           return 0
+	}
+
+	[ -e $MINIDLNA_PID ] && {
+      minidlna_print "Service already running"
+      return 1
+  }
+
+	config_load 'minidlna'
+	config_get_bool enabled config 'enabled' '0'
+
+	[ "$enabled" -gt 0 ] || return 1
+
+	minidlna_create_config config || return 1
+
+  [ -z "`uci -q get minidlna.config.media_dir`" ] && {
+    minidlna_print "Service not started (no disk connected)"
+    return 1
+  }
+
+  export MINIDLNA_FORCE_RESCAN="`uci -q get minidlna.config.force_rescan`"
+  export MINIDLNA_MEDIA_FINGERPRINT="`uci -q get minidlna.config.media_fingerprint`"
+  /usr/sbin/minidlna_bg /usr/sbin/minidlnad -f "$MINIDLNA_CONFIG_FILE" -P $MINIDLNA_D_PID &
+  echo $! > $MINIDLNA_PID
+}
+
+stop() {
+	minidlna_print " ==== minidlna-stop ==="
+  minidlna_kill $MINIDLNA_PID /usr/sbin/minidlna_bg
+  minidlna_kill $MINIDLNA_D_PID /usr/sbin/minidlnad
+}
+
+boot() {
+	minidlna_print " ==== minidlna-boot ==="
+	echo "`date` :auto" > $MINIDLAN_BOOT
+	[ -e $MINIDLAN_Q ] && {
+          minidlna_print "==== start from boot ==="
+	  export BOOT_DELAY=`uci -q get minidlna.config.boot_delay`
+	  start
+	}
+}

@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+#set -x
+
+START=10
+
+phypower_intf()
+{
+  local intf="$1"
+  local state="$2"
+
+  # Work-around for CSP788570; make sure power-down works
+  if [ "$state" = "down" ]; then
+    if ((ethctl $intf media-type 2>&1 | grep 'Auto-negotiation enabled' >/dev/null) && (ethctl $intf media-type 2>&1 | grep 'Link is up' >/dev/null)); then
+        ethctl $intf media-type 100FD  &> /dev/null
+    fi
+  fi
+
+  ethctl $intf phy-power $state  &> /dev/null
+}
+
+phypower()
+{
+    cd /sys/class/net/
+    for intf in *; do
+      if ethctl $intf media-type &> /dev/null; then
+        phypower_intf "$intf" "$1"
+      fi
+    done
+}
+
+start()
+{
+    phypower down
+}
+
+stop()
+{
+    phypower up
+}

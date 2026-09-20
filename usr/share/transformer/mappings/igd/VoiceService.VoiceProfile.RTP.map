@@ -1,0 +1,234 @@
+local match, format = string.match, string.format
+
+local uci_helper = mapper("ucihelper")
+
+local transactions = {}
+
+local InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_ = {
+    objectType = {
+        name = "InternetGatewayDevice.Services.VoiceService.{i}.VoiceProfile.{i}.RTP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            LocalPortMin = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0",
+            },
+            LocalPortMax = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0",
+            },
+            DSCPMark = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "63",
+                    },
+                },
+            },
+            --      VLANIDMark = {
+            --        access = "readWrite",
+            --        type = "int",
+            --        range = {
+            --          {
+            --            min = "-1",
+            --          },
+            --        },
+            --        default = "-1",
+            --      },
+            --      EthernetPriorityMark = {
+            --        access = "readWrite",
+            --        type = "int",
+            --        range = {
+            --          {
+            --            min = "-1",
+            --          },
+            --        },
+            --        default = "-1",
+            --      },
+            --      TelephoneEventPayloadType = {
+            --        access = "readWrite",
+            --        type = "unsignedInt",
+            --        range = {
+            --          {
+            --            min = "0",
+            --            max = "128",
+            --          },
+            --        },
+            --      },
+        }
+    }
+}
+
+local sip_binding = {config = "mmpbx", sectionname = "sip_net", option = "config"}
+local sipnet_config = uci_helper.get_from_uci(sip_binding)
+sip_binding.config = sipnet_config
+
+local function revTable(inTable)
+    local revTable = { }
+    for k,v in pairs(inTable) do
+        revTable[v]=k
+    end
+    return revTable
+end
+local dscp = {
+    cs0="0",
+    cs1="8",
+    af11="10",
+    af12="12",
+    af13="14",
+    cs2="16",
+    af21="18",
+    af22="20",
+    af23="22",
+    cs3="24",
+    af31="26",
+    af32="28",
+    af33="30",
+    cs4="32",
+    af41="34",
+    af42="36",
+    af43="38",
+    cs5="40",
+    ef="46",
+    cs6="48",
+    cs7="56",
+}
+local rev_dscp = revTable(dscp)
+local precedence = {
+    ["routine"]="0",
+    ["priority"]="8",
+    ["immediate"]="16",
+    ["flash"]="24",
+    ["flash override"]="32",
+    ["critic/ecp"]="40",
+    ["internetwork control"]="48",
+    ["network control"]="50",
+}
+local rev_precedence = revTable(precedence)
+
+local uci_map = {
+    LocalPortMin = "rtp_local_port_min",
+    LocalPortMax = "rtp_local_port_max",
+}
+
+local function get_from_uci_sipnetwork(mapping, param, key, parentkey)
+    -- TODO: sectionname should be replaced with parentkey when VoiceService is mapped to network section of mmpbxrvsipnet
+    sip_binding.sectionname = "sip_net"
+    sip_binding.option = uci_map[param]
+    return uci_helper.get_from_uci(sip_binding)
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_.get = {
+    LocalPortMin = get_from_uci_sipnetwork,
+    LocalPortMax = get_from_uci_sipnetwork,
+    DSCPMark = function (mapping, param, key, parentkey)
+        sip_binding.sectionname = "sip_net"  -- to be replaced by parentkey later
+        sip_binding.option = "realtime_qos_field"
+        local QoSField = uci_helper.get_from_uci(sip_binding)
+        sip_binding.option = "realtime_qos_value"
+        local QoSValue = uci_helper.get_from_uci(sip_binding)
+        local res = ""
+        if (QoSField == "dscp") then
+            res = dscp[QoSValue]
+        elseif (QoSField == "precedence") then
+            res = precedence[QoSValue]
+        end
+        if (res == nil) then
+            res = QoSValue
+        end
+        return res
+    end,
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_.set = {
+    LocalPortMin = function (mapping, paramname, paramvalue, key)
+        local port_max = get_from_uci_sipnetwork (mapping, "LocalPortMax", key)
+        if(port_max ~= "") then
+            if (tonumber (paramvalue) > tonumber (port_max)) then
+                return nil, "LocalPortMin should smaller than LocalPortMax"
+            end
+            -- TODO: sectionname should be replaced with parentkey when VoiceService is mapped to network section of mmpbxrvsipnet
+            sip_binding.sectionname = "sip_net"
+            sip_binding.option = "rtp_local_port_min"
+            uci_helper.set_on_uci(sip_binding, paramvalue, commitapply)
+            transactions[sip_binding.config] = true
+        else
+            return nil, "RtpPortRange is not in config file, LocalPortMin can not be set"
+        end
+    end,
+    LocalPortMax = function (mapping, paramname, paramvalue, key)
+        local port_min = get_from_uci_sipnetwork (mapping, "LocalPortMin", key)
+        if(port_min ~= "") then
+            if (tonumber (paramvalue) < tonumber (port_min)) then
+                return nil, "LocalPortMax should bigger than LocalPortMin"
+            end
+            -- TODO: sectionname should be replaced with parentkey when VoiceService is mapped to network section of mmpbxrvsipnet
+            sip_binding.sectionname = "sip_net"
+            sip_binding.option = "rtp_local_port_max"
+            uci_helper.set_on_uci(sip_binding, paramvalue, commitapply)
+            transactions[sip_binding.config] = true
+        else
+            return nil, "RtpPortRange is not in config file, LocalPortMax can not be set"
+        end
+    end,
+    DSCPMark = function (mapping, paramname, paramvalue, key)
+        -- TODO: sectionname should be replaced with parentkey when VoiceService is mapped to network section of mmpbxrvsipnet
+        sip_binding.sectionname = "sip_net"
+        sip_binding.option = "realtime_qos_field"
+        local QoSField = uci_helper.get_from_uci(sip_binding)
+        local checkparamvalue = paramvalue
+        if (QoSField == "dscp") then
+            checkparamvalue = rev_dscp[paramvalue]
+        elseif (QoSField == "precedence") then
+            local precedenceorder = checkparamvalue
+            if (checkparamvalue ~= "50") then
+                precedenceorder = tostring (math.modf(checkparamvalue/8)*8)
+            end
+            checkparamvalue = rev_precedence[precedenceorder]
+        end
+        if (checkparamvalue ~= nil) then
+            paramvalue = checkparamvalue
+        end
+        sip_binding.option = "realtime_qos_value"
+        uci_helper.set_on_uci(sip_binding, paramvalue, commitapply)
+        transactions[sip_binding.config] = true
+    end,
+}
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+register(InternetGatewayDevice_Services_VoiceService_i_VoiceProfile_i_RTP_)

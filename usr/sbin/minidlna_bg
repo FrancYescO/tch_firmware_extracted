@@ -1,0 +1,95 @@
+#!/bin/sh 
+# Copyright (C) 2010 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+#set -x
+
+minidlna_print() {
+    logger -t minidlna_bg "$1"
+}
+
+minidlna_update_media_dir_list() {
+        for mdir in `uci get minidlna.config.media_dir` ; do
+                dir=`echo $mdir | cut -d'/' -f1-4`
+                if [ ! $(mount | grep -e "/dev/sd[ab]" | cut -d ' ' -f3 | grep $dir)  ] ; then
+                        minidlna_print "$dir is not mounted !"
+                        uci del_list minidlna.config.media_dir="$mdir"
+                        uci commit minidlna
+                fi                                                                         
+        done
+}
+                
+minidlna_finger_print() {
+      local MINIDLNA_TMP_DIR
+      minidlna_print "Start profile check"
+	    db_dir=`uci get minidlna.config.db_dir`
+      MINIDLNA_TMP_DIR="$db_dir/tmp"
+
+	    rm -f $MINIDLNA_TMP_DIR/*
+	    mkdir $MINIDLNA_TMP_DIR
+
+        for mdir in `uci get minidlna.config.media_dir` ; do
+                dir=`echo $mdir | cut -d'/' -f1-4`
+                jdir=`echo $mdir | cut -f 4 -d /`
+                find $mdir -type f \( \
+                  	   -name "*.mpg" -o -name "*.tts"  -o -name "*.wma" -o -name "*.wmv" \
+                  	-o -name "*.mp3" -o -name "*.mpg"  -o -name "*.tts" -o -name "*.mp4" \
+                  	-o -name "*.3gp" -o -name "*.adts" -o -name "*.ifo" -o -name "*.png" \
+                  	-o -name "*.pcm" -o -name "*.wav"  -o -name "*.jpg" \
+                      \) -exec ls -la {} \; > ${MINIDLNA_TMP_DIR}/${jdir}.txt
+                [ -r ${MINIDLNA_TMP_DIR}/${jdir}.txt ] && cat ${MINIDLNA_TMP_DIR}/${jdir}.txt | md5sum | cut -f 1 -d ' ' > ${MINIDLNA_TMP_DIR}/${jdir}.fingerp
+                minidlna_print "mediadir=$dir calc fingerprint=`cat ${MINIDLNA_TMP_DIR}/${jdir}.fingerp`"
+        done
+	      cat $db_dir/files.db | md5sum | cut -f 1 -d ' ' > ${MINIDLNA_TMP_DIR}/file_db.fingerp
+        minidlna_print "Database calc fingerprint=`cat ${MINIDLNA_TMP_DIR}/file_db.fingerp`"
+        cat ${MINIDLNA_TMP_DIR}/*.fingerp | md5sum | cut -f 1 -d ' ' > ${MINIDLNA_TMP_DIR}/media_disk_fingerprint
+        minidlna_print "Media disk calc fingerprint=`cat ${MINIDLNA_TMP_DIR}/media_disk_fingerprint`"
+      
+        prevFP=`cat $db_dir/media_disk_fingerprint`
+        newFP=`cat ${MINIDLNA_TMP_DIR}/media_disk_fingerprint`
+        if [ "$prevFP" != "$newFP" ]
+        then
+          minidlna_print "Force rescan media database ($prevFP != $newFP)"
+          option_force_reload=-R
+        else
+          minidlna_print "Skip mediadata database rescan ($prevFP == $newFP)"
+        fi
+        
+        rm -f $db_dir/*.fingerp
+        cp ${MINIDLNA_TMP_DIR}/*.fingerp $db_dir
+        cp ${MINIDLNA_TMP_DIR}/media_disk_fingerprint $db_dir
+}
+
+[ -n "$BOOT_DELAY" ] && {
+  minidlna_print "Delay minidlna startup with $BOOT_DELAY sec"
+  sleep $BOOT_DELAY
+}
+
+minidlna_update_media_dir_list
+
+if [ x"$MINIDLNA_FORCE_RESCAN" == x"1" ]
+then
+  minidlna_print "Option set force_rescan media database"
+  option_force_reload=-R
+else
+  if [ x"$MINIDLNA_MEDIA_FINGERPRINT" == x"1" ]
+  then
+    minidlna_print "Option media fingerprint"
+	  minidlna_finger_print
+  else
+    minidlna_print "Default set force_rescan media database"
+    option_force_reload=-R
+  fi
+fi
+
+
+/usr/sbin/cgroup_wrapper.sh $@ ${option_force_reload}
+sleep 5
+PID=`cat $MINIDLNA_D_PID`
+[ -n "$PID" ] && PID_CHECK=`ps -w | grep $PID | egrep -e "/usr/sbin/minidlnad"`
+
+minidlna_print "minidlnad started ($?:$PID)"
+

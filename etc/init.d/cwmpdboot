@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+unset SERVICE_MATCH_EXEC
+
+VOICE_START_SCRIPT=/etc/init.d/mmpbxd
+
+wait_for_voice_up() {
+	if [ ! -f $VOICE_START_SCRIPT ];
+	then
+		return
+	fi
+         
+	count=0
+	while [ $count -lt 15 ]
+	do
+		mmpbx_state=$(uci -P /var/state get mmpbx.state 2> /dev/null)
+
+		if [ "$mmpbx_state" == "RUNNING" ] ; then
+			break
+		fi
+
+		logger -t cwmpd " Voice not up yet ... delaying startup"
+
+		sleep 5
+                                                     
+		count=`expr $count + 1`
+	done
+}
+
+boot() {
+	logger -t cwmpd "Starting cwmpd on boot"
+	wait_for_voice_up
+	service_start /usr/bin/cwmpd
+	service_start /usr/bin/cwmpevents
+}

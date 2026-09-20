@@ -1,0 +1,420 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_Layer3Forwarding_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Layer3Forwarding.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DefaultConnectionService = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        max = "256",
+      },
+      -- ForwardNumberOfEntries
+      -- automatically created when InternetGatewayDevice.Layer3Forwarding.Forwarding.{i}. is loaded
+    }
+  }
+}
+
+------------------------------------------------------
+--InternetGatewayDevice_Layer3Forwarding_
+------------------------------------------------------
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local common = mapper('nwcommon')
+local dev2interface = common.dev2interface
+local get_lower_layers = common.get_lower_layers
+local gsub, sub, gmatch, match = string.gsub, string.sub, string.gmatch, string.match
+local resolve = resolve
+
+InternetGatewayDevice_Layer3Forwarding_.get = {
+  DefaultConnectionService = function (mapping, param, key)
+    -- Find Interface where Destination == 0.0.0.0
+    local fd = io.open("/proc/net/route")
+    if not fd then
+      return ''
+    end
+    local dev
+
+    for line in fd:lines() do
+      local temp1 = gsub(line, "%s+",'|', 1)
+      local temp2 = match(temp1, "^(%S+)")
+
+      if match(temp2, "|00000000$") then
+        dev = match(temp2, "^(.-)|")
+        break
+      end
+    end
+    fd:close()
+
+    if dev == nil then --If there is no default route present then return nothing
+      return ''
+    end
+
+    if match(dev, "^eth") or match(dev, "^ptm") or match(dev, "^atm") or match(dev, "^wl") then --IPoE over ETH WAN
+      return (resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", dev2interface(dev) .. "|" .. dev) or "")
+    elseif match(dev, "^ppp") then --PPP over ETH WAN or PTM or ATM
+      local intf = match(dev, "%-(.*)$")
+      local ll_intf = get_lower_layers(intf)[1]
+      return ((ll_intf and resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", intf .. "|" .. ll_intf)) or "")
+    elseif match(dev, "^br") then --Bridged Scenarios
+      local intf = match(dev, "%-(.*)$")
+      -- TODO: bridged scenario is not supported/tested yet
+      return (resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", intf) or "")
+    else
+      return 'Unknown Interface: ' .. dev
+    end
+  end,
+}
+
+register(InternetGatewayDevice_Layer3Forwarding_)
+
+------------------------------------------------------
+--InternetGatewayDevice_Layer3Forwarding_Forwarding_i_
+------------------------------------------------------
+
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_Layer3Forwarding_Forwarding_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Layer3Forwarding.Forwarding.{i}.",
+    access = "readOnly",  -- readWrite currently not supported
+    numEntriesParameter = "ForwardNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Type = {
+        access = "readOnly",  -- readWrite currently not supported
+        status = "deprecated",
+        type = "string",
+        enumeration = {
+          "Default",
+          "Network",
+          "Host",
+        },
+        default = "Host",
+      },
+      DestIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      DestSubnetMask = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      SourceIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      SourceSubnetMask = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      ForwardingPolicy = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      GatewayIPAddress = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        default = "",
+      },
+      Interface = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "string",
+        max = "256",
+      },
+      ForwardingMetric = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      MTU = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "1540",
+          },
+        },
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Helper functions
+-- -------------------------------------------------------
+
+--Concert IP in hex to Dec IP
+local function hexIP2decIP(hexIP)
+  local retval = ''
+
+  for i = 1, 8, 2 do
+    retval = retval .. common.hex2Decimal(sub(hexIP, i , i+1))
+    if i < 6 then
+      retval = retval .. '.'
+    end
+  end
+  return retval
+end
+
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+-- Entries skeleton
+local routes = {}
+
+InternetGatewayDevice_Layer3Forwarding_Forwarding_i_.entries = function(mapping)
+  --Generate key
+  --Output: key is constructed as a string concatenation of Iface Destination Gateway fields delimited with |
+  local path="/proc/net/route"
+  local fd = io.open(path)
+  if not fd then
+    return {} --Return empty table
+  end
+  routes = {}
+  local key = {}
+  local firstline = false
+  for line in fd:lines() do
+    if firstline then
+      local temp1 = gsub(line, "%s+", '|', 2)
+      local k = match(temp1, "^(%S+)")
+      key[#key+1] = k
+      routes[k] = gsub(line, "%s+", '|')
+    end
+    firstline = true
+  end
+  fd:close()
+  return key
+end
+
+InternetGatewayDevice_Layer3Forwarding_Forwarding_i_.get = {
+  Enable = function(mapping, param, key)
+    return routes[key] and '1' or '0'
+  end,
+  Status = function(mapping, param, key)
+    return routes[key] and 'Enabled' or 'Disabled'
+  end,
+  Type = 'Host',
+  DestIPAddress = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      return hexIP2decIP(elements[2])
+    end
+    return ''
+  end,
+  DestSubnetMask = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      return hexIP2decIP(elements[8])
+    end
+    return ''
+  end,
+  SourceIPAddress = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      local el1 = elements[1]
+      if match(el1, "^veip") or match(el1, "^eth") or match(el1, "^ptm") or match(el1, "^atm") or match(el1, "^br") or match(el1, "^wl") then --IPoE WAN or LAN
+        local v = common.get_ubus_interface_status(dev2interface(el1))
+        v = v and v['ipv4-address']
+        v = v and v[1]
+        return (v and v['address']) or ""
+      elseif match(el1, "^ppp") then --PPP over ETH WAN or PTM or ATM
+        local back = match(el1, "%-(.*)$")
+        local v = common.get_ubus_interface_status(back)
+        v = v and v['ipv4-address']
+        v = v and v[1]
+        return (v and v['address']) or ""
+      else
+        return 'Unknown Interface: ' .. el1
+      end
+    end
+    return ''
+  end,
+  SourceSubnetMask = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      local el1 = elements[1]
+      if match(el1, "^veip") or match(el1, "^eth") or match(el1, "^ptm") or match(el1, "^atm") or match(el1, "^br") or match(el1, "^wl") then --IPoE over ETH WAN or LAN
+        local v = common.get_ubus_interface_status(dev2interface(el1))
+        v = v and v['ipv4-address']
+        v = v and v[1]
+        return common.netmask2mask(v and v['mask']) or ""
+      elseif match(el1, "^ppp") then --PPP over ETH WAN or PTM or ATM
+        local back = match(el1,'%-(.*)$')
+        local v = common.get_ubus_interface_status(back)
+        v = v and v['ipv4-address']
+        v = v and v[1]
+        return common.netmask2mask(v and v['mask']) or ""
+      else
+        return 'Unknown Interface: ' .. el1
+      end
+    end
+    return ''
+  end,
+  ForwardingPolicy = '-1',
+  GatewayIPAddress = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      return hexIP2decIP(elements[3])
+    end
+    return ''
+  end,
+  Interface = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      local el = elements[1]
+      if match(el, "^veip") or match(el, "^eth") or match(el, "^ptm") or match(el, "^atm") or match(el, "^wl") then --IPoE over ETH WAN
+        return (resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", dev2interface(el) .. "|" .. el) or "")
+      elseif match(el,"^ppp") then --PPP over ETH WAN or PTM or ATM
+        local intf = match(el, "%-(.*)$")
+        local ll_intf = get_lower_layers(intf)[1]
+        return ((ll_intf and resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", intf .. "|" .. ll_intf)) or "")
+      elseif match(el, "^br") then --Bridged Scenarios
+        local intf = match(el, "%-(.*)$")
+        -- TODO: bridged scenario is not supported/tested yet
+        return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", intf) or resolve("InternetGatewayDevice.LANDevice.{i}.", intf) or ""
+      else
+        return 'Unknown Interface: ' .. el
+      end
+    else
+      return ''
+    end
+  end,
+  ForwardingMetric = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      return elements[7]
+    end
+    return '-1'
+  end,
+  MTU = function(mapping, param, key)
+    if routes[key] then
+      local elements = {}
+      for w in gmatch(routes[key], "([^|]+)|?") do
+        elements[#elements+1] = w
+      end
+      return elements[9]
+    end
+    return ''
+  end,
+}
+
+InternetGatewayDevice_Layer3Forwarding_Forwarding_i_.getall = function(mapping,key)
+  local allValues = {
+    Enable = '0',
+    Status = 'Disabled',
+    Type = 'Host',
+    DestIPAddress = '',
+    DestSubnetMask = '',
+    SourceIPAddress = '',
+    SourceSubnetMask = '',
+    ForwardingPolicy = '-1',
+    GatewayIPAddress = '',
+    Interface = '',
+    ForwardingMetric = '-1',
+    MTU = '',
+  }
+  if routes[key] then
+    allValues.Enable = '1'
+    allValues.Status = 'Enabled'
+    local elements = {}
+    for w in gmatch(routes[key], "([^|]+)|?") do
+      elements[#elements+1] = w
+    end
+    allValues.DestIPAddress = hexIP2decIP(elements[2])
+    allValues.DestSubnetMask = hexIP2decIP(elements[8])
+    local el1 = elements[1]
+    if match(el1, "^veip") or match(el1, "^eth") or match(el1, "^ptm") or match(el1, "^atm") or match(el1, "^br") or match(el1, "^wl") then --IPoE WAN or LAN
+      local intf = dev2interface(el1)
+      local v = common.get_ubus_interface_status(intf)
+      v = v and v['ipv4-address']
+      v = v and v[1]
+      allValues.SourceIPAddress =  (v and v['address']) or ""
+      allValues.SourceSubnetMask = common.netmask2mask(v and v['mask']) or ""
+      allValues.Interface = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.', intf .. "|" .. el1) or ""
+    elseif match(el1, "^ppp") then --PPP over ETH WAN or PTM or ATM
+      local intf = match(el1, "%-(.*)$")
+      local ll_intf = get_lower_layers(intf)[1]
+      local v = common.get_ubus_interface_status(intf)
+      v = v and v['ipv4-address']
+      v = v and v[1]
+      allValues.SourceIPAddress = (v and v['address']) or ""
+      allValues.SourceSubnetMask = common.netmask2mask(v and v['mask']) or ""
+      allValues.Interface = (ll_intf and resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.', intf .. "|" .. ll_intf)) or ""
+    else
+      -- TODO: bridged scenario is not supported/tested yet
+      allValues.SourceIPAddress = 'Unknown Interface: ' .. el1
+      allValues.SourceSubnetMask = 'Unknown Interface: ' .. el1
+      if match(el1, "^br") then --Bridged Scenarios
+        local intf = match(el1, "%-(.*)$")
+        allValues.Interface = resolve('InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.', intf) or resolve('InternetGatewayDevice.LANDevice.{i}.', intf) or ''
+      end
+    end
+    allValues.GatewayIPAddress = hexIP2decIP(elements[3])
+    allValues.ForwardingMetric = elements[7]
+    allValues.MTU = elements[9]
+  end
+  return allValues
+end
+
+register(InternetGatewayDevice_Layer3Forwarding_Forwarding_i_)

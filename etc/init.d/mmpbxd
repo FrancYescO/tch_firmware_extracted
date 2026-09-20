@@ -1,0 +1,338 @@
+#!/bin/sh /etc/rc.common
+
+source /lib/functions/functions-tch.sh
+
+START=99
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+#SERVICE_STOP_TIME=60
+export MMPBX_SO_DIR=/usr/lib/mmpbx
+APP=polling-led.lua
+PID_FILE=/var/run/$APP.pid
+EXECUTE_LOCK=/tmp/.execute.lock
+QUEUE_FILE_LOCK=/tmp/.mmpbxd.queue.lock
+QUEUE_FILE=/tmp/mmpbx.queue
+
+local MMPBX_CHAIN="MMPBX"
+
+network_apply_rules () {
+ local network_name="$1"
+ local localPort
+ local primaryProxyPort
+ local secondaryProxyPort
+
+ config_get localPort "$network_name" local_port 5060
+ config_get primaryProxyPort "$network_name" primary_proxy_port 5060
+ config_get secondaryProxyPort "$network_name" secondary_proxy_port 5060
+
+ # Put exception to exclude this service from DMZ rules/port forwarding rules
+ iptables -t nat -I ${MMPBX_CHAIN} -p udp -m udp --dport $localPort -m comment --comment "DMZ_Exception_SIP" -j ACCEPT 2>/dev/null
+
+}
+
+do_firewall_start() {
+
+  # assure the MMPBX chain is present, if not reload the firewall to do so
+  iptables -L ${MMPBX_CHAIN} >/dev/null 2>/dev/null || fw3 reload
+
+  config_load "mmpbxrvsipnet"
+  config_foreach network_apply_rules network
+}
+
+do_firewall_stop() {
+  # flush the MMPBX chain
+  iptables -t filter -F ${MMPBX_CHAIN} 2>/dev/null
+  iptables -t nat -F ${MMPBX_CHAIN} 2>/dev/null
+  ip6tables -t filter -F ${MMPBX_CHAIN} 2>/dev/null
+}
+
+do_polling_start() {
+    start-stop-daemon -S -x $APP -p $PID_FILE -m -b
+}
+
+do_polling_stop() {
+    start-stop-daemon -K -p $PID_FILE -s KILL
+    rm -rf $PID_FILE
+}
+
+remove_module_without_config() {
+  local uciconfig="$1"
+  local filename="$2"
+  if uci get $uciconfig 2>/dev/null; then
+    # Restore if file was deleted
+    ln -s /rom/usr/lib/mmpbx/$filename /usr/lib/mmpbx/$filename 2>/dev/null
+  else
+    rm -f /usr/lib/mmpbx/$filename
+  fi
+}
+
+# On platforms without i.e. dect (config) remove the .so file.
+# Once we can customize by removing packages, this can be removed
+remove_modules_without_config() {
+  remove_module_without_config mmpbxbrcmdectdev libmmpbxbrcmdect.so
+  remove_module_without_config mmpbxbrcmfxonet libmmpbxbrcmfxo.so
+  remove_module_without_config mmpbxbrcmfxsdev libmmpbxbrcmfxs.so
+  remove_module_without_config mmpbxinternalnet libmmpbxinternalnet.so
+  remove_module_without_config mmpbxrvsipnet libmmpbxrvsipnet.so
+  remove_module_without_config mmpbxrvsipdev libmmpbxrvsipdev.so
+}
+
+mmpbxd_start() {
+  touch /var/state/mmpbx
+  uci -P /var/state set mmpbx.state="STARTING"
+  logger "Mmpbx starting mmpbx.state=STARTING"
+  local args="-q"
+  local enabled
+  local radvisionTraceLevel
+
+  remove_modules_without_config
+
+  config_load "env"
+  local mac
+  config_get mac rip eth_mac ""
+  export MACADDR=$mac
+
+  local mmswitchRtPriority
+  config_load "mmswitch"
+  config_get mmswitchRtPriority global rt_priority 20
+
+  local mmtonegenRtPriority
+  config_load "mmtonegen"
+  config_get mmtonegenRtPriority global rt_priority 20
+
+  config_load "mmpbx"
+  config_get_bool enabled global enabled 0
+  if [ $enabled -eq 0 ];
+  then
+    logger "Mmpbx not enabled by config not starting, mmpbx.state=NA"
+    uci -P /var/state set mmpbx.state="NA"
+  return 0
+  fi
+
+  # Start mmdbd process
+  local mmdbd_path="/etc/lasdb.db"
+  local mmdbd_args="-p $mmdbd_path"
+  service_start /usr/bin/mmdbd $mmdbd_args
+
+  insmod endpointdd
+  insmod modmmswitch
+  insmod mod_rv_rtp
+  insmod modmmtonegen
+  insmod modmmconnkernelbrcm
+
+  local traceLevel
+  config_get traceLevel global trace_level 2
+  ([ $traceLevel -lt 0 ] || [ $traceLevel -gt 4 ]) && echo "Invalid tracelevel: $traceLevel"
+  args="$args -t $traceLevel"
+
+  rm /tmp/mmpbx*.log 2>/dev/null
+
+  config_load "mmpbxrvsipnet"
+  config_get radvisionTraceLevel global radvision_trace_level 0
+  if [ $radvisionTraceLevel -gt 0 ];
+  then
+    export MMSIP_SIPLOGPATH=/tmp/mmpbx_sip.log
+    export MMSIP_MTFLOGPATH=/tmp/mmpbx_mtf.log;
+    echo "l ept 3" > /proc/bcmlog
+  else
+    echo "l ept 0" > /proc/bcmlog
+  fi
+
+  do_firewall_start
+
+  service_start /usr/bin/mmpbxd $args
+  # Let mmpbx fully start, UBUS object may get publish and then destoryed,
+  # if mmpbx self destruct, then UBUS command will catch these error.
+  sleep 20
+
+  #Voice socket TX thread
+  setrtprio mmswitchsock_w $mmswitchRtPriority
+  #Voice socket RX thread
+  setrtprio mmswitchsock_r $mmswitchRtPriority
+  #Voice tone generator thread
+  setrtprio mmtonegen $mmtonegenRtPriority
+
+  # for now prevent multiple instance by checking PID file
+  if ! [ -e $PID_FILE ] ; then
+     do_polling_start
+  fi
+
+  do_cleanup="0"
+  while :
+  do
+    ubus -t 20 call mmpbx.call get > /dev/null
+    if ! [ $? == "0" ] ; then
+    do_cleanup="1"
+    break
+  fi
+  ubus -t 20 call mmpbx.device get > /dev/null
+  if ! [ $? == "0" ] ; then
+    do_cleanup="1"
+    break
+  fi
+  ubus -t 20 call mmpbx.profile get > /dev/null
+  if ! [ $? == "0" ] ; then
+    do_cleanup="1"
+    break
+  fi
+  do_cleanup="0"
+  break
+  done
+
+  if [ "$do_cleanup" == "1" ] ; then
+     logger "Mmpbx failed to start, cleanup and stopping"
+     mmpbxd_stop
+     # state should have already been set by mmpbxd_stop
+  else
+     logger "Mmpbx is started, mmpbx.state=RUNNING"
+     uci -P /var/state set mmpbx.state="RUNNING"
+  fi
+}
+
+mmpbxd_stop() {
+  uci -P /var/state set mmpbx.state="STOPPING"
+  logger "Mmpbx stopping, mmpbx.state=STOPPING"
+  do_polling_stop
+
+  while :
+    do
+    up=$(ps|grep $APP | grep -v grep)
+    if [ "$up" == "" ] ; then
+        break
+    fi
+        kill -9 `ps | grep $APP | awk '{print $1}'`
+  done
+
+  logger "Mmpbx service_stop"
+  service_stop /usr/bin/mmpbxd
+  logger "Mmpbx service_stop done"
+
+  service_stop /usr/bin/mmdbd
+
+  # Quick fix to still make the Voice LED and DECT LED go off when mmpbxd stop is done
+  ubus send mmpbx.profilestate '{ }'
+  ubus send mmpbx.profilestate '{"dect_dev":"unregistered_unusable"}'
+
+  if ! cat /etc/banner | grep "Product: gant-j" > /dev/null;
+  then
+    #Without a reload, the endpoint driver will crash on the next mmpbx start
+
+    count="0"
+    while [ $count -lt 5 ] ;
+    do
+    up=$(ps|grep /usr/bin/mmpbxd|grep -v grep)
+    if [ "$up" == "" ] ; then
+        break
+    fi
+        sleep 5
+	logger "Mmpbx processes still alive"
+        count=$(( $count + 1 ))
+    done
+
+    #Wait for the MMPBX and Endpoint Driver resources to be cleaned up properly.
+    sleep 4 
+    rmmod modmmconnkernelbrcm
+    rmmod endpointdd
+    rmmod dect
+    rmmod modmmtonegen
+    rmmod mod_rv_rtp
+    rmmod modmmswitch
+    sleep 6
+  fi
+  do_firewall_stop
+  uci -P /var/state set mmpbx.state="NA"
+  logger "Mmpbx stopped, mmpbx.state=NA"
+}
+
+# takes the lock execution lock
+# reads the queue, empty the queue and execute
+# after execution, check if queue has something more
+# if something is put into queue checks if last execution is same as new
+# if yes skips execution and empty queue.
+# release lock
+execute_queue() {
+  lock $EXECUTE_LOCK
+
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    func=$(cat $QUEUE_FILE)
+    rm $QUEUE_FILE
+  fi
+  lock -u $QUEUE_FILE_LOCK
+
+  case "$func" in
+    "mmpbxd_start")
+      mmpbxd_stop
+      mmpbxd_start
+    ;;
+    "mmpbxd_stop")
+      mmpbxd_stop
+    ;;
+    "mmpbxd_restart")
+      mmpbxd_stop
+      mmpbxd_start
+    ;;
+  esac
+
+  lock -u $EXECUTE_LOCK
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+restart() {
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_restart > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+start() {
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_start > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this is the entry point from service-manager
+# take a locks over queue
+# this just write to queue what needs to be done and execute
+# release lock
+stop(){
+  do_exec="1"
+  lock $QUEUE_FILE_LOCK
+  if [ -e $QUEUE_FILE ] ; then
+    do_exec="0"
+  fi
+  echo mmpbxd_stop > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  if [ "$do_exec" == "1" ] ; then
+    execute_queue&
+  fi
+}
+
+# this entry point could be accessed only after EXTRA_COMMANDS env is set
+# right now only called by sysupgrade script to terminate voice normally before reboot
+stop_run_in_foreground(){
+  lock $QUEUE_FILE_LOCK
+  echo mmpbxd_stop > $QUEUE_FILE
+  lock -u $QUEUE_FILE_LOCK
+  execute_queue
+}

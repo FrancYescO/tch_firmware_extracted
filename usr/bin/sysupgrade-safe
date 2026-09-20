@@ -1,0 +1,60 @@
+#!/bin/sh
+
+source /lib/upgrade/common.sh
+source /lib/upgrade/platform.sh
+
+SKIP_SIGNATURE=0
+REBOOT_OPTION=""
+
+# parse options
+while [ -n "$1" ]; do
+        case "$1" in
+                -S|--skip-signature) SKIP_SIGNATURE=1;;
+                -o) REBOOT_OPTION="-o -s";;
+                -*)
+                        echo "Invalid option: $1"
+                        exit 1
+                ;;
+                *) break;;
+        esac
+        shift;
+done
+
+UPGRADE_URL="$1"
+
+if [ -z $UPGRADE_URL ]; then
+	echo "Wrapper around sysupgrade, making it more robust for firmware upgrades."
+	echo "It first downloads the build into tmpfs, before calling sysupgrade"
+	echo ""
+	echo "Usage: $0 {options} <url>"
+	echo " Options:"
+	echo "  [-S|--skip-signature] Disables signature checking"
+	exit 1
+fi
+
+restore_signature_check() {
+	rm -rf ${SIGNATURE_CHECKER_DIR}
+}
+
+if [ $SKIP_SIGNATURE -eq 1 ]; then
+	# Stub a signature checker in /tmp; after reboot we get back the normal behavior
+	SIGNATURE_CHECKER_DIR=`mktemp -d`
+	SIGNATURE_CHECKER="${SIGNATURE_CHECKER_DIR}/signature_checker"
+
+	echo "#!/bin/sh
+	      cat > /dev/null" > ${SIGNATURE_CHECKER}
+	chmod +x ${SIGNATURE_CHECKER}
+	export PATH=${SIGNATURE_CHECKER_DIR}:$PATH
+	trap "restore_signature_check" EXIT
+fi
+
+
+echo "call stop_apps ..."
+stop_apps
+
+echo "Downloading file to tmpfs..."
+TMPFILE=`mktemp`
+get_image  "${UPGRADE_URL}" > $TMPFILE || exit 1
+echo "Calling sysupgrade..."
+
+sysupgrade ${REBOOT_OPTION} ${TMPFILE} || (rm ${TMPFILE}; exit 2 )
