@@ -1,0 +1,162 @@
+-- Manually generated
+local InternetGatewayDevice_X_Management_AccessControl_List_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_Management.AccessControl.List.{i}.",
+    access = "readWrite",
+    description = "AccessControl List Parameters",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      SourceIPStart = {
+        access = "readWrite",
+        type = "string",
+        description = "Specifies starting IP address of access control trust network",
+      },
+      SourceIPEnd = {
+        access = "readWrite",
+        type = "string",
+        description = "Specifies ending IP address of access control trust network",
+      }
+    }
+  }
+}
+
+local mapper, commitapply = mapper, commitapply
+local uciHelper = mapper("ucihelper")
+local nwCommon = mapper("nwcommon")
+local ipv4ToNum = nwCommon.ipv4ToNum
+local numToIPv4 = nwCommon.numToIPv4
+local inet = require "tch.inet"
+local bit = require("bit")
+local isValidIP = inet.isValidIPv4
+local ipsetBinding = { config = "ipset" }
+local configChanged
+
+--- To find the start and end ip from the ip/cidr
+-- @function calculateIPRange
+-- @param ip the ip address in the form of ip/cidr or start-endip or ip
+-- @return ipmin the start address
+-- @return ipmax the end address
+local function calculateIPRange(ip)
+  local ipmin = ip
+  local ipmax = ip
+  if ip:match("/") then
+    local base, mask = ip:match("(.*)/(.*)")
+    base = base and ipv4ToNum(base)
+    mask = mask and ipv4ToNum(nwCommon.netmask2mask(tonumber(mask)))
+    if base and mask then
+      local network = bit.band(base, mask)
+      ipmin = numToIPv4(network + 1)
+      ipmax = numToIPv4(bit.bor(network, bit.bnot(mask)) - 1)
+    end
+  elseif ip:match("-") then
+    ipmin, ipmax = ip:match("^(.*)-(.*)")
+  end
+  return ipmin, ipmax
+end
+
+--- Returns the ipset name
+-- @function getIPsetName
+-- @return ipsetName Returns the ipset name
+local function getIPsetName()
+  local ipsetName = ""
+  ipsetBinding.sectionname = "ipset"
+  uciHelper.foreach_on_uci(ipsetBinding, function(s)
+    ipsetName = s[".name"]
+    return false
+  end)
+  return ipsetName
+end
+
+local function getFromUci(section, option)
+  ipsetBinding.sectionname = section
+  ipsetBinding.option = option
+  return uciHelper.get_from_uci(ipsetBinding)
+end
+
+local function setOnUci(section, option, value)
+  ipsetBinding.sectionname = section
+  ipsetBinding.option = option
+  uciHelper.set_on_uci(ipsetBinding, value, commitapply)
+  configChanged = true
+end
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.entries = function()
+  local ipsetEntries = {}
+  ipsetBinding.sectionname = "ipset_entry"
+  uciHelper.foreach_on_uci(ipsetBinding, function(s)
+    ipsetEntries[ #ipsetEntries + 1] = s[".name"]
+  end)
+  return ipsetEntries
+end
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.get = {
+  SourceIPStart = function(mapping, param, key)
+    local ip = getFromUci(key, "ip")
+    return calculateIPRange(ip)
+  end,
+  SourceIPEnd = function(mapping, param, key)
+    local ip = getFromUci(key, "ip")
+    local _, endIP = calculateIPRange(ip)
+    return endIP
+  end
+}
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.set = {
+  SourceIPStart = function(mapping, param, value, key)
+    local rc, err = isValidIP(value)
+    if not rc then
+      return nil, err
+    end
+    local ip = getFromUci(key, "ip")
+    if ip ~= "" then
+      local _, max = calculateIPRange(ip)
+      value = value .. "-" .. max
+    end
+    setOnUci(key, "ip", value)
+  end,
+  SourceIPEnd = function(mapping, param, value, key)
+    local rc, err = isValidIP(value)
+    if not rc then
+      return nil, err
+    end
+    if ip ~= "" then
+      local ip = getFromUci(key, "ip")
+      local min = calculateIPRange(ip)
+      value = min .. "-" ..value
+    end
+    setOnUci(key, "ip", value)
+  end,
+}
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.add = function()
+  local uniqueKey = uciHelper.generate_key()
+  setOnUci(uniqueKey, nil, "ipset_entry")
+  local ipsetName = getIPsetName()
+  setOnUci(uniqueKey, "ipset", ipsetName)
+  return uniqueKey
+end
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.delete = function(mapping, key)
+  ipsetBinding.sectionname = key
+  ipsetBinding.option = nil
+  uciHelper.delete_on_uci(ipsetBinding, commitapply)
+  configChanged = true
+  return true
+end
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(ipsetBinding)
+  end
+  configChanged = false
+end
+
+InternetGatewayDevice_X_Management_AccessControl_List_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(ipsetBinding)
+  end
+  configChanged = false
+end
+
+register(InternetGatewayDevice_X_Management_AccessControl_List_i_)

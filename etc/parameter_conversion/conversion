@@ -1,0 +1,263 @@
+debug_on
+
+copy_file /etc/hosts
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_section cwmpd.cwmpd_config
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convacspw.lua
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+
+uci_set dhcp.odhcpd.leasefile
+uci_set dhcp.odhcpd.leasetrigger
+uci_set dhcp.lan.interface
+uci_set dhcp.lan.start
+uci_set dhcp.lan.limit
+uci_set dhcp.lan.leasetime
+uci_set dhcp.lan.dhcpv6
+uci_set dhcp.lan.ra_management
+uci_set dhcp.lan.ra_min_interval
+uci_set dhcp.lan.ra_max_interval
+uci_set dhcp.lan.ra_lifetime
+uci_set dhcp.lan.ra_hoplimit
+uci_set dhcp.lan.ra_max_mtu
+uci_set dhcp.lan.force
+uci_set dhcp.@match[0].match
+uci_set dhcp.wan.interface
+uci_set dhcp.wan.ignore
+uci_section dhcp.@host id=name
+uci_set dhcp.lan.ignore
+uci_set uci-defaults.lan.hostname
+uci_set uci-defaults.lan.dnsproxy
+
+inline_sh_cmd convcmds copy_shadow_psw admin,support
+
+uci_section clash.@user
+uci_section clash.@single_config
+
+copy_file /etc/config/dropbear
+copy_file /etc/config/dscp2pbit
+
+uci_set env.var.provisioning_code
+
+uci_section firewall.@helper id=helper,proto,dest_port
+uci_section firewall.@userrule id=name
+uci_section firewall.@userrule_v6 id=name
+uci_section firewall.@fwconfig
+uci_section firewall.@zone id=name
+uci_set firewall.defaultoutgoing.target
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_set firewall.ftphelper.enable
+uci_set firewall.tftphelper.enable
+uci_set firewall.snmphelper.enable
+uci_set firewall.pptphelper.enable
+uci_set firewall.siphelper.enable
+uci_set firewall.siploopback.enable
+uci_set firewall.irchelper.enable
+uci_set firewall.amandahelper.enable
+uci_set firewall.rtsphelper.enable
+uci_set firewall.h323rashelper.enable
+uci_set firewall.h323q931helper.enable
+uci_section firewall.@userredirect
+uci_set firewall.userredirects.enabled
+uci_set firewall.@dmzredirect[0].dest_ip firewall.dmzredirect.dest_ip
+uci_set firewall.dmzredirects.enabled
+uci_set firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirect.dest_ip
+uci_section firewall.@rule id=name
+uci_section firewall.@forwarding id=src,dest
+uci_section firewall.@cone id=name
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+copy_file /etc/config/iqos
+
+copy_file /etc/config/mcastsnooping
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+
+uci_set mmpbx.global.enabled
+uci_set mmpbx.global.dial_timeout
+uci_set mmpbx.@service.provisioned
+uci_set mmpbx.@service.activated
+uci_section mmpbx.@dial_plan
+uci_set mmpbx.@codec_filter.allow
+uci_set mmpbx.@codec_filter.priority
+uci_set mmpbx.@codec_filter.remove_silence_suppression
+uci_set mmpbx.@codec_filter.packetization_time
+uci_set mmpbx.telephone_event.allow='0'
+uci_section mmpbx.@profile
+uci_section mmpbx.@incoming_map
+uci_section mmpbx.@outgoing_map
+uci_section mmpbx.@service
+
+uci_set mmpbxbrcmfxsdev.global.early_detect_faxmodem
+uci_set mmpbxbrcmfxsdev.global.fax_transport
+uci_set mmpbxbrcmfxsdev.@device.echo_cancellation
+uci_set mmpbxbrcmfxsdev.@device.rtcp_interval
+
+uci_section mmpbxrvsipnet.@profile
+uci_set mmpbxrvsipnet.sip_net.proxy_selection_policy
+uci_set mmpbxrvsipnet.sip_net.realtime_qos_field
+uci_set mmpbxrvsipnet.sip_net.cac
+uci_set mmpbxrvsipnet.sip_net.interface
+uci_set mmpbxrvsipnet.sip_net.min_session_expires
+uci_set mmpbxrvsipnet.sip_net.session_expires
+uci_set mmpbxrvsipnet.sip_net.primary_registrar
+uci_set mmpbxrvsipnet.sip_net.primary_registrar_port
+uci_set mmpbxrvsipnet.sip_net.primary_proxy_port
+uci_set mmpbxrvsipnet.sip_net.primary_proxy
+uci_set mmpbxrvsipnet.sip_net.secondary_proxy_port
+uci_set mmpbxrvsipnet.sip_net.secondary_proxy
+uci_set mmpbxrvsipnet.sip_net.secondary_registrar
+uci_set mmpbxrvsipnet.sip_net.secondary_registrar_port
+uci_set mmpbxrvsipnet.sip_net.domain_name
+uci_set mmpbxrvsipnet.sip_net.dtmf_relay
+uci_set mmpbxrvsipnet.sip_net.escape_hash
+uci_set mmpbxrvsipnet.sip_net.escape_star
+uci_set mmpbxrvsipnet.sip_net.invite_expire_timer
+uci_set mmpbxrvsipnet.sip_net.cancel_invite_timer
+uci_set mmpbxrvsipnet.sip_net.realtime_qos_value
+uci_set mmpbxrvsipnet.sip_net.control_qos_value
+uci_set mmpbxrvsipnet.sip_net.rtp_local_port_min
+uci_set mmpbxrvsipnet.sip_net.rtp_local_port_max
+uci_set mmpbxrvsipnet.sip_net.reg_expire
+uci_set mmpbxrvsipnet.sip_net.reg_back_off_timeout
+uci_set mmpbxrvsipnet.sip_net.reliable_provisional_response
+uci_set mmpbxrvsipnet.sip_net.switch_back_to_primary_proxy_timer
+uci_set mmpbxrvsipnet.sip_net.dtmf_relay_translation
+
+uci_set mmpbxbrcmcountry.global_provision.min_hookflash_time
+uci_set mmpbxbrcmcountry.global_provision.max_hookflash_time
+uci_set mmpbxbrcmcountry.global_provision.rx_gain_fxs
+uci_set mmpbxbrcmcountry.global_provision.tx_gain_fxs
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+uci_section mobiled.@profile id=id
+uci_section mobiled.@sim
+uci_section mobiled.@device
+uci_set mobiled.device_defaults.network_selection
+uci_set mobiled.device_defaults.mcc
+uci_set mobiled.device_defaults.mnc
+uci_set mobiled.device_defaults.radio_pref
+uci_set mobiled.device_defaults.lte_bands
+uci_set mobiled.device_defaults.earfcn
+uci_set mobiled.globals.enabled
+uci_set mobiled.globals.store_pin
+
+uci_section network.wan
+uci_section network.wan6
+uci_section network.adsl
+uci_section network.vdsl
+uci_section network.ewan
+uci_section network.vlanptm0
+uci_section network.vlanwan
+uci_section network.wwan
+
+uci_section network.@route
+
+uci_set network.lan.netmask
+uci_set network.lan.ipaddr
+uci_set network.lan.ipv6
+
+inline_sh_cmd /etc/parameter_conversion/scripts/copy_ppp_state.sh %%OLDCONFIG%%
+
+uci_set network.wwan.profile
+
+copy_file /etc/config/nslookupdiag
+
+copy_file /etc/config/parental
+inline_sh_cmd uci set parental.general.ipv6_enable='1'
+
+copy_file /etc/config/portmirror
+
+copy_file /etc/config/power
+
+copy_file /etc/config/pppoerelayd
+
+copy_file /etc/config/printersharing
+
+copy_file /etc/config/qos
+
+uci_set samba.samba.name
+uci_set samba.samba.workgroup
+uci_set samba.samba.description
+uci_set samba.samba.enabled
+uci_set samba.samba.filesharing
+uci_set samba.@sambashare[0].name
+uci_set samba.@sambashare[0].enabled
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].hostname
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+uci_set system.@system[0].log_ip
+uci_set system.@system[0].log_type
+uci_set system.@system[0].log_file
+uci_set system.@system[0].log_size
+uci_set system.@system[0].log_port
+uci_set system.@system[0].log_prefix
+uci_set system.@system[0].log_filter_ip
+uci_set system.@system[0].log_filter
+uci_set system.@system[0].log_filter_file
+
+copy_file /etc/config/tod
+
+copy_file /etc/config/traceroute
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+
+copy_file /etc/config/user_friendly_name
+
+
+
+
+
+
+copy_web_users
+uci_section web.@assist_state
+
+copy_file /etc/config/wifidoctor_station_importance
+
+uci_section wireless.@wifi-device
+uci_section wireless.@wifi-iface
+uci_section wireless.@wifi-ap
+uci_section wireless.@wifi-radius-server
+uci_section wireless.@wifi-bandsteer
+inline_sh_cmd uci set wireless.radio_2G.acs_allowed_channels='1 2 3 4 5 6 7 8 9 10 11'
+inline_sh_cmd uci set wireless.radio_2G.allowed_channels='1 2 3 4 5 6 7 8 9 10 11 12 13'
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/xtm
