@@ -1,0 +1,107 @@
+local Multi_X_000E50_CoreDump_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_CoreDump.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Configuration for uploading coredump information for further analysis",
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "URL where to upload the coredump data to",
+      },
+      Path = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        description = "The path where to store the coredump when selecting compress or store",
+      },
+      Action = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        description = "Specifies what to do with the coredump data",
+        enumeration = {
+          "nocore",
+          "compress",
+          "upload",
+          "store",
+        },
+      },
+      Reboot = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Reboot the gateway yes or no after coredump",
+      }
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local uciHelper = mapper("ucihelper")
+local coreDumpBinding = { config = "system", sectionname = "@coredump[0]", extended = true }
+local configChanged
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+local paramMap = {
+  ["URL"] = "url",
+  ["Action"] = "action",
+  ["Path"] = "path",
+  ["Reboot"] = "reboot",
+}
+
+local function getCoreDumpValues(mapping, param)
+  coreDumpBinding.option = paramMap[param]
+  coreDumpBinding.default = nil
+  if param == "Path" then
+    coreDumpBinding.default = "/tmp"
+  end
+  return uciHelper.get_from_uci(coreDumpBinding)
+end
+
+Multi_X_000E50_CoreDump_.get = getCoreDumpValues
+
+Multi_X_000E50_CoreDump_.getall = function()
+  local allValues = uciHelper.getall_from_uci(coreDumpBinding)
+  return {
+    URL = allValues.url or "",
+    Action = allValues.action or "",
+    Path = allValues.path or "/tmp",
+    Reboot = allValues.reboot or "1",
+  }
+end
+
+local function setCoreDumpValues(mapping, param, value)
+  coreDumpBinding.option = paramMap[param]
+  uciHelper.set_on_uci(coreDumpBinding, value, commitapply)
+  configChanged = true
+end
+
+Multi_X_000E50_CoreDump_.set = setCoreDumpValues
+
+Multi_X_000E50_CoreDump_.commit = function()
+  if configChanged then
+    uciHelper.commit(coreDumpBinding)
+    configChanged = false
+  end
+end
+
+Multi_X_000E50_CoreDump_.revert = function()
+  if configChanged then
+    uciHelper.revert(coreDumpBinding)
+    configChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_CoreDump_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

@@ -1,0 +1,504 @@
+-- luacheck: globals register mapper resolve commitapply
+-- Automatically generated from Device:2.14
+-- using generator version 3.0
+
+local Multi_SoftwareModules_ExecEnv_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ExecEnvNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    unique_keys = {
+      {"Alias"},
+      {"Name"},
+    },
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Error",
+          "Disabled",
+        },
+      },
+--[[
+      Reset = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
+--]]
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      InitialRunLevel = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      RequestedRunLevel = {
+        access = "readWrite",
+        command = "true",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      CurrentRunLevel = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      InitialExecutionUnitRunLevel = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      ParentExecEnv = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+      AllocatedDiskSpace = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AvailableDiskSpace = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AllocatedMemory = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AvailableMemory = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      ActiveExecutionUnits = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+      },
+      ProcessorRefList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.Processor.{i}.",
+      },
+      X_000E50_Reboot = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
+    },
+  },
+  aliasDefault = "Name",
+}
+
+do
+  local lcmd_helper = require("transformer.shared.lcmd")
+  local ubus = mapper("ubus").connect()
+  lcmd_helper.init(ubus)
+  local uciHelper = require("transformer.mapper.ucihelper")
+  local get_from_uci = uciHelper.get_from_uci
+  local set_on_uci = uciHelper.set_on_uci
+  local lxcBinding = {config = "lxc"}
+  local isConfigChanged = false
+  local ipairs, pairs = ipairs, pairs
+  local concat = table.concat
+  local process = require("tch.process")
+  local popen = process.popen
+  local match, floor = string.match, math.floor
+
+  Multi_SoftwareModules_ExecEnv_i_.entries = function()
+    local entries = {}
+    local execenvs = lcmd_helper.retrieve_EE()
+    if not execenvs then
+      return entries
+    end
+    if execenvs["native"] ~= nil then
+      entries[#entries + 1] = "native"
+    end
+    for ee_name in pairs(execenvs) do
+      if ee_name ~= "native" then
+	entries[#entries + 1] = ee_name
+      end
+    end
+    return entries
+  end
+
+  local dm_to_ubus_names = {
+    Name = "name",
+    Type = "type",
+    Vendor = "vendor",
+    Version = "version",
+  }
+
+  local function getFromUci(binding, sectionname, option)
+    binding.sectionname = sectionname
+    binding.option = option
+    return get_from_uci(binding)
+  end
+
+  local function setOnUci(binding, sectionname, option, value)
+    binding.sectionname = sectionname
+    binding.option = option
+    set_on_uci(binding, value, commitapply)
+    isConfigChanged = true
+  end
+
+  local function get_enable_state(mapping, param, key)
+    return key == "native" and "1" or getFromUci(lxcBinding, key, "enabled")
+  end
+
+  local function get_status(mapping, param, key)
+    if key ~= "native" then
+      local ee_status = "Error"
+      local enable_state = getFromUci(lxcBinding, key, "enabled")
+      local get_state = popen("lxc-ls", {"-f", "-F", "STATE", key})
+      local state
+      if get_state then
+        for line in get_state:lines() do
+          line = string.gsub(line, "%s+$", "")
+          state = line ~= "STATE" and line
+        end
+        get_state:close()
+      end
+      if state == "STARTING" or state == "RUNNING" or state == "STOPPING" then
+        ee_status = "Up"
+      elseif state == "ABORTING" or (enable_state == "1" and state == "STOPPED") then
+        ee_status = "Error"
+      elseif enable_state == "0" and state == "STOPPED" then
+        ee_status = "Disabled"
+      end
+      return ee_status
+    end
+    return "Up"
+  end
+
+  local function get_memory(param, key)
+    local rss, cache, swap, result, path
+    if key == "native" then
+      path = "/cgroups/cpumemblk/memory."
+    else
+      path = "/cgroups/cpumemblk/lxc/"..key.."/memory."
+    end
+    local stat = io.open(path.."stat", "r")
+    if stat then
+      for line in stat:lines() do
+        if match(line, "^rss%s%d+") then
+          rss = match(line, "%d+")
+        end
+        if match(line, "^cache%s%d+") then
+          cache = match(line, "%d+")
+        end
+      end
+      stat:close()
+    end
+    local swappiness = io.open(path.."swappiness", "r")
+    if swappiness then
+      swap = swappiness:read()
+      swappiness:close()
+    end
+    if param == "AllocatedMemory" then
+      if rss and cache and swap then
+        result = rss + cache + swap
+      end
+    else
+      local limit
+      if key == "native" then
+        local meminfo = io.open("/proc/meminfo", "r")
+        if meminfo then
+          for line in meminfo:lines() do
+            if line:match("MemTotal") then
+              limit = line:match("^MemTotal:%s*(%d+)%s*kB$")
+              if limit then limit = limit * 1024 end
+              break
+            end
+          end
+          meminfo:close()
+        end
+      else
+        local limit_in_bytes = io.open(path.."limit_in_bytes", "r")
+        if limit_in_bytes then
+          limit = limit_in_bytes:read()
+          limit_in_bytes:close()
+        end
+      end
+      if rss and cache and swap and limit then
+        result = limit - rss - cache - swap
+      end
+    end
+    result = result and floor(result/1024)
+    return result and tostring(result) or "-1"
+  end
+
+  local function get_disk_space(param, key)
+    local df
+    if key == "native" then
+      df = popen("df", {"/"})
+    else
+      df = popen("lxc-attach", {"-n", key, "--", "df", "/"})
+    end
+    if df then
+      local allocated, available, result
+      for line in df:lines() do
+        if match(line, "/overlay") then
+          allocated, available = match(line, "(%S+)%s+(%S+)%s+%S+%%")
+          result = param == "AllocatedDiskSpace" and allocated or available
+        end
+      end
+      df:close()
+      return result or "-1"
+    end
+  end
+
+  local function get(_, paramname, key)
+    local execenv = lcmd_helper.retrieve_EE(key)
+    local value = ""
+    if execenv then
+      if paramname == "AllocatedDiskSpace" or paramname == "AvailableDiskSpace" then
+        value = get_disk_space(paramname, key)
+      elseif paramname == "AllocatedMemory" or paramname == "AvailableMemory" then
+        value = get_memory(paramname, key)
+      else
+        value = execenv[dm_to_ubus_names[paramname]]
+      end
+    end
+    return value
+  end
+
+  local function get_active_EUs(mapping, _, key)
+    local EUs = lcmd_helper.retrieve_EE_packages(key)
+    if EUs then
+      local paths = {}
+      local typepath = mapping.root .. ".SoftwareModules.ExecutionUnit.{i}."
+      for pkg_id, pkg in pairs(EUs) do
+        if pkg.state == "running" then
+          paths[#paths + 1] = resolve(typepath, pkg_ID)
+        end
+      end
+      return concat(paths, ",")
+    end
+    return ""
+  end
+
+  local function get_parent_EE(mapping, _, key)
+    -- We currently only support two possibilities:
+    --   * The EE is the native EE and therefor doesn't have a parent
+    --   * The EE is a container and it's parent is the native EE
+    -- We currently don't support nested containers
+    if key == "native" then
+      return ""
+    end
+    local typepath = mapping.root .. ".SoftwareModules.ExecEnv.{i}."
+    return resolve(typepath, "native")
+  end
+
+  local function getProcessorCount()
+    local processor = {}
+    local fd = io.open("/proc/cpuinfo")
+    if fd then
+      for line in fd:lines() do
+        if line:find("processor") then
+          processor[#processor+1] = line:match("%d+")
+        end
+      end
+      fd:close()
+    end
+    return processor
+  end
+
+  local function getValue(mapping, param, key)
+    local cpuOption = getFromUci(lxcBinding, key, "lxc_cgroup_cpuset_cpus")
+    local path = mapping.root ..".DeviceInfo.Processor.{i}."
+    local result, cpuNodes = {}, {}
+    for node in string.gmatch(cpuOption, "([^,]+)") do
+      cpuNodes[#cpuNodes+1] = node
+    end
+    cpuNodes = cpuOption == "" and getProcessorCount() or cpuNodes
+    for _, node in pairs(cpuNodes) do
+       result[#result+1] = resolve(path, node)
+    end
+    return concat(result, ",") or ""
+  end
+
+  Multi_SoftwareModules_ExecEnv_i_.get = {
+    Enable = get_enable_state,
+    Status = get_status,
+    Name = get,
+    Type = get,
+    InitialRunLevel = "0",
+    RequestedRunLevel = "-1",
+    CurrentRunLevel = "-1",
+    InitialExecutionUnitRunLevel = "-1",
+    Vendor = get,
+    Version = get,
+    ParentExecEnv = get_parent_EE,
+    AllocatedDiskSpace = get,
+    AvailableDiskSpace = get,
+    AllocatedMemory = get,
+    AvailableMemory = get,
+    ActiveExecutionUnits = get_active_EUs,
+    ProcessorRefList = getValue,
+    X_000E50_Reboot = "0"
+  }
+
+  Multi_SoftwareModules_ExecEnv_i_.getall = function(_, key)
+    local execenv = lcmd_helper.retrieve_EE(key)
+    local data = {}
+    if execenv then
+      data.Name = execenv.name
+      data.Vendor = execenv.vendor
+      data.Version = execenv.version
+      data.Type = execenv.type
+    end
+    return data
+  end
+
+  local function dummy_set()
+  end
+
+  local function enable_exec_env(mapping, _, value, key)
+    if key == "native" then
+      return nil, "Cannot modify the value for native EE"
+    else
+      setOnUci(lxcBinding, key, "enabled", value)
+    end
+  end
+
+  local function lxc_reboot(mapping, _, value, key)
+    if value == "1" then
+      local container_name = key
+      if container_name == "native" then
+         return nil,"cannot reboot native ExecEnv"
+      end
+      -- TODO: this needs to be fixed, currently only supports one container reboot at a time
+      local f = io.open("/tmp/.lxc_name","w")
+      if f then
+        f:write(container_name)
+        f:close()
+        commitapply:newset("Device.SoftwareModules.ExecEnv.{i}.X_000E50_Reboot")
+      else
+        return nil, "unexpected write error"
+      end
+    end
+  end
+
+  Multi_SoftwareModules_ExecEnv_i_.set = {
+    Enable = enable_exec_env,
+    InitialRunLevel = dummy_set,
+    RequestedRunLevel = dummy_set,
+    InitialExecutionUnitRunLevel = dummy_set,
+    X_000E50_Reboot = lxc_reboot,
+  }
+
+  Multi_SoftwareModules_ExecEnv_i_.commit = function()
+    if isConfigChanged then
+      uciHelper.commit(lxcBinding)
+    end
+    isConfigChanged = false
+  end
+
+  Multi_SoftwareModules_ExecEnv_i_.revert = function()
+    if isConfigChanged then
+      uciHelper.revert(lxcBinding)
+    end
+    isConfigChanged = false
+  end
+
+end
+
+local duplicator = mapper("multiroot").duplicate
+local dm_roots = { "InternetGatewayDevice", "Device", "sys" }
+
+local function duplicate_and_register(mapping)
+  local duplicates = duplicator(mapping, "#ROOT", dm_roots)
+  for _, m in ipairs(duplicates) do
+    local root = m.objectType.name:match("([^%.]+)%.")
+    m.root = root
+    for _, param in pairs(m.objectType.parameters) do
+      local targetParent = param.targetParent
+      if targetParent then
+        param.targetParent = targetParent:gsub("#ROOT", root)
+      end
+    end
+    register(m)
+  end
+end
+
+duplicate_and_register(Multi_SoftwareModules_ExecEnv_i_)

@@ -1,0 +1,31 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+VERBOSE=${VERBOSE:-}
+if [ -n "$VERBOSE" ]; then
+    set -x
+fi
+
+CUJO_HOME=${CUJO_HOME:-}
+if [ -z "$CUJO_HOME" ]; then
+    # Emulate dirname, as it is not available on all platforms
+    # remove everything after last '/'
+    a="/${0%/*}"
+    # if $a is unset or null, replace it with '.'
+    a=${a:-.}
+    # remove '/' from beginning of the string and add '/' at the end
+    a=${a#/}/
+    # this script should be in $CUJO_HOME/bin folder
+    CUJO_HOME=$(cd "$a"/..; pwd)
+fi
+export CUJO_HOME
+
+# shellcheck source=/dev/null
+. "$CUJO_HOME/bin/rabid-sh-env"
+
+lua "$CUJO_HOME/share/lua/cujo/tools/raptr/raptr.lua" "$@"

@@ -1,0 +1,107 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/jquery.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="duma-speed-rating"> <template> <style> </style> <!-- local DOM HTML --> <duma-rating id="rating" value="[[score]]" animated="[[animated]]" tooltip="[[tooltip]]" tooltip-icons="[[tooltipIcons]]" thresholds="[[thresholds]]"></duma-rating> </template> <script> Polymer(
+    {
+      is: 'duma-speed-rating',
+      properties:
+      {
+        animated:
+        {
+          type: Boolean,
+          value: false,
+        },
+        thresholds:
+        {
+          type: Object,
+          value:
+          {
+            max: 0.5,
+
+            limits: 
+            [
+              {
+                letter: "D",
+                limit: 0.2,
+                colour: "<%= theme.RATING_D %>",
+              },
+              {
+                letter: "C",
+                limit: 0.25,
+                colour: "<%= theme.RATING_C %>",
+              },
+              {
+                letter: "B",
+                limit: 0.3,
+                colour: "<%= theme.RATING_B %>",
+              },
+              {
+                letter: "A",
+                limit: 0.35,
+                colour: "<%= theme.RATING_A %>",
+              },
+              {
+                letter: "A+",
+                limit: 0.4,
+                colour: "<%= theme.RATING_APLUS %>",
+              }
+            ],
+          }
+        },
+        tooltipIcons:
+        {
+          type: Object,
+          value:
+          {
+            0: "<%= i18n.download %>",
+            1: "<%= i18n.upload %>",
+            2: "<%= i18n.netflix %>",
+          },
+        },
+        tooltip:
+        {
+          type: Object,
+          value: function ()
+          {
+            return {
+              line0: "",
+              line1: "",
+              line2: "",
+            };
+          },
+        },
+        upload: Number,
+        download: Number,
+        expectedUpload: Number,
+        expectedDownload: Number,
+        score: Number
+      },
+
+      observers: [
+        "calcScore(upload, download, expectedUpload, expectedDownload)"
+      ],
+
+      // Upload and download as percentages of expected speeds
+      calcScore: function (upload, download, expectedUpload, expectedDownload)
+      {
+        this.score = null;
+        //if any are null, we don't want to calculate score
+        if(upload === null || download === null || expectedUpload === null || expectedDownload === null) return;
+        // Speed rating is set up to give download an 80% bias as that's most important to typical users
+        // Because dl is 80% vs 20% of ul it's 4 times.
+        // As the total possible percentage is now 500% we reduce it between 0 - 0.5
+        this.tooltip = {
+          line0: FormatBytes(download * 1000, 1000),
+          line1: FormatBytes(upload * 1000, 1000),
+          line2: GetNetflixRating(download),
+        }
+        var downloadPercent = download / expectedDownload;
+        var uploadPercent = upload / expectedUpload;
+        this.score = Math.min(Math.max(((((Math.min(1, downloadPercent) * 4) + Math.min(1, uploadPercent))) / 5) - 0.5, 0), 1);
+        return this.score;
+      },
+
+      reset: function ()
+      {
+        this.upload = null;
+        this.download = null;
+        this.$.rating.reset();
+      },
+    }); </script> </dom-module> 

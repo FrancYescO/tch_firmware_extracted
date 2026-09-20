@@ -1,0 +1,159 @@
+-- Manually generated
+
+local register, pairs, mapper, commitapply, find, sub = register, pairs, mapper, commitapply, string.find, string.sub
+local uciHelper = mapper("ucihelper")
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local setSecurityOption = bandSteerHelper.setSecurityOption
+local setOnUci =  uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local wirelessBinding = { config = "wireless" }
+local multiapBinding = { config = "multiap" }
+local multiapControllerBinding = {config='multiap', sectionname='controller', option='enabled'}
+local multiapAgentBinding = {config='multiap', sectionname='agent', option='enabled'}
+local crypto = require("tch.simplecrypto")
+local transactions = {}
+local knownPrefix = "Ngarigo"
+
+local Device_WiFi_X_TELSTRA_WiFi_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_WiFi.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {}
+  }
+}
+
+register(Device_WiFi_X_TELSTRA_WiFi_)
+
+local Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_WiFi.AccessPoint.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {}
+  }
+}
+
+local function entries(mapping)
+  wirelessBinding.sectionname = "wifi-ap"
+  local iface = {}
+  forEachOnUci(wirelessBinding, function(s)
+      iface[#iface + 1] = s['.name']
+  end)
+  return iface
+end
+
+Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_.entries = entries
+
+register(Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_)
+
+local Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_WiFi.AccessPoint.{i}.Security.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      EncryptedKeyPassphrase = {
+        access = "readWrite",
+        type = "string",
+        description = "The Wifi WPA KeyPassphrase in encrypted format"
+      }
+    }
+  }
+}
+
+-- This table will give the cred section equivalent to ap section
+local credSection = {
+  ["ap0"] = "cred0",
+  ["ap4"] = "cred1",
+  ["ap2"] = "cred2"
+}
+
+-- The function to return easymesh state
+local function getMultiapState()
+  return (getFromUci(multiapControllerBinding) == "1" and getFromUci(multiapAgentBinding) == "1") and true or false
+end
+
+-- The function to return the value from multiap/wireless config.
+-- When EM is enabled and main/backhaul interfaces are present, the value is taken from multiap config.
+-- Otherwise, the value is taken from wireless configuration.
+local function getUciValue(sectionName, paramName)
+  local binding = wirelessBinding
+  local section = sectionName
+  if getMultiapState() and credSection[sectionName] then
+    binding = multiapBinding
+    section = credSection[sectionName]
+  end
+  binding.sectionname = section
+  binding.option = paramName
+  return getFromUci(binding)
+end
+
+local function setUciValue(key, option, value, transactions)
+  multiapBinding.sectionname = key
+  multiapBinding.option = option
+  setOnUci(multiapBinding, value, commitapply)
+  transactions[multiapBinding.config] = true
+end
+
+local function encrypt(data)
+  return crypto.encrypt_keysel(data, crypto.AES_256_CBC, crypto.RIP_RANDOM_B)
+end
+
+Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_.get = {
+  EncryptedKeyPassphrase = function(mapping, param, key)
+    local encryptedData, err, wifiPassword
+    wifiPassword = getUciValue(key, "wpa_psk_key")
+    if wifiPassword then
+      wifiPassword = knownPrefix .. wifiPassword
+      encryptedData, err = crypto.encrypt_keysel(wifiPassword, crypto.AES_256_CBC, crypto.RIP_RANDOM_B)
+      if not encryptedData then
+        return nil, err
+      end
+    end
+    return encryptedData or ""
+  end
+}
+
+Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_.set = {
+  EncryptedKeyPassphrase = function(_, _, value, key)
+    local err, prefixStart, prefixEnd
+    value, err = crypto.decrypt(value)
+    if not value then
+      return nil, err
+    end
+    prefixStart, prefixEnd = find(value, knownPrefix)
+    if prefixStart == 1 and #knownPrefix ~= #value then
+      value = sub(value, prefixEnd + 1, #value)
+      if #value > 7 and #value < 64 then
+        if getMultiapState() and credSection[key] then
+          return setUciValue(credSection[key], "wpa_psk_key", value, transactions)
+        else
+          return setSecurityOption(key, "wpa_psk_key", value, commitapply, transactions)
+        end
+      end
+      return nil, "Password must be between 8 and 63 characters long"
+    end
+    return nil, "Please enter valid input"
+  end
+}
+
+Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_.commit = function()
+  for config in pairs(transactions) do
+    uciHelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_.revert = function()
+  for config in pairs(transactions) do
+    uciHelper.revert({config = config})
+  end
+  transactions = {}
+end
+
+register(Device_WiFi_X_TELSTRA_WiFi_AccessPoint_i_Security_)

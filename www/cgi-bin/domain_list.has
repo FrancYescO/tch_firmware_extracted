@@ -1,0 +1,66 @@
+#!/usr/bin/haserl --upload-limit=51200 --upload-dir=/tmp
+
+<%
+	is_bool() {
+		local bool="$1"
+
+		if [ "$bool" = "true" ] || [ "$bool" = "false" ]
+		then
+			return 0
+		else
+			return 1
+		fi
+	}
+
+	validate_and_call() {
+		local path="$HASERL_uploadfile_path"
+		local id="$FORM_id"
+		local whitelist="$FORM_whitelist"
+		local editable="$FORM_editable"
+		local stats="$FORM_stats"
+		local name="$FORM_name"
+
+		reason=""
+
+		if ! echo "$id" | grep -qE "^-?[0-9]+$"
+		then
+			reason="invalid id"
+			return "1"
+		fi
+
+		if ! is_bool "$whitelist" || ! is_bool "$editable" || ! is_bool "$stats"
+		then
+			reason="invalid bool"
+			return "1"
+		fi
+
+		if ! echo "$name" | grep -qE "^[a-zA-Z0-9_ ]+$"
+		then
+			reason="invalid name"
+			return "1"
+		fi
+
+		reason=$(ubus call com.netdumasoftware.adblocker domain_file_uploaded "{ \
+			\"path\": \"$path\", \
+			\"id\": \"$id\", \
+			\"whitelist\": \"$whitelist\", \
+			\"editable\": \"$editable\", \
+			\"stats\": \"$stats\", \
+			\"name\": \"$name\", \
+		}" 2>&1)
+
+		if echo "$reason" | fgrep -iq "error"
+		then
+			return "1"
+		else
+			return "0"
+		fi
+	}
+
+	if validate_and_call
+	then
+	%>Status: 200 OK
+<% else %>Status: 400 Bad Request
+<% fi %>Content-Type: text/plain; UTF-8
+
+<% echo "$reason" %>

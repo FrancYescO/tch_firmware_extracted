@@ -1,0 +1,164 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-panels/duma-panel.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-range-slider/paper-range-slider.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/storage.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="ping-history-range"> <template> <style is="custom-style" include="duma-theme"> .time-slider-wrapper {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+        padding: 0em 2em;
+      }
+      .time-slider-wrapper > div {
+        display: flex;
+        justify-content: flex-start;
+      }
+      .time-slider-wrapper > *:first-child{
+        flex-grow: 2;
+      }
+      .time-slider-wrapper > *:first-child paper-range-slider{
+        width: 100%;
+      }
+      .date-display {
+        white-space: nowrap;
+      }
+      #timeSlider {
+        --paper-range-slider-knob-start-color: var(--primary-color);
+        --paper-range-slider-knob-start-border-color: var(--primary-color);
+        --paper-range-slider-pin-color: transparent;
+        --paper-range-slider-pin-start-color: transparent;
+        --paper-single-range-slider-font-color: var(--primary-text-color);
+        --paper-range-slider-pin-font-size: 14px;
+        --paper-range-slider-pin-white-space: nowrap;
+        margin: 0em 2em;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+      } </style> <div class="inner layout horizontal time-slider-wrapper"> <div> <paper-range-slider id="timeSlider" step="0.0001" keyboard-step="1" min="0" max="[[_sliderLen]]" value-min="{{sliderVal.min}}" value-max="{{sliderVal.max}}" style="width:100%" always-show-pin aria-label-min="<%= i18n.ariaSliderMin %>" aria-label-max="<%= i18n.ariaSliderMax %>" aria-value-text-override="[[getAriaOverride(timeSelected,timeOptions)]]"></paper-range-slider> </div> <div> <paper-dropdown-menu dynamic-align label="<%= i18n.dropdownLabel %>" aria-label="<%= i18n.dropdownLabel %>"> <paper-listbox class="dropdown-content" selected="{{timeSelected}}"> <template is="dom-repeat" items="[[timeOptions]]" as="time"> <paper-item time="[[time.t]]">[[time.text]]</paper-item> </template> </paper-listbox> </paper-dropdown-menu> </div> </div>  </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-history-range",
+
+      properties: {
+        timeSelected: {
+          type: Number,
+          value: 2
+        },
+        timeOptions: {
+          type: Array,
+          notify: true,
+          value: [
+            { t: 3600, text: "<%= i18n.time_1hour %>" },
+            { t: 21600, text: "<%= i18n.time_6hour %>" },
+            { t: 86400, text: "<%= i18n.time_24hour %>" },
+            { t: 604800, text: "<%= i18n.time_1week %>" },
+            { t: 1209600, text: "<%= i18n.time_2week %>" },
+            { t: 2592000, text: "<%= i18n.time_1month %>" }
+          ]
+        },
+        sliderVal: {
+          type: Object,
+          value: {
+            min: 0,
+            max: 0
+          },
+        },
+        _sliderLen: Number,
+        _sliderScale: {
+          type: Number,
+          value: 60
+        },
+      },
+
+      observers: [
+        "_refresh(timeOptions,timeSelected,_callback,sliderVal)",
+        "_sliderChange(sliderVal.min,sliderVal.max,timeSelected)"
+      ],
+
+      ready: function(){
+        this._callback = null;
+        this.$.timeSlider.displayFunction = this._pinDisplay.bind(this);
+        this.load();
+      },
+      attached: function(){
+        this.load();
+        if(top.chartsAsTables){
+          this.timeSelected = this.timeOptions.length - 1;
+          this.style.display = "none";
+        }
+      },
+
+      load: function(){
+        var digitEx = new RegExp("\\d+");
+        var time_drop = duma.storage(packageId,"range_time_drop");
+        if(time_drop && time_drop.match(digitEx)){
+          this.timeSelected = parseInt(time_drop);
+        }else{
+          this.timeSelected = 2;
+        }
+        var smin = duma.storage(packageId,"range_slider_min");
+        var smax = duma.storage(packageId,"range_slider_max");
+        if(smin && smax && smin.match(digitEx) && smax.match(digitEx)){
+          this.sliderVal = {
+            min: parseFloat(smin),
+            max: parseFloat(smax)
+          };
+        }else{
+          this.sliderVal = {
+            min: 0,
+            max: this._sliderLen
+          }
+        }
+      },
+      save: function(){
+        if($(this).closest("duma-panel").prop("loaded")){
+          duma.storage(packageId,"range_time_drop",this.timeSelected);
+          duma.storage(packageId,"range_slider_min",this.sliderVal.min);
+          duma.storage(packageId,"range_slider_max",this.sliderVal.max);
+        }
+      },
+      
+      _sliderToUnix: function(value){
+        var start = Date.now() - (this.timeOptions[this.timeSelected].t * 1000);
+        return start + ( (value * this._sliderScale) * 1000 );
+      },
+      _unixToDisplayDate: function(unixTime,multi=1){
+        var unixDate = new Date(unixTime * multi);
+        return unixDate.toLocaleDateString([], {day:'numeric', month: 'numeric'}) + " " + unixDate.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'})
+      },
+      _pinDisplay: function(value)
+      {
+        return this._unixToDisplayDate(this._sliderToUnix(value));
+      },
+      getAriaOverride: function(timeSelected,timeOptions){
+        return function(val){
+          if(val >= this._sliderLen) return "<%= i18n.presentTime %>";
+          var unix = this._sliderToUnix(val);
+          return new Date(unix).toLocaleString([], {day: 'numeric', month: 'long', year: 'numeric', hour12: false, hour: '2-digit', minute:'2-digit'});
+        }.bind(this);
+      },
+
+      _sliderChange: function(begin, end){
+        var times = [this._sliderToUnix(begin),this._sliderToUnix(end)];
+        this._call(times[0],end === this._sliderLen ? null : times[1]);
+        this.save();
+      },
+
+      _refresh: function () {
+        var timeData = this.timeOptions[this.timeSelected];
+        var times = [Date.now() - (timeData.t * 1000), Date.now()];
+        var len = 100;
+        this._sliderLen = len;
+        this._sliderScale = timeData.t / len;
+        // this.sliderVal = {min: 0, max: len};
+        this.save();
+        Polymer.dom.flush();
+      },
+      _call: function(begin, end){
+        if(this._callback){
+          this._callback(begin,end);
+        }
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

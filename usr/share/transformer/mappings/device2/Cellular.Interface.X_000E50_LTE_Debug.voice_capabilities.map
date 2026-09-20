@@ -1,0 +1,41 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Voice_NetworkCapabilities.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			CS_Emergency = {
+				access = "readOnly",
+				type = "string"
+			},
+			VoLTE_Emergency = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+
+function obj.getall(_, key)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.voice", "network_capabilities", key)
+	if data then
+		result.CS_Emergency = data.cs.emergency
+		result.VoLTE_Emergency = data.volte.emergency
+	end
+	return result
+end
+
+function obj.get(_, paramName, key)
+	return obj.getall(_, key)[paramName]
+end
+
+register(obj)
+

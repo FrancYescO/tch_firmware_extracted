@@ -1,0 +1,18 @@
+#!/bin/sh
+
+model=`uci get env.var.prod_number | sed -e "s/TLS//g" | awk '{print tolower($0)}'`
+uci set cwmpd.cwmpd_config.acs_url=https://$model.technicolor.cwmp.bdms.telstra.net/
+
+set_forced_informs(){
+  uci add_list cwmpd.cwmpd_config.forcedinforms="Device.Services.X_000E50_Internet.WANConnectionName"
+  uci del_list cwmpd.cwmpd_config.forcedinforms="Device.IP.X_TELSTRA_IP.ActiveWANInterface"
+  uci del_list cwmpd.cwmpd_config.notifications="Device.Services.X_000E50_Internet.WANConnectionName|Active"
+}
+
+board_name=`uci get env.var.hardware_version`
+
+case "$board_name" in
+    VBNT-V)  set_forced_informs;;
+esac
+
+uci commit cwmpd

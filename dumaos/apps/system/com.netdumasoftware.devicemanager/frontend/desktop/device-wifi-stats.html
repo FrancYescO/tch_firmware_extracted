@@ -1,0 +1,269 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <%
+require "libos"
+local platform_information = os.platform_information()
+%> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/editor-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/cycle.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/colours.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% if platform_information.sdk == "OpenWRT" then %> <link rel="import" href="/apps/com.netdumasoftware.devicemanager/desktop/radio-scan.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <% end %> <dom-module id="device-wifi-stats"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host #dialog {
+        width: calc(100vw - 20em) !important;
+        max-width: 100vw !important;
+      }
+      .sub-header-row {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+      }
+      .sub-header {
+        color: var(--secondary-text-color);
+        margin-bottom: 1em;
+      }
+      .graph-wrapper {
+        display: flex;
+        flex-direction: row;
+        flex-grow: 1;
+        width: 100%;
+        height: 30em;
+      }
+      .dump-wrapper {
+        height: 30em;
+        width: 40em;
+      }
+      .dump-wrapper paper-textarea {
+        height: 30em;
+      } </style> <paper-icon-button id="wifiPerformanceButton" icon="editor:insert-chart" on-click="open" disabled="[[!interface]]"><%= i18n.wireless %></paper-icon-button> <paper-tooltip for="wifiPerformanceButton"><%= i18n.buttonTooltip %></paper-tooltip> <paper-dialog id="dialog" with-backdrop> <div class="layout vertical"> <h2 dialog-label>[[_getHeader(device,_forceDeviceUpdateCount)]]</h2> <div class="sub-header-row"> <span class="sub-header">[[_getSubHeader(interface,_forceDeviceUpdateCount)]]</span> <span class="sub-header">[[_getChannelHeader(_radioStats,_forceDeviceUpdateCount)]]</span> </div> <div class="sub-header-row"> <span class="sub-header">[[_getRangeHeader(_minRange,_maxRange)]]</span> <span class="sub-header">[[_getTXPowerHeader(_radioStats,_forceDeviceUpdateCount)]]</span> </div> <paper-radio-group selected="{{selectedShow}}"> <paper-radio-button name="through"><%= i18n.throughput %></paper-radio-button> <paper-radio-button name="prob"><%= i18n.probability %></paper-radio-button> </paper-radio-group> </div> <paper-dialog-scrollable> <div class="graph-wrapper"> <duma-chart id="chart" type="bar"></duma-chart> <div class="dump-wrapper"> <paper-textarea readonly="readonly" value="[[_dumpOutput]]" max-rows="14" rows="14"></paper-textarea> </div> </div> </paper-dialog-scrollable> <div class="buttons"> <% if platform_information.sdk == "OpenWRT" then %> <radio-scan device-mac="[[interface.mac]]"></radio-scan> <% end %> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "device-wifi-stats",
+
+      properties: {
+        interface: {
+          type: Object,
+        },
+        device: {
+          type: Object,
+          observer: "_onDeviceChanged"
+        },
+        _forceDeviceUpdateCount: {
+          type: Number,
+          value: 0
+        },
+        selectedShow: {
+          type: String,
+          value: "through",
+          observer: "_selectedChanged"
+        },
+        _minRange: {
+          type: Number,
+          value: 0
+        },
+        _maxRange: {
+          type: Number,
+          value: 0
+        },
+
+        _radioStats: Object,
+        _dumpOutput: String,
+        _preData: Array
+      },
+
+      _format: function(){
+        return String.format.apply(this,arguments);
+      },
+
+      _getHeader: function(device){
+        return "<%= i18n.header %>".format(device ? device.name : "");
+      },
+      _getSubHeader: function(interface){
+        if(!interface) return "";
+        return "<%= i18n.subHeader %>".format(interface.freq, interface.signal);
+      },
+      _getRangeHeader: function(min,max){
+        if(!max) min = "N/A";
+        if(!max) max = "N/A";
+        return "<%= i18n.range %>".format(min,max);
+      },
+      _getChannelHeader: function(radio_stats){
+        return "<%= i18n.channel %>".format(radio_stats ? radio_stats.channel : "N/A");
+      },
+      _getTXPowerHeader: function(radio_stats){
+        return "<%= i18n.txpower %>".format(radio_stats ? radio_stats.txpower : "N/A");
+      },
+
+      update: function(){
+        this.$.chart.chart.update();
+      },
+
+      _selectedChanged: function(){
+        this.reset();
+        this._formatData();
+      },
+
+      _formatData: function(data){
+        if(data){
+          this._preData = data;
+        }else{
+          data = this._preData;
+        }
+        if(!data) return;
+        this._minRange = 0;
+        this._maxRange = 0;
+        var labels = [];
+        data = data.sort(function(a,b){
+          if(a.max_tp == b.max_tp) return a.avg_tp - b.avg_tp;
+          return a.max_tp - b.max_tp;
+        });
+        var avg_dataset = {
+          data: [],
+          backgroundColor: "<%= theme.PRIMARY_COLOR %>",
+          label: "<%= i18n.avgLabel %>",
+          suffix: "<%= i18n.suffixThrough %>"
+        }
+        var max_dataset = {
+          data: [],
+          labelVals: [],
+          backgroundColor: "<%= theme.DARK_PRIMARY_COLOR %>",
+          label:"<%= i18n.maxLabel %>",
+          suffix: "<%= i18n.suffixThrough %>"
+        }
+        var prob_dataset = {
+          data: [],
+          backgroundColor: "<%= theme.PRIMARY_COLOR %>",
+          label:"<%= i18n.probLabel %>",
+          suffix: "<%= i18n.suffixProb %>"
+        }
+
+        for(var i = 0; i < data.length; i ++){
+          var stats = data[i];
+          labels.push(stats.best_rate || "");
+          var avg_tp = stats.avg_tp.toFixed(1);
+          var max_tp = stats.max_tp.toFixed(1);
+          avg_dataset.data.push(avg_tp);
+          max_dataset.data.push(max_tp - avg_tp);
+          max_dataset.labelVals.push(max_tp);
+          prob_dataset.data.push(stats.avg_prob.toFixed(1));
+
+          if(stats.best_rate.indexOf('A') !== -1 || stats.best_rate.indexOf('B') !== -1 || stats.best_rate.indexOf('C') !== -1 || stats.best_rate.indexOf('D') !== -1){
+            if(!this._minRange || avg_tp < this._minRange)
+              this._minRange = parseFloat(avg_tp);
+
+            if(!this._maxRange || avg_tp > this._maxRange)
+              this._maxRange = parseFloat(avg_tp);
+          }
+        }
+
+        this.$.chart.data = {
+          labels: labels,
+          datasets: this.selectedShow === "through" ? [
+            avg_dataset,
+            max_dataset
+          ] : [
+            prob_dataset
+          ]
+        }
+      },
+
+      _getPromises: function(){
+        var out = [];
+        if(this.$.dialog && this.$.dialog.opened && this.interface && this.interface.mac){
+          out.push(long_rpc_promise("com.netdumasoftware.devicemanager","get_wifi_stats",[this.interface.mac]),long_rpc_promise("com.netdumasoftware.devicemanager","get_station_dump",[this.interface.mac]));
+        }else{
+          out.push(false,false);
+        }
+        return out;
+      },
+
+      _refreshInterval: 1,
+      _refreshLoop: function () {
+        if (!this._cycle) {
+          this._cycle = start_cycle(this._getPromises.bind(this), function (wifi_stats,dump) {
+            if (wifi_stats && typeof wifi_stats[0] === "string") {
+              this._formatData(JSON.parse(wifi_stats[0]));
+            }
+            if(dump && dump[0]){
+              this._dumpOutput = dump[0];
+            }
+          }.bind(this), this._refreshInterval * 1000);
+        }
+      },
+
+      _onDeviceChanged: function(device){
+        if(!device || !device.interfaces) return;
+        for (var i = 0; i < device.interfaces.length; i++) {
+          var deviceInterface = device.interfaces[i];
+          if(deviceInterface.wifi && deviceInterface.ips.length){
+            this.interface = deviceInterface;
+            long_rpc_promise("com.netdumasoftware.devicemanager","get_radio_stats",[deviceInterface.mac]).done(function(radio_stats){
+              if (radio_stats && typeof radio_stats[0] === "object") {
+                this._radioStats = radio_stats[0];
+              }
+            }.bind(this));
+            return;
+          }
+        }
+        this.interface = null;
+      },
+
+      _refreshDevice: function(name,type){
+        this.device.name = name;
+        this.device.type = type;
+        this._forceDeviceUpdateCount += 1;
+      },
+
+      open: function () {
+        if(!this.interface){
+          throw new Error("Trying to open wifi stats when device does not have an online wireless interface.");
+        }
+        this.notifyPath('header');
+        this.$.dialog.open();
+      },
+
+      close: function () {
+        this.$.dialog.close();
+      },
+
+      reset: function(){
+        if(!this.$.chart.data){
+          this.$.chart.data = {
+            datasets: []
+          }
+        }
+        this.$.chart.options = {
+          scales: {
+            xAxes: [{
+							stacked: true,
+              ticks: {
+                beginAtZero: true,
+                maxRotation: 0
+              },
+              scaleLabel: {
+                display: false,
+              }
+            }],
+            yAxes: [{
+              stacked: true,
+              ticks: {
+                beginAtZero: true
+              },
+              scaleLabel: {
+                display: true,
+                labelString: this.selectedShow === "through" ? "<%= i18n.yAxisLabelThrough %>" : "<%= i18n.yAxisLabelProb %>"
+              }
+            }]
+          },
+          tooltips:{
+            displayColors: false,
+            mode: "x",
+            bodySpacing: 4,
+            callbacks: {
+              label: function(tooltipItem, data) {
+                var dataset = data.datasets[tooltipItem.datasetIndex];
+                var value = dataset.labelVals ? dataset.labelVals[tooltipItem.index] : dataset.data[tooltipItem.index];
+                return "{0}: {1} {2}".format(dataset.label,value,dataset.suffix || "");
+              },
+            }
+          }
+        }
+      },
+      ready: function(){
+        this.reset();
+        this._refreshLoop();
+      }
+    }); </script> </dom-module> 

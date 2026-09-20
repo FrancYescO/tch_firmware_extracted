@@ -1,0 +1,231 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-ip-input/duma-ip-input.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-item/paper-item.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/util.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.pingheatmap/desktop/add-to-list.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="ping-log"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host:not([collapsed]) {
+        min-width: 160px;
+        height: 100%;
+        margin-left: 22em;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        flex-grow: 1;
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 25em;
+        z-index: 85;
+        background-color: var(--transparent-background-color);
+      }
+      .scrollable {
+        flex-grow: 1;
+        position: relative;
+      }
+      .scrollable paper-listbox {
+        position: absolute;
+        overflow-y: auto;
+        height: calc(100% - 36px);
+        width: 100%;
+      }
+      :host:not([desktop]) .line * {
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .line > th {
+        position: sticky;
+      }
+      .line td:first-child {
+        padding-left: 0;
+        width: 80%;
+      }
+      .line > tr > *:last-child {
+        width: 3em;
+      }
+      .line.selected * {
+        color: var(--primary-color);
+      }
+      .more-info {
+        padding: 1em;
+        margin-top: 2em;
+      }
+      .more-info #success-info {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .dot {
+        height: 10px;
+        width: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 0.2em;
+      }
+      .ping-head-container {
+        display: flex;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+      }
+      .ping-head-container > span {
+        flex: 1;
+        text-align: right;
+      }
+      .open-button-container {
+        padding: 10px;
+      }
+      .list-header {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-end;
+        align-items: center;
+      }
+      .server-item {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+      }
+      .server-item .ping {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-start;
+        align-items: center;
+        min-width: 5em;
+      } </style> <template is="dom-if" if="[[collapsed]]"> <div class="open-button-container"> <paper-icon-button icon="menu" on-click="_openLog" aria-label="<%= i18n.expandLog %>"></paper-icon-button> </div> </template> <template is="dom-if" if="[[!collapsed]]"> <div id="container" class="container"> <div class="scrollable"> <div class="list-header"> <paper-icon-button icon="chevron-right" on-click="_closeLog" aria-label="<%= i18n.collapseLog %>"></paper-icon-button> </div> <paper-listbox on-selected-changed="_onSelect" attr-for-selected="server"> <template is="dom-repeat" items="[[servers]]" as="server"> <paper-item server="[[server]]"> <div class="server-item" onmouseover="[[_getMouseOverRow(server)]]" onmouseout="[[_getMouseOutRow(server)]]"> <span>[[_getServerDisplay(server)]]</span> <div class="ping"> <span class="dot" style$="[[_getPingColour(server.ping)]]"></span> <span>[[_getPingDisplay(server.ping)]] ms</span> </div> </div> </paper-item> </template> </paper-listbox> </div> <div class="more-info"> <div id="success-info"> <div> <%= i18n.successful %>: <span>0</span> </div> <div> <%= i18n.failed %>: <span>0</span> </div> </div> </div> </div> </template> </template> <script> var packageId = "com.netdumasoftware.pingheatmap";
+
+    Polymer({
+      is: "ping-log",
+
+      properties: {
+        servers: {
+          type: Array,
+          value: null
+        },
+        category: {
+          type: Object,
+          value: null
+        },
+        collapsed: {
+          type: Boolean,
+          value: false,
+          notify: true,
+          reflectToAttribute: true,
+          observer: "_resizeContainer"
+        }
+      },
+
+      _resizeContainer: function(){
+        var dimelem = $(this).closest("[main]")[0];
+        var cont = $(this.$$("#container"));
+        cont.height(dimelem.clientHeight);
+      },
+
+      ready: function(){
+        var resizeelem = $(this).closest("duma-panels");
+        resizeelem.on("resizestart resizestop resize",this._resizeContainer.bind(this));
+        this._resizeContainer();
+        setTimeout(this._resizeContainer.bind(this),100);
+      },
+
+      _svgElement: null,
+      _svg: function(){
+        if(!this._svgElement){
+          this._svgElement = $(this).closest(".horizontal-wrapper").find("ping-servers-svg")[0];
+        }
+        return this._svgElement;
+      },
+
+      _openLog: function(){
+        this.collapsed = false;
+      },
+      _closeLog: function(){
+        this.collapsed = true;
+      },
+
+      _getServerDisplay: function(data){
+        var server = data.server;
+        var texts = [];
+        if(server.name) texts.push(titleCase(server.name));
+        if(server.display) texts.push(server.display);
+        if(!server.display) texts.push(server.ip);
+        return texts.join(" - ");
+      },
+
+      _getMouseOverRow: function(data){
+        return function(event){
+          this._svg().highlightIP(data.server.ip);
+          this._closeCluster = true;
+        }.bind(this);
+      },
+      _getMouseOutRow: function(data){
+        return function(event){
+          this._svg().dehighlightIP(data.server.ip);
+        }.bind(this);
+      },
+      _onSelect: function(event){
+        var data = event.detail.value;
+        if(data){
+          this._closeCluster = false;
+          this._svg().selectAndClickIP(data.server.ip);
+          this.fire("server-click",data);
+        }
+      },
+      setHighlighted: function(elems){
+        var scrolled = false;
+        $(this.$.tableBody).find(".line").each(function(index,element){
+          if(element.classList.contains("highlight")){
+            element.classList.remove("highlight");
+          }
+          for(var i = 0; i < elems.length; i++){
+            if(element === elems[i] || index === elems[i]){
+              element.classList.add("highlight");
+              if(!scrolled){
+                element.scrollIntoView({behavior: "smooth", block: "nearest"});
+                scrolled = true;
+              }
+            }
+          }
+        });
+      },
+
+      _getPingDisplay: function(ping){
+        return ping < 0 ? "<%= i18n.noPing %>" : Math.min(999,ping);
+      },
+
+      _getPingColour: function(ping){
+        if(ping < 0) return "<%= theme.PRIMARY_TEXT_COLOR %>"
+        var c = scoreUtil.getPingColour(ping);
+        return "background-color:" + c + ";"
+      },
+
+      _genAddClick: function(event){
+        var paper_icon = $(event.target).closest("paper-icon-button");
+        this.$.add.open(paper_icon[0].server.server);
+      },
+
+      update: function(servers, category){
+        servers.sort(function(a,b){
+          if(a.ping < 0) return 1;
+          if(b.ping < 0) return -1;
+          return a.ping - b.ping;
+        });
+        this.servers = servers;
+        this.category = category;
+        this._resizeContainer();
+      },
+      updateFromHistory: function(data){
+        for(var i = 0; i < data.length; i++){
+          var d = data[i];
+          for(var s = 0; s < this.servers.length; s++){
+            var serv = this.servers[s];
+            if(serv.server.ip === d.server.ip){
+              this.set('servers.' + s.toString() + '.ping',d.ping);
+            }
+          }
+        }
+        this._resizeContainer();
+      },
+
+      behaviours: [
+        Polymer.IronResizableBehaviour
+      ],
+    }); </script> </dom-module> 

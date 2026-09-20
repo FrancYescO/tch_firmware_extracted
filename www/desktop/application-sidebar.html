@@ -1,0 +1,402 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button-light.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-image/duma-image.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-ripple/paper-ripple.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/word-type.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <%
+  require("libos")
+  local platform_information = os.platform_information()
+%> <dom-module id="application-sidebar"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        -khtml-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        width: 256px;
+        position: fixed;
+        top: 64px;
+        left: 0;
+        bottom: 0;
+        overflow: auto;
+        z-index: 1;
+      }
+
+      :host[collapsed] {
+        width: 64px;
+      }
+
+      :host:not([collapsed]) {
+        background-color: var(--transparent-background-color);
+        border-radius: 0 2px 0 0;
+      }
+
+      :host[collapsed]:hover {
+        width: 256px;
+        background: var(--primary-background-color);
+        transition: width ease-in-out 0.3s, background ease-in-out 0.3s;
+      }
+
+      ul {
+        box-sizing: border-box;
+        padding: 4px 0 0;
+        margin: 0;
+        list-style: none;
+        list-style-type: none;
+        background: transparent;
+        min-height: 100%;
+        width: 100%;
+        transition: width ease-in-out 0.3s, background ease 0.3s;
+      }
+
+      li {
+        padding: 0;
+        margin: 0;
+        text-align: center;
+        background: transparent;
+        transition: background 0.3s ease, color 0.3s ease;
+        color: var(--secondary-text-color);
+        fill: var(--secondary-text-color);
+      }
+
+      li:hover {
+        fill: var(--primary-text-color);
+        color: var(--primary-text-color);
+      }
+      
+      li[active] {
+        color: var(--primary-color);
+        fill: var(--primary-color);
+      }
+
+      span.sidebar-group {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        align-items: center;
+        white-space: nowrap;
+        overflow: visible;
+        position: relative;
+        margin: 4px 0px;
+        opacity: 1;
+      }
+      span.sidebar-group > span {
+        opacity: 0;
+        width: 0px;
+        margin-left: 0px;
+        position: absolute;
+        top: 2px;
+        left: 0px;
+        font-size: 12px;
+        overflow: hidden;
+        color: var(--disabled-text-color);
+        transition: opacity 0.3s ease, width 0.3s ease, margin-left 0.3s ease;
+      }
+      span.sidebar-group > hr {
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        flex-grow: 1;
+      }
+      :host:hover span.sidebar-group > span,
+      :host:not([collapsed]) span.sidebar-group > span {
+        opacity: 1;
+        width: auto;
+        margin-left: 20px;
+      }
+      :host[collapsed]:not(:hover) span.sidebar-group > hr {
+        opacity: 0.2;
+      }
+
+      a {
+        display: flex;
+        flex-grow: 1;
+        height: 100%;
+        color: inherit;
+        position: relative;
+        padding: 0 8px;
+      }
+
+      a span {
+        display: flex;
+        vertical-align: middle;
+        line-height: 48px;
+        flex: 1 1 auto;
+        overflow: hidden;
+        align-self: flex-start;
+        white-space: nowrap;
+        opacity: 0;
+        margin-left: 8px;
+        transition: opacity 0.3s ease;
+      }
+      
+      :host:hover a span,
+      :host:not([collapsed]) a span {
+        opacity: 1;
+      }
+
+      paper-tooltip {
+        --paper-tooltip: {
+          @apply(--paper-font-caption);
+          text-transform: uppercase;
+          white-space: nowrap;
+          position: absolute;
+        };
+      }
+      
+      duma-image {
+        padding: 12px;
+        fill: inherit;
+      }
+      @keyframes wiggle {
+        0% { -webkit-transform: translate(2px, 1px) rotate(0deg); }
+        10% { -webkit-transform: translate(-1px, -2px) rotate(-1deg); }
+        20% { -webkit-transform: translate(-3px, 0px) rotate(1deg); }
+        30% { -webkit-transform: translate(0px, 2px) rotate(0deg); }
+        40% { -webkit-transform: translate(1px, -1px) rotate(1deg); }
+        50% { -webkit-transform: translate(-1px, 2px) rotate(-1deg); }
+        60% { -webkit-transform: translate(-3px, 1px) rotate(0deg); }
+        70% { -webkit-transform: translate(2px, 1px) rotate(-1deg); }
+        80% { -webkit-transform: translate(-1px, -1px) rotate(1deg); }
+        90% { -webkit-transform: translate(2px, 2px) rotate(0deg); }
+        100% { -webkit-transform: translate(0px, 0px) rotate(0deg); }
+      }
+
+      .wiggle * {
+        animation: wiggle 1s 1;
+      }
+      button[is=paper-icon-button-light] {
+        width: 40px;
+        height: 40px;
+        margin: 4px;
+        vertical-align: middle;
+        transition: fill 0.3s ease;
+        white-space: nowrap;
+      }
+      
+      button[is=paper-icon-button-light] duma-image {
+        padding: 8px;
+      }
+      paper-icon-button#sidebar-toggle {
+        --paper-icon-button: {
+          position: fixed;
+          top: 12px;
+          left: 12px;
+        };
+      } </style> <paper-icon-button id="sidebar-toggle" icon="icons:menu" aria-label="<%= i18n.sidebarToggleAriaLabel %>" aria-expanded$="[[_bts(collapsed,1)]]"></paper-icon-button> <ul> <template is="dom-repeat" items="[[rapp_ordering]]" as="group" sort="_sortGroups"> <!-- using filter breaks stuff for some reason --> <template is="dom-if" if="[[_hideGroup(group, applications)]]"> <template is="dom-if" if="[[group.name]]"> <span class="sidebar-group"> <span> [[group.name]] </span> <hr> </span> </template> <template is="dom-repeat" items="[[applications]]" filter="[[_filterAppsInGroup(group)]]" as="application" sort="[[_sortAppsInGroup(group)]]"> <li active$="[[_isActiveApplication(application.id, activeApplicationId)]]"> <a href$="[[_getApplicationLink(application)]]" application="[[application]]" current$="[[_isActiveApplication(application.id, activeApplicationId)]]" aria-current$="[[_isActiveApplicationAria(application.id, activeApplicationId)]]" class$="sidebar-application [[_doWiggle(application,fw)]]" on-tap="_applicationClick" aria-labelledby$="label-rapp-[[index]]"> <duma-image src="[[application.icon]]" aria-label$="[[getAriaLabel(application.title,collapsed)]]"></duma-image> <span id="label-rapp-[[index]]">[[application.title]]</span> <paper-ripple></paper-ripple> </a> </li> </template> </template> </template> </ul> </template> <script> Polymer({
+      is: "application-sidebar",
+      properties: {
+        applications: {
+          type: Array,
+          observer: "_onApplicationsChange"
+        },
+        rapp_ordering: {
+          type: Array,
+          value: [
+            {
+              order: 100,
+              rapps: [
+                "com.netdumasoftware.desktop"
+              ]
+            },
+            {
+              name: "<%= i18n.gaming %>",
+              order: <%= platform_information.vendor == "TELSTRA" and 5 or 20 %>,
+              rapps: [
+                "com.netdumasoftware.geofilter",
+                "com.netdumasoftware.pingheatmap",
+              ]
+            },
+            {
+              name: "<%= i18n.homeNetwork %>",
+              order: 10,
+              rapps: [
+                "com.netdumasoftware.qos",
+                "com.netdumasoftware.networkmonitor",
+                "com.netdumasoftware.trafficcontroller",
+                "com.netdumasoftware.devicemanager",
+                "com.netdumasoftware.benchmark",
+                "com.netdumasoftware.adblocker",
+                "com.netdumasoftware.datausage",
+                "com.netdumasoftware.hybridvpn"
+              ]
+            },
+            {
+              name: "<%= i18n.other %>",
+              order: 0,
+              rapps: [
+                "com.netdumasoftware.systeminfo",
+                "com.netdumasoftware.rappstore",
+                "com.netdumasoftware.ngportal",
+                "com.netdumasoftware.settings"
+              ],
+              default: true,
+            },
+          ]
+        },
+
+        activeApplicationId: String,
+
+        collapsed: {
+          type: Boolean,
+          observer: "_onCollapsedChange",
+          reflectToAttribute: true,
+          value: false
+        },
+        difference: Object,
+        fw: {type: Boolean, value: false}
+      },
+
+      hostAttributes: {
+        'role': 'navigation',
+      },
+
+      // bool to string wrapper (with inverse)
+      // bool == true for normal, bool == false for inverse, and because it's 'inverse', we want to invert it, so inverse == true -> bool == false
+      _bts: function(bool,inverse){
+        return (bool === !inverse).toString();
+      },
+
+      getAriaLabel: function(text,collapsed){
+        return collapsed ? text : "";
+      },
+
+      getApp: function (id) {
+        for (var i = 0; i < this.applications.length; i++) {
+          var application = this.applications[i];
+          if (application.id === id) {
+            var applicationElements = this.querySelectorAll(".sidebar-application");
+            
+            for (var i = 0; i < applicationElements.length; i++) {
+              var element = applicationElements[i];
+
+              if (element.application.id === id) {
+                application.target = element;
+              }
+            }
+
+            return application;
+          }
+        }
+      },
+
+      _onCollapsedChange: function (ne,ol) {
+        if (this.collapsed) {
+          this.debounce("sidebar-collapse-change", function () {
+            this._collapsed = true;
+          }, 200);
+
+        } else {
+          this.debounce("sidebar-collapse-change", function () {
+            this._collapsed = false;
+          });
+        }
+      },
+
+      _onApplicationsChange: function(apps,oldApps){
+        // true = new app, false = removed app, null = no difference
+        var difference = {}
+        if(apps && oldApps){
+          for(var n = 0; n < apps.length; n ++){
+            var new_app = apps[n];
+            difference[new_app.id] = true;
+            for(var o = 0; o < oldApps.length; o ++){
+              var old_app = oldApps[o];
+              if(old_app.id === new_app.id){
+                difference[new_app.id] = null;
+              }else if(difference[old_app.id] === undefined){
+                difference[old_app.id] = false;
+              }
+            }
+          }
+        }else if(apps){
+          for(var n = 0; n < apps.length; n++){
+            difference[apps[n].id] = null;
+          }
+        }
+        this.difference = difference;
+      },
+
+      ready: function(){
+        duma.type.OnWord("wiggle",()=>{this.fw = true;setTimeout(() => this.fw = false, 1000);});
+      },
+
+      _doWiggle: function(application,fw){
+        return (!!this.difference[application.id] || fw) ? "wiggle" : null;
+      },
+      
+      _getApplicationLink: function (application) {
+        return "#" + application.id;
+      },
+
+      _isActiveApplicationAria: function (applicationId, activeApplicationId) {
+        return (activeApplicationId === applicationId) ? "page" : null;
+      },
+
+      _isActiveApplication: function (applicationId, activeApplicationId) {
+        return activeApplicationId === applicationId;
+      },
+
+      _isSet: function (variable) {
+        return typeof variable !== "undefined";
+      },
+
+      _applicationClick: function (e) {
+        e.preventDefault();
+        
+        var element = e.target;
+        while (typeof element.application === "undefined") {
+          element = element.parentNode;
+        }
+
+        var application = element.application;
+
+        if (application.children) {
+          this._collapsibleOpen = !this._collapsibleOpen;
+        
+        } else {
+          document.location.hash = "#" + application.id;
+          this.activeApplicationId = application.id;
+        }
+      },
+
+      _hideGroup: function (group, apps) {
+        if (!apps || !group) return function () { return false; };
+        return apps.filter(this._filterAppsInGroup(group)).length > 0;
+      },
+
+      _sortGroups: function (g1, g2) {
+        return g2.order - g1.order;
+      },
+
+      _filterAppsInGroup: function(group) {
+        return function(rapp){
+          var ordering = this.rapp_ordering;
+          // if in this group, return true
+          if(group.rapps.includes(rapp.id)){
+            return true;
+          }else{
+            // if this group is not default, then return false
+            if(!group.default){
+              return false;
+            } else {
+              // if this group is default, return true only if rapp is not in a different group
+              for(var i = 0; i < ordering.length; i++){
+                var g = ordering[i];
+                if(!g.default && g.rapps.includes(rapp.id)){
+                  return false;
+                }
+              }
+              return true;
+            }
+          }
+        }.bind(this);
+      },
+
+      _sortAppsInGroup: function(group) {
+        return function(app1, app2){
+          var rapp1 = group.rapps.indexOf(app1.id);
+          var rapp2 = group.rapps.indexOf(app2.id);
+          return rapp1 - rapp2;
+        }
+      }
+    }); </script> </dom-module> 

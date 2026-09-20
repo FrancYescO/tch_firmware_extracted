@@ -1,0 +1,310 @@
+-- luacheck: globals register mapper resolve
+-- Automatically generated from Device:2.14
+-- using generator version 3.0
+local Multi_SoftwareModules_ExecutionUnit_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ExecutionUnitNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    unique_keys = {
+      {"EUID"},
+      {"Alias"},
+    },
+    parameters = {
+      EUID = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      ExecEnvLabel = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Status = {
+        access = "readOnly",
+        activeNotify = "forceDefaultEnabled",
+        type = "string",
+        enumeration = {
+          "Idle",
+          "Starting",
+          "Active",
+          "Stopping",
+        },
+      },
+      RequestedState = {
+        access = "readWrite",
+        command = "true",
+        type = "string",
+        enumeration = {
+          "Idle",
+          "Active",
+        },
+      },
+      ExecutionFaultCode = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "NoFault",
+          "FailureOnStart",
+          "FailureOnAutoStart",
+          "FailureOnStop",
+          "FailureWhileActive",
+          "DependencyFailure",
+          "UnStartable",
+        },
+      },
+      ExecutionFaultMessage = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      AutoStart = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      RunLevel = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+--[[
+      DiskSpaceInUse = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      MemoryInUse = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      References = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+      },
+      AssociatedProcessList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.ProcessStatus.Process.{i}.",
+      },
+      VendorLogList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+      },
+      VendorConfigList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorConfigFile.{i}.",
+      },
+      SupportedDataModelList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.SupportedDataModel.{i}.",
+      },
+--]]
+      ExecutionEnvRef = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+    },
+  },
+}
+
+do
+
+  local lcmd_helper = require("transformer.shared.lcmd")
+  local ubus = mapper("ubus").connect()
+  lcmd_helper.init(ubus)
+
+  local dm_to_ubus_names = {
+    AutoStart = "autostart",
+    EUID = "ID",
+    Name = "name",
+    ExecEnvLabel = "name",
+    Status = "state",
+    Vendor = "vendor",
+    Version = "version",
+    Description = "Description",
+    ExecutionEnvRef = "execenv",
+    ExecutionFaultMessage = "errormsg",
+    ExecutionFaultCode = "errorcode"
+  }
+
+  local pkg_state_to_EU_state = {
+    new          = false,
+    downloading  = false,
+    downloaded   = false,
+    installing   = false,
+    installed    = "Idle",
+    starting     = "Starting",
+    running      = "Active",
+    stopping     = "Stopping",
+    uninstalling = false,
+    retired      = false
+  }
+
+  local function pkg_entries()
+    local entries = {}
+    local packages = lcmd_helper.retrieve_EE_packages()
+    if not packages then
+      return entries
+    end
+    for pkg_ID, pkg in pairs(packages) do
+      if pkg_state_to_EU_state[pkg.state] then
+        entries[#entries + 1] = pkg_ID
+      end
+    end
+    return entries
+  end
+
+  local function get_pkg_ubus_data(key)
+    local packages = lcmd_helper.retrieve_EE_packages()
+    if packages then
+      return packages[key]
+    end
+  end
+
+ local errorCode = {
+  [5] = "FailureOnStart",
+  [6] = "FailureOnStop"
+ }
+
+  local function get(mapping, paramname, key, pkg)
+    local value = ""
+    if paramname == "RequestedState" then
+      return value
+    end
+    if paramname == "RunLevel" then
+      return "0"
+    end
+    pkg = pkg or get_pkg_ubus_data(key)
+    if pkg then
+      value = pkg[dm_to_ubus_names[paramname]] or ""
+      if paramname == "Status" then
+        value = pkg_state_to_EU_state[value] or "Idle"
+      elseif paramname == "ExecutionEnvRef" then
+        value = resolve(mapping.root .. ".SoftwareModules.ExecEnv.{i}.", value) or ""
+      elseif paramname == "ExecutionFaultMessage" then
+        value = value ~= "" and value or  "NoFault"
+      elseif paramname == "ExecutionFaultCode" then
+        value = (value == "" and "NoFault") or (value ~= "" and errorCode[value] or "UnStartable")
+      end
+    end
+    return value
+  end
+
+  local actions = {}
+
+  local function set(_, paramname, paramvalue, key)
+    if paramname == "RequestedState" then
+      local method = (paramvalue == "Idle") and "stop" or "start"
+      actions[#actions + 1] = { method = method, properties = { ID = key } }
+    elseif paramname == "AutoStart" then
+      actions[#actions + 1] = { method = "modify_package", ID = key, properties = { autostart = paramvalue }}
+    end
+  end
+
+  local function commit()
+    for i, action_details in ipairs(actions) do
+      local method = action_details.method
+      action_details.method = nil
+      ubus:call("lcm", method, action_details)
+      actions[i] = nil
+    end
+  end
+
+  local function revert()
+    actions = {}
+  end
+
+  Multi_SoftwareModules_ExecutionUnit_i_.entries = pkg_entries
+  Multi_SoftwareModules_ExecutionUnit_i_.get = get
+  Multi_SoftwareModules_ExecutionUnit_i_.set = set
+  Multi_SoftwareModules_ExecutionUnit_i_.commit = commit
+  Multi_SoftwareModules_ExecutionUnit_i_.revert = revert
+  Multi_SoftwareModules_ExecutionUnit_i_.getall = function(mapping, key)
+    local pkg = get_pkg_ubus_data(key)
+    local data = {}
+    for paramname in pairs(dm_to_ubus_names) do
+      data[paramname] = get(mapping, paramname, key, pkg)
+    end
+    return data
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local dm_roots = { "InternetGatewayDevice", "Device", "sys" }
+
+local function duplicate_and_register(mapping)
+  local duplicates = duplicator(mapping, "#ROOT", dm_roots)
+  for _, m in ipairs(duplicates) do
+    local root = m.objectType.name:match("([^%.]+)%.")
+    m.root = root
+    for _, param in pairs(m.objectType.parameters) do
+      local targetParent = param.targetParent
+      if targetParent then
+        param.targetParent = targetParent:gsub("#ROOT", root)
+      end
+    end
+    register(m)
+  end
+end
+
+duplicate_and_register(Multi_SoftwareModules_ExecutionUnit_i_)
+

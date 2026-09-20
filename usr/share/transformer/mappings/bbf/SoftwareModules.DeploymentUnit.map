@@ -1,0 +1,229 @@
+-- luacheck: globals register mapper resolve
+-- Automatically generated from Device:2.14
+-- using generator version 3.0
+local Multi_SoftwareModules_DeploymentUnit_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.DeploymentUnit.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "DeploymentUnitNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    unique_keys = {
+      {"UUID","Version","ExecutionEnvRef"},
+      {"Alias"},
+    },
+    parameters = {
+      UUID = {
+        access = "readOnly",
+        type = "string",
+        max = "36",
+      },
+      DUID = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Status = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "Installing",
+          "Installed",
+          "Updating",
+          "Uninstalling",
+          "Uninstalled",
+        },
+      },
+--[[
+      Resolved = {
+        access = "readOnly",
+        type = "boolean",
+      },
+--]]
+      URL = {
+        access = "readOnly",
+        type = "string",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+--[[
+      VendorLogList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+      },
+      VendorConfigList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorConfigFile.{i}.",
+      },
+--]]
+      ExecutionUnitList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+      },
+      ExecutionEnvRef = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+    },
+  },
+}
+
+local lcmd_helper = require("transformer.shared.lcmd")
+local ubus = mapper("ubus").connect()
+lcmd_helper.init(ubus)
+
+local function get_pkg_ubus_data(ID)
+  local packages = lcmd_helper.retrieve_EE_packages()
+  if packages then
+    return packages[ID]
+  end
+end
+
+local pkg_state_to_EU_state = {
+  new          = false,
+  downloading  = false,
+  downloaded   = false,
+  installing   = false,
+  installed    = "Idle",
+  starting     = "Starting",
+  running      = "Active",
+  stopping     = "Stopping",
+  uninstalling = false,
+  retired      = false
+}
+
+do
+  local dm_to_ubus_names = {
+    UUID = "UUID",
+    DUID = "ID",
+    Name = "name",
+    Status = "state",
+    URL = "URL",
+    Description = "Description",
+    Vendor = "vendor",
+    Version = "version",
+    ExecutionUnitList = "state", -- may seem strange but see below in get()
+    ExecutionEnvRef = "execenv"
+  }
+
+  local pkg_state_to_DU_state = {
+    new          = "Installing",
+    downloading  = "Installing",
+    downloaded   = "Installing",
+    installing   = "Installing",
+    installed    = "Installed",
+    starting     = "Installed",
+    running      = "Installed",
+    stopping     = "Installed",
+    uninstalling = "Uninstalling",
+    retired      = "Uninstalled"
+  }
+
+  local function pkg_entries()
+    local entries = {}
+    local packages = lcmd_helper.retrieve_EE_packages()
+    if not packages then
+      return entries
+    end
+    for pkg_ID in pairs(packages) do
+      entries[#entries + 1] = pkg_ID
+    end
+    return entries
+  end
+
+  local function get(mapping, paramname, key, pkg)
+    pkg = pkg or get_pkg_ubus_data(key)
+    local value = ""
+    if pkg then
+      value = pkg[dm_to_ubus_names[paramname]] or ""
+      if paramname == "Status" then
+        value = pkg_state_to_DU_state[value]
+      elseif paramname == "ExecutionUnitList" then
+        -- Knowing that EUs have the same key as DUs we could do a plain
+        -- resolve() but:
+        -- - It's possible that for a DU the corresponding EU is not visible
+        --   in the data model, depending on the state of the package.
+        -- - resolve() will first consult Transformer's DB but if not found
+        --   there it will issue a sync to the objecttype. This can be
+        --   relatively expensive. Since we know when an EU should be visible
+        --   in the datamodel we can make sure to only call resolve() when
+        --   it's actually relevant.
+        if pkg_state_to_EU_state[value] then
+          value = resolve(mapping.root .. ".SoftwareModules.ExecutionUnit.{i}.", key) or ""
+        else
+          value = ""
+        end
+      elseif paramname == "ExecutionEnvRef" then
+        value = resolve(mapping.root .. ".SoftwareModules.ExecEnv.{i}.", value) or ""
+      end
+    end
+    return value
+  end
+
+  Multi_SoftwareModules_DeploymentUnit_i_.entries = pkg_entries
+  Multi_SoftwareModules_DeploymentUnit_i_.get = get
+  Multi_SoftwareModules_DeploymentUnit_i_.getall = function(mapping, key)
+    local pkg = get_pkg_ubus_data(key)
+    local data = {}
+    for paramname in pairs(dm_to_ubus_names) do
+      data[paramname] = get(mapping, paramname, key, pkg)
+    end
+    return data
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local dm_roots = { "InternetGatewayDevice", "Device", "sys" }
+
+local function duplicate_and_register(mapping)
+  local duplicates = duplicator(mapping, "#ROOT", dm_roots)
+  for _, m in ipairs(duplicates) do
+    local root = m.objectType.name:match("([^%.]+)%.")
+    m.root = root
+    for _, param in pairs(m.objectType.parameters) do
+      local targetParent = param.targetParent
+      if targetParent then
+        param.targetParent = targetParent:gsub("#ROOT", root)
+      end
+    end
+    register(m)
+  end
+end
+
+duplicate_and_register(Multi_SoftwareModules_DeploymentUnit_i_)
