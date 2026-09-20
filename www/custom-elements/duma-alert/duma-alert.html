@@ -1,0 +1,121 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../paper-dialog/paper-dialog.html"> <link rel="import" href="../paper-button/paper-button.html"> <link rel="import" href="../paper-checkbox/paper-checkbox.html"> <link rel="import" href="/libs/storage.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="duma-alert"> <template> <style include="duma-theme"></style> <paper-dialog id="dialog" modal> <paper-dialog-scrollable> <div class="inner"> <p>[[_message]]</p> <content></content> </div> </paper-dialog-scrollable> <template is="dom-if" if="[[_dontShowAgain.enabled]]"> <div class="inner"> <paper-checkbox checked="{{_dontShowChecked}}"><%= i18n.dontShowAgain %></paper-checkbox> </div> </template> <div class="buttons"> <template is="dom-repeat" items="[[_buttons]]" as="button"> <paper-button on-tap="_onButtonClick" button="[[button]]" autofocus$="[[button.default]]" dialog-dismiss$="[[_shouldAddDismiss(button.action)]]" dialog-confirm$="[[_shouldAddConfirm(button.action)]]" background$="[[button.default]]">[[button.text]]</paper-button> </template> </div> </paper-dialog> </template> <script> Polymer({
+      is: "duma-alert",
+      properties: {
+        _message: String,
+        _buttons: Array,
+        _dontShowAgain: Object,
+        _dontShowChecked: Boolean
+      },
+
+      _getDontShowKey: function (id) {
+        return "__duma-dialog-dont-show-again-" + id;
+      },
+
+      _isDontShow: function (packageId, id) {
+        return duma.storage(packageId, this._getDontShowKey(id)) === "true";
+      },
+
+      _shouldShowDialog: function (dontShowAgain) {
+        if (dontShowAgain.enabled && !dontShowAgain.reconfirm) {
+          return !this._isDontShow(dontShowAgain.packageId, dontShowAgain.id);
+        } else {
+          return true;
+        }
+      },
+  
+      _shouldAddDismiss: function (action) {
+        return action === "dismiss";
+      },
+
+      _shouldAddConfirm: function (action) {
+        return action === "confirm";
+      },
+
+      _setDontShowAgainCookie: function (dontShowAgain) {
+        if (dontShowAgain.packageId && dontShowAgain.id) {
+          duma.storage(
+            dontShowAgain.packageId,
+            this._getDontShowKey(dontShowAgain.id),
+            this._dontShowChecked
+          )
+        }
+      },
+
+      _onButtonClick: function (e) {
+        var button = e.target.button;
+
+        if (this._dontShowAgain.enabled) {
+          this._setDontShowAgainCookie(this._dontShowAgain);
+        }
+
+        if (typeof(button.callback) !== "undefined") {
+          button.callback();
+        }
+      },
+
+      _valueOrDefault: function (value, def) {
+        return (typeof(value) === "undefined" || value === null) ? def : value;
+      },
+
+      _setValues: function (message, buttons, dontShowAgain) {
+        this._message = message;
+        this._buttons = this._valueOrDefault(buttons, [
+          { text: "Ok", default: true, action: "confirm" }
+        ]);
+
+        var dontShowAgainDefault = { enabled: false };
+
+        this._dontShowAgain = this._valueOrDefault(
+          dontShowAgain,
+          dontShowAgainDefault
+        );
+
+        this._dontShowChecked = this._isDontShow(
+          this._dontShowAgain.packageId,
+          this._dontShowAgain.id
+        );
+
+        if (this._buttons.length > 1) {
+          this._dontShowAgain = dontShowAgainDefault;
+        }
+      },
+
+      _hideIfNoShow: function (dontShowAgain) {
+        if (!this._shouldShowDialog(dontShowAgain)) {
+          var callback = this._buttons[0].callback;
+
+          if (callback) {
+            callback();
+          }
+
+          this.close();
+        }     
+      },
+
+      open: function (message, buttons, dontShowAgain) {
+        this._setValues(message, buttons, dontShowAgain);
+        this.$$("#dialog").open();
+        this._hideIfNoShow(this._dontShowAgain);
+      },
+
+      close: function () {
+        this.$$("#dialog").close();
+      },
+
+      show: function (message, buttons, dontShowAgain) {
+        this.open(message, buttons, dontShowAgain);
+      },
+
+      hide: function () {
+        this.close();
+      },
+
+      toggle: function (message, buttons, dontShowAgain) {
+        this._setValues(message, buttons, dontShowAgain);
+        this.$$("#dialog").toggle();
+        this._hideIfNoShow(this._dontShowAgain);
+      }
+    }); </script> </dom-module> 

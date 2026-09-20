@@ -1,0 +1,407 @@
+<!--
+  (C) 2016 NETDUMA Software Ltd  
+  Iain Fraser
+
+  Icontree polymer component
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../iron-resizable-behavior/iron-resizable-behavior.html"> <link rel="import" href="../../libs/q.html"> <link rel="import" href="../../libs/d3.html"> <link rel="import" href="../../libs/util.html"> <link rel="import" href="../../libs/math.html"> <link rel="import" href="../../libs/sprintf.html"> <link rel="import" href="../../libs/svg-util.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="duma-icon-tree"> <template> <style is="custom-style" include="duma-theme"> :host {
+        display: block;
+        overflow: auto;
+      }
+      ::content .icontree-link {
+        stroke: var(--primary-background-color);
+        stroke-width: 2;
+        stroke-dasharray: 0;
+      }
+      ::content .icontree-link.active {
+        stroke: var(--primary-color);
+      }
+      
+      ::content [type=wireless].icontree-link {
+        stroke-dasharray: 5,5;
+      }      
+      ::content [type=offline].icontree-link.active {
+        stroke: var(--disabled-text-color);
+      }      
+      
+      ::content .icontree-node .icon-content {
+        fill: var(--primary-text-color);
+      }      
+      ::content .icontree-node[type=offline] .icon-content {
+        opacity: 0.39;
+      }      
+    
+      ::content .icontree-node text {
+        @apply(--paper-font-common-base);
+        font-size: 16px;
+        fill: var(--secondary-text-color);
+      }
+      ::content .icontree-node > circle {
+        r: 24;
+        fill: var(--primary-background-color);
+      }       
+      ::content .icontree-node.active > circle {
+        fill: var(--primary-color);
+      }
+
+      #container {
+      	overflow: auto;
+      } </style> <svg id="container" class="svg_ratio_widget"> <g class="icontree-parent"></g> </svg> </template> <script> var duma_icon_tree_data = duma_icon_tree_data || {};
+    var icon_tree_line = d3.svg.line()
+                     .x( function(point) { return point.lx; })
+                     .y( function(point) { return point.ly; });
+
+    duma_icon_tree_data.create_node_transform_circular = function( width, height, diameter ){
+      var radius_x = width;
+      var radius_y = height;
+      var aspect = radius_x / radius_y;
+      var sx = width / diameter;
+      var sy = height / diameter;
+      return function( d, i, scale ){
+        if( !scale ) scale = 1;
+        var theta = ( ( d.x - 45    ) / 180 ) * Math.PI;
+        var mag = d.y;
+        var tx = Math.cos( theta ) * d.y * sx;
+        var ty = Math.sin( theta ) * d.y * sy;
+/*        var unit_radius = Math.sqrt( x*x + y*y );
+        var radius = unit_radius * d.y; */
+
+        return svg_translate( tx, ty ) + svg_scale( scale );
+
+        return "rotate(" + (d.x - 90) + ")translate(" + radius
+                                        + ") scale( " + scale + ")"
+      }
+
+    }
+
+
+
+    duma_icon_tree_data.node_transform_cartesian = function( d, i, scale ){
+      return "translate(" + d.x + "," + d.y + ") scale(" + scale + ")"
+    }
+
+    duma_icon_tree_data.svg_rotate = function( theta ){
+      return svg_2d( "rotate", theta ); 
+    }
+    duma_icon_tree_data.image_transform_circular = function( d, i, theta ){
+      if( !theta )
+        theta = 0;
+
+      return duma_icon_tree_data.svg_rotate( theta );    //  "rotate(" + -(d.x-90) + ")" 
+    }
+
+    duma_icon_tree_data.image_transform_cartesian = function( d ){
+      return ""  
+    }
+
+    duma_icon_tree_data.text_transform_circular = function( d ){
+      var theta = d.x;
+      if( theta < 90 || theta > 270 )
+        return svg_translate( 0, -34 );
+      else
+        return svg_translate( 0, 38 );
+    }
+
+    duma_icon_tree_data.text_transform_cartesian = function( d ){
+      return "translate( 0, 20 )";
+    }
+
+    duma_icon_tree_data.create_icon_tree_line_project = function( width, height, diameter ){
+      var radius_x = width;
+      var radius_y = height;
+      var aspect = radius_x / radius_y;
+      var sx = width / diameter;
+      var sy = height / diameter;
+      
+      return function( d ){
+        var theta = ( ( d.x - 45  ) / 180 ) * Math.PI;
+        var mag = d.y;
+        var tx = Math.cos( theta ) * d.y * sx;
+        var ty = Math.sin( theta ) * d.y * sy;
+        return { lx:tx, ly:ty};
+      }
+    }
+
+    duma_icon_tree_data.create_icon_tree_cricular_line_data = function( width, height, diameter ){
+      icon_tree_line_project = duma_icon_tree_data.create_icon_tree_line_project( width, height, diameter );
+      
+      return function(d){
+        // i'm assuming here that supplied datum 
+        // is a link between 'source' and 'target'
+        var points = [
+          icon_tree_line_project( d.source ),
+          icon_tree_line_project( d.target )
+        ];
+        return icon_tree_line(points);
+      }
+    }
+
+
+    duma_icon_tree_data.icon_tree_cartesian_line_data = function( d ){
+      var points = [
+        { lx : d.source.x, ly : d.source.y },
+        { lx : d.target.x, ly : d.target.y }
+      ];
+      
+      return icon_tree_line( points );
+    }
+
+    duma_icon_tree_data.getObjSvg = function(obj){
+      return new Promise(function(resolve,reject){
+        var prom = duma.svg.getPromise(obj.img || obj.icon);
+        if(prom){
+          prom.then(function(result){
+            obj.svg = result.innerHTML ? result.innerHTML : result;
+            resolve(true);
+          });
+        }else{
+          console.error("Invalid Icon:",img)
+        }
+      })
+    }
+    
+    duma_icon_tree_data.getSvgPromises = function(obj,arr){
+      if(!arr) arr = [];
+      arr.push(duma_icon_tree_data.getObjSvg(obj));
+      if(obj.children && obj.children.length){
+        for(var i = 0; i < obj.children.length; i++){
+          duma_icon_tree_data.getSvgPromises(obj.children[i],arr);
+        }
+      }
+      return arr;
+    }
+
+    duma_icon_tree_data.render = function(){
+      if( !this.dimensions_ready ) return;
+      if( is_undefined( this.data ) ) return;
+
+      var svgPromises = duma_icon_tree_data.getSvgPromises(this.data);
+      Q.all(svgPromises).then(function(pdata){
+        duma_icon_tree_data._real_render.call(this);
+      }.bind(this));
+    }
+
+    duma_icon_tree_data._real_render = function(){
+
+      var width = this.width - 98;
+      var height = this.height - 98;
+      var diameter = Math.max( width, height);
+      var iscurve = this.iscurve;
+      var iscircular = this.iscircular;
+      var id = this.$$("#container");
+      var data = this.data;
+      var duration = this.duration;
+
+      var node_transf,image_transf,text_transf,projection,linegen,tsize,ctrans;
+      if( iscircular ){
+        node_transf = duma_icon_tree_data.create_node_transform_circular( width, height, diameter ); 
+        image_transf = duma_icon_tree_data.image_transform_circular;
+        text_transf = duma_icon_tree_data.text_transform_circular;
+        projection = function(d) { return [d.y, d.x / 180 * Math.PI]; };
+        linegen = duma_icon_tree_data.create_icon_tree_cricular_line_data( width, height, diameter );
+        tsize = [ 360, diameter / 2 ]; 
+        ctrans = "translate(" + this.width / 2 + "," + this.height / 2 + ")";
+      } else {
+        node_transf = duma_icon_tree_data.node_transform_cartesian;
+        image_transf = duma_icon_tree_data.image_transform_cartesian;
+        text_transf = duma_icon_tree_data.text_transform_cartesian;
+        projection = function(d) { return [d.x, d.y ]; }
+        linegen = duma_icon_tree_data.icon_tree_cartesian_line_data;
+        tsize = [ width, height - 24 ];
+        ctrans = "translate( 0, 0 )";
+      }
+
+      var svg = d3.select(id)
+      var cong = svg.select("g");
+      cong.attr("transform", ctrans ); 
+      
+      // take empty data array as signal to flush tree
+      if (jQuery.isEmptyObject(data)) {
+        cong.selectAll(".icontree-node").data( data ).exit().remove();
+        cong.selectAll(".icontree-link").data( data ).exit().remove();
+        return
+      }
+
+      var tree = d3.layout.tree()
+        .size( tsize )
+        .separation(function(a, b) { 
+                    return (a.parent == b.parent ? 1 : 2) / (a.depth || 1); });
+      var diagonal = d3.svg.diagonal.radial().projection( projection );
+      var d_generate = iscurve ? diagonal : linegen;
+      var nodes = tree.nodes( data );
+      var links = tree.links(nodes);
+
+
+      var link_join = cong.selectAll(".icontree-link")
+        .data(links, function( d ){ return d.source.id + "-" + d.target.id; })
+        .attr("type",function(d){ return d.target.type; })
+        .classed("active",function(d){ return d.target.active; });
+      var link = link_join.enter().insert("path",":first-child")
+        .attr("class", "icontree-link")
+        .attr("opacity", 0.0 )
+        .attr("d", d_generate );
+
+      function create_mouse_event( node_transf, scale ){
+        return function( d, i ){
+          if( d.isclickable ){
+            d3.select(this).transition()
+              .ease("elastic")
+              .duration("500")
+              .attr("transform", node_transf( d, i, scale ) );
+          }
+        }
+      }
+
+      var node_join = cong.selectAll(".icontree-node")
+        .data( nodes, function( d ){ return d.id; } )
+        .attr("type",function(d){ return d.type ? d.type : (d.parent ? d.parent.type : null ); });
+
+
+      var node = node_join.enter().append("g")
+        .attr("class", "icontree-node")
+        .on("click", function( d ){  
+          if(d.isclickable) $( this ).trigger("iconclick", [ d.id ] );
+        })
+        .on("mouseover", create_mouse_event( node_transf, 1.3 ) )
+        .on("mouseout", create_mouse_event( node_transf, 1 ) )
+        .style("cursor", function( d, i ){ 
+            return d.isclickable ? "pointer" : "auto" } )
+
+      if( !iscircular )
+        node.attr( "transform", node_transf )
+
+      function truncate( x ){
+        var n = 12;
+        return (x.length > n) ? x.substr(0, n-1) + '..' : x;
+      }
+
+
+      var svgTransform = function( d ){
+        var svgwidth=24,svgheight=24;
+        var bb = this.getBBox();
+        var scale = Math.min( (svgwidth/(bb.width||svgwidth)), (svgheight/(bb.height||svgheight)) );
+        var matrix = "matrix("+scale+", 0, 0, "+scale+", "+(svgwidth/-2)*scale+", "+(svgheight/-2)*scale+")";
+        return matrix;
+      }
+
+      node.append("circle").attr("r", 24 );
+      node.each(function(d,index,element){
+        var self = d3.select(this);
+        if(d.svg){
+          self.append("g")
+            .html(d.svg)
+            .classed("icon-content",true)
+            .attr("transform",svgTransform );
+        }else{
+          self.append("image")
+            .attr("width", 24 )
+            .attr("height", 24 )
+            .attr("x", function(d,i){ return -( 24 / 2 ); } )
+            .attr("y", function(d,i){ return -( 24 / 2 ); } )
+            .attr("transform", function( d, i ){ return image_transf( d, i, 180 ); } )
+            .attr("xlink:href", function(d){ return d.img; }  )
+        }
+      })
+      node.append("text")
+        .attr("transform", text_transf )
+        .attr("text-anchor", "middle" )
+        .attr("alignment-baseline", "middle" )
+        .text(function(d) { 
+          return d.isclickable ? truncate( d.name ) : d.name; 
+        });
+
+      var t = cong.transition().duration( duration );
+      t.selectAll(".icontree-link")
+        .attr( "d", d_generate )
+        .attr( "opacity", 1.0 );
+      var tnode = t.selectAll(".icontree-node");
+      tnode.attr("transform", node_transf )
+      tnode.select("image").attr("transform", image_transf )
+      tnode.select("text").attr("transform", text_transf )
+    
+      node_join.select("text").text( function( d ){ 
+      	return d.isclickable? truncate( d.name ) : d.name; 
+      } );
+      node_join.select(".icon-content").html(function(d){ return d.svg; }).attr("transform", svgTransform );
+      node_join.select("image").attr("xlink:href", function(d){ return d.img; });
+      node_join.classed("active", function(d){ return d.active; });
+      node_join.on("mouseover", create_mouse_event( node_transf, 1.3 ) );
+      node_join.on("mouseout", create_mouse_event( node_transf, 1 ) );
+      
+      node_join.exit()
+        .attr("opacity", 1.0 )
+        .transition().duration( duration ).attr("opacity", 0.0 ).remove();
+
+      link_join.exit()
+        .attr("opacity", 1.0 )
+        .transition().duration( duration ).attr("opacity", 0.0 ).remove();
+    }
+
+    duma_icon_tree_data.do_dimensions = function(){
+      var obj = this.$$("#container");
+      var width = $( obj ).parent().width();
+      var height = $( obj ).parent().height();
+/*      var aspect = 7;
+      var dims = calculate_aspect_dimensions( width, height, aspect ); */
+
+//      if( !this.dimensions_ready ){
+	this.width = Math.max( width, 640 );
+	this.height = Math.max( height, 480 );
+
+        var svg = d3.select( this.$$("#container") )
+          svg.attr("width",  this.width )
+            .attr("height", this.height )
+//            .attr("viewBox", [0,0,this.width,this.height].join(" ") )
+//            .attr("preserveAspectRatio", "xMidYMid" );
+//      }
+
+      this.dimensions_ready = true;
+    }
+
+    Polymer({
+      is: "duma-icon-tree",
+      
+      attached: function(){
+        this.async(function () {
+          this.notifyResize();
+        }, 1);
+      },
+
+      behaviors: [ Polymer.IronResizableBehavior ],
+      listeners: { "iron-resize": "onWidthChange" },
+      listeners: { "iron-resize": "onHeightChange" },
+      
+      onWidthChange: function() {
+        duma_icon_tree_data.do_dimensions.call( this );
+        duma_icon_tree_data.render.call( this );
+      },
+      onHeightChange: function() {
+        duma_icon_tree_data.do_dimensions.call( this );
+        duma_icon_tree_data.render.call( this );
+      },
+      
+      properties : {
+        width: { type: Number},
+        height: { type: Number},
+        data: { type: Array},
+        iscurve: { type: Boolean, value: false },
+        iscircular: { type: Boolean, value: true },
+        duration: { type: Boolean, value: 800 },
+        dimensions_ready : { type: Boolean, value: false }
+      },
+
+      observers: [
+        "_datachange(data.*)"
+      ],
+
+      _datachange : function( newValue, oldValue ){
+        var that = this;
+        setTimeout( function(){
+          duma_icon_tree_data.do_dimensions.call( that );
+          duma_icon_tree_data.render.call( that );
+        }, 0 );
+      },
+      /* sub property observers are a pain just do explicitly */
+      invalidateData : function(){
+        duma_icon_tree_data.render.call( this );
+      }
+    }); </script> </dom-module> 

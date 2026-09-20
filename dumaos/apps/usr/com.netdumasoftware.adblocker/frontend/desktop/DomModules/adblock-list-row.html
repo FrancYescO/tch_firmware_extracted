@@ -1,0 +1,39 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/paper-range-slider/paper-range-slider.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-toggle-button/paper-toggle-button.html"> <link rel="import" href="/custom-elements/paper-listbox/paper-listbox.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-item/paper-item.html"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html"> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="adblock-list-row"> <template> <style include="duma-theme iron-flex"> :host { display: table-row; }
+      :host:first-child td {
+        border-top: none;
+      }
+      .td, ::content .td { display: table-cell; } </style> <td><paper-checkbox checked="[[list.enabled]]" on-change="enabledChanged" disabled="[[checkboxDisabled]]"></paper-checkbox></td> <td>[[list.name]]</td> <td>[[list.type]]</td> <td><paper-icon-button icon="duma-icons:duma-edit" on-tap="fireEdit" disabled="[[!list.editable]]"></paper-icon-button></td> <td><paper-icon-button icon="icons:delete-forever" on-tap="deleteList" disabled="[[isCloudList]]"></paper-icon-button></td> </template> <script> Polymer(
+    {
+      is: 'adblock-list-row',
+      properties:
+      {
+        list: Object,
+        checkboxDisabled:
+        {
+          type: Boolean,
+          value: false,
+        },
+        isCloudList:
+        {
+          type: Boolean,
+          computed: 'computeIsCloudList(list)',
+        }
+      },
+      enabledChanged(event)
+      {
+        this.checkboxDisabled = true;
+        long_rpc_promise("com.netdumasoftware.adblocker", "enable_list", [this.list.id, event.target.checked]).done(function(d) { this.checkboxDisabled = false; }.bind(this));
+      },
+      deleteList()
+      {
+        long_rpc_promise("com.netdumasoftware.adblocker", "remove_list", [this.list.id]).done(function(d) { this.fire("reload-lists"); }.bind(this));
+      },
+      fireEdit()
+      {
+        this.fire("edit-list", this.list);
+      },
+      computeIsCloudList(list)
+      {
+        return (list.type == "cloud");
+      },
+    }); </script> </dom-module> 

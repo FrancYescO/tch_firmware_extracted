@@ -1,0 +1,271 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="/custom-elements/duma-panels/duma-panels.html"> <link rel="import" href="/libs/sampler.html"> <link rel="import" href="/libs/connection-processor.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/q.html"> <script> var geoFilter = (function () {
+    var packageId = "com.netdumasoftware.geofilter";
+    var pingPanel = false;
+
+    var connectionProcessorId = null;
+    var hosts = {};
+    var callbacks = [];
+
+    var constants = {
+      /* host type classification */
+      GEO_CSTATE_HOST_PEER: 0,      // host is peer (default for code to work)
+      GEO_CSTATE_HOST_DEDI: 1,      // host is server
+
+      /* generic verdicts */
+      GEO_CSTATE_VERDICT_NO: 0,     // no verdict set yet
+      GEO_CSTATE_VERDICT_WDIST: 1,  // allowed by distance
+      GEO_CSTATE_VERDICT_BDIST: 2,  // disallowed by distance
+      GEO_CSTATE_VERDICT_RTT: 3,    // allowed due to rtt below threshold
+
+      /* peer verdicts */
+      GEO_CSTATE_VERDICT_USER_ALLOW: 4, // allowed by user whitelist
+      GEO_CSTATE_VERDICT_USER_DENY: 5,  // disallowed by user blacklist
+
+      /* dedi verdicts */
+      GEO_CSTATE_VERDICT_WHITELIST: 4,
+      GEO_CSTATE_VERDICT_BAN: 5,
+      GEO_CSTATE_VERDICT_ALLOW: 6,
+
+      // Shifts
+      TYPE_SHIFT: 3,
+      VERDICT_SHIFT: 0,
+
+      ALIVE_TIMEOUT: 10 * 1000,
+      MAXIMUM_CONNECTIONS: 3
+    };
+
+    function addPanel(file, data, options) {
+      return $("duma-panels")[0].add(
+        "/apps/" + packageId + "/desktop/" + file,
+        packageId,
+        data,
+        options
+      );  
+    }
+
+    function removePanel(panel) {
+      return $("duma-panels")[0].remove(panel);
+    }
+
+    function addPingGraph(host, onClose) {
+
+      removePingGraph();
+
+      pingPanel = true;
+
+      addPanel("ping.html", {
+        host: host
+      }, { x: 6, y: 25, width: 6, height: 15,
+        initialisationCallback: function (panel) {
+          pingPanel = panel;
+          $(pingPanel).find("duma-panel").one("closeClick", function() { 
+            pingPanel = null; 
+            if (onClose) {
+              onClose();
+            }
+          });
+        }
+      });
+    }
+
+    function removePingGraph() {
+      if (pingPanel === true) {
+        return;
+
+      } else if (pingPanel) {
+        removePanel(pingPanel);
+      }
+
+      pingPanel = null;
+    }
+
+    function showLoaderDialog(loader, promise) {
+      promise.fin(function () {
+        $(loader)[0].close();
+        $(loader).find("paper-spinner-lite").prop("active", false);
+      }); 
+
+      $(loader)[0].open();
+      $(loader).find("paper-spinner-lite").prop("active", true);
+    }
+
+    // Geofiltering code
+
+    var last_time = false;
+
+    function processHosts() {
+
+      var now = timeGetTime()
+      var delta = last_time ? ( now - last_time ) / 1000 : false;
+      last_time = timeGetTime();
+
+      var ips = [];
+      for (var ip in hosts) {
+        var v = hosts[ip]
+
+        if( v.total_bytes > 0 )
+          hosts[ip].mtime = now;
+        else if( typeof( hosts[ip].mtime ) === "undefined" )
+          hosts[ip].mtime = now - constants.ALIVE_TIMEOUT;    /* sending data before page loaded assume dead */
+
+        if( delta ){
+          sampler_circular_array_add( v.sampler, v.total_bytes / delta );
+          v.rate = converge( smooth_rate( v.total_bytes, v.rate, delta ) );
+        }
+
+        v.total_bytes = 0;
+
+        if( !v.marked ){
+          delete hosts[ip];
+        } else if( hosts[ip].coord == false ){
+          hosts[ip].coord = true;
+          ips.push( ip );
+        }
+
+        v.marked = false;
+      }
+
+      // process them in the background, will only be used once resolved
+      // TODO: handle failure by redoing IP lookup
+      if( ips.length > 0 ) {
+        long_rpc_promise(packageId, "geomap_ip", [ ips ] )
+          .spread( function (locations) {
+            for (var i = 0; i < locations.length; i++){
+              var entry = hosts[ ips[i] ];
+              if( entry )
+                entry.coord = locations[i];
+            }
+          }).done();
+      }
+    }
+
+
+    function processGeoFilterConnection( connection, oldconn, devmap ) {
+      if (!hosts[connection.dip4]) {
+        hosts[connection.dip4] = {
+          sampler: sampler_circular_array_create(constants.MAXIMUM_CONNECTIONS),
+          coord : false,
+          total_bytes: 0,
+          rate : 0,
+          key : connection.dip4,
+          associatedConnections: []
+        };
+      }
+
+      hosts[connection.dip4].marked = true;
+      hosts[connection.dip4].class = connection.class;
+
+      var sbytes = 0;
+      var dbytes = 0;
+      if( oldconn ){
+        dbytes = connection.dbytes - oldconn.dbytes;
+        sbytes = connection.sbytes - oldconn.sbytes;
+      } else {    /* make sure short lived connections are displayed */
+        sbytes = 1;
+        dbytes = 1;
+      }
+      
+      hosts[connection.dip4].total_bytes += dbytes + sbytes;
+    }
+
+
+    /* we can classify a connection as geo-filter once it has a verdict */
+    function isGeoFilterConnection(connection) {
+      var isgeo = ( ( connection.class >> constants.VERDICT_SHIFT ) & 0x7 ) != 0;
+      if( isgeo ){
+        var h = hosts[connection.dip4];
+        if( h && h.mtime ){
+          if( ( timeGetTime() - h.mtime ) < constants.ALIVE_TIMEOUT )
+            return true;
+        } else {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function startConnectionProcessor(callback) {
+
+      if (connectionProcessorId === null) {
+        connectionProcessorId = connectionProcessor.add(
+          function (newConnection, oldConnection, devices) {
+            if (isGeoFilterConnection(newConnection)) {
+              processGeoFilterConnection(newConnection, oldConnection);
+              hosts[newConnection.dip4].associatedConnections.push({
+                new: newConnection,
+                old: oldConnection
+              });
+            }
+          }, function () {
+            processHosts();
+
+            if (callbacks.length > 0) {
+              for (var i = 0; i < callbacks.length; i++) {
+                callbacks[i](hosts);
+              }
+            }
+          
+            for(var key in hosts) {
+              if (hosts.hasOwnProperty(key)) {
+                hosts[key].associatedConnections = [];
+              }
+            }
+          }
+        );
+        
+        connectionProcessor.start();
+      }
+
+      callbacks.push(callback);
+    }
+
+    function stopConnectionProcessor(callback) {
+
+      var index = callbacks.indexOf(callback);
+      if (index > -1) {
+        callbacks.splice(index, 1);
+      }
+
+      if (callbacks.length === 0) {
+        connectionProcessor.remove(connectionProcessorId); 
+        connectionProcessorId = null;
+      }
+    }
+
+    function initialise(resolve, reject) {
+      Q.spread([
+        long_rpc_promise(packageId, "get_cmark_mask", [])
+      ], function (shifts) {
+
+        constants.TYPE_SHIFT = shifts[0];
+        constants.VERDICT_SHIFT = shifts[1];
+        resolve();
+
+      }).fail(function () {
+        reject();
+      });
+    }
+
+    var initialisationPromise = Q.promise(function (resolve, reject) {
+      initialise(resolve, reject);
+    });
+
+    return {
+      getPackageId: function () {
+        return packageId;
+      },
+      addPanel: addPanel,
+      removePanel: removePanel,
+      removePingGraph: removePingGraph,
+      addPingGraph: addPingGraph,
+      showLoaderDialog: showLoaderDialog,
+      stopConnectionProcessor: stopConnectionProcessor,
+      startConnectionProcessor: startConnectionProcessor,
+      constants: constants,
+      initialisationPromise: initialisationPromise
+    };
+  })(); </script> 

@@ -1,0 +1,712 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem <luke.meppem@netduma.com>
+--> <link rel="import" href="/custom-elements/polymer/polymer.html"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html"> <link rel="import" href="/custom-elements/paper-input/paper-input.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html"> <link rel="import" href="/custom-elements/paper-dropdown-menu/paper-dropdown-menu.html"> <link rel="import" href="/custom-elements/paper-radio-button/paper-radio-button.html"> <link rel="import" href="/custom-elements/paper-radio-group/paper-radio-group.html"> <link rel="import" href="/custom-elements/paper-checkbox/paper-checkbox.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tabs.html"> <link rel="import" href="/custom-elements/paper-tabs/paper-tab.html"> <link rel="import" href="/custom-elements/duma-image/duma-image.html"> <link rel="import" href="/custom-elements/duma-chart/duma-chart.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <link rel="import" href="/libs/cycle.html"> <link rel="import" href="/libs/rpc.html"> <link rel="import" href="/libs/colours.html"> <dom-module id="rapp-overview"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> :host #dialog {
+        width: calc(100vw - 20em) !important;
+        max-width: 100vw !important;
+      }
+
+      .row,
+      .rapp-row {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .margin-bottom {
+        margin-bottom: 2em;
+      }
+
+      .rapp-row {
+        align-items: center;
+      }
+
+      .pointer {
+        cursor: pointer;
+      }
+
+      .graph-wrapper {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+        width: 100em;
+        height: 30em;
+      }
+
+      .mini-graph-wrapper {
+        display: flex;
+        flex-direction: column;
+        width: 50%;
+        height: 10em;
+      }
+
+      .x-axis-label {
+        display: flex;
+        flex-direction: row;
+        width: 90%;
+        padding-left: 8%;
+        justify-content: space-between;
+      }
+
+      .legend {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        min-width: 17em;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      .legend-scroll {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      .legend-scroll .rapp-row>span {
+        display: inline-block;
+        min-width: 16px;
+        min-height: 12px;
+        margin-right: 5px;
+      }
+
+      .legend-scroll .rapp-row {
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .expand {
+        display: flex;
+        justify-content: space-between;
+        width: 100%;
+      }
+
+      .radios {
+        margin-bottom: 16px;
+      }
+
+      .radios > *:nth-child(n+2) {
+        margin-left: 16px;
+      }
+
+      .pages > iron-page > div {
+        max-height: 60vh;
+      }
+
+      .advanced-info {
+        display: flex;
+        flex-direction: column;
+        flex-grow: 1;
+        justify-content: space-around;
+      }
+
+      .advanced-info .row > div {
+        display: flex;
+        flex-direction: row;
+        flex-grow: 1;
+        justify-content: space-between;
+        margin-right: 10em;
+        margin-left: 2em;
+        width: 50%;
+      }
+
+      .table-container {
+       height: 50vh;
+       overflow: auto;
+      }
+      .scroll-table {
+        height: 100%;
+      }
+      .scroll-table thead th:nth-child(n+2) {
+        cursor: pointer;
+      }
+      .scroll-table tbody tr:nth-of-type(2n) {
+        background-color: var(--divider-color);
+      } </style> <paper-dialog id="dialog" with-backdrop> <h2><%= i18n.rappPerformance %></h2> <div class="inner"> <div class="margin-bottom"> <paper-tabs selected="{{_selectedTab}}" attr-for-selected="name"> <paper-tab name="memory"><%= i18n.memoryUsage %></paper-tab> <!-- <paper-tab name="cpu"><%= i18n.cpuUsage %></paper-tab> --> <paper-tab name="advanced"><%= i18n.advanced %></paper-tab> </paper-tabs> </div> <iron-pages selected="[[_selectedPage]]" attr-for-selected="name" class="pages"> <iron-page name="single"> <div class="row"> <div class="graph-wrapper"> <duma-chart id="chart" type="line" options="[[__gOptions]]" data="[[__gData]]"></duma-chart> <div class="x-axis-label"> <span>[[_format("<%= i18n.ago %>",_timespanLength)]]</span> <span><%= i18n.now %></span> </div> </div> <div class="legend"> <div> <paper-dropdown-menu id="dropdown" label="<%= i18n.selectRapps %>"> <div class="rapp-list inner dropdown-content"> <template is="dom-repeat" items="[[rapps]]" as="rapp"> <div class="rapp-row pointer" on-click="_onRappRowClick" rapp="[[rapp]]"> <!-- <div>
+                        <template is="dom-if" if="[[rapp.icon]]">
+                          <duma-image src="[[rapp.icon]]" style$="[[_genRowStyle(index)]]"></duma-image>
+                        </template>
+                        <template is="dom-if" if="[[!rapp.icon]]">
+                          <iron-icon icon="help" style$="[[_genRowStyle(index)]]"></iron-icon>
+                        </template>
+                      </div> --> <paper-checkbox checked="[[_isRappSelected(rapp,_selectedRappsLength)]]" disabled="[[_selectableDisabled(rapp,_selectedRappsLength)]]"> <template is="dom-if" if="[[rapp.name]]"> [[rapp.name]] </template> <template is="dom-if" if="[[!rapp.name]]"> [[rapp.id]] </template> </paper-checkbox> </div> </template> </div> </paper-dropdown-menu> </div> <paper-radio-group selected="{{_selectedData}}" attr-for-selected="name" class="radios"> <paper-radio-button name="totalbytes"><%= i18n.typeTotal %></paper-radio-button> <paper-radio-button name="memory"><%= i18n.typeMemory %></paper-radio-button> </paper-radio-group> <ul class="legend-scroll"> <template is="dom-repeat" items="[[_getSelected(_selectedRappsLength)]]" as="rapp"> <li class="rapp-row" rapp="[[rapp]]"> <span style$="[[_genLegendStyle(index)]]"></span> <div class="expand horizontal"> <template is="dom-if" if="[[rapp.name]]"> <span> [[rapp.name]] </span> </template> <template is="dom-if" if="[[!rapp.name]]"> <span> [[rapp.id]] </span> </template> <span class="currentByteShow" rapp="[[rapp.id]]">0B</span> </div> </li> </template> </ul> </div> </div> </iron-page> <iron-page name="advanced"> <div class="table-container"> <table class="scroll-table"> <thead> <tr> <th></th> <th sort="default" on-click="_sortClick"><%= i18n.rappName %><iron-icon icon="[[_getSortIcon('default',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="peak-size" on-click="_sortClick"><%= i18n.vmemSize %><iron-icon icon="[[_getSortIcon('peak-size',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="peak-peak" on-click="_sortClick"><%= i18n.vmemPeak %><iron-icon icon="[[_getSortIcon('peak-peak',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="current-p" on-click="_sortClick"><%= i18n.currentPSS %><iron-icon icon="[[_getSortIcon('current-p',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="current-r" on-click="_sortClick"><%= i18n.currentRSS %><iron-icon icon="[[_getSortIcon('current-r',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="current-vmach" on-click="_sortClick"><%= i18n.currentVMach %><iron-icon icon="[[_getSortIcon('current-vmach',_sortMethod,_sortAscending)]]"></iron-icon></th> <th sort="peak-vmach" on-click="_sortClick"><%= i18n.peakVMach %><iron-icon icon="[[_getSortIcon('peak-vmach',_sortMethod,_sortAscending)]]"></iron-icon></th> </tr> </thead> <tbody> <template is="dom-repeat" items="[[rapps]]" as="rapp" sort="[[_getSortMethod(_sortMethod,_sortAscending)]]"> <tr class="advanced-row" rapp="[[rapp]]"> <td> <template is="dom-if" if="[[rapp.icon]]" restamp> <duma-image src="[[rapp.icon]]"></duma-image> </template> <template is="dom-if" if="[[!rapp.icon]]"> <iron-icon icon="info"></iron-icon> </template> </td> <td>[[rapp.name]]</td> <td><div>[[_getAdvancedInfo("peak-size",rapp,__sortInfo)]]</div></td> <td><div>[[_getAdvancedInfo("peak-peak",rapp,__sortInfo)]]</div></td> <td><div>[[_getAdvancedInfo("current-p",rapp,__sortInfo)]]</div></td> <td><div>[[_getAdvancedInfo("current-r",rapp,__sortInfo)]]</div></td> <td><div>[[_getAdvancedInfo("current-vmach",rapp,__sortInfo)]]</div></td> <td><div>[[_getAdvancedInfo("peak-vmach",rapp,__sortInfo)]]</div></td> </tr> </template> </tbody> </table> </div> </iron-page> </iron-pages> </div> <div class="buttons"> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "rapp-overview",
+
+      properties: {
+        _cycle: {
+          type: Object,
+          value: null
+        },
+        rapps: {
+          type: Object,
+          value: []
+        },
+        _selectedRapps: {
+          type: Object,
+          value: [],
+          observer: "_updateSelRappsLength"
+        },
+        _selectedRappsLength: {
+          type: Number,
+          value: 0,
+          observer: "_updateLineColours"
+        },
+        _maxSelected: {
+          type: Number,
+          value: 8
+        },
+        _memData: {
+          type: Object,
+          value: {
+            totalbytes: {},
+            estimates: {},
+            memory: {},
+          }
+        },
+        _selectedData: {
+          type: String,
+          value: "totalbytes",
+          observer: "_selectedDataChanged"
+        },
+        _selectedPage: {
+          type: String,
+          value: "single",
+          observer: "_selectedDataChanged"
+        },
+        _selectedTab: {
+          type: String,
+          value: "memory",
+          observer: "_selectedDataChanged"
+        },
+        _timespanLength: {
+          type: Number,
+          value: 20
+        },
+        _timeCount: {
+          type: Number,
+          value: 0
+        },
+
+        _sortMethod: {
+          type: String,
+          value: "default",
+          observer: "_sortMethodChanged"
+        },
+        _sortAscending: {
+          type: Boolean,
+          value: false
+        },
+        __sortInfo: {
+          type: Object,
+          value: {}
+        },
+
+        __gOptions: Object,
+        __gData: Object,
+        __shades: Array,
+        __prePage: String,
+      },
+
+      _sortingMethods: {
+        ["default"]: function(a,b,info){
+          return a.name > b.name ? 1 : -1;
+        },
+        ["peak-size"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].vm_size;
+          var valB = info[b.id].vm_size;
+          return valA - valB;
+        },
+        ["peak-peak"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].vm_peak;
+          var valB = info[b.id].vm_peak;
+          return valA - valB;
+        },
+        ["current-p"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].vm_pss;
+          var valB = info[b.id].vm_pss;
+          return valA - valB;
+        },
+        ["current-r"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].vm_rss;
+          var valB = info[b.id].vm_rss;
+          return valA - valB;
+        },
+        ["current-vmach"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].totalbytes;
+          var valB = info[b.id].totalbytes;
+          return valA - valB;
+        },
+        ["peak-vmach"]: function(a,b,info){
+          if(!info[a.id]) return 1;
+          if(!info[b.id]) return -1;
+          var valA = info[a.id].totalbytes_max;
+          var valB = info[b.id].totalbytes_max;
+          return valA - valB;
+        },
+      },
+
+      _getSortIcon: function(thisMethod,method,ascending){
+        if(thisMethod !== method)
+          return "blank";
+        else {
+          return ascending ? "arrow-drop-up" : "arrow-drop-down";
+        }
+      },
+
+      _getSortMethod: function(method,ascending){
+        return function(a,b){
+          if(this._sortingMethods[method]){
+            var args = [a,b,this.__sortInfo || {}];
+            return ((ascending === true) ? 1 : -1) * this._sortingMethods[method].apply(this,args);
+          }else{
+            return 0;
+          }
+        }.bind(this);
+      },
+
+      _sortMethodChanged: function(){
+        this._sortAscending = false;
+      },
+
+      _sortClick: function(e){
+        var sort = $(e.target).closest("[sort]").attr("sort") || "default";
+        if(this._sortMethod !== sort){
+          this._sortAscending = false;
+          this._sortMethod = sort;
+        }else{
+          this._sortAscending = !this._sortAscending;
+        }
+      },
+
+      _selectableDisabled: function(rapp,count){
+        if(count < this._maxSelected) return false;
+        for(var i = 0; i < this._selectedRapps.length; i ++){
+          var srapp = this._selectedRapps[i];
+          if(srapp.id === rapp.id){
+            return false;
+          }
+        }
+        return true;
+      },
+
+      _format: function () {
+        return String.format.apply(this, arguments);
+      },
+
+      ready: function () {
+        this._setGraphOptions();
+        this.__shades = getAllShades();
+        this._maxSelected = this.__shades.length;
+      },
+
+      _getSelected: function () {
+        return this._selectedRapps.map((x) => x);
+      },
+
+      _getColor: function (num) {
+        return this.__shades[num % this.__shades.length];
+      },
+
+      _genRowStyle: function (index) {
+        return ("fill:{0};".format(this._getColor(index)));
+      },
+      _genLegendStyle: function (index) {
+        return "background-color:{0};".format(this._getColor(index));
+      },
+
+      _updateDropdownLabel: function () {
+        $(this.$.dropdown.$.menuButton).find("paper-input")[0].value = "<%= i18n.selectedCount %>".format(this._selectedRappsLength);
+      },
+
+      _updateSelRappsLength: function () {
+        this._selectedRappsLength = this._selectedRapps ? this._selectedRapps.length : 0;
+        this._updateLineColours();
+        this._updateDropdownLabel();
+      },
+
+      _getRappObject: function (rappOrRappID, list) {
+        if (!list) { list = this.rapps; }
+        for (var i = 0; i < list.length; i++) {
+          var test = list[i];
+          if (test === rappOrRappID || test.id === rappOrRappID || test.id === rappOrRappID.id) {
+            return test
+          }
+        }
+      },
+
+      _isRappSelected: function (rapp, length) {
+        return this._getRappObject(rapp, this._selectedRapps) ? true : null;
+      },
+
+      _addRappToSelected: function (rapp) {
+        rapp = this._getRappObject(rapp);
+        this._selectedRapps.push(rapp);
+        this._updateSelRappsLength();
+      },
+      _removeRappFromSelected: function (rapp) {
+        for (var i = this._selectedRapps.length - 1; i >= 0; i--) {
+          var sel = this._selectedRapps[i];
+          if (sel === rapp || sel.id === rapp.id || sel.id === rapp) {
+            this._selectedRapps.splice(i, 1);
+          }
+        }
+        this._updateSelRappsLength();
+      },
+      _toggleSelected: function (rapp) {
+        if (this._isRappSelected(rapp)) {
+          this._removeRappFromSelected(rapp);
+        } else {
+          this._addRappToSelected(rapp);
+        }
+      },
+
+      _onRappRowClick: function (e) {
+        var row = $(e.target).closest(".rapp-row")[0];
+        if (row && row.rapp) {
+          if(!this._selectableDisabled(row.rapp,this._selectedRappsLength)){
+            this._toggleSelected(row.rapp);
+          }
+        }
+      },
+
+      _formatBytes: function (value) {
+        return format_bytes(value, 1);
+      },
+
+      _setGraphOptions: function () {
+        this.__gOptions = {
+          animation: {
+            duration: 0
+          },
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true,
+                callback: this._formatBytes,
+                precision: 0
+              },
+              scaleLabel: {
+                display: true,
+                labelString: "<%= i18n.yAxisLabel %>"
+              }
+            }],
+            xAxes: [{
+              type: 'time',
+              time: {
+                minUnit: 'second',
+              },
+              ticks: {
+                autoSkip: true,
+                display: false,
+              },
+              offset: false,
+              display: true,
+              distribution: 'linear',
+              stacked: true,
+              scaleLabel: {
+                display: false
+              }
+            }]
+          },
+          elements: {
+            line: {
+              tension: 0.1
+            },
+            point: {
+              pointStyle: 'circle',
+              radius: 0,
+              hitRadius: 3,
+            }
+          },
+          legend: {
+            display: false
+          }
+        }
+        this.__miniOptions = {
+          animation: {
+            duration: 0
+          },
+          scales: {
+            yAxes: [{
+              ticks: {
+                beginAtZero: true,
+                callback: this._formatBytes,
+                precision: 0
+              }
+            }],
+            xAxes: [{
+              type: 'time',
+              time: {
+                minUnit: 'second',
+              },
+              ticks: {
+                autoSkip: true,
+                display: false,
+              },
+              offset: false,
+              display: true,
+              distribution: 'linear',
+              stacked: true,
+              scaleLabel: {
+                display: false
+              }
+            }]
+          },
+          elements: {
+            line: {
+              tension: 0.1
+            },
+            point: {
+              pointStyle: 'circle',
+              radius: 0,
+              hitRadius: 3,
+            }
+          }
+        }
+      },
+
+      _update: function () {
+        if (this.$.chart.chart) {
+          var axis = this.$.chart.chart.config.options.scales.xAxes[0].ticks;
+          axis.min = this._timeCount - (this._timespanLength - 1);
+          axis.max = this._timeCount;
+          this.$.chart.chart.update();
+        }
+      },
+
+      _getEstimColor: function (color) {
+        return new Color(color).setVal(64, 3).hex()
+      },
+
+      _updateLineColours: function () {
+        for (var i = 0; i < this._selectedRapps.length; i++) {
+          var rapp = this._selectedRapps[i];
+          if (this._memData.totalbytes[rapp.id]) {
+            var color = this._getColor(i);
+            this._memData.totalbytes[rapp.id].borderColor = color;
+            this._memData.estimates[rapp.id].borderColor = color;
+            this._memData.memory[rapp.id].borderColor = color;
+          }
+        }
+        this._update();
+      },
+
+      _initEmptyData: function () {
+        var len = this._timespanLength;
+        return [];
+      },
+
+      _initData: function (rapp, index) {
+        this._memData.totalbytes[rapp.id] = {
+          borderColor: this._getColor(index),
+          backgroundColor: 'transparent',
+          type: 'line',
+          data: this._initEmptyData()
+        }
+        this._memData.estimates[rapp.id] = {
+          borderColor: this._getColor(index),
+          backgroundColor: 'transparent',
+          type: 'line',
+          data: this._initEmptyData()
+        }
+        this._memData.memory[rapp.id] = {
+          borderColor: this._getColor(index),
+          backgroundColor: 'transparent',
+          type: 'line',
+          data: this._initEmptyData()
+        }
+        return [this._memData.totalbytes[rapp.id], this._memData.estimates[rapp.id], this._memData.memory[rapp.id]];
+      },
+
+      _clampAndClone: function (data) {
+        if(!data || !data.data) return {data:[]}
+        while (data.data.length > this._timespanLength) {
+          data.data.shift()
+        }
+        var clone = Object.assign({}, data);
+        clone.data = data.data.map(function (val) {
+          return val;
+        });
+        return clone;
+      },
+
+      _addData: function (rapp, memInfo, index) {
+        var datas = {
+          totalbytes: this._memData.totalbytes[rapp.id] || this._initData(rapp, index)[0],
+          estimates: this._memData.estimates[rapp.id] || this._initData(rapp, index)[1],
+          memory: this._memData.memory[rapp.id] || this._initData(rapp, index)[2]
+        }
+        if (memInfo.totalbytes) datas.totalbytes.data.push({ t: this._timeCount, y: parseInt(memInfo.totalbytes) });
+        if (memInfo.estimate) datas.estimates.data.push({ t: this._timeCount, y: parseInt(memInfo.estimate) });
+        if (memInfo.vm_pss || memInfo.vm_rss) datas.memory.data.push({ t: this._timeCount, y: parseInt((memInfo.vm_pss || memInfo.vm_rss) * 1024) });
+        return this._getSingleData(rapp);
+      },
+
+      _getSingleData: function (rapp) {
+        return [this._clampAndClone(this._memData[this._selectedData][rapp.id])];
+      },
+
+      _setCurrentShow: function (rapp, list, datasets) {
+        for (var i = 0; i < list.length; i++) {
+          var elem = list[i];
+          if ((elem.rapp === rapp.id || elem.rapp === rapp)) {
+            if (datasets[0] && datasets[0].data.length) {
+              var data = datasets[0].data[datasets[0].data.length - 1].y || 0;
+              $(elem).text(format_bytes(data, 1));
+              return;
+            } else {
+              $(elem).text("<%= i18n.noValue %>");
+              return;
+            }
+          }
+        }
+      },
+
+      _setAdvancedInfo: function (info) {
+        this.__sortInfo = info;
+      },
+      _getAdvancedInfo: function(key,rapp,info){
+        var map = {
+          ["peak-size"]: "vm_size",
+          ["peak-peak"]: "vm_peak",
+          ["current-p"]: "vm_pss",
+          ["current-r"]: "vm_rss",
+          ["current-vmach"]: "totalbytes",
+          ["peak-vmach"]: "totalbytes_max"
+        }
+        var map_multis = {
+          vm_size: 1024,
+          vm_peak: 1024,
+          vm_pss: 1024,
+          vm_rss: 1024,
+          totalbytes: 1,
+          totalbytes_max: 1
+        }
+        var text;
+        if(info[rapp.id]){
+          var rinfo = info[rapp.id];
+          var infokey = map[key];
+          if(rinfo[infokey])
+            text = format_bytes(rinfo[infokey] * map_multis[infokey]);
+        }
+        return text || "<%= i18n.noValue %>";
+      },
+
+      _formatData: function (info) {
+        var datasets = [];
+        var showCurrents = $(".currentByteShow", this.$.dialog);
+        if (info) {
+          this._timeCount += 1;
+        }
+        if(this._selectedPage === "advanced"){
+          this._setAdvancedInfo(info);
+          return
+        }
+        for (var i = 0; i < this._selectedRapps.length; i++) {
+          var rapp = this._selectedRapps[i];
+          if (info && info[rapp.id]) {
+            this._addData(rapp, info[rapp.id], i);
+          }
+          if (this._selectedPage !== "advanced") {
+            var sets = this._getSingleData(rapp);
+            if (sets) {
+              datasets = datasets.concat(sets);
+              this._setCurrentShow(rapp, showCurrents, sets);
+            }
+          }
+        }
+        if (this._selectedPage === "single") {
+          this.__gData = {
+            datasets: datasets
+          }
+          this._update();
+        }
+      },
+
+      _selectedDataChanged: function () {
+        this._formatData();
+        if (this._selectedTab === "advanced") {
+          this._selectedPage = "advanced";
+        } else {
+          this._selectedPage = "single";
+        }
+      },
+
+      _getSelectedIds: function () {
+        var ret = [];
+        var fromList = this._selectedRapps;
+        if(this._selectedPage === "advanced") fromList = this.rapps;
+        for (var i = 0; i < fromList.length; i++) {
+          ret.push(fromList[i].id);
+        }
+        return ret;
+      },
+
+      _getPromises: function () {
+        var ret = [this.$.dialog.opened];
+        var rappList = this._getSelectedIds();
+        if (this._selectedData === "totalbytes" || this._selectedPage === "advanced")
+          ret.push(long_rpc_promise("com.netdumasoftware.systeminfo", "get_rapp_gstate", rappList))
+        if (this._selectedData === "memory" || this._selectedPage === "advanced")
+          ret.push(long_rpc_promise("com.netdumasoftware.systeminfo", "get_rapp_meminfo", rappList))
+        while (ret.length < 3) ret.push([]);
+        return ret;
+      },
+
+      _mergeData: function (gstates, memInfo) {
+        var ret = {};
+        for (var i = 0; i < this.rapps.length; i++) {
+          var rapp = this.rapps[i];
+          var merge = {};
+          if (gstates) Object.assign(merge, gstates[rapp.id] || {});
+          if (memInfo) Object.assign(merge, memInfo[rapp.id] || {});
+          ret[rapp.id] = merge;
+        }
+        return ret;
+      },
+
+      _refreshLoop: function () {
+        if (!this._cycle) {
+          this._cycle = start_cycle(this._getPromises.bind(this), function (doStuff, gstates, memInfo) {
+            if (doStuff) {
+              var mergedData = this._mergeData(gstates[0], memInfo[0]);
+              this._formatData(mergedData);
+            }
+          }.bind(this), 3000);
+        }
+      },
+
+      _enableCurrentPage: function () {
+        if (this.__prePage && this._selectedRapps.length === 1) {
+          this._removeRappFromSelected(this.__prePage);
+        }
+        if (this._selectedRapps.length === 0) {
+          var rappid = top.location.hash.replace('#', '');
+          this._addRappToSelected(rappid);
+          this.__prePage = rappid;
+        }
+      },
+
+      open: function () {
+        long_rpc_promise("com.netdumasoftware.procmanager", "installed_rapps", []).done(function (installed) {
+          this.rapps = installed[0];
+          this._enableCurrentPage();
+          this._refreshLoop();
+          this.$.dialog.open();
+        }.bind(this));
+      },
+
+      close: function () {
+        this.$.dialog.close();
+      },
+    }); </script> </dom-module> 

@@ -1,0 +1,159 @@
+<!-- 
+  (C) 2020 NETDUMA Software
+  Luke Meppem <luke.meppem@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="../iron-flex-layout/iron-flex-layout-classes.html"> <link rel="import" href="../iron-flex-layout/iron-flex-layout.html"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html"> <dom-module id="duma-menu"> <template> <style include="duma-theme iron-flex iron-flex-alignment iron-positioning"> ::content iron-icon {
+        --iron-icon: {
+          flex-shrink: 0;
+        };
+      }
+      ::content iron-icon:first-of-type {
+        margin-right: 12px;
+      }
+      ::content iron-page div {
+        margin: 8px 0;
+        min-width: 256px;
+      }
+      ::content iron-page div > div {
+        position: relative;
+        cursor: pointer;
+        min-height: 40px;
+        line-height: 24px;
+        padding: 0 16px;
+        @apply(--layout-horizontal);
+        @apply(--layout-center);
+        color: var(--secondary-text-color);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        transition: color 150ms ease-in-out;
+      }
+      ::content iron-page div hr {
+        margin: 8px 0;
+        border: none;
+        border-top: thin solid var(--divider-color);
+      }
+      ::content iron-page div > div:hover {
+        color: var(--primary-text-color);
+      }
+      ::content iron-page div > div[disabled] {
+        color: var(--disabled-text-color);
+        cursor: default;
+      }
+      ::content iron-page div > div iron-icon {
+        flex-shrink: 0;
+      }
+      ::content iron-page div > div iron-icon[icon="chevron-right"],
+      ::content iron-page div > div iron-icon[right] {
+        margin-left: auto;
+      } </style> <div id="pagesContainer"> <iron-pages id="pages" selected="{{selected}}" attr-for-selected="{{attrForSelected}}"> <content select="iron-page"></content> </iron-pages> </div> </template> <script> Polymer({
+      is: "duma-menu",
+      properties: {
+        selected: {
+          type: String,
+          value: "main"
+        },
+        attrForSelected: {
+          type: String,
+          value: "name"
+        },
+        resetOnDropdownClose: {
+          type: Boolean,
+          value: false,
+          observer: "_onRODC"
+        }
+      },
+
+      //function (jpages,jtarget,jdiv)
+      //return false to return and quit
+      _attributeFunctions: {
+        "disabled": false,
+        "goto": function(pages,target,div){
+          this.selected = div.attr("goto");
+          return false;
+        },
+        "click-this": function(pages,target,div){
+          target.find(div.attr("click-this")).click();
+        },
+        "href": function(pages,target,div){
+          var newwin = window.open(div.attr("href"),'_blank');
+          newwin.focus();
+        },
+        "dont-close": false,
+      },
+
+      bindAttributeCalls: function(){
+        var janimPages = $(this.$.pages);
+        var animPages = janimPages[0];
+        janimPages.click(function(e){
+          var jtarget = $(e.target);
+          var divButton = jtarget.parent().parent("iron-page")[0] ? jtarget : jtarget.closest("iron-page > div > div").has(e.target);
+
+          for(var key in this._attributeFunctions){
+            var func = this._attributeFunctions[key];
+            if(divButton.attr(key) !== undefined){
+              if(func === false) return;
+
+              if(typeof func === "function"){
+                var result = func.call(this,janimPages,jtarget,divButton);
+                if(result === false) return;
+              }
+            }
+          }
+          var jcheckboxElem = divButton.children("paper-checkbox");
+          if(jcheckboxElem.length){
+            if(!jtarget.closest("paper-checkbox")[0]){
+              jcheckboxElem[0].set('checked',!jcheckboxElem[0].checked);
+            }
+            return;
+          }
+          var jtoggleElem = divButton.children("paper-toggle-button");
+          if(jtoggleElem.length){
+            if(!jtarget.closest("paper-toggle-button")[0]){
+              jtoggleElem[0].set('checked',!jtoggleElem[0].checked);
+            }
+            return;
+          }
+          this.fire("menu-click");
+        }.bind(this));
+      },
+
+      _bindPreventIronOverlayPropogation: function(){
+        $(this.$.pagesContainer).on("iron-overlay-closed",function(e){
+          e.stopPropagation();
+        });
+      },
+
+      ready: function(){
+        this.bindAttributeCalls();
+        this._bindPreventIronOverlayPropogation();
+      },
+
+      firstPage: function(){
+        this.selected = $(this.$.pages).find("iron-page")[0].attributes.name.value;
+      },
+
+      _closeChildDropdowns: function(){
+        $(this.$.pages).find("iron-dropdown").each(function(index,element){
+          if(element.close) element.close();
+        });
+      },
+
+      _onDropdownClose: function(){
+        this.firstPage();
+        this._closeChildDropdowns();
+      },
+
+      _preDrop: null,
+      attached: function(){
+        var drop = $(this.$.pages).closest("iron-dropdown")[0];
+        if(this._preDrop){
+          drop.removeEventListener("iron-overlay-closed",this._onDropdownClose.bind(this));
+        }
+        if(drop){
+          if(this.resetOnDropdownClose === true){
+            drop.addEventListener("iron-overlay-closed",this._onDropdownClose.bind(this));
+          }
+          this._preDrop = drop;
+        }
+      }
+    }); </script> </dom-module> 

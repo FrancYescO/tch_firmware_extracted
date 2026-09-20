@@ -1,0 +1,15 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+local iface=$1
+local lease=$2
+
+eval ubus send dhcp.client \'{\"event\":\"renew\",\"interface\":\"$iface\"}\'
+if [ "$lease" != "4294967295" ]; then
+	uci_toggle_state network "$iface" lease $lease
+	uci_toggle_state network "$iface" lease_expires $(echo ${lease} $(cat /proc/uptime) | awk '{printf "%d", $1 + $2}')
+else
+	uci_toggle_state network "$iface" lease infinite
+	uci_toggle_state network "$iface" lease_expires infinite
+fi

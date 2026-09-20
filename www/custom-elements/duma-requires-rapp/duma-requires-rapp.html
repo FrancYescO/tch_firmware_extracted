@@ -1,0 +1,77 @@
+<!--
+  (C) 2016 NETDUMA Software
+  Kian Cross <kian.cross@netduma.com>
+--> <link rel="import" href="../polymer/polymer.html"> <link rel="import" href="/libs/jquery.html"> <link rel="import" href="/libs/q.html"> <link rel="import" href="/libs/rpc.html"> <dom-module is="duma-requires-rapp"> <template> <template is="dom-if" if="[[_showContent]]" restamp> <content></content> </template> </template> <script> Polymer({
+      is: "duma-requires-rapp",
+      
+      properties: {
+        rapp: {
+          type: String,
+          value: null
+        },
+
+        imports: {
+          type: Array,
+          value: []
+        },
+
+        invert: {
+          type: Boolean,
+          value: false
+        },
+
+        _showContent: {
+          type: Boolean,
+          value: false
+        },
+
+        callback: {
+          type: Function,
+          value: null
+        }
+      },
+
+      observers: [
+        '_change(rapp,imports)'
+      ],
+
+      _importPromise: function(href){
+        return Q.promise(function(resolve,reject){
+          this.importHref(href, function(e) {
+            resolve(true)
+          }, function(e) {
+            reject(e)
+          },true);
+        }.bind(this));
+      },
+
+      _doImports: function(imports){
+        var promises = [];
+        for(var i = 0; i < imports.length; i++){
+          var full = "http://" + document.domain + imports[i];
+          promises.push(this._importPromise(full));
+        }
+        return Q.all(promises);
+      },
+
+      _doCallback: function(rapp,imports){
+        if(typeof this.callback === "function"){
+          this.callback.call(this,rapp,imports);
+        }
+      },
+
+      _change: function(rapp,imports){
+        if(!Array.isArray(imports)) return;
+        this._showContent = false;
+        long_rpc_promise("com.netdumasoftware.procmanager","running",[rapp]).done(function(result){
+          result = result && !!result[0];
+          if(result !== this.invert){
+            this._doImports(imports).done(function(){
+              this._showContent = true;
+              Polymer.dom.flush();
+              this._doCallback();
+            }.bind(this));
+          }
+        }.bind(this));
+      }
+    }); </script> </dom-module> 
