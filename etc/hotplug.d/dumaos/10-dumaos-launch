@@ -1,0 +1,87 @@
+#!/bin/sh
+
+if [ -e "/dumaos/api/libs/shell/dumaos_helper.sh" ];then
+  . /dumaos/api/libs/shell/dumaos_helper.sh
+else
+  printf "DumaOS API doesn't exist, Exiting \n"
+  exit 1
+fi
+
+uci_commits(){
+if [ "$1" = "enable" ];then
+  uci set dumaos.tr69.dumaos_enabled=1
+elif [ "$1" = "disable" ];then
+  uci set dumaos.tr69.dumaos_enabled=0   	
+else
+  return 0
+fi
+uci commit dumaos
+}
+
+services_trigger(){
+  /etc/init.d/ctwatch "$1"
+  /etc/init.d/connwatch "$1"
+  /etc/init.d/arpwatch "$1"
+  if [ -f "/etc/init.d/telemetry-daemon" ]; then
+    /etc/init.d/telemetry-daemon "$1"
+  fi
+  /etc/init.d/dumaos "$1" "dumaos_hotplug_action" &
+}
+
+if [ -z "$(uci_get dumaos.tr69.dumaos_enabled)" ];then
+  generate_dumaos_config
+fi
+
+case "$ACTION" in
+  "dumaos_enabled")
+    uci_commits "enable"
+    if [ "$(uci get dumaos.tr69.dumaos_enabled)" = "1" ] && change_state "stopped" "starting" "stopping" ;then
+            services_trigger "start"
+    else
+      printf "You need to set dumaos.tr69.dumaos_enabled to 1 to start DumaOS or dumaos already started\n"
+      exit 1
+    fi
+    ;;
+  "rappstart")
+    if [ "$RAPP" = "com.netdumasoftware.geofilter" ];then
+      if [ "$(uci get dumaos.tr69.dumaos_enabled)" = "1" ] ;then
+          dumaos_swap_status "starting" "running"
+      else
+          printf "You can only check DumaOS running status if dumaos.tr69.dumaos_enabled is set to 1\n"
+          exit 1
+      fi
+    fi
+    ;;
+  "dumaos_disabled")
+    uci_commits "disable"
+    if [ "$(uci get dumaos.tr69.dumaos_enabled)" = "0" ] && change_state "running" "stopping" "starting" ;then
+      services_trigger "stop"
+    else
+      printf "You need to set dumaos.tr69.dumaos_enabled to 0 to stop DumaOS or dumaos already stopped\n"
+      exit 1
+    fi
+    ;;
+  "cleanup")
+    dumaos_swap_status "stopping" "stopped"
+    ;;
+  "dumaos_resume")
+    if [ "$(uci get dumaos.tr69.dumaos_enabled)" = "1" ] && change_state "stopped" "starting" "stopping" ;then
+      services_trigger "start"
+    else
+      printf "You need to set dumaos.tr69.dumaos_enabled to 1 to resume DumaOS or dumaos already resumed\n"
+      exit 1
+    fi
+    ;;
+  "dumaos_suspend")
+    if [ "$(uci get dumaos.tr69.dumaos_enabled)" = "1" ] && change_state "running" "stopping" "starting";then
+      services_trigger "stop"
+    else
+      printf "You need to set dumaos.tr69.dumaos_enabled to 1 to suspend DumaOS or dumaos already suspended\n"
+      exit 1
+    fi
+    ;;
+  *)
+    printf "No valid ACTION passed\n"
+    exit 1
+    ;;
+esac

@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+# (C) NETDUMA Software 2020
+
+START=99
+
+can_use() {
+	command -v "$1" 1>/dev/null 2>&1 || type "$1" 1>/dev/null 2>&1 || hash "$1" 1>/dev/null 2>&1
+	return "$?"
+}
+
+start() {
+	local lan_inf="$(ubus call network.interface.lan status | jsonfilter -e '@.l3_device')"
+
+	if can_use "ifconfig"
+	then
+		ifconfig "$lan_inf" txqueuelen 1000
+	elif can_use "ip"
+	then
+		ip link set "$lan_inf" txqueuelen 1000
+	fi
+
+	if can_use "chrt"
+	then
+		chrt -r -p "5" "$(pgrep "bcmxtm_rx")"
+		chrt -r -p "5" "$(pgrep "bcmsw_rx")"
+	fi
+}

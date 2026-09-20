@@ -1,0 +1,95 @@
+#!/bin/sh
+
+#
+# (C) 2018 NETDUMA Software
+# Kian Cross <kian.cross@netduma.com>
+#
+
+UCI_CONFIG_FILE_NAME="dumaos"
+UCI_CONFIG_NAME="dumaos_nvram"
+
+not_implemented_erorr() {
+  #-- @depends echo
+  #-- @test echo config-emulate
+  echo "This command has not been implemented.";
+  exit 1;
+}
+
+filter_config_prefix() {
+  #-- @depends echo; sed
+  #-- @test echo config-emulate && which sed
+  echo "$1" | sed -rn 's/dumaos\.dumaos_nvram\.([[:graph:]]+=[[:graph:]])/\1/p'
+}
+
+config_show() {
+  #-- @depends uci
+  #-- @test uci show"
+  uci_output=`uci show "${UCI_CONFIG_FILE_NAME}.${UCI_CONFIG_NAME}"`
+  filter_config_prefix "${uci_output}"
+}
+
+config_commit() {
+  #-- @depends uci
+  #-- @test uci show
+  uci commit "${UCI_CONFIG_FILE_NAME}"
+  exit $?
+}
+
+config_get() {
+  #-- @depends uci
+  #-- @test uci show
+  uci get "${UCI_CONFIG_FILE_NAME}.${UCI_CONFIG_NAME}.$1"
+  exit $?
+}
+
+config_set() {
+  #-- @depends uci
+  #-- @test uci show
+  uci set "${UCI_CONFIG_FILE_NAME}.${UCI_CONFIG_NAME}.$1"
+  exit $?
+}
+
+case "$1" in
+"show")
+  config_show
+  ;;
+"commit")
+  config_commit
+  ;;
+"uncommit")
+  not_implemented_erorr
+  ;;
+"default")
+  not_implemented_erorr
+  ;;
+"get")
+  config_get $2
+  ;;
+"set")
+  config_set $2
+  ;;
+"unset")
+  not_implemented_erorr
+  ;;
+"backup")
+  not_implemented_erorr
+  ;;
+"restore")
+  not_implemented_erorr
+  ;;
+"list")
+  not_implemented_erorr
+  ;;
+"dumaos")
+  #-- @depends echo
+  #-- @test echo config-emulate
+  echo "true";
+  ;;
+*)
+  #-- @depends echo
+  #-- @test echo config-emulate
+  echo "Unknown command."
+  exit 1
+  ;;
+esac
+exit $?

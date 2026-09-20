@@ -1,0 +1,295 @@
+<!--
+  (C) 2017 NETDUMA Software
+  Kian Cross
+--> <!--
+  This is a special case tour as it must access the whole of DumaOS,
+  it is not specific for any app. Therefore it can't be generic.
+--> <%
+  local libos = require("libos")
+  local platform_information = os.platform_information()
+%> <link rel="import" href="/libs/tour.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script> duma.tour.setTour("desktop", (function () {
+  var desktopAppId = "com.netdumasoftware.desktop";
+
+  function isTargetDefined(target) {
+    if (typeof target === "function") {
+      target = target();
+    }
+
+    return target ? true : false;
+  }
+
+  function getNextMultipageStepIndex(steps, currentIndex) {
+    for (var i = currentIndex + 1; i < steps.length; i++) {
+      var step = steps[i];
+
+      if (step.multipage) {
+        return i;
+      }
+    }
+
+    return -1;
+  }
+
+  function getNextStepIndexInWindow(steps, currentIndex) {
+    for (var i = currentIndex + 1; i < steps.length; i++) {
+      var step = steps[i];
+
+      if (isTargetDefined(step.target)) {
+        return i;
+      }
+      
+      if (step.multipage) {
+        return -1;
+      }
+    }
+
+    return -1;
+  }
+
+  function getOnNext(getTourWindow, onNext, position) {
+    return function () {
+
+      hopscotch.endTour(false, false);
+
+      var tourWindow = getTourWindow();
+
+      var callback = function () {
+        if(tourWindow.hopscotch && tourWindow.duma && tourWindow.duma.tour && typeof tourWindow.duma.tour.getTour === "function"){
+          tourWindow.hopscotch.startTour(
+            tourWindow.duma.tour.getTour(true)(position),
+            position
+          );
+        }
+      }
+
+      if (onNext) {
+        onNext(callback);
+      } else {
+        setTimeout(callback);
+      }
+    }
+  }
+
+  function processTour(tour, start) {
+    var steps = tour.steps;
+
+    for (var i = start; i < steps.length; i++) {
+      var step = steps[i];
+      step.userOnNext = step.onNext;
+
+      if (
+        i - start === 0 &&
+        !isTargetDefined(step.target)
+      ) {
+        var multipageIndex = getNextMultipageStepIndex(steps, i - 1);
+
+        getOnNext(
+          steps[multipageIndex].getNextWindow,
+          null,
+          multipageIndex + 1
+        )();
+        
+        break;
+        
+      } else if (step.multipage && step.getNextWindow) {
+        step.onNext = getOnNext(step.getNextWindow, step.userOnNext, i + 1);
+        break;
+        
+      } else if (
+        steps[i + 1] &&
+        !isTargetDefined(steps[i + 1].target) &&
+        getNextStepIndexInWindow(steps, i) === -1 &&
+        getNextMultipageStepIndex(steps, i) > -1
+      ) {
+        var nextMultipageIndex = getNextMultipageStepIndex(steps, i);
+        var nextStep = steps[nextMultipageIndex];
+
+        step.onNext = getOnNext(
+          nextStep.getNextWindow,
+          step.userOnNext,
+          nextMultipageIndex + 1
+        );
+
+        nextStep.target = $("body")[0];
+      }
+    }
+
+    return tour;
+  }
+
+  function getPanelButtonTarget(method) {
+    var panels = $("duma-panel");
+    
+    for (var i = 0; i < panels.length; i++) {
+      var panel = panels[i];
+      var button = panel[method]();
+      if (button) {
+        return button;
+      }
+    }
+  }
+
+  function getAppIconTarget(id) {
+    var applicationSidebar = $("application-sidebar")[0];
+
+    if (!applicationSidebar) {
+      return;
+    }
+
+    return applicationSidebar.getApp(id).target;
+  }
+
+  return function (start) {
+    return processTour({
+      id: "dumaos-welcome-tour",
+
+      steps: [
+        {
+          title: "<%= i18n.step1Title %>",
+          content: "<%= i18n.step1Content %>",
+
+          target: function () {
+            return $(".dumaos-logo")[0];
+          },
+          placement: "bottom",
+          multipage: true,
+
+          getNextWindow: function() {
+            return $("#application iframe")[0].contentWindow;
+          }
+        },
+        
+        {
+          title: "<%= i18n.step2Title %>",
+          content: "<%= i18n.step2Content %>",
+
+          target: function () {
+            return getPanelButtonTarget("getHelpButton");
+          },
+          placement: "left"
+        },
+
+        {
+          title: "<%= i18n.step3Title %>",
+          content: "<%= i18n.step3Content %>",
+
+          target: function () {
+            return getPanelButtonTarget("getDrawerButton");
+          },
+          placement: "right",
+          multipage: true,
+
+          getNextWindow: function () {
+            return parent;
+          }
+        },
+
+        {
+          title: "<%= i18n.step4Title %>",
+          content: "<%= i18n.step4Content %>",
+          target: function () {
+            return $("application-sidebar")[0];
+          },
+          placement: "right"
+        },
+
+        {
+          title: "<%= i18n.step5Title %>",
+          content: "<%= i18n.step5Content %>",
+
+          placement: "right",
+
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.desktop");
+          },
+
+          multipage: true,
+
+          getNextWindow: function() {
+            return $("#application iframe")[0].contentWindow;
+          }
+        },
+
+        {
+          title: "<%= i18n.step6Title %>",
+          content: "<%= i18n.step6Content %>",
+
+          placement: "left",
+          multipage: true,
+
+          target: function () {
+            return getPanelButtonTarget("getPinButton");
+          },
+
+          getNextWindow: function() {
+            return parent;
+          }
+        },
+
+        {
+          title: "<%= i18n.step7Title %>",
+          content: "<%= i18n.step7Content %>",
+
+          placement: "right",
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.geofilter");
+          }
+        },
+
+        {
+          title: "<%= i18n.step8Title %>",
+          content: "<%= i18n.step8Content %>",
+
+          placement: "right",
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.qos");
+          }
+        },
+
+        {
+          title: "<%= i18n.step9Title %>",
+          content: "<%= i18n.step9Content %>",
+
+          placement: "right",
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.devicemanager");
+          }
+        },
+
+        {
+          title: "<%= i18n.step10Title %>",
+          content: "<%= i18n.step10Content %>",
+
+          placement: "right",
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.networkmonitor");
+          }
+        },
+
+        {
+          title: "<%= i18n.step11Title %>",
+          content: "<%= i18n.step11Content %>",
+
+          placement: "right",
+          target: function () {
+            return getAppIconTarget("com.netdumasoftware.systeminfo");
+          }
+        }, <% if os.implements_netgear_specification() then %> {
+            title: "<%= i18n.step12Title %>",
+            content: "<%= i18n.step12Content %>",
+
+            placement: "right",
+            target: function () {
+              return getAppIconTarget("com.netdumasoftware.ngportal");
+            }
+          }, <% end %> {
+          title: "<%= i18n.step13Title %>",
+          content: "<%= i18n.step13Content %>",
+
+          placement: "left",
+          target: "help-menu-button"
+        }
+      ]
+    }, start);
+  }
+})(), true); </script> 

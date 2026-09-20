@@ -1,0 +1,111 @@
+local Device_LEDs_LED_i_CycleElement_i_ = {
+  objectType = {
+    name = "Device.LEDs.LED.{i}.CycleElement.{i}.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Color = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "hexBinary",
+        min = "3",
+        max = "3",
+      },
+      Duration = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+      },
+      Order = {
+        access = "readOnly", -- readWrite currently not supported
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+    }
+  }
+}
+
+local colorCodeMap = {
+  ["off"] = "000000",
+  ["red"] = "FF0000",
+  ["green"] = "00FF00",
+  ["blue"] = "0000FF",
+  ["orange"] = "FFFF00",
+  ["white"] = "FFFFFF"
+}
+
+-- Since we have all LED state transitions in stateMachines.lua file, we have hardcoded the below LED cycle names and colors
+local ledCycle = {
+  power = {
+    ["modem not powered"] = { "off", "1" },
+    ["online fixed"] = { "green", "2" },
+    ["online mobile"] = { "blue", "3" },
+    ["powered on booting"] = { "white", "4" },
+    ["firmware upgrade"] = { "white", "5", "250" },
+    ["powered on waiting WAN"] = { "orange", "6" },
+    ["connect both fixed and mobile WAN"] = { "red", "7" },
+  },
+  wireless = {
+    ["disabled"] = { "off", "1" },
+    ["enabled"] = { "green", "2" }
+  },
+  dect = {
+    ["off and not paired"] = { "off" , "1" },
+    ["dect or wps paired"] = { "green", "2" },
+    ["dect or wps pairing active"] = { "green", "3", "250" },
+    ["wps failure"] = { "red", "4" },
+  },
+  internet = {
+    ["fixed and mobile offline"] = { "off" , "1" },
+    ["fixed or mobile online"] = { "green", "2" },
+    ["ADSL captive portal"] = { "orange", "3" },
+    ["ppp authentication failed"] = { "red", "4" },
+  },
+  ethernet = {
+    ["no wan"] = { "off", "1" },
+    ["xdsl synced or eth connected"] = { "green", "2" },
+    ["xdsl syncing"] = { "green", "3", "250" },
+    ["xdsl completing sync"] = { "green", "4", "125" },
+  },
+  mobile = {
+    ["offline"] = { "off", "1" },
+    ["online"] = { "green", "2" },
+  },
+  lte = {
+    ["off and mobile net NA"] = { "off", "1" },
+    ["good signal"] = { "green" , "2" },
+    ["ok signal"] = { "orange", "3" },
+    ["poor signal"] = { "red", "4" },
+  },
+  voip = {
+    ["no voltage or dect onhook or sip not reg"] = { "off", "1" },
+    ["sip or volte reg"] = { "green", "2" },
+    ["dect or fxs offhook"] = { "green", "3", "500" },
+    ["sos only and fixed or mobile unavailable"] = { "orange", "4" },
+    ["unable to make SIP call"] = { "red", "5" },
+  },
+}
+
+Device_LEDs_LED_i_CycleElement_i_.entries = function(mapping, key)
+  local entries = {}
+  for state in pairs(ledCycle[key] or {}) do
+    entries[#entries + 1] = state
+  end
+  return entries
+end
+
+Device_LEDs_LED_i_CycleElement_i_.get = function(mapping, param, key, parent)
+  if param == "Color" then
+    local color = ledCycle[parent][key] and ledCycle[parent][key][1] or "off"
+    return colorCodeMap[color]
+  elseif param == "Order" then
+    return ledCycle[parent][key] and ledCycle[parent][key][2] or "1"
+  elseif param == "Duration" then
+    return ledCycle[parent][key] and ledCycle[parent][key][3] or "0"
+  end
+end
+
+register(Device_LEDs_LED_i_CycleElement_i_)

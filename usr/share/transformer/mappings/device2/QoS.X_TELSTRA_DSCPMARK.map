@@ -1,0 +1,109 @@
+-- Manually generated
+local Device_QoS_X_TELSTRA_DSCPMARK_ = {
+  objectType = {
+    name = "Device.QoS.X_TELSTRA_DSCPMARK.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BFDECHO = {
+        access = "readWrite",
+        type = "int",
+      },
+      VOICE = {
+        access = "readWrite",
+        type = "int",
+      },
+      VOWIFI = {
+        access = "readWrite",
+        type = "int",
+      },
+    }
+  }
+}
+
+local ucihelper = mapper("ucihelper")
+local getFromUci = ucihelper.get_from_uci
+local setOnUci = ucihelper.set_on_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+local transactions = {}
+local supervision_binding = {config = "supervision"}
+local qos_binding = {config = "qos"}
+local mmpbx_binding = {config = "mmpbxrvsipnet", sectionname = "sip_net", option = "control_qos_value"}
+local commitapply = commitapply
+local qosHelper = require('transformer.shared.qoshelper')
+
+local function getUciParam(sectionName, param)
+  local binding
+  if param == "BFDECHO" then
+    binding = supervision_binding
+  else
+    binding = qos_binding
+  end
+  binding.sectionname = sectionName
+  binding.option = "dscp"
+  return getFromUci(binding)
+end
+
+local function setUciParam(sectionName, param, value)
+  local binding, config
+  if param == "BFDECHO" then
+    binding = supervision_binding
+    config = "supervision"
+  else
+    binding = qos_binding
+    config = "qos"
+  end
+  binding.sectionname = sectionName
+  binding.option = "dscp"
+  local dscpValue = qosHelper.convertToHexDscp(value)
+  setOnUci(binding, dscpValue, commitapply)
+  transactions[config] = true
+end
+
+Device_QoS_X_TELSTRA_DSCPMARK_.get = {
+  BFDECHO = function(mapping, param)
+    local dscpVal =  getUciParam("bfdecho_config", param)
+    return dscpVal ~= "" and qosHelper.mapDSCP(dscpVal, mapping.objectType.name) or ""
+  end,
+  VOICE = function(mapping, param)
+    local dscpVal =  getUciParam("Voice", param)
+    if dscpVal == "" then
+      dscpVal = string.upper(getFromUci(mmpbx_binding))
+    end
+    return dscpVal ~= "" and qosHelper.mapDSCP(dscpVal, mapping.objectType.name) or ""
+  end,
+  VOWIFI = function(mapping, param)
+    local dscpVal = getUciParam("VoWiFi", param)
+    return dscpVal ~= "" and qosHelper.mapDSCP(dscpVal, mapping.objectType.name) or ""
+  end,
+}
+
+Device_QoS_X_TELSTRA_DSCPMARK_.set = {
+  BFDECHO = function(mapping, param, value)
+    setUciParam("bfdecho_config", param, value)
+  end,
+  VOICE = function(mapping, param, value)
+    setUciParam("Voice", param, value)
+  end,
+  VOWIFI = function(mapping, param, value)
+   setUciParam("VoWiFi", param, value)
+  end,
+}
+
+Device_QoS_X_TELSTRA_DSCPMARK_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_QoS_X_TELSTRA_DSCPMARK_.revert = function()
+  for config in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(Device_QoS_X_TELSTRA_DSCPMARK_)

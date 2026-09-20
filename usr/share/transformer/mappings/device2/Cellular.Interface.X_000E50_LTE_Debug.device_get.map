@@ -1,0 +1,111 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Device_Get.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			Initialized = {
+				access = "readOnly",
+				type = "string"
+			},
+			Hardware_Version = {
+				access = "readOnly",
+				type = "string"
+			},
+			Device_Config_Parameter = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Network_Interfaces = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			Device_Description = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			PID = {
+				access = "readOnly",
+				type = "string"
+			},
+			VID = {
+				access = "readOnly",
+				type = "string"
+			},
+			Power_Mode = {
+				access = "readOnly",
+				type = "string"
+			},
+			Temperature = {
+				access = "readOnly",
+				type = "string"
+			},
+			Manufacturer = {
+				access = "readOnly",
+				type = "string"
+			},
+			Model = {
+				access = "readOnly",
+				type = "string"
+			},
+			Software_Version = {
+				access = "readOnly",
+				type = "string"
+			},
+			Mode = {
+				access = "readOnly",
+				type = "string"
+			},
+			IMEI = {
+				access = "readOnly",
+				type = "string"
+			},
+			IMEI_SVN = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+function obj.getall(mapping, key)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.device", "get", key)
+	if data then
+		result.Initialized = data.initialized
+		result.Hardware_Version = data.hardware_version
+		result.Device_Config_Parameter = data.device_config_parameter
+		result.Network_Interfaces = data.network_interfaces
+		result.Device_Description = data.dev_desc
+		result.PID = data.pid
+		result.VID = data.vid
+		result.Power_Mode = data.power_mode
+		result.Temperature = data.temperature
+		result.Manufacturer = data.manufacturer
+		result.Model = data.model
+		result.Software_Version = data.software_version
+		result.Mode = data.mode
+		result.IMEI = data.imei
+		result.IMEI_SVN = data.imei_svn
+
+	end
+
+	return result
+end
+
+function obj.get(mapping, paramName, key)
+	return obj.getall(mapping, key)[paramName]
+end
+
+register(obj)
+

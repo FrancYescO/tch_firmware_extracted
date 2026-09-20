@@ -1,0 +1,130 @@
+<link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-resizable-behavior/iron-resizable-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script src="/custom-elements/drag-table/dragula.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <dom-module id="duma-drag-table"> <template> <style include="duma-theme"> :host ::content .gu-mirror {
+        position: fixed !important;
+        margin: 0 !important;
+        z-index: 9999 !important;
+        opacity: 0.8;
+        -ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=80)";
+        filter: alpha(opacity=80);
+      }
+      
+      :host ::content .gu-hide {
+        display: none !important;
+      }
+      
+      :host ::content .gu-unselectable {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+      }
+      
+      :host ::content .gu-transit {
+        opacity: 0.2;
+        -ms-filter: "progid:DXImageTransform.Microsoft.Alpha(Opacity=20)";
+        filter: alpha(opacity=20);
+      }
+
+      :host ::content .drag_handle {
+        cursor: move;
+      } </style> <div id="mirrorBoi"></div> <content id="contentTest"> </content> </template> <script> Polymer({
+      is: 'duma-drag-table',
+
+      behaviors: [
+        Polymer.IronResizableBehavior
+      ],
+
+      properties:
+      {
+        _drake: {
+          type: Object,
+        },
+
+        _containers: {
+          type: Array,
+        },
+
+        cloned:
+        {
+          type: Function,
+          value: function()
+          {
+            return function(clone, original, type)
+            {
+              if (type == "mirror")
+              {
+                clone.config = $.extend({}, original.config);
+                var cloneTDs = $(clone).children();
+                $(original).children().each(function(index,element){
+                  cloneTDs[index].style.width = element.clientWidth + "px";
+                });
+              }
+            }
+          }
+        },
+
+        drop:
+        {
+          type: Function,
+          value: function()
+          {
+            return function(el, target, source, sibling)
+            {
+            }
+          }
+        },
+
+        dragEnabled: {
+          type: Boolean,
+          value: true,
+          notify: true
+        }
+      },
+
+      attached: function ()
+      {
+        if (this._drake === undefined)
+          this._appendLocalDom();
+      },
+
+      // Element Behavior
+
+      _createDrake: function(containers) {
+        var that = this;
+        var drag = dragula(containers, {
+          mirrorContainer: containers[0],
+          revertOnSpill: true,
+          moves: function (el, container, handle)
+          {
+            return that.dragEnabled && handle.classList.contains('drag_handle');
+          },
+          accepts: function (el, target, source, sibling)
+          {
+              // accept drags only if the drop target is the same
+              // as the source container the element came from
+              return target == source;
+          }
+        });
+
+        drag.on("cloned", this.cloned);
+
+        return drag;
+      },
+
+      _appendLocalDom: function() {
+        this._containers = this._getContainers();
+        this._drake = this._createDrake(this._containers);
+        this._drake.on('drop', function(el, target, source, sibling) {
+          this.drop(el, target, source, sibling);
+          Polymer.dom(target).insertBefore(el, sibling);
+        }.bind(this));
+      },
+
+      _getContainers: function ()
+      {
+        var children = this.getContentChildren('#contentTest');
+        var a = $(".drag_container", children).toArray();
+        if ($(children).hasClass("drag_container"))
+          a.push(children);
+        return a;
+      },
+    }); </script> </dom-module> 

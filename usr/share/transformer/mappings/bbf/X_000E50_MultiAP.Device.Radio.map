@@ -1,0 +1,151 @@
+-- Manually generated
+
+local Multi_X_000E50_MultiAP_Device_i_Radio_i_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_MultiAP.Device.{i}.Radio.{i}.",
+    access = "readOnly",
+    description = "Radio information of Multi-AP agent in network.",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      RadioID = {
+          access = "readOnly",
+          type = "string",
+      },
+      Freq = {
+          access = "readOnly",
+          type = "string",
+      },
+      Cap = {
+          access = "readOnly",
+          type = "string",
+      },
+      Sec = {
+          access = "readOnly",
+          type = "string",
+      },
+      OpClass = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      Channel = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      Bw = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      TxPwr = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      BSSCount = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+
+local paramMap = {
+  Freq = "freq",
+  Cap = "cap",
+  Sec = "sec",
+  OpClass = "op_class",
+  Channel = "channel",
+  Bw = "bw",
+  TxPwr = "tx_pwr",
+  BSSCount = "bss_count"
+}
+
+Multi_X_000E50_MultiAP_Device_i_Radio_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  local radioInfo = data[parentkey] and data[parentkey]["radio_info"] or {}
+  for radioMac in pairs(radioInfo) do
+    entries[#entries + 1] = radioMac
+  end
+  return entries
+end
+
+Multi_X_000E50_MultiAP_Device_i_Radio_i_.get = function(mapping, param, key, parentkey)
+  if param == "RadioID" then
+    return key
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+    local result = data[parentkey] and data[parentkey]["radio_info"] and data[parentkey]["radio_info"][key] or {}
+    return result[paramMap[param]] and tostring(result[paramMap[param]]) or ""
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_MultiAP_Device_i_Radio_i_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_X_000E50_MultiAP_Device_i_Radio_i_BSS_i_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_MultiAP.Device.{i}.Radio.{i}.BSS.{i}.",
+    access = "readOnly",
+    description = "BSS information of radio in Multi-AP agent.",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      BSSID = {
+        access = "readOnly",
+        type = "string"
+      },
+      SSID = {
+        access = "readOnly",
+        type = "string"
+      },
+      BSSType = {
+        access = "readOnly",
+        type = "string"
+      },
+      STAList = {
+        access = "readOnly",
+        type = "string"
+      },
+    }
+  }
+}
+
+local paramMap = {
+  SSID = "ssid",
+  BSSType = "bss_type",
+  STAList = "sta_list"
+}
+
+Multi_X_000E50_MultiAP_Device_i_Radio_i_BSS_i_.entries = function(mapping, parentkey, grandparentkey)
+  local entries = {}
+  local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  local bssInfo = data[grandparentkey] and data[grandparentkey]["radio_info"] and data[grandparentkey]["radio_info"][parentkey] and data[grandparentkey]["radio_info"][parentkey]["bss_info"] or {}
+  for bssMac in pairs(bssInfo) do
+    entries[#entries + 1] = bssMac
+  end
+  return entries
+end
+
+Multi_X_000E50_MultiAP_Device_i_Radio_i_BSS_i_.get = function(mapping, param, key, parentkey, grandparentkey)
+  if param == "BSSID" then
+    return key
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+    local result = data[grandparentkey] and data[grandparentkey]["radio_info"] and data[grandparentkey]["radio_info"][parentkey] and data[grandparentkey]["radio_info"][parentkey]["bss_info"][key] or {}
+    result = result[paramMap[param]] or ""
+    return type(result) == "table" and table.concat(result, " ") or tostring(result)
+  end
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(Multi_X_000E50_MultiAP_Device_i_Radio_i_BSS_i_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

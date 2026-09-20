@@ -1,0 +1,86 @@
+<!--
+  (C) 2020 NETDUMA Software
+  Luke Meppem
+--> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icon/iron-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-icons/editor-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog/paper-dialog.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-dialog-scrollable/paper-dialog-scrollable.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-button/paper-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-tooltip/paper-tooltip.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-spinner/paper-spinner-lite.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-input/paper-textarea.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/duma-clipboard-button/duma-clipboard-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/cycle.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/rpc.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/libs/colours.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="radio-scan"> <template> <style is="custom-style" include="duma-theme iron-flex iron-positioning"> .wait-button:not([disabled]) ::content paper-spinner-lite {
+        display: none;
+      }
+      .wait-button[disabled] ::content span {
+        display: none;
+      }
+      :host #dialog {
+        width: 70vw;
+        height: 70vh;
+        max-width: 70vw;
+        max-height: 70vh;
+      }
+      .output {
+        width: 100%;
+        height: 75%;
+      }
+      .buttons duma-clipboard-button ::content iron-icon {
+        fill: var(--primary-text-color);
+      } </style> <template is="dom-if" if="[[_showDefault(buttonOverride)]]"> <paper-button on-click="scan" disabled="[[waiting]]" class="wait-button"> <span><%= i18n.wifiScan %></span> <paper-spinner-lite active></paper-spinner-lite> </paper-button> </template> <paper-dialog id="dialog"> <h2 dialog-label><%= i18n.output %></h2> <paper-dialog-scrollable class="inner"> <paper-textarea value="[[output]]" readonly="readonly" class="output"></paper-textarea> </paper-dialog-scrollable> <div class="buttons"> <duma-clipboard-button id="copy"></duma-clipboard-button> <paper-button dialog-dismiss><%= i18n.close %></paper-button> </div> </paper-dialog> </template> <script> Polymer({
+      is: "radio-scan",
+
+      properties: {
+        waiting: {
+          type: Boolean,
+          value: false,
+          observer: "_waitingChanged"
+        },
+        deviceMac: String,
+        output: String,
+        buttonOverride: {
+          type: String,
+          value: "",
+          observer: "_overrideChanged"
+        },
+        __preOverride: Object
+      },
+
+      _showDefault: function(override){
+        return !override;
+      },
+
+      _overrideChanged: function(newOverride,oldOverride){
+        if(this.__preOverride){
+          this.__preOverride.removeEventListener('click',this.scan.bind(this));
+        }
+        if(newOverride){
+          var elem = $(newOverride)[0];
+          if(elem){
+            elem.addEventListener('click',this.scan.bind(this));
+            this.__preOverride = elem;
+          }
+        }
+      },
+
+      ready: function(){
+        this.$.copy.getText = function(){
+          return this.output;
+        }.bind(this);
+      },
+
+      _setDisabledPre: function(state){
+        if(this.__preOverride){
+          $(this.__preOverride).attr("disabled",!!state);
+        }
+      },
+
+      _waitingChanged: function(newWait){
+        this._setDisabledPre(newWait);
+      },
+
+      scan: function(){
+        if(!this.waiting){
+          this.waiting = true;
+          long_rpc_promise("com.netdumasoftware.devicemanager","radio_scan",[this.deviceMac]).then(function(result){
+            if(result && result[0]){
+              this.output = result[0];
+              this.$.dialog.open();
+              this.waiting = false;
+            }
+          }.bind(this))
+        }
+      }
+    }); </script> </dom-module> 

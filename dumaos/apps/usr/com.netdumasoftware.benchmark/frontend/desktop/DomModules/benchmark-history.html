@@ -1,0 +1,282 @@
+<link rel="import" href="/custom-elements/iron-icons/iron-icons.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/paper-icon-button/paper-icon-button.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/iron-flex-layout/iron-flex-layout-classes.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/benchmark-rating-icon.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-speed-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-ping-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/duma-bloat-rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/apps/com.netdumasoftware.benchmark/desktop/DomModules/rating.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="/custom-elements/polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script src="/apps/com.netdumasoftware.benchmark/desktop/Scripts/shared.js?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"></script> <!-- Theme, loaded last --> <link rel="import" href="/themes/<%= current_theme %>/duma-theme.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <dom-module id="benchmark-history"> <template> <style is="custom-style" include="duma-theme iron-flex"> :host {
+        display: block;
+      }
+      .historyTable-wrap {
+        @apply(--layout-horizontal);
+        border: thin solid var(--divider-color);
+        border-width: thin 0 thin 0;
+        position: relative;
+        z-index: 0;
+      }
+      #header > div:not(:first-child) {
+        border-top: thin solid var(--divider-color);
+      }
+      .history-title {
+        @apply(--paper-font-subhead);
+        flex-grow: 1;
+      }
+      #tableWrap  {
+        overflow: hidden;
+        width: 100%;
+      }
+      .history-date {
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+        color: var(--secondary-text-color);
+      }
+
+      .horizontal-table {
+        display: flex;
+        overflow-y: hidden;
+      }
+      .horizontal-table tr > th,
+      .horizontal-table tr > td {
+        overflow: visible;
+        height: 40px;
+      }
+      .horizontal-table tr:first-child > * {
+        height: 64px;
+      }
+      .horizontal-table tr > td > div {
+        @apply(--layout-vertical);
+        @apply(--layout-center);
+      }
+      .horizontal-table th {
+        background-color: var(--transparent-background-color);
+        padding: 0 16px;
+        white-space: nowrap;
+        text-align: end;
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        transition: background-color 0.2s ease;
+      }
+      .horizontal-table:not([data-scroll="0"]) th {
+        background-color: var(--primary-background-color);
+      }
+      .horizontal-table tr:first-child {
+        height: 64px;
+      }
+      .horizontal-table td {
+        position: relative;
+        min-width: 112px;
+      }
+      .horizontal-table td:nth-child(even){
+        background: rgba(var(--primary-background-rgb), 0.25);
+      }
+      .horizontal-table td:not([failed]) {
+        cursor: pointer;
+      }
+      .horizontal-table td:hover::before,
+      .horizontal-table td:focus::before {
+        content: '';
+        top: -500px;
+        height: 1000px;
+        left: 0;
+        position: absolute;  
+        width: 100%;
+        z-index: -1;
+      }
+      .horizontal-table td:focus::before,
+      .horizontal-table td:hover::before {
+        background-color: rgba(var(--primary-background-rgb), 0.5);
+      } </style> <div class="layout vertical"> <div class="historyTable-wrap"> <!-- Entries --> <table id="historyTable" role="region" aria-label$="[[ariaLabel]]" class="horizontal-table"> <tbody> <tr> <th><%= i18n.date %></th> <template is="dom-repeat" items="[[entries]]" as="entry"> <td on-click="clickTD" on-keydown="clickTD" entry="[[entry]]" tabindex="0" aria-label="[[_getAriaLabel(entry,index,genAria,uploadSpeed,downloadSpeed)]]" failed$="[[entry.failed]]"> <div> <div class="history-time" aria-label="[[_getLocaleTime(entry.dateTime)]]">[[_getLocaleTime(entry.dateTime)]]</div> <div class="history-date" aria-label="[[_getLocaleDate(entry.dateTime,1)]]">[[_getLocaleDate(entry.dateTime,0)]]</div> </div> </td> </template> </tr> <tr id="speedRow"> <th><%= i18n.speed %></th> <template is="dom-repeat" items="[[entries]]" as="entry"> <td on-click="clickTD" entry="[[entry]]" failed$="[[entry.failed]]"> <div> <template is="dom-if" if="[[!entry.failed]]"> <duma-speed-rating class="history-row" upload="[[entry.upload]]" expected-upload="[[uploadSpeed]]" download="[[entry.download]]" expected-download="[[downloadSpeed]]"></duma-speed-rating> </template> </div> </td> </template> </tr> <tr id="pingRow"> <th><%= i18n.ping %></th> <template is="dom-repeat" items="[[entries]]" as="entry"> <td on-click="clickTD" entry="[[entry]]" failed$="[[entry.failed]]"> <div> <template is="dom-if" if="[[!entry.failed]]"> <duma-ping-rating class="history-row" ping="[[entry.ping]]" jitter="[[entry.jitter]]" dropped-percent="[[entry.dropRate]]"></duma-ping-rating> </template> </div> </td> </template> </tr> <tr id="bloatRow"> <th><%= i18n.buffer %></th> <template is="dom-repeat" items="[[entries]]" as="entry"> <td on-click="clickTD" entry="[[entry]]" failed$="[[entry.failed]]"> <div> <template is="dom-if" if="[[!entry.failed]]"> <duma-bloat-rating class="history-row" thresholds$="[[bloatThreshold]]" up="[[entry.bloatUpload]]" down="[[entry.bloatDownload]]" idle="[[entry.bloatIdle]]"></duma-bloat-rating> </template> <template is="dom-if" if="[[entry.failed]]"> <paper-icon-button icon="delete-forever" on-click="_deleteTest" aria-label="<%= i18n.ariaDeleteTest %>"></paper-icon-button> </template> </div> </td> </template> </tr> </tbody> </table> </div> </div> </template> <script> Polymer({
+      is: 'benchmark-history',
+      properties:
+      {
+        testProcessor: Object,
+        historyUsageCount:
+        {
+          type: String,
+          value: "",
+        },
+        countAvailable:
+        {
+          type: Boolean,
+          value: false,
+        },
+        ariaLabel: String,
+        entries: {
+          type: Array,
+          value: function(){
+            return [];
+          }
+        },
+        downloadSpeed: Number,
+        uploadSpeed: Number,
+        genAria: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      ready: function(){
+        function storeScroll(){
+          this.dataset.scroll = this.scrollLeft || 0;
+        }
+        this.$.historyTable.addEventListener('scroll',storeScroll);
+        storeScroll.call(this.$.historyTable);
+      },
+
+      _getLocaleDate: function(dateTime,full){
+        return full ? dateTime.toLocaleDateString([], {day: 'numeric', month: 'long', year: 'numeric'}) : dateTime.toLocaleDateString([], {day: '2-digit', month: 'short', year: '2-digit'});
+      },
+      _getLocaleTime: function(dateTime){
+        return dateTime.toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit'});
+      },
+
+      //Create an aria label for the date <td>
+      _getAriaLabel: function(entryInfo,elemindex,doAria){
+        if(!doAria) return "";
+        
+        //long date for screen reader use
+        var date = entryInfo.dateTime.toLocaleString([], {day: 'numeric', month: 'long', year: 'numeric', hour12: false, hour: '2-digit', minute:'2-digit'});
+        if(entryInfo.failed){
+          return "<%= i18n.ariaHistoryFailed %>".format(date);
+        }else{
+          //Get the <td> at equal index to the date here
+          var speedTD = this.$.speedRow.children[elemindex + 1];
+          var pingTD = this.$.pingRow.children[elemindex + 1];
+          var bloatTD = this.$.bloatRow.children[elemindex + 1];
+          //if what has been selected doesn't exist, or is the <template> and not <td>, then return ""
+          if(!speedTD || !pingTD || !bloatTD || speedTD.tagName === "TEMPLATE"|| pingTD.tagName === "TEMPLATE" || bloatTD.tagName === "TEMPLATE") return "";
+
+          //get the rating from each
+          var speedRating = speedTD.children[0].children[0].$.rating.rating;
+          var pingRating = pingTD.children[0].children[0].$.rating.rating;
+          var bloatRating = bloatTD.children[0].children[0].$.rating.rating;
+          return "<%= i18n.ariaHistory %>".format(date,speedRating,pingRating,bloatRating)
+        }
+      },
+
+      ReloadHistory()
+      {
+        this.countAvailable = false;
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).done(this.GetHistoryCallback.bind(this));
+      },
+
+      Init()
+      {
+        //retrun promise to allow overview.js to wait
+        return long_rpc_promise("com.netdumasoftware.benchmark", "get_history", []).then(this.GetHistoryCallback.bind(this));
+      },
+
+      SetSpeeds(upload,download)
+      {
+        this.downloadSpeed = download || this.downloadSpeed;
+        this.uploadSpeed = upload || this.uploadSpeed;
+      },
+
+      MakeEntry(entryInfo){
+        var index = parseInt(entryInfo[0]);
+        var dateTime = new Date(entryInfo[1] * 1000);
+        if(entryInfo.length > 2){
+          return {
+            failed: false,
+            index: index,
+            dateTime: dateTime,
+            upload: parseFloat(entryInfo[2]),
+            download: parseFloat(entryInfo[3]),
+            ping: parseFloat(entryInfo[4]),
+            jitter: parseFloat(entryInfo[5]),
+            dropRate: parseFloat(entryInfo[6]),
+            bloatIdle: parseFloat(entryInfo[7]),
+            bloatUpload: parseFloat(entryInfo[8]),
+            bloatDownload: parseFloat(entryInfo[9]),
+          }
+        }else{
+          return {
+            failed: true,
+            index: index,
+            dateTime: dateTime,
+          }
+        }
+      },
+
+      GetHistoryCallback(result)
+      {
+        var data = result[0];
+        this.genAria = false;
+
+        // Check if there is any tests to process. Stops error on first time run
+        if (data.length == 0){
+          // fix - deleting all tests didn't clear the history
+          this.entries = [];
+          return;
+        }
+
+        if (data[0] != "version:1.1.0")
+        {
+          alert("<%= i18n.alertIncorrectVersion %>");
+          return;
+        }
+
+
+        var numTests = data.length - 2;
+
+        var table = $(".horizontal-table tbody", this)[0];
+
+        var maxSpeed = this.uploadSpeed;
+
+        var maxTests = parseInt(data[1].split(":")[5]);
+        this.historyUsageCount = numTests + "/" + maxTests;
+        this.countAvailable = true;
+
+        var newEntries = new Array(numTests);
+        for (var i = 0; i < numTests; i++)
+        {
+          // reverse test order, so it decends in date
+          var getIndex = ((numTests - 1) - i) + 2;
+          var entryInfo = data[getIndex].split(":");
+          
+          newEntries[i] = this.MakeEntry(entryInfo);
+        }
+
+        this.entries = newEntries;
+
+        //Make sure the entries in the dom-repeat get made first, then gen aria labels
+        Polymer.dom.flush();
+        this.genAria = true;
+      },
+
+      LoadGraph(result)
+      {
+        this.testProcessor.ClearGraphs();
+        this.testProcessor.AllowLowSpeedToast(false);
+
+        for (var i = 0; i < result[0].length; i++)
+        {
+          if (this.testProcessor.SendResult(result[0][i])[0] == -1)
+          {
+            alert("<%= i18n.alertIncorrectVersion %>");
+            break;
+          }
+        }
+
+        this.testProcessor.UpdateGraph(-2);
+        this.testProcessor.SetLoading(false);
+      },
+
+
+      //on-click of any <td>, or on keyDown of the date <td>
+      clickTD: function(event){
+        //if on space key or enter key, or no keyCode for click event
+        if(event.keyCode && event.keyCode !== 13 && event.keyCode !== 32) return;
+        var entry = $(event.target).closest("td")[0].entry;
+        //If entry failed, don't load
+        if(entry.failed) return;
+        this.testProcessor.SetLoading(true);
+        long_rpc_promise("com.netdumasoftware.benchmark", "get_file_data", [entry.index]).done(this.LoadGraph.bind(this))
+      },
+
+      //on-click of delete paper-icon-button
+      _deleteTest: function(event){
+        //prevent [this] or <td> from receiving the on-click event
+        event.stopImmediatePropagation();
+        var td = $(event.target).closest("td")[0];
+        if(td && td.entry){
+          long_rpc_promise("com.netdumasoftware.benchmark", "delete_entry",[td.entry.index]).done(function() { this.ReloadHistory() }.bind(this));
+        }
+      }      
+    }); </script> </dom-module> 

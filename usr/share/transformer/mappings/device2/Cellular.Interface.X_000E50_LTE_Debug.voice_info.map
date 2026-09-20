@@ -1,0 +1,101 @@
+local mobiled_mapping_helper = require("transformer.shared.mobiled_helper")
+
+local obj = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Voice_Info.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			VoLTE_Registration_Status = {
+				access = "readOnly",
+				type = "string"
+			},
+			Messages_Waiting = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+local conn = mapper("ubus").connect()
+
+function obj.getall(_, key)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn, "mobiled.voice", "info", key)
+	if data then
+		result.VoLTE_Registration_Status = data.volte.registration_status
+		result.Messages_Waiting = data.messages_waiting
+	end
+	return result
+end
+
+function obj.get(_, paramName, key)
+	return obj.getall(_, key)[paramName]
+end
+
+register(obj)
+
+local Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Voice_Info.Emergency_Numbers.{i}.',
+		access = 'readOnly',
+		numEntriesParameter = "EmergencyNumbersNumberOfEntries",
+		minEntries = 0,
+		maxEntries = math.huge,
+		parameters = {
+			Number = {
+				access = "readOnly",
+				type = "string"
+			},
+		}
+	}
+}
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers.getall(_, key, parentKey)
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	key = tonumber(key)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.voice", "info", parentKey)
+	if data and data.emergency_numbers and data.emergency_numbers[key] then
+		result.Number = data.emergency_numbers[key]
+	end
+	return result
+end
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers.get(mapping, paramName, key, parentKey)
+	return Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers.getall(mapping, key, parentKey)[paramName] or ""
+end
+
+function Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers.entries(_, parentKey)
+	local data = mobiled_mapping_helper.getUbusInfoUseCellularInterfaceKey(conn,  "mobiled.voice", "info", parentKey)
+	local emergency_numbers_indexes = {}
+
+	if type(data.emergency_numbers) == "table" then
+		for emergency_number_index in ipairs(data.emergency_numbers) do
+			table.insert(emergency_numbers_indexes, tostring(emergency_number_index))
+		end
+	end
+	return emergency_numbers_indexes
+end
+
+register(Device_Cellular_Interface_i_X__000E50_LTE_Debug_VoiceInfo_EmergencyNumbers)
+
+local X_000E50_LTE_Debug_VoiceInfo_EmergencyNumbers_Parent = {
+  objectType = {
+    name = "Device.Cellular.Interface.{i}.X_000E50_LTE_Debug.Voice_Info.Emergency_Numbers.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- No parameters as it is the top level to add the content of different ubus commands to
+    }
+  }
+}
+
+register(X_000E50_LTE_Debug_VoiceInfo_EmergencyNumbers_Parent)
+
