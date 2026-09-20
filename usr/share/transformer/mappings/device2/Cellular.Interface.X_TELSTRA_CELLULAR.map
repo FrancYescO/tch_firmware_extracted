@@ -1,0 +1,216 @@
+local Device_Cellular_Interface_i_X_TELSTRA_CELLULAR = {
+	objectType = {
+		name = 'Device.Cellular.Interface.{i}.X_TELSTRA_CELLULAR.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			RSRQHistory = {
+				access = "readOnly",
+				type = "string"
+			},
+			RSRPHistory = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			SINRHistory = {
+				 access = "readOnly",
+				 type = "string"
+			},
+			StatusHistory = {
+				 access = "readOnly",
+				 type = "string"
+			},
+		}
+	}
+}
+
+local tonumber, concat, format = tonumber, table.concat, string.format
+local io = { open = io.open }
+local math = { floor = math.floor }
+
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local sqlite3 = require ("lsqlite3")
+local json = require("dkjson")
+
+local function get_uptime()
+	local f = io.open("/proc/uptime")
+	local line = f:read("*line")
+	f:close()
+	return math.floor(tonumber(line:match("[%d%.]+")))
+end
+
+local binding = { config = "lte-doctor", sectionname = "logger" }
+local interval = 900
+local offset = 200
+local signal_query_cmd = "SELECT * FROM log WHERE %s ORDER BY uptime;"
+local condition_cmd = "(uptime >= %s AND uptime <= %s)"
+
+local signal_map = { RSRQHistory = "rsrq", RSRPHistory = "rsrp", SINRHistory = "sinr"}
+
+local path, max_records
+local function get_db_path()
+    if not path then
+        binding.option = "path"
+        path = uci_helper.get_from_uci(binding)
+        if not path or path == "" then
+            path = "/tmp/lte-doctor.db"
+        end
+    end
+    return path
+end
+
+local function get_max_records(interval)
+    if not max_records then
+        binding.option = "period"
+        local period = uci_helper.get_from_uci(binding)
+        if not period or period == "" then
+	        period = 86400  --24h*60m*60s
+        else
+            period = period*60*60
+        end
+        max_records = math.floor(period/interval)
+    end
+    return max_records
+end
+
+local function get_db()
+    local db_path = get_db_path()
+    local db = sqlite3.open(db_path)
+    if not db then
+	    return
+    end
+    db:busy_timeout(1000)
+    local table_exists, event_table_exists
+    for line in db:nrows("SELECT name FROM sqlite_master WHERE type='table';") do
+	    if line.name == "log" then
+		    table_exists = true
+	    elseif line.name == "eventlog" then
+		    event_table_exists = true
+        end
+    end
+    return db, table_exists, event_table_exists
+end
+
+local function get_signal_query_conditions(current_uptime, interval)
+    local query_condition = {}
+    local number_record = math.floor(current_uptime/interval)
+    local starting_uptime = number_record*interval + offset
+    local max_records = get_max_records(interval)
+    if number_record > max_records then
+        number_record = max_records
+    end
+    if starting_uptime > current_uptime then
+        starting_uptime = starting_uptime - interval
+    end
+    for i=0, number_record do
+        local upper_limit = starting_uptime - i*interval
+        upper_limit = upper_limit + 2
+        local lower_limit = upper_limit - 7
+        query_condition[#query_condition+1] = format(condition_cmd, lower_limit, upper_limit)
+    end
+    if #query_condition > 0 then
+        return concat(query_condition, " OR ")
+    end
+end
+
+local function get_signal_history(database, record, reboot_time, query_condition)
+    local data = {}
+    local last_data
+    for line in database:nrows(format(signal_query_cmd, query_condition)) do
+        local number_data = #data
+        if (not last_data) or (line.uptime - last_data.uptime) > 10 then
+            number_data = number_data + 1
+        end
+        data[number_data] = line
+        last_data = line
+        local time_stamp = os.date("%FT%T", line.uptime + reboot_time)
+        for _,v in pairs(signal_map) do
+            if line.nas_state ~= 'registered' then
+                line[v] = ""
+            end
+            if line[v] ~= "" then
+                record[v][number_data] = time_stamp .. " " .. line[v]
+            end
+        end
+    end
+end
+
+local status_map = {
+    SimInit = "sim_removed",
+    Disabled = "device_disabled",
+    UnlockSim = "sim_unblock",
+    RegisterNetwork = "network_unregistered",
+}
+
+local function get_status_history(database, record, reboot_time)
+    local last_event
+    for line in database:nrows("SELECT * FROM eventlog WHERE uptime > 0 ORDER BY uptime;") do
+        local msg, pos, err = json.decode(line.event, 1 , nil)
+        if not err then
+            if last_event ~= msg.event and msg.event ~= "session_state_changed" then
+                local time_stamp = os.date("%FT%T", line.uptime + reboot_time)
+                record["StatusHistory"][#record["StatusHistory"]+1] = time_stamp .. " " .. msg.event
+                last_event = msg.event
+            end
+        end
+    end
+    -- lte doctor logger start after mobiled, some events are not captured and we need add it back
+    if #record["StatusHistory"] == 0 then
+        local result = conn:call("mobiled", "status", {})
+        if result and result.status then
+            local time_stamp = os.date("%FT%T", reboot_time + offset)
+            if status_map[result.status] then
+                record["StatusHistory"][1] = time_stamp .. " " .. status_map[result.status]
+            elseif result.status == "Idle" then
+                if result.display_status == "disconnected" then
+                    record["StatusHistory"][1] = time_stamp .. " " .. "network_registered"
+                elseif result.display_status == "connected" then
+                    record["StatusHistory"][1] = time_stamp .. " " .. "session_connected"
+                end
+            else
+                record["StatusHistory"][1] = time_stamp .. " " .. string.lower(result.status)
+            end
+        end
+    end
+end
+
+local function getall(mapping, key)
+    local record = {}
+    for _,v in pairs(signal_map) do
+        record[v] = {}
+    end
+    record["StatusHistory"] = {}
+
+    local database, table_exists, event_table_exists = get_db()
+
+    if database then
+        local current_uptime = get_uptime()
+        local reboot_time = os.time() - current_uptime
+        if table_exists then
+            local query_condition = get_signal_query_conditions(current_uptime, interval)
+            if query_condition then
+                get_signal_history(database, record, reboot_time, query_condition)
+            end
+        end
+        if event_table_exists then
+            get_status_history(database, record, reboot_time)
+        end
+    end
+    local result = {}
+    for k,v in pairs(signal_map) do
+        result[k] = concat(record[v],",")
+    end
+    result["StatusHistory"] = concat(record["StatusHistory"],",")
+	return result
+end
+
+local function get(mapping, paramName, key)
+    return getall(mapping, key)[paramName] or ""
+end
+
+Device_Cellular_Interface_i_X_TELSTRA_CELLULAR.get = get
+Device_Cellular_Interface_i_X_TELSTRA_CELLULAR.getall = getall
+
+register(Device_Cellular_Interface_i_X_TELSTRA_CELLULAR)
