@@ -1,0 +1,19 @@
+#!/bin/sh
+
+. /lib/config/uci.sh
+
+proxyAddress=`echo "$2" | awk -F',' '{print $1}'`
+
+if [ "$(uci_get mmpbxrvsipnet.sip_net.interface)" == "$1" ]; then
+    if [ "$(uci_get mmpbxrvsipnet.sip_net.primary_proxy)" != "$proxyAddress" ]; then
+        uci_set mmpbxrvsipnet sip_net primary_proxy "$proxyAddress"
+        uci_commit mmpbxrvsipnet
+    if [ "$(uci -P /var/state get mmpbx.state)" == "RUNNING" ]; then
+        /etc/init.d/mmpbxd restart
+    else
+        echo "MMPBX won't be restarted "
+    fi
+    else
+        echo "The proxy address didn't change so nothing to do .."
+    fi
+fi
