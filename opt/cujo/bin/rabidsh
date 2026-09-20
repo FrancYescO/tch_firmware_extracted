@@ -1,0 +1,24 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2018-2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+CUJO_HOME=${CUJO_HOME:-}
+if [ -z "$CUJO_HOME" ]; then
+    # Emulate dirname, as it is not available on all platforms
+    # remove everything after last '/'
+    a="/${0%/*}"
+    # if $a is unset or null, replace it with '.'
+    a=${a:-.}
+    # remove '/' from beginning of the string and add '/' at the end
+    a=${a#/}/
+    # this script should be in $CUJO_HOME/bin folder
+    CUJO_HOME=$(cd "$a"/..; pwd)
+fi
+export CUJO_HOME
+
+LD_LIBRARY_PATH=$CUJO_HOME/lib:${LD_LIBRARY_PATH:-} \
+    exec "$CUJO_HOME"/bin/lua "$CUJO_HOME"/share/lua/cujo/shell/client.lua "$@"

@@ -1,0 +1,587 @@
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--> <link rel="import" href="../polymer/polymer.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-a11y-keys-behavior/iron-a11y-keys-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-form-element-behavior/iron-form-element-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../iron-range-behavior/iron-range-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <link rel="import" href="../paper-behaviors/paper-inky-focus-behavior.html?v=<%= dumaos_version %>&lang=<%= lang %>&theme=<%= current_theme %>&themeVersion=<%= current_theme_version %>"> <script> /**
+    Shared library to combine paper-slider and paper-ranged-slider > paper-single-slider
+  */
+
+  Polymer.PaperSliderSharedBehaviourImpl = {
+
+    properties: {
+        /**
+        * Used to customize the displayed value of the pin. E.g. the value can be prefixed with a '$' like '$99'
+        */
+        displayFunction: {
+          type: Function,
+          value: function () {
+            return function (value) {
+              return value;
+            }
+          }
+        },
+
+        /**
+         * If true, the slider thumb snaps to tick marks evenly spaced based
+         * on the `step` property value.
+         */
+        snaps: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        /**
+         * Specifies the value granularity of the range's value.
+         * Used for keyboard left + right arrows only.
+         * 0 by default because code will fallback to `step`
+         */
+        keyboardStep: {
+          type: Number,
+          value: 0,
+          notify: true
+        },
+
+        /**
+         * If true, a pin with numeric value label is shown when the slider thumb
+         * is pressed. Use for settings for which users need to know the exact
+         * value of the setting.
+         */
+        pin: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        /**
+        * if true, pins with numeric value label are shown when the slider thumb
+        * is pressed. Use for settings for which users need to know the exact
+        * value of the setting.
+        */
+        alwaysShowPin: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        /**
+         * The number that represents the current secondary progress.
+         */
+        secondaryProgress: {
+          type: Number,
+          value: 0,
+          notify: true,
+          observer: '_secondaryProgressChanged'
+        },
+
+        secondaryAsMin: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+
+        /**
+         * If true, an input is shown and user can use it to set the slider value.
+         */
+        editable: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * The immediate value of the slider.  This value is updated while the user
+         * is dragging the slider.
+         */
+        immediateValue: {
+          type: Number,
+          value: 0,
+          readOnly: true,
+          notify: true
+        },
+
+        /**
+         * The maximum number of markers
+         */
+        maxMarkers: {
+          type: Number,
+          value: 0,
+          notify: true
+        },
+
+        /**
+         * If true, the knob is expanded
+         */
+        expand: {
+          type: Boolean,
+          value: false,
+          readOnly: true
+        },
+
+        /**
+         * True when the user is dragging the slider.
+         */
+        dragging: {
+          type: Boolean,
+          value: false,
+          readOnly: true
+        },
+
+        transiting: {
+          type: Boolean,
+          value: false,
+          readOnly: true
+        },
+
+        markers: {
+          type: Array,
+          readOnly: true,
+          value: function() {
+              return [];
+          }
+        },
+
+        /**
+         * If true, force display markers
+         */
+        forceMarkers: {
+          type: Boolean,
+          value: false,
+        },
+
+        filterMarkers: {
+          type: Function,
+          value: function(){
+            return function(index){
+              if(this.autoSecondaryMarker){
+                return index === this.secondaryProgress;
+              }
+              return true;
+            }.bind(this);
+          }
+        },
+
+        markerLabel: {
+          type: String,
+          value: ""
+        },
+        /**
+        * If this < 0, it will use secondaryProgress
+        */
+        markerLabelPos: {
+          type: Number,
+          value: -1
+        },
+
+        autoSecondaryMarker:
+        {
+          type: Boolean,
+          reflectToAttribute: true,
+          computed: '_hasAutoSecondaryMinMarkers(secondaryAsMin,maxMarkers,max)',
+        },
+
+        /**
+         * Hide the aria-label for this element
+         * see commented out 'ariaLabelChanged' function why it's left here commented out
+         */
+        // ariaLabel: {
+        //   type: String,
+        //   value: "",
+        //   reflectToAttribute: false,
+        //   observer: 'ariaLabelChanged'
+        // },
+
+        /**
+         * A unit to suffix on the end of aria-value attributes.
+         */
+        ariaValueUnit: {
+          type: String,
+          value: ""
+        },
+
+        ariaValueNowOverride: { type: Function, value: false },
+        ariaValueMinOverride: { type: Function, value: false },
+        ariaValueMaxOverride: { type: Function, value: false },
+        ariaValueTextOverride: { type: Function, value: false },
+
+        /**
+         * Convert between slider value and text input
+         * {
+         *   to: slider -> input value
+         *   from: input -> slider value
+         * }
+         */
+        inputProjection: {
+          type: Object,
+          value: function(){
+            return {
+              to: (v) => v,
+              from: (v) => v
+            }
+          }
+        }
+    },
+
+    observers: [
+      '_updateKnob(value, min, max, snaps, step, secondaryProgress, secondaryAsMin, ariaValueUnit, ariaValueNowOverride, ariaValueMinOverride, ariaValueMaxOverride, ariaValueTextOverride)',
+      '_valueChanged(value)',
+      '_immediateValueChanged(immediateValue)',
+      '_updateMarkers(maxMarkers, min, max, snaps)'
+    ],
+
+    hostAttributes: {
+      tabindex: -1
+    },
+
+    keyBindings: {
+      'left down pagedown home': '_decrementKey',
+      'right up pageup end': '_incrementKey'
+    },
+
+    get $sliderKnob() {
+      return this.__$sliderKnob || (this.__$sliderKnob = this.$$(".slider-knob"))
+    },
+
+    get $sliderBar() {
+      return this.__$sliderBar || (this.__$sliderBar = this.$$(".slider-bar"))
+    },
+
+    get $sliderContainer() {
+      return this.__$sliderContainer || (this.__$sliderContainer = this.$$(".slider-container"))
+    },
+
+    // This function takes the ariaLabel, and makes it so that it is removed from this element's attribute, even when set there initially
+    // This allows you to set the ariaLabel prop, from the [aria-label] attribute, but then it's removed from the attribute, but remains on the prop
+    // Left here because it took a while to figure out the exact specifics of this code, and the code could be very useful in the future
+    // ariaLabelChanged: function(newVal,oldVal){
+    //   if(this.hasAttribute("aria-label")) this.removeAttribute("aria-label");
+    //   if(newVal && newVal !== oldVal){
+    //     this.__latestAriaLabel = newVal;
+    //     Polymer.RenderStatus.afterNextRender(this,() => {
+    //       if(this.__latestAriaLabel) this.ariaLabel = this.__latestAriaLabel;
+    //     });
+    //   }
+    // },
+
+    /**
+     * Increases value by `step` but not above `max`.
+     * @method increment
+     */
+    increment: function(amount) {
+      var step = amount || this.step;
+      this.value = this._clampValue(this.value + step);
+    },
+    
+    /**
+     * Decreases value by `step` but not below `min`.
+     * @method decrement
+     */
+    decrement: function(amount) {
+      var step = amount || this.step;
+      this.value = this._clampValue(this.value - step);
+    },
+
+    _hasAutoSecondaryMinMarkers: function(secondaryAsMin,maxMarkers,max){
+      return secondaryAsMin && maxMarkers === max;
+    },
+
+    _showMarkers: function(snaps,forceMarkers,autoSecondaryMarker){
+      return snaps || forceMarkers || autoSecondaryMarker;
+    },
+
+    _isMarkerLabelHere: function(index,markerLabel,markerLabelPos,secondaryProgress){
+      return markerLabel && index === (markerLabelPos < 0 ? secondaryProgress : markerLabelPos);
+    },
+
+    _showEndMarker: function(filter,markers){
+      return filter(markers.length);
+    },
+
+    ready: function() {
+      if(this.alwaysShowPin) { this.pin = true; }
+    },
+      
+    _clampValue: function(value) {
+      return Math.min(this.max, Math.max(this.secondaryAsMin ? this.secondaryProgress : this.min, this._calcStep(value)));
+    },
+
+    _getAriaOverride: function(overrideVal,arg){
+      if(typeof overrideVal === "function"){
+        return overrideVal(arg);
+      }else{
+        return overrideVal;
+      }
+    },
+
+    _showMarkers: function(snaps,forceMarkers){
+      return snaps || forceMarkers;
+    },
+
+    _showEndMarker: function(filter,markers){
+      return filter(markers.length);
+    },
+
+    _updateKnob: function(value, min, max, snaps, step, secondaryProgress, secondaryAsMin, unit) {
+      const setAria = (attribute, value) => {
+        this.$sliderContainer.setAttribute(attribute,value);
+      }
+
+      const minFunc = this.ariaValueMinOverride || this.inputProjectionTo;
+      const maxFunc = this.ariaValueMaxOverride || this.inputProjectionTo;
+      const nowFunc = this.ariaValueNowOverride || this.inputProjectionTo;
+      const textFunc = this.ariaValueTextOverride || this.inputProjectionTo;
+      var suffix = unit ? " " + unit : "";
+      min = secondaryAsMin ? secondaryProgress : min;
+      setAria('aria-valuemin', minFunc ? this._getAriaOverride(minFunc,min) : min);
+      setAria('aria-valuemax', maxFunc ? this._getAriaOverride(maxFunc,max) : max);
+      setAria('aria-valuenow', nowFunc ? this._getAriaOverride(nowFunc,value) : value);
+      setAria('aria-valuetext', textFunc ? this._getAriaOverride(textFunc,value) + suffix : (value + suffix));
+
+      this._positionKnob(this._calcRatio(value));
+    },
+
+    _valueChanged: function() {
+      this.fire('value-change');
+    },
+
+    _immediateValueChanged: function() {
+      if (this.dragging) {
+        this.fire('immediate-value-change');
+      } else {
+        this.value = this.immediateValue;
+      }
+    },
+
+    _secondaryProgressChanged: function() {
+      this.secondaryProgress = this._clampValue(this.secondaryProgress);
+    },
+
+    _expandKnob: function() {
+      this._setExpand(true);
+    },
+
+    _resetKnob: function() {
+      this.cancelDebouncer('expandKnob');
+      this._setExpand(false);
+    },
+
+    _positionKnob: function(ratio) {
+      this._setImmediateValue(this._clampValue(this._calcKnobPosition(ratio)));
+      this._setRatio(this._calcRatio(this.immediateValue));
+
+      this.$sliderKnob.style.left = (this.ratio * 100) + '%';
+      if (this.dragging) {
+        this._knobstartx = this.ratio * this._w;
+        this.translate3d(0, 0, 0, this.$sliderKnob);
+      }
+    },
+
+    _calcKnobPosition: function(ratio) {
+      return (this.max - this.min) * ratio + this.min;
+    },
+
+    _onTrack: function(event) {
+      event.stopPropagation();
+      switch (event.detail.state) {
+        case 'start':
+          this._trackStart(event);
+          break;
+        case 'track':
+          this._trackX(event);
+          break;
+        case 'end':
+          this._trackEnd();
+          break;
+      }
+    },
+
+    _trackStart: function(event) {
+      this._w = this.$sliderBar.offsetWidth;
+      this._x = this.ratio * this._w;
+      this._startx = this._x;
+      this._knobstartx = this._startx;
+      this._minx = - this._startx;
+      this._maxx = this._w - this._startx;
+      this.$sliderKnob.classList.add('dragging');
+      this._setDragging(true);
+    },
+
+    _trackX: function(event) {
+      if (!this.dragging) {
+        this._trackStart(event);
+      }
+
+      var dx = Math.min(this._maxx, Math.max(this._minx, event.detail.dx));
+      this._x = this._startx + dx;
+
+      var immediateValue = this._clampValue(this._calcKnobPosition(this._x / this._w));
+      this._setImmediateValue(immediateValue);
+
+      // update knob's position
+      var translateX = ((this._calcRatio(this.immediateValue) * this._w) - this._knobstartx);
+      this.translate3d(translateX + 'px', 0, 0, this.$sliderKnob);
+    },
+
+    _trackEnd: function() {
+      var s = this.$sliderKnob.style;
+
+      this.$sliderKnob.classList.remove('dragging');
+      this._setDragging(false);
+      this._resetKnob();
+      this.value = this.immediateValue;
+
+      s.transform = s.webkitTransform = '';
+
+      this.fire('change');
+    },
+
+    _knobdown: function(event) {
+      this._expandKnob();
+
+      // cancel selection
+      event.preventDefault();
+
+      // set the focus manually because we will called prevent default
+      this.$sliderContainer.focus();
+    },
+
+    _bardown: function(event) {
+      this._w = this.$sliderBar.offsetWidth;
+      var rect = this.$sliderBar.getBoundingClientRect();
+      var ratio = (event.detail.x - rect.left) / this._w;
+      var prevRatio = this.ratio;
+
+      this._setTransiting(true);
+
+      this._positionKnob(ratio);
+
+      this.debounce('expandKnob', this._expandKnob, 60);
+
+      // if the ratio doesn't change, sliderKnob's animation won't start
+      // and `_knobTransitionEnd` won't be called
+      // Therefore, we need to manually update the `transiting` state
+
+      if (prevRatio === this.ratio) {
+        this._setTransiting(false);
+      }
+
+      this.async(function() {
+        this.fire('change');
+      });
+
+      // cancel selection
+      event.preventDefault();
+
+      // set the focus manually because we will called prevent default
+      this.$sliderContainer.focus();
+    },
+
+    _knobTransitionEnd: function(event) {
+      if (event.target === this.$sliderKnob) {
+        this._setTransiting(false);
+      }
+    },
+
+    _updateMarkers: function(maxMarkers, min, max, snaps) {
+      if (!snaps) {
+        this._setMarkers([]);
+      }
+      var steps = Math.round((max - min) / this.step);
+      if (steps > maxMarkers) {
+        steps = maxMarkers;
+      }
+      this._setMarkers(new Array(steps));
+    },
+
+    _getClassNames: function() {
+      return this._mergeClasses({
+        disabled: this.disabled,
+        pin: this.pin,
+        snaps: this.snaps,
+        ring: this.immediateValue <= this.min,
+        expand: this.expand || this.alwaysShowPin,
+        dragging: this.dragging,
+        transiting: this.transiting,
+        editable: this.editable
+      });
+    },
+
+    _mergeClasses: function(classes) {
+      return Object.keys(classes).filter(
+        function(className) {
+          return classes[className];
+        }).join(' ');
+    },
+
+    _inputKeyDown: function(event) {
+      event.stopPropagation();
+    },
+
+    // create the element ripple inside the `sliderKnob`
+    _createRipple: function() {
+      this._rippleContainer = this.$sliderKnob;
+      return Polymer.PaperInkyFocusBehaviorImpl._createRipple.call(this);
+    },
+
+    // Hide the ripple when user is not interacting with keyboard.
+    // This behavior is different from other ripple-y controls, but is
+    // according to spec: https://www.google.com/design/spec/components/sliders.html
+    _focusedChanged: function(receivedFocusFromKeyboard) {
+      if (receivedFocusFromKeyboard) {
+        this.ensureRipple();
+      }
+      if (this.hasRipple()) {
+        // note, ripple must be un-hidden prior to setting `holdDown`
+        if (receivedFocusFromKeyboard) {
+          this._ripple.style.display = '';
+        } else {
+          this._ripple.style.display = 'none';
+        }
+        this._ripple.holdDown = receivedFocusFromKeyboard;
+      }
+    },
+
+    inputProjectionTo: function(value){
+      if(this.inputProjection && this.inputProjection.to) return this.inputProjection.to(value);
+      return value;
+    },
+    inputProjectionFrom: function(value){
+      if(this.inputProjection && this.inputProjection.from) return this.inputProjection.from(value);
+      return value;
+    },
+
+    //on change from text input
+    _changeValue: function(event) {
+      const value = this.inputProjectionFrom(event.target.value);
+      this.value = this._clampValue(value);
+      this.fire('change');
+    },
+
+    // override this function from iron-control-state to move where it sets aria-disabled
+    _disabledChanged: function(disabled, old) {
+      this.$sliderContainer.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      this.style.pointerEvents = disabled ? 'none' : '';
+      if (disabled) {
+        this._oldTabIndex = this.tabIndex;
+        this._setFocused(false);
+        this.tabIndex = -1;
+        this.blur();
+      } else if (this._oldTabIndex !== undefined) {
+        this.tabIndex = this._oldTabIndex;
+      }
+      this.fire("tabindex-changed");
+    },
+
+  }
+
+  /** @polymerBehavior */
+  Polymer.PaperSliderSharedBehaviour = [
+    Polymer.IronA11yKeysBehavior,
+    Polymer.IronFormElementBehavior,
+    Polymer.PaperInkyFocusBehavior,
+    Polymer.IronRangeBehavior,
+    Polymer.PaperSliderSharedBehaviourImpl
+  ]; </script> 

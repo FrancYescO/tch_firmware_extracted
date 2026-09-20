@@ -1,0 +1,225 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.",
+    access = "readOnly",  -- readWrite currently not supported
+    numEntriesParameter = "IPInterfaceNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      IPInterfaceIPAddress = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      X_000E50_ExternalIPv6Address = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      IPInterfaceSubnetMask = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      IPInterfaceAddressingType = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "DHCP",
+          "Static",
+          "AutoIP",
+        },
+        default = "DHCP",
+      },
+    }
+  }
+}
+
+local format = string.format
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local inet = require "tch.inet"
+local isValidIP = inet.isValidIPv4
+local nwCommon = require("transformer.mapper.nwcommon")
+local conn = mapper("ubus").connect()
+local network = require("transformer.shared.common.network")
+local binding = { config = "network", state = false }
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local parentref = "@"..parentkey
+  local lanIntf = network.getLanInterfaces()
+  entries[#entries+1] = parentkey
+  binding.sectionname = "interface"
+  uci_helper.foreach_on_uci(binding, function(s)
+    if lanIntf[s['.name']] and s.ifname == parentref then
+       entries[#entries+1] = s['.name']
+    end
+  end)
+  return entries
+end
+
+local function getproto(key)
+  binding.sectionname = key
+  binding.option = "proto"
+  return get_from_uci(binding)
+end
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.get = {
+  Enable = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "auto"
+    local auto = get_from_uci(binding) or ""
+    if auto == "" then
+      return "1"
+    else
+      return auto
+    end
+  end,
+  IPInterfaceIPAddress = function(mapping, param, key)
+    local proto = getproto(key)
+    if proto == "dhcp" then
+      local networkstatus = conn:call("network.interface." .. key  , "status", {})
+      local ipaddr = networkstatus and networkstatus["ipv4-address"] and networkstatus["ipv4-address"][1] and networkstatus["ipv4-address"][1]["address"]
+      if not ipaddr then
+        return ""
+      end
+      return ipaddr
+    end
+    binding.sectionname = key
+    binding.option = "ipaddr"
+    local addr = get_from_uci(binding)
+    if type(addr) == "table" then
+      return addr[1]
+    end
+    return addr
+  end,
+  X_000E50_ExternalIPv6Address = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "ipv6"
+    if get_from_uci(binding) == "0" then
+      return ""
+    else
+      binding.sectionname = "globals"
+      binding.option = "ula_prefix"
+      local ula_disabled = get_from_uci(binding) == "none" and true or false
+      local default_mask = "64"
+      local networkstatus = conn:call("network.interface." .. key  , "status", {}) or {}
+      local addrs = {}
+      for _, ip in ipairs(networkstatus['ipv6-address'] or {}) do
+        addrs[#addrs+1] = ip.address.."/"..ip.mask or ""
+      end
+      if ula_disabled then
+        for _, prefix in ipairs(networkstatus['ipv6-prefix-assignment'] or {}) do
+          local addr = prefix['local-address']
+          if addr then
+            addrs[#addrs+1] = addr.address.."/"..addr.mask
+          end
+        end
+      end
+      if not next(addrs) then
+        local device = nwCommon.getIntfName(key)
+        addrs[#addrs+1] = nwCommon.getLinkLocalAddress(device) ~= "" and nwCommon.getLinkLocalAddress(device).."/"..default_mask or ""
+      end
+      return (table.concat(addrs, " "))
+    end
+  end,
+  IPInterfaceSubnetMask = function(mapping, param, key)
+    local proto = getproto(key)
+    if proto == "dhcp" then
+      local networkstatus = conn:call("network.interface." .. key  , "status", {})
+      local mask = networkstatus and networkstatus["ipv4-address"] and networkstatus["ipv4-address"][1] and networkstatus["ipv4-address"][1]["mask"]
+      if not mask then
+        return ""
+      end
+      return nwCommon.netmask2mask(mask)
+    end
+    binding.sectionname = key
+    binding.option = "netmask"
+    return get_from_uci(binding)
+  end,
+  IPInterfaceAddressingType = function(mapping, param, key)
+    binding.sectionname = key
+    binding.option = "proto"
+    local proto = get_from_uci(binding)
+    if proto == "static" then
+      return "Static"
+    elseif proto == "auto" then
+      return "AutoIP"
+    else
+      return "DHCP"
+    end
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.set = function(mapping,param,paramvalue,key)
+  if param == "Enable" then
+    binding.sectionname = key
+    binding.option = "auto"
+    uci_helper.set_on_uci(binding, paramvalue, commitapply)
+    uci_helper.commit(binding)
+  end
+  if param == "IPInterfaceIPAddress" then
+    if isValidIP(paramvalue) then
+      local proto = getproto(key)
+      if proto == "static" then
+        binding.sectionname = key
+        binding.option = "ipaddr"
+        uci_helper.set_on_uci(binding, paramvalue, commitapply)
+        uci_helper.commit(binding)
+      end
+    else
+      return nil,format("%s is not a valid IP Address", paramvalue or "nil")
+    end
+  end
+  if param == "IPInterfaceSubnetMask" then
+    local proto = getproto(key)
+    if proto == "static" then
+      binding.sectionname = key
+      binding.option = "netmask"
+      uci_helper.set_on_uci(binding, paramvalue, commitapply)
+      uci_helper.commit(binding)
+    end
+  end
+  if param == "IPInterfaceAddressingType" then
+    binding.sectionname = key
+    binding.option = "proto"
+    if paramvalue == "Static" then
+      uci_helper.set_on_uci(binding, "static", commitapply)
+      uci_helper.commit(binding)
+    elseif paramvalue == "DHCP" then
+      uci_helper.set_on_uci(binding, "dhcp", commitapply)
+      uci_helper.commit(binding)
+    elseif paramvalue == "AutoIP" then
+      uci_helper.set_on_uci(binding, "auto", commitapply)
+      uci_helper.commit(binding)
+    end
+  end
+end
+
+local function ip_intf_event(mapping, event, msg)
+  -- only event if there is at least an IP address in the event
+  local addresses = msg["ipv4-address"]
+  local ipv6addresses = msg["ipv6-address"]
+  if addresses and #addresses > 0 then
+    return { { key = msg.interface, paramname = "IPInterfaceIPAddress" } }
+  end
+  if ipv6addresses then
+    return { { key = msg.interface, paramname = "X_000E50_ExternalIPv6Address" } }
+  end
+end
+
+InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, ip_intf_event, "network.interface")
+end
+
+register(InternetGatewayDevice_LANDevice_i_LANHostConfigManagement_IPInterface_i_)

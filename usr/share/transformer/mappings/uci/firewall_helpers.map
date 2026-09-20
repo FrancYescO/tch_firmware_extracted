@@ -1,0 +1,136 @@
+local mapper = mapper
+local uh = mapper("ucihelper")
+local config_firewall_helpers = "firewall_helpers"
+
+-- uci.firewall_helpers
+mapper("uci_1to1").registerConfigMap(config_firewall_helpers)
+
+-- uci.firewall_helpers.helper.{i}
+local firewall_helper_options = {
+  "enable", "name", "port", "family", "proto",
+}
+
+local firewall_helper = {
+  config = config_firewall_helpers,
+  type = "helper",
+  options = firewall_helper_options,
+}
+
+-- In firewall_helpers config, only enable option is readwrite,
+-- other options are readonly. The 1-to-1 helper doesn't support this.
+-- Hence the following implementation is done to handle this scenario.
+-- We use the helper as much as possible but wrap the get(), getall(), set()
+-- functions in a version that handles options other than 'enable' in a custom way.
+local firewall_helpers_mapping = mapper("uci_1to1").createMultiMap(firewall_helper)
+
+local fwBinding = { config = "firewall" }
+local configChanged
+
+local function getFromUci(section, option, default)
+  fwBinding.sectionname = section
+  fwBinding.option = option
+  fwBinding.default = default
+  return uh.get_from_uci(fwBinding)
+end
+
+local function setOnUci(section, option, value)
+  fwBinding.sectionname = section
+  fwBinding.option = option
+  uh.set_on_uci(fwBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getFirewallData(helperName)
+  local enable = "0"
+  local intf
+  fwBinding.sectionname = "zone"
+  uh.foreach_on_uci(fwBinding, function(s)
+    for _, helper in pairs(s.helper or {}) do
+      if helper == helperName and s.name ~= "loopback" then
+        enable = "1"
+        intf = s.name
+        return false
+      end
+    end
+  end)
+  return enable, intf
+end
+
+-- get firewall zone sectionname(or cfgid) of given intf name
+local function getFirewallZoneSectionName(intf)
+  local section_name
+  fwBinding.sectionname = "zone"
+  uh.foreach_on_uci(fwBinding, function(s)
+    if s["name"] == intf then
+      section_name = s[".name"]
+      return false
+    end
+  end)
+  return section_name or ""
+end
+
+local orig_get = firewall_helpers_mapping.get
+firewall_helpers_mapping.get = function(mapping, paramname, key, ...)
+  if paramname == "enable" then
+    local name = orig_get(mapping, "name", key)
+    return getFirewallData(name)
+  end
+  return orig_get(mapping, paramname, key, ...)
+end
+
+local orig_getall = firewall_helpers_mapping.getall
+firewall_helpers_mapping.getall = function(mapping, key, ...)
+  local values = orig_getall(mapping, key, ...)
+  values.enable = getFirewallData(values.name)
+  return values
+end
+
+firewall_helpers_mapping.set = function(mapping, paramname, paramvalue, key, ...)
+  if paramname ~= "enable" then
+    return nil, "Currently set not supported for ".. paramname
+  end
+  local name = orig_get(mapping, "name", key)
+  local oldValue, intf = getFirewallData(name)
+  if paramvalue ~= oldValue then
+    -- By default add helper list in LAN zone incase enable 1
+    local interface = paramvalue == "1" and "lan" or intf
+    local sectionname = getFirewallZoneSectionName(interface)
+    local helperList = getFromUci(sectionname, "helper", {})
+    if paramvalue == "1" then
+      helperList[#helperList + 1] = name
+      setOnUci(sectionname, "helper", helperList)
+    else
+      local newList = {}
+      for _, helper in pairs(helperList) do
+        if helper ~= name then
+          newList[#newList + 1] = helper
+        end
+      end
+      setOnUci(sectionname, "helper", newList)
+    end
+  end
+end
+
+firewall_helpers_mapping.add = function()
+  return nil, "Currently add functionality is not supported"
+end
+
+firewall_helpers_mapping.delete = function()
+  return nil, "Currently delete is not supported"
+end
+
+firewall_helpers_mapping.commit = function()
+  if configChanged then
+    uh.commit(fwBinding)
+    configChanged = false
+  end
+end
+
+firewall_helpers_mapping.revert = function()
+  if configChanged then
+    uh.revert(fwBinding)
+    configChanged = false
+  end
+end
+
+register(firewall_helpers_mapping)

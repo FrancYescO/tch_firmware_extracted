@@ -1,0 +1,13 @@
+#!/bin/sh
+[ -z "${IPKG_INSTROOT}" ] || exit 0
+if [ "${PKG_UPGRADE}" == "1" ]; then
+	eval $(/usr/bin/nginx-util get_env)
+	TMP_CRT=$(mktemp -p "${CONF_DIR}" "${LAN_NAME}.crt.tmp-XXXXXX")
+	ln -f "${CONF_DIR}${LAN_NAME}.crt" "${TMP_CRT}"
+	TMP_KEY=$(mktemp -p "${CONF_DIR}" "${LAN_NAME}.key.tmp-XXXXXX")
+	ln -f "${CONF_DIR}${LAN_NAME}.key" "${TMP_KEY}"
+fi
+/usr/bin/nginx-util del_ssl
+[ -f "${TMP_CRT}" ] && mv -f "${TMP_CRT}" "${CONF_DIR}${LAN_NAME}.crt"
+[ -f "${TMP_KEY}" ] && mv -f "${TMP_KEY}" "${CONF_DIR}${LAN_NAME}.key"
+exit 0

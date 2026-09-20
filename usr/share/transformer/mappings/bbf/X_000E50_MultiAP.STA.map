@@ -1,0 +1,113 @@
+-- Manuall generated
+
+local Multi_X_000E50_MultiAP_STA_i_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_MultiAP.STA.{i}.",
+    numEntriesParameter = "STANumberOfEntries",
+    access = "readOnly",
+    description = "This object represents the associated Stations of  Multi-AP.",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MAC = {
+        access = "readOnly",
+        type = "string"
+      },
+      AssocBSS = {
+        access = "readOnly",
+        type = "string"
+      },
+      AssocAgentMAC = {
+        access = "readOnly",
+        type = "string"
+      },
+      AssocSince = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      DLMACRate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      ULMACRate = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RSSI = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      TxBytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RxBytes = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      TxPkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RxPkts = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      TxPktErrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RxPktErrors = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+      RetransmissionCount = {
+        access = "readOnly",
+        type = "unsignedInt"
+      },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+local paramMap = {
+  AssocBSS = "associated_bssid_mac",
+  AssocAgentMAC = "associated_agent_mac",
+  AssocSince = "since_assoc_time",
+  DLMACRate = "dlmac_datarate",
+  ULMACRate = "ul_mac_rate",
+  RSSI = "rssi",
+  TxBytes = "txbytes",
+  RxBytes = "rxbytes",
+  TxPkts = "txpkts",
+  RxPkts = "rxpkts",
+  TxPktErrors = "txpkterrrors",
+  RxPktErrors = "rxpkterrors",
+  RetransmissionCount = "retransmission_cnt",
+}
+
+Multi_X_000E50_MultiAP_STA_i_.entries = function()
+  local entries = {}
+  local data = conn:call("multiap.controller.station", "list", {}) or {}
+  for mac in pairs(data) do
+    entries[#entries + 1] = mac
+  end
+  return entries
+end
+
+Multi_X_000E50_MultiAP_STA_i_.get = function(mapping, param, key)
+  if param == "MAC" then
+    return key
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.station", "list", {}) or {}
+    local result = data[key] and data[key][paramMap[param]] or ""
+    return tostring(result)
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_MultiAP_STA_i_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

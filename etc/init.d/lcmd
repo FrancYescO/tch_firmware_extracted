@@ -1,0 +1,73 @@
+#!/bin/sh /etc/rc.common
+START=50
+STOP=10
+
+SERVICE_SIG_RELOAD="USR1"
+SERVICE_SIG_RELOAD_EE_PACKAGES="USR2"
+
+USE_PROCD=1
+
+EXTRA_COMMANDS="reload_ee_packages"
+EXTRA_HELP="	reload_ee_packages Iterate over all EE's and add any new packages to the LCM database"
+
+parse_old_db() {
+  local database_old="/etc/lcmd_db_old/"
+  if [ ! -d "${database_old}" ]; then
+    return 0
+  fi
+  local force_enabled="/etc/force_enabled"
+  local force_disabled="/etc/force_disabled"
+  for app in $(find "${database_old}" -type f); do
+    local autostart=$(sed -ne 's/^ *"autostart": *//p' "${app}" | cut -d '"' -f 2)
+    if [ -n "${autostart}" ]; then
+      # We found an app with autostart explicitly set
+      local execenv=$(sed -ne 's/^ *"execenv": *//p' "${app}" | cut -d '"' -f 2)
+      local name=$(sed -ne 's/^ *"name": *//p' "${app}" | cut -d '"' -f 2)
+      if [[ "${execenv}"=="lxc"* ]] ; then
+        mkdir -p "/srv/lxc/${execenv}/rootfs/etc/"
+        if [ "${autostart}" -eq "0" ]; then
+          echo "${name}" >> "/srv/lxc/${execenv}/rootfs${force_disabled}"
+        else
+          echo "${name}" >> "/srv/lxc/${execenv}/rootfs${force_enabled}"
+        fi
+      fi
+      if [[ "${execenv}"=="native"* ]] ; then
+        if [ -f "/opt/etc/init.d/${name}" ]; then
+          if [ "${autostart}" -eq "0" ]; then
+            /opt/etc/init.d/${name} disable
+          else
+            /opt/etc/init.d/${name} enable
+          fi
+        fi
+      fi
+    fi
+    rm -f "${app}"
+  done
+  rm -rf "${database_old}"
+}
+
+start_service() {
+  local enabled
+  parse_old_db
+  config_load "lcmd"
+  config_get enabled daemon_config enable 0
+  [ "$enabled" -eq 0 ] && return 1
+  procd_open_instance "lcmd"
+  procd_set_param command /usr/bin/lcmd
+  procd_close_instance
+}
+
+reload_service() {
+  procd_send_signal lcmd lcmd $(kill -l "${SERVICE_SIG_RELOAD}")
+  if [ $? -ne 0 ]; then
+    echo "Reload of lcmd failed. LCMd not yet running?"
+  fi
+  # make sure the last statement of the reload function is always true
+  # otherwise init.d will restart LCMd on failure of the reload function
+  # and that can lead to an unwanted racecondition during boot time
+  true
+}
+
+reload_ee_packages() {
+  procd_send_signal lcmd lcmd $(kill -l "${SERVICE_SIG_RELOAD_EE_PACKAGES}")
+}
