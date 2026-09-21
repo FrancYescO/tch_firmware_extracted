@@ -1,0 +1,303 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Multi_DeviceInfo_VendorLogFile_i_ = {
+  objectType = {
+    name = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorLogFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      MaximumSize = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Persistent = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_000E50_DeviceLogFilter = {
+        access = "readWrite",
+        type = "string",
+        description = "Set a filter for DeviceLog",
+        max = "64",
+         enumeration = {
+         "SIP",
+         "DHCP",
+         "PPP",
+         "CWMPD",
+         "WANSENSING",
+         "FON",
+         "MOBILED",
+         "VOLTE",
+         "ALL",
+         },
+      },
+      X_000E50_DeviceLogLevel = {
+        access = "readWrite",
+        type = "string",
+        description = "Severity  of the messages that can be set to be stored in the log file",
+        max = "64",
+        enumeration = { "1","2","3","4","5","6","7","8",
+        "Normal",
+        "Verbose"
+        },
+      },
+      X_000E50_Rotate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Allows to create the file rotation when defined filesize is achieved",
+      },
+      X_000E50_Size = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "Size of the log file that is retained in the device",
+      },
+    }
+  }
+}
+
+local lfs = require("lfs")
+local uciHelper = mapper("ucihelper")
+local normalPriority = { "emerg", "alert", "crit", "err", "warning" }
+local sysBinding = { config = "system" }
+local configChanged
+local execute = os.execute
+
+local categories = {
+  ALL = { "" },
+  SIP = { "mmpbx", "mmpbxd%[%d+%]" },
+  DHCP = { "dhcp" },
+  PPP = { "ppp" },
+  CWMPD = { "cwmpd","cwmpd%[%d+%]" },
+  WANSENSING = { "wansensing" },
+  FON = { "hotspotd" },
+  MOBILED = { "mobiled", "mobiled%[%d+%]" },
+  VOLTE = { "mobiled", "MOBILENETIMPL" }
+}
+
+local function getUciValue(section, option, default, extended)
+  sysBinding.sectionname = section
+  if option then
+    sysBinding.option = option
+    sysBinding.default = default
+    sysBinding.extended = extended
+    return uciHelper.get_from_uci(sysBinding)
+  end
+  return uciHelper.getall_from_uci(sysBinding)
+end
+
+local function setUciValue(section, option, value)
+  sysBinding.sectionname = section
+  sysBinding.option = option
+  uciHelper.set_on_uci(sysBinding, value, commitapply)
+  configChanged = true
+end
+
+local function get_patterns(category, level)
+  local patterns = {}
+  local keywords = categories[category]
+
+  if not keywords then return nil end
+
+  for _, keyword in ipairs(keywords) do
+    if level == "Normal" then
+      for _, priority in ipairs(normalPriority) do
+        patterns[#patterns+1] = "\."..priority.."%s+"..keyword
+      end
+    else
+      patterns[#patterns+1] =keyword
+    end
+  end
+
+  return patterns
+end
+
+local function uci_set_pattern(key,category,level)
+  if(category == "ALL" and level =="Verbose" ) then
+    setUciValue(key, "logall", 1)
+  else
+    local patterns = get_patterns(category, level) or {}
+    setUciValue(key, "pattern", patterns)
+    setUciValue(key, "logall", "")
+  end
+end
+
+local function getName(key)
+  if key == "kernel_crash" or key == "crash_file" then
+    local coredump_path = getUciValue("@coredump[0]", "path", "", true)
+    if coredump_path ~= "" and lfs.attributes(coredump_path, 'mode') == 'directory' then
+      for file in lfs.dir(coredump_path) do
+        if lfs.attributes(coredump_path .."/".. file,"mode") == "file" and file:match("%.gz$") then
+          if (file:match("kernel_crash.gz$") and key == "kernel_crash") or (file:match("%.core.gz$") and key == "crash_file") then
+            return coredump_path .."/".. file or ""
+          end
+        end
+      end
+    end
+  end
+  return ""
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.entries = function(mapping)
+  local logEntries = {}
+  sysBinding.sectionname = "log"
+  uciHelper.foreach_on_uci(sysBinding, function(s)
+    logEntries[#logEntries+1] = s['.name']
+  end)
+  logEntries[#logEntries+1] = "crash_file"
+  logEntries[#logEntries+1] = "kernel_crash"
+  return logEntries
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.get = {
+  Name = function(mapping, param, key)
+    return getUciValue(key, "path") ~= "" and getUciValue(key, "path") or getName(key)
+  end,
+
+  MaximumSize = function(mapping, param, key)
+    -- Max number of files is 1 (the current log file) plus max number of log rotation files.
+    -- size is the maximum size per file
+    local logConfig = getUciValue(key)
+    local size = tonumber(logConfig.size) or 0
+    local rotate = logConfig.rotate and tonumber(logConfig.rotate) or 0
+    return tostring(size * (rotate + 1))
+  end,
+
+  Persistent = function(mapping, param, key)
+    -- log file is persistent when path, size and rotate options are valid at the same time
+    local logConfig = getUciValue(key)
+    local path = logConfig.path or ""
+    if path == "filter_file" then
+      local log_filter_file = getUciValue("@system[0]", "log_filter_file", "/var/log/filt_msg", true)
+      return (log_filter_file:find("^/var/") or log_filter_file:find("^/tmp/")) and "0" or "1"
+    else
+       local validPath = lfs.attributes(path, "mode") == "file"
+       local size = tonumber(logConfig.size) or 0
+       if validPath and size > 0 then
+          return (path:find("^/var/") or path:find("^/tmp/")) and "0" or "1"
+       end
+       return "0"
+    end
+  end,
+  X_000E50_DeviceLogFilter = function(mapping, param, key)
+    local logConfig = getUciValue(key)
+    local path = logConfig.path or ""
+    if path == "filter_file" then
+      local log_filter = getUciValue("@system[0]", "log_filter", {}, true)
+      if type(log_filter) == 'table' then
+        log_filter = table.concat(log_filter, ',')
+      end
+      return log_filter
+    else
+      return getUciValue(key, "logfilter", "ALL")
+    end
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, key)
+    local logConfig = getUciValue(key)
+    local path = logConfig.path or ""
+    if path == "filter_file" then
+      local log_filter_level = getUciValue("@system[0]", "filterloglevel", "8", true)
+      return log_filter_level
+    else
+      return getUciValue(key, "loglevel", "Normal")
+    end
+  end,
+  X_000E50_Rotate = function(mapping, param, key)
+    return getUciValue(key, "rotate", "0")
+  end,
+  X_000E50_Size = function(mapping, param, key)
+    return getUciValue(key, "size", "0")
+  end
+}
+
+Multi_DeviceInfo_VendorLogFile_i_.getall = function(mapping,key)
+  local values = getUciValue(key)
+  return {
+    Name = values.path ~= "" and values.path or getName(key),
+    MaximumSize = values.size or "0",
+  }
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.set = {
+  Persistent = function(mapping, param, value, key)
+    local logConfig = getUciValue(key)
+    local size = tonumber(logConfig.size) or 0
+    if size > 0 then
+      local oldPath = logConfig.path or ""
+      local newPath = ""
+      local fileSize = "64000"
+      local rotation = "0"
+      if value == "1" then
+        newPath = oldPath:gsub("var","root")
+        fileSize = "1024000"
+        rotation = "5"
+      else
+        newPath = oldPath:gsub("root","var")
+      end
+      execute("rm -f " .. oldPath .. "*")
+      setUciValue(key, "path", newPath)
+      setUciValue(key, "size", fileSize)
+      setUciValue(key, "rotate", rotation)
+      return true
+    else
+      return nil, "Cannot set Persistent Value"
+    end
+  end,
+  X_000E50_DeviceLogFilter = function(mapping, param, value, key)
+    local level = getUciValue(key, "loglevel")
+    local category = value
+    uci_set_pattern(key,category,level)
+    return setUciValue(key, "logfilter", value)
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, value, key)
+    local logConfig = getUciValue(key)
+    local path = logConfig.path or ""
+    if path == "filter_file" and tonumber(value) <= 8 then
+      return setUciValue("@system[0]", "filterloglevel", value)
+    elseif value == "Normal" or value == "Verbose" then
+      local level = value
+      local category = getUciValue(key, "logfilter")
+      uci_set_pattern(key,category,level)
+      return setUciValue(key, "loglevel", value)
+    end
+  end,
+  X_000E50_Rotate = function(mapping, param, value, key)
+    return setUciValue(key, "rotate", value)
+  end,
+  X_000E50_Size = function(mapping, param, value, key)
+    return setUciValue(key, "size", value)
+  end,
+}
+
+Multi_DeviceInfo_VendorLogFile_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(sysBinding)
+  end
+  configChanged = false
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(sysBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DeviceInfo_VendorLogFile_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
