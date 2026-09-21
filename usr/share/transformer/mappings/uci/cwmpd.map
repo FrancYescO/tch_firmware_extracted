@@ -1,0 +1,46 @@
+local config_cwmpd = "cwmpd"
+
+-- uci.cwmpd
+local uci_cwmpd = mapper("uci_1to1").createConfigMap(config_cwmpd)
+register(uci_cwmpd)
+
+-- uci.cwmpd.config
+local cwmpd_config = {
+  config = config_cwmpd,
+  section = "cwmpd_config",
+  options = { "state", "acs_url", "acs_user", "acs_pass", "periodicinform_enable",
+              "periodicinform_interval", "periodicinform_time",
+              "connectionrequest_username", "connectionrequest_password",
+              "connectionrequest_auth", "connectionrequest_port",
+              "interface", "upgradesmanaged", "ssl_castore", "ssl_certificate", "ssl_privatekey" }
+}
+
+local uci_cwmpd_config = mapper("uci_1to1").createSimpleMap(cwmpd_config)
+register(uci_cwmpd_config)
+
+-- Temporary workaround to have the proper TR-069 events when
+-- external IP changes or diagnostics have completed: the backend
+-- subscribes on these parameters and external scripts do a set.
+register({
+  objectType = {
+    name = "uci.cwmpd.events.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ExternalIP = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      DiagnosticsComplete = {
+        access = "readWrite",
+        type = "boolean",
+      }
+    }
+  },
+  get = function()
+    return "0"
+  end,
+  set = function()
+  end
+})

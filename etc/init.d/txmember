@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_DAEMONIZE=1
+export WD_UUID_FILE="/etc/txmember/radio_id"
+if [ -z "$WD_DEVICE_ID" ]; then                                      
+        export WD_DEVICE_ID="$(uci get env.rip.eth_mac | tr '[A-Z]' '[a-z]')"
+fi
+export TDDS_IP_INTF="br-lan"
+
+start() {
+        config_load txmember
+        config_get_bool enabled config enabled 0
+        [ $enabled -gt 0 ] || return 1
+        if [ ! -e "${WD_UUID_FILE}" ]; then
+          #This is an easy way to have a persistent random radio_id
+          cp /proc/sys/kernel/random/uuid "${WD_UUID_FILE}"
+        fi
+        service_start /usr/bin/txmember
+}
+
+stop() {
+        service_stop /usr/bin/txmember
+}
+
+reload() {
+        restart
+}

@@ -1,0 +1,105 @@
+
+local uci_wanatmf5loopback = {
+  objectType = {
+    name = "uci.wanatmf5loopback.@.",
+    access = "readOnly",
+    numEntriesParameter = "numOfatminterfaces",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Complete",
+          "Error_Internal",
+          "Error_Other",
+        },
+        default = "None",
+      },
+      NumberOfRepetitions = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+        default = "1",
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      SuccessCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        default = "0",
+      },
+      FailureCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        default = "0",
+      },
+      AverageResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        default = "0",
+      },
+      MinimumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        default = "0",
+      },
+      MaximumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        default = "0",
+      },
+    }
+  }
+}
+
+local helper = mapper("atmpinghelper")
+
+
+helper.startup(commitapply)
+
+uci_wanatmf5loopback.get = function(mapping,pname,key)
+   local interface = key
+   -- point to interface specific config
+   helper.adapt_uci_binding(interface)
+   -- create_defaults_on_uci (only if they do not exist)
+   helper.create_defaults_on_uci(interface)
+   return helper.getResults(interface, pname)
+end
+
+uci_wanatmf5loopback.set = function(mapping,pname,pvalue,key)
+    local interface = key
+    -- point to interface specific config
+    helper.adapt_uci_binding(interface)
+    -- create_defaults_on_uci (only if they do not exist)
+    helper.create_defaults_on_uci(interface)
+    helper.starttest(interface, pname, pvalue, commitapply)
+end
+uci_wanatmf5loopback.entries = function(mapping)
+     return helper.getIntf()
+end
+uci_wanatmf5loopback.commit = helper.atm_commit
+uci_wanatmf5loopback.revert = helper.atm_revert
+
+register(uci_wanatmf5loopback)
+

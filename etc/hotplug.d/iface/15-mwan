@@ -1,0 +1,493 @@
+#!/bin/sh
+
+# do not run during /etc/init.d/network boot()
+# rules will be set once iso for each interface in /etc/init.d/mwan
+[ -f /var/state/bootnetwork ] && exit 0
+# do not run if there is no mwan config
+[ -f /etc/config/mwan ] && [ "$(wc -l /etc/config/mwan | cut -d ' ' -f 1)" -gt 0 ] || exit 0
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+. /lib/functions/functions-tch.sh
+
+mwan_get_mark_mask MWAN_NF_MASK
+MWAN_CT_MASK=$MWAN_NF_MASK
+
+mwan_check_icmp_type6() {
+	local _var="$1"
+	local _type="$2"
+
+	case "$_type" in
+		![0-9]*) export -n -- "$_var=! --icmpv6-type ${_type#!}"; return 0 ;;
+		[0-9]*)  export -n -- "$_var=--icmpv6-type $_type";       return 0 ;;
+	esac
+
+	[ -z "$FW_ICMP6_TYPES" ] && \
+	 	export FW_ICMP6_TYPES=$(
+	 		ip6tables -p icmpv6 -h 2>/dev/null | \
+	 		sed -n -e '/^Valid ICMPv6 Types:/ {
+	 			n; :r; s/[()]/ /g; s/[[:space:]]\+/\n/g; p; n; b r
+	 		}' | sort -u
+	 	)
+
+	local _check
+	for _check in $FW_ICMP6_TYPES; do
+		if [ "$_check" = "${_type#!}" ]; then
+			[ "${_type#!}" != "$_type" ] && \
+				export -n -- "$_var=! --icmpv6-type ${_type#!}" || \
+				export -n -- "$_var=--icmpv6-type $_type"
+			return 0
+		fi
+	done
+
+	export -n -- "$_var="
+	return 1
+}
+
+mwan_check_icmp_type4() {
+	local _var="$1"
+	local _type="$2"
+
+	case "$_type" in
+		![0-9]*) export -n -- "$_var=! --icmp-type ${_type#!}"; return 0 ;;
+		[0-9]*)  export -n -- "$_var=--icmp-type $_type";       return 0 ;;
+	esac
+
+	[ -z "$MWAN_ICMP4_TYPES" ] && \
+		export MWAN_ICMP4_TYPES=$(
+			iptables -p icmp -h 2>/dev/null | \
+			sed -n -e '/^Valid ICMP Types:/ {
+				n; :r; s/[()]/ /g; s/[[:space:]]\+/\n/g; p; n; b r
+			}' | sort -u
+		)
+
+	local _check
+	for _check in $MWAN_ICMP4_TYPES; do
+		if [ "$_check" = "${_type#!}" ]; then
+			[ "${_type#!}" != "$_type" ] && \
+				export -n -- "$_var=! --icmp-type ${_type#!}" || \
+				export -n -- "$_var=--icmp-type $_type"
+			return 0
+		fi
+	done
+
+	export -n -- "$_var="
+	return 1
+}
+
+mwan_get_negation() {
+	local _var="$1"
+	local _flag="$2"
+	local _value="$3"
+
+	[ "${_value#!}" != "$_value" ] && \
+		export -n -- "$_var=! $_flag ${_value#!}" || \
+		export -n -- "$_var=${_value:+$_flag $_value}"
+}
+
+mwan_get_port_range() {
+	local _var=$1
+	local _ports=$2
+	local _delim=${3:-:}
+	if [ "$4" ]; then
+		fw_get_port_range $_var "${_ports}-${4}" $_delim
+		return
+	fi
+
+	local _first=${_ports%[-:]*}
+	local _last=${_ports#*[-:]}
+	if [ "${_first#!}" != "${_last#!}" ]; then
+		export -- "$_var=$_first$_delim${_last#!}"
+	else
+		export -- "$_var=$_first"
+	fi
+}
+
+mwan_iptables_mangle() #action fam chain pos { rule }
+{
+	local cmd fam chain pos
+	local i
+
+	for i in cmd fam chain pos; do
+		if [ "$1" -a "$1" != '{' ]; then
+			eval "$i='$1'"
+			shift
+		else
+			eval "$i=-"
+		fi
+	done
+
+	local app
+	case $fam in
+		*4) app=iptables ;;
+		*6) app=ip6tables ;;
+		*) app=iptables ;;
+	esac
+
+	case "$cmd:$chain:$pos" in
+		add:*:%) cmd=new-chain ;;
+		add:*:-) cmd=append ;;
+		add:*:*) cmd=insert ;;
+		del:-:*) cmd=delete-chain; mwan_iptables_mangle flush $fam ;;
+		del:*:*) cmd=delete-chain; mwan_iptables_mangle flush $fam $chain ;;
+		flush:*) ;;
+		list:*) cmd="numeric --verbose --$cmd" ;;
+		*) return 254 ;;
+	esac
+
+	case "$chain" in
+		-) chain= ;;
+	esac
+
+	local rule_offset
+	case "$pos" in
+		^) pos=1 ;;
+		-) pos= ;;
+		%) pos= ;;
+	        +) rule_offset=$(($($app -L $chain -t mangle -n | wc -l)-1)) ;;
+	esac
+
+	if [ $# -gt 0 ]; then
+		shift
+		if [ $cmd == delete ]; then
+			pos=
+		fi
+	fi
+
+	local cmdline="$app --${cmd} $chain ${rule_offset:-${pos}} -t mangle"
+
+	while [ $# -gt 1 ]; do
+		# special parameter handling
+		case "$1:$2" in
+			-p:icmp*|-p:1|-p:58)
+				[ "$app" = ip6tables ] && \
+					cmdline="$cmdline -p icmpv6" || \
+					cmdline="$cmdline -p icmp"
+				shift
+			;;
+
+			--icmp-type:*|--icmpv6-type:*)
+				local icmp_type
+				if [ "$app" = ip6tables ] && mwan_check_icmp_type6 icmp_type "$2"; then
+					cmdline="$cmdline $icmp_type"
+				elif [ "$app" = iptables ] && mwan_check_icmp_type4 icmp_type "$2"; then
+					cmdline="$cmdline $icmp_type"
+				else
+					local fam=IPv4; [ "$app" = ip6tables ] && fam=IPv6
+					logger -t mwan "ICMP type '$2' is not valid for $fam address family, skipping rule"
+					return 1
+				fi
+				shift
+			;;
+
+			*) cmdline="$cmdline $1"
+			   ;;
+		esac
+		shift
+	done
+
+	$cmdline
+
+	return $?
+}
+
+mwan_setup_basic_iptables_rules()
+{
+	if ! mwan_iptables_mangle list "ipv4" "mwan_rules"; then
+		mwan_iptables_mangle add "ipv4" "mwan_rules" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_default"; then
+		mwan_iptables_mangle add "ipv4" "mwan_default" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_pre"; then
+		mwan_iptables_mangle add "ipv4" "mwan_pre" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_local"; then
+		mwan_iptables_mangle add "ipv4" "mwan_local" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_output"; then
+		mwan_iptables_mangle add "ipv4" "mwan_output" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_post"; then
+		mwan_iptables_mangle add "ipv4" "mwan_post" %
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_pre" | grep "CONNMARK restore mask"; then
+		mwan_iptables_mangle flush "ipv4" "mwan_pre"
+		mwan_iptables_mangle add "ipv4" "mwan_pre" \
+				{ "-j CONNMARK --restore-mark --nfmask $MWAN_NF_MASK --ctmask $MWAN_CT_MASK" }
+		mwan_iptables_mangle add "ipv4" "mwan_pre" \
+				{ "-m mark --mark 0x0/$MWAN_NF_MASK" "-j mwan_default" }
+		mwan_iptables_mangle add "ipv4" "mwan_pre" \
+				{ "-m mark --mark 0x0/$MWAN_NF_MASK" "-j mwan_rules" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_post" | grep "CONNMARK save mask"; then
+		mwan_iptables_mangle flush "ipv4" "mwan_post"
+		mwan_iptables_mangle add "ipv4" "mwan_post" \
+				{ "-m mark ! --mark 0x0/$MWAN_NF_MASK -j CONNMARK --save-mark \
+				  --nfmask $MWAN_NF_MASK --ctmask $MWAN_CT_MASK" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "PREROUTING" | grep mwan_pre; then
+		mwan_iptables_mangle add "ipv4" "PREROUTING" { "-j mwan_pre" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "OUTPUT" | grep mwan_output; then
+		mwan_iptables_mangle add "ipv4" "OUTPUT" { "-j mwan_output" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "mwan_output" | grep "CONNMARK restore mask"; then
+		mwan_iptables_mangle flush "ipv4" "mwan_output"
+		mwan_iptables_mangle add "ipv4" "mwan_output" \
+				{ "-m conntrack --ctdir ORIGINAL -m connmark ! --mark 0x0 -j CONNMARK \
+				  --restore-mark --nfmask $MWAN_NF_MASK --ctmask $MWAN_CT_MASK" }
+		mwan_iptables_mangle add "ipv4" "mwan_output" \
+				{ "-m mark --mark 0x0/$MWAN_NF_MASK -j mwan_default" }
+		mwan_iptables_mangle add "ipv4" "mwan_output" \
+				{ "-m mark  --mark 0x0/$MWAN_NF_MASK -j mwan_local" }
+		mwan_iptables_mangle add "ipv4" "mwan_output" \
+				{ "-m mark  --mark 0x0/$MWAN_NF_MASK -j mwan_rules" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "INPUT" | grep mwan_post &> /dev/null; then
+		mwan_iptables_mangle add "ipv4" "INPUT" { "-j mwan_post" }
+	fi
+
+	if ! mwan_iptables_mangle list "ipv4" "POSTROUTING" | grep mwan_post &> /dev/null; then
+		mwan_iptables_mangle add "ipv4" "POSTROUTING" { "-j mwan_post" }
+	fi
+
+	mwan_iptables_mangle flush "ipv4" "mwan_rules"
+	mwan_iptables_mangle flush "ipv4" "mwan_local"
+}
+
+mwan_update_ip_rules()
+{
+	local interface
+	config_get interface $1 interface
+	[ $interface = $INTERFACE ] || return
+
+	local policy_number
+	mwan_get_policy_number "$1" "policy_number"
+	[ -n "$policy_number" ] || exit 0
+	[ "$policy_number" -lt "$MWAN_MARK_MASK_BITS" ] || exit 0
+	local wan_rule_pref=$(($policy_number+1015))
+	local policy_rule_pref=$(($policy_number+2015))
+
+	local nfmark
+	val_shift_left "nfmark" "$policy_number" "$MWAN_MARK_SHIFT"
+	local nfmark_hex=0x$(printf %x $nfmark)
+
+	local table_id=$(uci get network.$interface.ip4table)
+	if [ -z "$table_id" ]; then
+		table_id=main
+	fi
+
+	ip -f inet rule del pref ${wan_rule_pref}
+
+	for c in $(ip -f inet rule list | grep "fwmark" | \
+		awk '($1 == ( "'${policy_rule_pref}:'" )) || ($7 == ( "'$table_id'" ))' | \
+		awk '{split($5,a,"/"); if (a[1] == "'$nfmark_hex'") print $1}'); do
+		ip -f inet rule del pref ${c%:}
+	done
+
+	[ $ACTION = "ifup" -a -n "$DEVICE" ] || return
+	ip -f inet rule add pref ${wan_rule_pref} iif $DEVICE table main &> /dev/null
+	ip -f inet rule add pref ${policy_rule_pref} fwmark $nfmark/$MWAN_NF_MASK table $table_id &> /dev/null
+}
+
+mwan_default_iptables_rules()
+{
+	mwan_iptables_mangle flush "ipv4" "mwan_default"
+	mwan_iptables_mangle add "ipv4" "mwan_default" \
+			{ "-d 224.0.0.0/3" "-m mark" "--mark 0x0/$MWAN_NF_MASK" \
+			  "-j MARK --set-xmark $MWAN_NF_MASK/$MWAN_NF_MASK" }
+}
+
+mwan_parse_rule()
+{
+	local policy
+	config_get policy $1 policy
+
+	local nfmark
+	mwan_get_mark_number "$policy" "nfmark"
+	[ -n "$nfmark" ] || exit 0
+
+	local rule_src
+	config_get rule_src $1 src
+	[ -n "$rule_src" ] && {
+		local device
+
+		if network_get_device device "${rule_src#!}"; then
+			[ ${rule_src#!} != $rule_src ] && \
+			device="!$device"
+			mwan_get_negation rule_src '-i' "$device"
+		else
+			rule_src=""
+		fi
+	}
+
+	local rule_proto
+	config_get rule_proto $1 proto "tcpudp"
+	[ "$rule_proto" == "tcpudp" ] && rule_proto="tcp udp"
+
+	local rule_src_ip
+	config_get rule_src_ip $1 src_ip 0.0.0.0/0
+	mwan_get_negation rule_src_ip '-s' "$rule_src_ip"
+
+	local rule_dest_ip
+	config_get rule_dest_ip $1 dest_ip 0.0.0.0/0
+	mwan_get_negation rule_dest_ip '-d' "$rule_dest_ip"
+
+	local rule_src_ports
+	config_get rule_src_ports $1 src_port "0-65535"
+	mwan_get_port_range rule_src_ports "$rule_src_ports"
+	mwan_get_negation rule_src_ports '--sport' "$rule_src_ports"
+
+	local rule_dest_ports
+	config_get rule_dest_ports $1 dest_port "0-65535"
+	mwan_get_port_range rule_dest_ports "$rule_dest_ports"
+	mwan_get_negation rule_dest_ports '--dport' "$rule_dest_ports"
+
+	local rule_icmp_types
+	config_get rule_icmp_types $1 icmp_type ""
+
+	local pr; for pr in ${rule_proto}; do
+		case "${pr#!}" in
+			0)
+				rule_src_ports=""
+				rule_dest_ports=""
+			;;
+
+			icmp|icmpv6|1|58)
+				if [ "${pr#!}" != "$pr" ]; then
+					rule_icmp_types=""
+				else
+					rule_src_ports=""; rule_dest_ports=""
+				fi
+			;;
+
+			tcp|udp|6|17)
+				if [ "${pr#!}" != "$pr" ]; then
+					rule_src_ports=""
+					rule_dest_ports=""
+				fi
+				rule_icmp_types=""
+			;;
+
+			*)
+				rule_icmp_types=""
+			;;
+		esac
+
+		mwan_get_negation pr '-p' "$pr"
+
+		local rule_icmp_type; for rule_icmp_type in ${rule_icmp_types:-""}; do
+
+			mwan_get_negation rule_icmp_type '--icmp-type' "$rule_icmp_type"
+
+			mwan_iptables_mangle "add" "ipv4" "mwan_rules" \
+					{ $rule_src $rule_src_ip $rule_dest_ip \
+					  $pr $rule_src_ports $rule_dest_ports \
+					  $rule_icmp_type "-m mark" "--mark 0x0/$MWAN_NF_MASK" \
+					  "-j MARK --set-xmark $nfmark/$MWAN_NF_MASK" }
+		done
+	done
+}
+
+mwan_flush_iptables()
+{
+	# Flush the mwan "root" chains as we don't want
+	# to flush the iptables root chains
+	mwan_iptables_mangle "flush" "ipv4" "mwan_pre"
+	mwan_iptables_mangle "flush" "ipv4" "mwan_output"
+	mwan_iptables_mangle "flush" "ipv4" "mwan_post"
+
+	# Delete the mwan subchains
+	mwan_iptables_mangle "del" "ipv4" "mwan_default"
+	mwan_iptables_mangle "del" "ipv4" "mwan_local"
+	mwan_iptables_mangle "del" "ipv4" "mwan_rules"
+}
+
+mwan_flush_ip_rules()
+{
+	for c in $(ip -f inet rule list | grep "fwmark" | awk '{split($5,a,"/"); \
+		    if (a[2] == "$MWAN_NF_MASK") print $1}'); do
+		ip -f inet rule del pref ${c%:}
+	done
+}
+
+mwan_parse_host()
+{
+	local policy
+	config_get policy $1 policy
+
+	local path
+	config_get path $1 path
+
+	local arg
+	config_get arg $1 arg
+
+	local interface
+	config_get interface $policy interface
+	local table_id=$(uci get network.$interface.ip4table)
+
+	if [ -n "$table_id" ]; then
+		local nfmark
+		mwan_get_mark_number "$policy" "nfmark"
+		[ -n "$nfmark" ] || exit 0
+
+		for p in $path; do
+			echo "$p $nfmark $arg" >>/var/etc/mwan.config.$$
+		done
+	fi
+
+}
+
+mwan_ifupdown()
+{
+	config_load mwan
+
+	if grep -q '/sbin/hotplug-call' "/proc/$$/cmdline"
+	then
+		while [ "$(pgrep -f -o '/sbin/hotplug-call iface')" != "$$" ]; do
+			sleep 1
+		done
+	fi
+
+	logger -t mwan "$ACTION interface $INTERFACE ($DEVICE)"
+
+	mwan_setup_basic_iptables_rules
+	config_foreach mwan_update_ip_rules policy
+	mwan_default_iptables_rules
+	config_foreach mwan_parse_rule rule
+	touch /var/etc/mwan.config.$$
+	config_foreach mwan_parse_host host
+	mv -f /var/etc/mwan.config.$$ /var/etc/mwan.config
+}
+
+mwan_stop()
+{
+	logger -t mwan "$ACTION"
+
+	mwan_flush_iptables
+	mwan_flush_ip_rules
+
+	rm -f /var/etc/mwan.config
+}
+
+case "$ACTION" in
+	ifup|ifdown)
+		mwan_ifupdown
+	;;
+
+	stop)
+		mwan_stop
+	;;
+esac

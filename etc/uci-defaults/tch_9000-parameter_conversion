@@ -1,0 +1,193 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+echo_debug() {
+	if [[ -n $DEBUG ]]; then
+		echo $1 >> /tmp/parameter_conversion.log
+	fi
+}
+
+if [[ -f /tmp/parameter_conversion.log ]]; then rm /tmp/parameter_conversion.log; fi
+
+if [[ -h /overlay/homeware_conversion -o -d /overlay/homeware_conversion ]]; then
+
+	if [[ -h /overlay/homeware_conversion ]]; then
+		old_config=$(readlink /overlay/homeware_conversion)
+	else
+		old_config=/overlay/homeware_conversion
+	fi
+	old_release_version=$(uci -q -c $old_config/etc/config get version.@version[0].version | awk -F- '{print $1}')
+
+	if [[ "$old_release_version" && -f /etc/parameter_conversion/conversion_$old_release_version ]]; then
+		conversion_file=/etc/parameter_conversion/conversion_$old_release_version
+	else
+		conversion_file=/etc/parameter_conversion/conversion
+	fi
+
+	if [[ -f $conversion_file ]]; then
+		i=1
+		# Remove comments from conversion file
+		while read action value1 value2 value3; do
+			if [[ $action ]]; then
+				echo_debug "Parameter='$value1', action='$action'"
+				case $action in
+
+				debug_on)
+					# No parameter required
+					DEBUG=1
+					echo_debug "Old configuration=$old_config"
+					echo_debug "Conversion file=$conversion_file"
+					;;
+
+				duplicate_config)
+					# No parameter required
+					echo_debug "Duplicate config from $old_config to /"
+					cp -R $old_config/* /
+					;;
+
+				copy_dir)
+					# value1=directory to be copied
+					# value2=new directory destination (optional)
+					# value3=(not used)
+					if [[ "$value1" ]]; then
+						if [[ -d $old_config/$value1 ]]; then
+							if [[ ! -d $(dirname $value1) ]]; then
+								mkdir $(dirname $value1)
+							fi
+							cp -R $old_config/$value1 $(dirname $value1)
+						else
+							echo_debug "copy_dir: '$old_config/$value1' is not a directory"
+						fi
+					else
+						echo_debug "copy_dir: Error, expected at least 1 parameter (line $i)"
+					fi
+					;;
+
+				copy_file)
+					# value1=file to be copied
+					# value2=new directory (optional)
+					# value3=new filename (optional)
+					if [[ "$value1" ]]; then
+						if [[ -f $old_config/$value1 ]]; then
+							if [[ "$value2" ]]; then
+								if [[ ! -d $value2 ]]; then
+									echo_debug "copy_file: Creating directory '$value2'"
+									mkdir -p $value2
+								fi
+								if [[ "$value3" ]]; then
+									new_file=$value2/$value3
+								else
+									new_file=$value2/$(basename $value1)
+								fi
+								cp $old_config/$value1 $new_file
+								if [[ $? -ne 0 ]]; then
+									echo_debug "copy_file: Couldn't copy '$old_config/$value1' to '$new_dir'"
+								fi
+							else
+								cp $old_config/$value1 $(dirname $value1)
+								if [[ $? -ne 0 ]]; then
+									echo_debug "copy_file: Couldn't copy '$old_config/$value1' to '$(dirname $value1)'"
+								fi
+							fi
+						else
+							echo_debug "copy_file: Couldn't find file '$value1' in $old_config"
+						fi
+					else
+						echo_debug "copy_file: Error, expected at least 1 parameter (line $i)"
+					fi
+					;;
+
+				uci_set)
+					# value1=parameter to be copied
+					# value2=new parameter name (optional)
+					# value3=(not used)
+					if [[ "$value1" ]]; then
+						old_value=$(uci -q -c $old_config/etc/config get $value1)
+						if [[ "$old_value" ]]; then
+							if [[ "$value2" ]]; then
+								uci set $value2="$old_value"
+								if [[ $? -ne 0 ]]; then
+									echo_debug "uci_set: Failed to set UCI value '$old_value' for parameter '$value2'"
+								fi
+							else
+								uci set $value1="$old_value"
+								if [[ $? -ne 0 ]]; then
+									echo_debug "uci_set: Failed to set UCI value '$old_value' for parameter '$value1'"
+								fi
+							fi
+						else
+							echo_debug "uci_set: Couldn't get UCI value for parameter '$value1'"
+						fi
+					else
+						echo_debug "uci_set: Error, expected at least 1 parameter (line $i)"
+					fi
+					;;
+
+				uci_section)
+					# value1=section name
+					# value2=UCI filename (absolute path)
+					# value3=(not used)
+					if [[ "$value1" && "$value2" ]]; then
+						echo_debug "Copying UCI section '$value1' from '$value2'"
+						awk "/^config $value1/{start_print=1} {if(start_print==1) print} /^$/{start_print=0}" $old_config/$value2 >> $value2
+					else
+						echo_debug "uci_section: Expected 2 parameters (line $i)"
+					fi
+					;;
+
+				uci_list)
+					# value1=list parameter to be copied
+					# value2=new list name (optional)
+					# value3=(not used)
+					if [[ "$value1" ]]; then
+						old_value=$(uci -q -d"%%" -c $old_config/etc/config get $value1)
+						if [[ "$old_value" ]]; then
+							if [[ "$value2" ]]; then
+								parameter=$value2
+							else
+								parameter=$value1
+							fi
+							uci delete -q $parameter
+							echo $old_value | awk -F"%%" "{for(i=1; i<NF+1; i++){print \"add_list $parameter='\" \$i \"'\";}}" | uci batch
+							if [[ $? -ne 0 ]]; then
+								echo_debug "uci_list: Failed to set UCI value '$old_value' for parameter '$parameter'"
+							fi
+						else
+							echo_debug "uci_list: Couldn't get UCI value for parameter '$value1'"
+						fi
+					else
+						echo_debug "uci_list: Error, expected at least 1 parameter (line $i)"
+					fi
+					;;
+
+				inline_sh_cmd)
+					# value1=shell command
+					# value2=shell command (continued)
+					# value3=shell command (continued)
+					if [[ "$value1" ]]; then
+						run=$(echo "$value1 $value2 $value3" | sed "s|%%OLDCONFIG%%|$old_config|g")
+						echo_debug "inline_sh_cmd: Running '$run'"
+						sh -c "$run"
+					else
+						echo_debug "inline_sh_cmd: Error, expected at least 1 parameter (line $i)"
+					fi
+					;;
+
+				*)
+					echo_debug "Unknow action '$action' in file $conversion_file in line $i"
+				esac
+				let i++
+			fi
+		done < $conversion_file
+	else
+		echo_debug "Conversion file '$conversion_file' not found"
+	fi
+
+	if [[ -d /overlay/homeware_conversion ]]; then
+		umount /overlay/homeware_conversion
+	fi
+	rm -rf /overlay/homeware_conversion
+fi
+
+

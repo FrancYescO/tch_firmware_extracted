@@ -1,0 +1,48 @@
+local commitapply = commitapply
+local floor = math.floor
+local open = io.open
+local tostring = tostring
+
+register({
+    objectType = {
+        name = 'rpc.system.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            reboot = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            reset = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            switchover = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            uptime = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+        }
+    },
+    get = {
+        reboot = "0",
+        reset = "0",
+        switchover = "0",
+        uptime = function()
+            local fd, msg = open("/proc/uptime")
+            if not fd then
+                return fd, msg
+            end
+            local uptime = fd:read("*n")
+            fd:close()
+            return tostring(floor(uptime))
+        end,
+    },
+    set = function(_,paramname)
+        commitapply:newset("rpc.system." .. paramname)
+    end
+})

@@ -1,0 +1,409 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local WANIPConnection_i_PortMapping_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.PortMapping.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PortMappingNumberOfEntries",
+    enableParameter = "PortMappingEnabled",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      PortMappingEnabled = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      PortMappingLeaseDuration = {
+        access = "readOnly",  -- readWrite currently not supported
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      RemoteHost = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ExternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ExternalPortEndRange = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      InternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      PortMappingProtocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      InternalClient = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+     PortMappingDescription = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+-- Automatically generated from InternetGatewayDevice:1.4
+-- using generator version 2.1
+local WANPPPConnection_i_PortMapping_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.PortMapping.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PortMappingNumberOfEntries",
+    enableParameter = "PortMappingEnabled",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      PortMappingEnabled = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      PortMappingLeaseDuration = {
+        access = "readOnly",   -- readWrite currently not supported
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      RemoteHost = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      ExternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      ExternalPortEndRange = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      InternalPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      PortMappingProtocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      InternalClient = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+      PortMappingDescription = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+
+local common = mapper("nwcommon")
+local split_key = common.split_key
+local interface2zone = common.interface2zone
+local get_lan_zones = common.get_lan_zones
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local getall_from_uci = uci_helper.getall_from_uci
+local foreach_on_uci = uci_helper.foreach_on_uci
+local generate_key_on_uci = uci_helper.generate_key_on_uci
+local commit_keys = uci_helper.commit_keys
+local commit_on_uci = uci_helper.commit
+local revert_keys = uci_helper.revert_keys
+local revert_on_uci = uci_helper.revert_on_uci
+local delete_on_uci = uci_helper.delete_on_uci
+
+local ipairs, type, tonumber = ipairs, type, tonumber
+local lower, upper, match = string.lower, string.upper, string.match
+
+local fw_binding = { config = "firewall", sectionname = "", option = "", default = "" }
+
+-- Cache that maps the generated _key of a portmap to the corresponding
+-- generated section name.
+-- Note that this cache needs to be rebuild every entries() because the
+-- generated section name changes when entries are deleted/added.
+local key2sectionname = {}
+
+local changes_done = false
+
+local function entries(mapping, parentkey)
+  local PortMappings = {}
+  key2sectionname = {}
+  local ifname = split_key(parentkey)
+  local iface_zone = interface2zone(ifname)
+  if not iface_zone then
+    return PortMappings
+  end
+  iface_zone = iface_zone.name
+  local lan_zones = get_lan_zones()
+  local redirect_sections = { "redirect" }
+
+  fw_binding.sectionname = "redirectsgroup"
+  foreach_on_uci(fw_binding, function(s)
+    if (not s.enabled or s.enabled == "1") then
+      redirect_sections[#redirect_sections + 1] = s.type
+    end
+  end)
+
+  for _, v in ipairs(redirect_sections) do
+    local key_generated = false
+    fw_binding.sectionname = v
+    local result = foreach_on_uci(fw_binding, function(s)
+      -- TODO: deal with proto == "tcpudp"! The GUI can set this and the ACS should see those portmaps!
+      if s.src == iface_zone and lan_zones[s.dest] and (s.target == nil or s.target == "DNAT") and
+         (type(s.proto) == "table" and #s.proto == 1 and (lower(s.proto[1]) == "tcp" or lower(s.proto[1]) == "udp")) then
+        local _key = s._key
+        if not _key then
+          fw_binding.sectionname = s[".name"]
+          _key = generate_key_on_uci(fw_binding)
+          key_generated = true
+        end
+        _key = parentkey .. "|" .. _key
+        PortMappings[#PortMappings + 1] = _key
+        key2sectionname[_key] = s[".name"]
+      end
+    end)
+    if key_generated then
+      if result then
+        uci_helper.commit_keys(fw_binding)
+      else
+        uci_helper.revert_keys(fw_binding)
+      end
+    end
+  end
+  -- TODO: we should also include portmaps created via UPnP (sys.upnp.redirect.)
+  return PortMappings
+end
+
+local function get_from_rule(key, option, default)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  fw_binding.default = default
+  if option then
+    return get_from_uci(fw_binding)
+  end
+  return getall_from_uci(fw_binding)
+end
+
+local function get_external_port(_, param, key)
+  local v = get_from_rule(key, "src_dport", "0")
+  local start, stop = match(v, "(%d+)[%-:]?(%d*)")
+  if not start or not stop then
+    return "0"
+  end
+  if param == "ExternalPort" then
+    return start
+  end
+  return stop
+end
+
+local get = {
+  PortMappingEnabled = function(mapping, param, key)
+    return get_from_rule(key, "enabled", "1")
+  end,
+  PortMappingLeaseDuration = "0",  -- TODO: UPnP portmaps have a duration!
+  RemoteHost = function(mapping, param, key)
+    return get_from_rule(key, "src_ip")
+  end,
+  ExternalPort = get_external_port,
+  ExternalPortEndRange = get_external_port,
+  InternalPort = function(mapping, param, key)
+    -- dest_port could be a range according to the documentation;
+    -- take the first port
+    local v = get_from_rule(key, "dest_port")
+    return match(v, "^%d+") or "0"
+  end,
+  PortMappingProtocol = function(mapping, param, key)
+    local v = get_from_rule(key, "proto", {})
+    return ((type(v) == "table") and #v == 1 and upper(v[1])) or ""
+  end,
+  InternalClient = function(mapping, param, key)
+    return get_from_rule(key, "dest_ip")
+  end,
+
+  PortMappingDescription = function(mapping, param, key)
+    return get_from_rule(key, "name")
+  end,
+}
+
+local function set_on_rule(key, param, value)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = param
+  set_on_uci(fw_binding, value, commitapply)
+  changes_done = true
+end
+
+local function delete_on_rule(key, option)
+  fw_binding.sectionname = key2sectionname[key]
+  fw_binding.option = option
+  delete_on_uci(fw_binding, commitapply)
+  changes_done = true
+end
+
+local set = {
+  PortMappingEnabled = function(mapping, param, value, key)
+    set_on_rule(key, "enabled", value)
+  end,
+  RemoteHost = function(mapping, param, value, key)
+    set_on_rule(key, "src_ip", value)
+  end,
+  ExternalPort = function(mapping, param, value, key)
+    local v = get_from_rule(key, "src_dport")
+    local start, stop = match(v, "(%d+)[%-:]?(%d*)")
+    -- add stop port in case stop is configured and smaller than the new value
+    if stop ~= nil and value ~= "0" and tonumber(value) < tonumber(stop) then
+      value = value .. ":" .. stop
+    end
+    if value ~= "0" then
+      set_on_rule(key, "src_dport", value)
+    else
+      -- wildcard
+      delete_on_rule(key, "src_dport")
+      delete_on_rule(key, "dest_port")
+    end
+  end,
+  ExternalPortEndRange = function(mapping, param, value, key)
+    local v = get_from_rule(key, "src_dport")
+    -- ignore in case src_port is wildcard
+    if v == "" then
+      return
+    end
+    local start, stop = match(v, "(%d+)[%-:]?(%d*)")
+    if value ~= "0" then
+      if tonumber(value) < tonumber(start) then
+        return nil, "value must be >= ExternalPort value"
+      end
+      set_on_rule(key, "src_dport", start .. ":" .. value)
+    else
+      if stop ~= nil then
+        set_on_rule(key, "src_dport", start)
+      end
+    end
+  end,
+  InternalPort = function(mapping, param, value, key)
+    local v = get_from_rule(key, "src_dport")
+    -- ignore in case src_port is wildcard
+    if v == "" then
+      return
+    end
+    if value == "0" then
+      return nil, "value must be > 0"
+    end
+    set_on_rule(key, "dest_port", value)
+  end,
+  PortMappingProtocol = function(mapping, param, value, key)
+    set_on_rule(key, "proto", { value })
+  end,
+  InternalClient = function(mapping, param, value, key)
+    set_on_rule(key, "dest_ip", value)
+  end,
+  PortMappingDescription = function(mapping, param, value, key)
+    set_on_rule(key, "name", value)
+  end
+}
+
+local function add(mapping, parentkey)
+  local ifname = split_key(parentkey)
+  local iface_zone = interface2zone(ifname)
+
+  if not iface_zone then
+    return nil, "interface zone not found"
+  end
+
+  -- Discover the default "lan" zone
+  local lan_zones, nr_of_lan_zones = get_lan_zones()
+  if (nr_of_lan_zones == 0) then
+    return nil, "need one LAN zone"
+  end
+  local lan_zone = lan_zones["lan"] and "lan" or next(lan_zones)
+
+  fw_binding.sectionname = "redirect"
+  local sectionname = uci_helper.add_on_uci(fw_binding, commitapply)
+  fw_binding.sectionname = sectionname
+  local _key = uci_helper.generate_key()
+  fw_binding.option = "_key"
+  set_on_uci(fw_binding, _key)
+  _key = parentkey .. "|" .. _key
+  key2sectionname[_key] = sectionname
+  fw_binding.option = "enabled"
+  set_on_uci(fw_binding, "0", commitapply)
+  fw_binding.option = "src"
+  set_on_uci(fw_binding, iface_zone.name, commitapply)
+  fw_binding.option = "proto"
+  set_on_uci(fw_binding, { "TCP" }, commitapply)
+  fw_binding.option = "dest"
+  set_on_uci(fw_binding, lan_zone, commitapply)
+  fw_binding.option = "target"
+  set_on_uci(fw_binding, "DNAT", commitapply)
+  changes_done = true
+  return _key
+end
+
+local function delete(mapping, key)
+  delete_on_rule(key)
+  return true
+end
+
+local function commit()
+  if changes_done then
+    commit_keys(fw_binding)
+    commit_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+local function revert()
+  if changes_done then
+    revert_keys(fw_binding)
+    revert_on_uci(fw_binding)
+    changes_done = false
+  end
+end
+
+-- TODO: getall() implementation
+
+WANIPConnection_i_PortMapping_i_.entries = entries
+WANIPConnection_i_PortMapping_i_.get = get
+WANIPConnection_i_PortMapping_i_.set = set
+WANIPConnection_i_PortMapping_i_.add = add
+WANIPConnection_i_PortMapping_i_.delete = delete
+WANIPConnection_i_PortMapping_i_.commit = commit
+WANIPConnection_i_PortMapping_i_.revert = revert
+WANPPPConnection_i_PortMapping_i_.entries = entries
+WANPPPConnection_i_PortMapping_i_.get = get
+WANPPPConnection_i_PortMapping_i_.set = set
+WANPPPConnection_i_PortMapping_i_.add = add
+WANPPPConnection_i_PortMapping_i_.delete = delete
+WANPPPConnection_i_PortMapping_i_.commit = commit
+WANPPPConnection_i_PortMapping_i_.revert = revert
+
+register(WANIPConnection_i_PortMapping_i_)
+register(WANPPPConnection_i_PortMapping_i_)

@@ -1,0 +1,51 @@
+<%
+gettext.textdomain('webui-core')
+
+local modal = '/modals/assistance-modal.lp'
+
+local format = string.format
+
+local session = ngx.ctx.session
+local admin = session:hasAccess(modal)
+
+local ui_helper = require 'web.ui_helper'
+
+local assistance = require 'web.assistance'
+local assistant = assistance.getAssistant('remote')
+
+if assistant then
+    local content
+    local state
+    if assistant:enabled() then
+        state = "1"
+        local light = ui_helper.createSimpleLight(state, T"Enabled")
+        if admin then
+            content = {
+                light,'<br/>',
+                T"Port:",format(' <strong id="port">%s</strong>', assistant:port()),'<br/>',
+                T"Username:",format(' <strong id="username">%s</strong>', assistant:username()),"<br/>",
+                T"Password:", format(' <strong id="password">%s</strong>', assistant:password()),
+            }
+        else
+            content = {light}
+        end
+    else
+        state = "0"
+        content = {
+            ui_helper.createSimpleLight(state, T"Disabled")
+        }
+    end
+%>
+<div class="span3">
+  <div class="smallcard">
+    <% if admin then
+        ngx.print(ui_helper.createCardHeader(T"Assistance", modal, 'ra_enabled', state))
+    else
+        ngx.print(ui_helper.createCardHeader(T"Assistance"))
+    end %>
+    <div class="content">
+        <%= content %>
+    </div>
+  </div>
+</div>
+<% end %>

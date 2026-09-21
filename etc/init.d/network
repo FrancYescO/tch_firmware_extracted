@@ -1,0 +1,60 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+STOP=90
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+
+network_system() { return 0; }
+setup_switch() { return 0; }
+include /lib/network
+
+boot() {
+	# this can be checked by hotplug scripts to prevent them from running
+	# for each ifup during boot (mwan,igmpproxy,miniupnpd,firewall,pppoe-relay)
+	touch /var/state/bootnetwork
+	start
+	# firewall hotplug script disabled during boot but reload needed at least once
+	# do not remove file yet, we do not want firewall hotplug scripts to fire
+	# those are handled by succesive /etc/init.d/ files
+	fw3 -q reload
+	rm -f /var/state/bootnetwork
+	# mwan hotplug script disabled during boot, should be called at least once
+	# /var/state/bootnetwork should be removed at this point or it will not be executed properly 
+	# (sources hotplug script)
+	[ -x /etc/init.d/mwan ] && /etc/init.d/mwan restart
+}
+
+start() {
+	stop
+	[ -e /proc/sys/kernel/core_pattern ] && {
+		ulimit -c unlimited
+		echo '|/sbin/core-handler %e.%p.%s.%t.core %p' > /proc/sys/kernel/core_pattern
+	}
+	network_system start
+	service_start /sbin/netifd
+
+	setup_switch
+
+}
+
+restart() {
+	ifdown -a
+	sleep 1
+	start
+}
+
+shutdown() {
+	ifdown -a
+	stop
+}
+
+stop() {
+	service_stop /sbin/netifd
+	network_system stop
+}
+
+reload() {
+	ubus call network reload
+}

@@ -1,0 +1,187 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_ManagementServer_ = {
+  objectType = {
+    name = "InternetGatewayDevice.ManagementServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      URL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        hidden = "true",
+        max = "256",
+      },
+      PeriodicInformEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      PeriodicInformInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      PeriodicInformTime = {
+        access = "readWrite",
+        type = "dateTime",
+      },
+      ParameterKey = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        forcedInform = "true",
+        type = "string",
+        max = "32",
+      },
+      ConnectionRequestURL = {
+        access = "readOnly",
+        activeNotify = "forceEnabled",
+        forcedInform = "true",
+        type = "string",
+        max = "256",
+      },
+      ConnectionRequestUsername = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      ConnectionRequestPassword = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        max = "256",
+      },
+      UpgradesManaged = {
+        access = "readWrite",
+        type = "boolean",
+       },
+--      KickURL = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      DownloadProgressURL = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      UDPConnectionRequestAddress = {
+--        access = "readOnly",
+--        type = "string",
+--        max = "256",
+--      },
+--      UDPConnectionRequestAddressNotificationLimit = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--      },
+--      STUNEnable = {
+--        access = "readWrite",
+--        type = "boolean",
+--      },
+--      STUNServerAddress = {
+--        access = "readWrite",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNServerPort = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--        range = {
+--          {
+--            min = "0",
+--            max = "65535",
+--          },
+--        },
+--      },
+--      STUNUsername = {
+--        access = "readWrite",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNPassword = {
+--        access = "readWrite",
+--        hidden = "true",
+--        type = "string",
+--        max = "256",
+--      },
+--      STUNMaximumKeepAlivePeriod = {
+--        access = "readWrite",
+--        type = "int",
+--        range = {
+--          {
+--            min = "-1",
+--          },
+--        },
+--      },
+--      STUNMinimumKeepAlivePeriod = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--      },
+--      NATDetected = {
+--        access = "readOnly",
+--        type = "boolean",
+--      },
+      -- ManageableDeviceNumberOfEntries
+      -- automatically created when InternetGatewayDevice.ManagementServer.ManageableDevice.{i}. is loaded
+--      ManageableDeviceNotificationLimit = {
+--        access = "readWrite",
+--        type = "unsignedInt",
+--      },
+    }
+  }
+}
+
+local function cwmpd_config(option)
+    return {
+        config = "cwmpd",
+        sectionname = "cwmpd_config",
+        option = option,
+    }
+end
+
+local function getPeriodicInformTime(uci_value)
+  local seconds = tonumber(uci_value)
+  if seconds then
+    return os.date("%Y-%m-%dT%H:%M:%SZ", seconds)
+  else
+    return "0001-01-01T00:00:00Z"
+  end
+end
+
+local function setPeriodicInformTime(value)
+  local date = {}
+  date.year, date.month, date.day, date.hour, date.min, date.sec = value:match("(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)Z")
+  return os.time(date)
+end
+
+local uci_binding = {
+    URL = cwmpd_config("acs_url"),
+    Username = cwmpd_config("acs_user"),
+    Password = cwmpd_config("acs_pass"),
+    PeriodicInformEnable = cwmpd_config("periodicinform_enable"),
+    PeriodicInformInterval = cwmpd_config("periodicinform_interval"),
+    PeriodicInformTime = { get = getPeriodicInformTime, set = setPeriodicInformTime, uci_config = cwmpd_config("periodicinform_time") },
+    ParameterKey = cwmpd_config("parameter_key"),
+    ConnectionRequestURL = cwmpd_config("connectionrequest_url"),
+    ConnectionRequestUsername = cwmpd_config("connectionrequest_username"),
+    ConnectionRequestPassword = cwmpd_config("connectionrequest_password"),
+    UpgradesManaged = cwmpd_config("upgradesmanaged"),
+}
+
+mapper("simpleuci").connect(InternetGatewayDevice_ManagementServer_, uci_binding)
+
+register(InternetGatewayDevice_ManagementServer_)

@@ -1,0 +1,173 @@
+#!/bin/sh /etc/rc.common
+#set -x
+START=59
+
+uci2power() {
+    case "$1" in
+        0) echo "down";;
+        1) echo "up" ;;
+        *) echo "Invalid UCI power option: $1" 1>&2; echo "up" ;;
+    esac
+}
+
+uci2duplex() {
+    case "$1" in
+        half) echo "HD";;
+        full) echo "FD" ;;
+        *) echo "Invalid UCI duplex option: $1" 1>&2; echo "HD" ;;
+    esac
+}
+
+uci2mediatype() {
+    case "$1" in
+        10) echo "$1"`uci2duplex $2`;;
+        100) echo "$1"`uci2duplex $2`;;
+        auto) echo "auto";;
+        *) "Invalid UCI speed option: $1" 1>&2; echo "auto";;
+    esac
+}
+
+setup_interface() {
+    . /etc/init.d/phypower
+    local IF="$1"
+    local MODE="$2"
+    local tmctl=$(which tmctl)
+
+    config_get speed "$IF" speed auto
+    config_get duplex "$IF" duplex full
+    config_get enable "$IF" enable 1
+
+    if [ "$enable" == "1" ]; then
+      # If we are just reloading, skip re-setting auto, since this causes link-down/up
+      if !([ "$MODE" == "reload" ] && [ "$speed" == "auto" ] && (ethctl $IF media-type 2>&1 | grep 'Auto-negotiation enabled' >/dev/null)); then
+        ethctl $IF media-type `uci2mediatype $speed $duplex`  &> /dev/null
+      fi
+      # If we are just reloading, skip re-setting phy-power state, since this causes link-down/up on internal fast ethernet PHYs
+      if !([ "$MODE" == "reload" ] && (ethctl $IF media-type 2>&1 | grep 'Link is up' >/dev/null)); then
+        phypower_intf "$IF" `uci2power $enable`
+      fi
+      [ -n "${tmctl}" ] && ${tmctl} init "$IF"
+    else
+      phypower_intf "$IF" `uci2power $enable`
+      [ -n "${tmctl}" ] && ${tmctl} uninit "$IF"
+    fi
+}
+
+setup_qosscheduling(){
+    local classgroup
+    local classes
+    local priority
+    local weight
+    local policy
+    local startqueue
+    local policynum
+    local weights_0
+    local weights_1
+    local weights_2
+    local weights_3
+    local weight_indexed
+
+    policynum="0"
+    startqueue="0"
+    weights_0="0"
+    weights_1="0"
+    weights_2="0"
+    weights_3="0"
+
+    if [ ! -f "/usr/bin/fapctl" ]; then 
+      config_get classgroup lan classgroup ""
+      if [ "$classgroup" != "" ]; then
+        config_get classes $classgroup classes ""
+        config_get policy "$classgroup" policy "wrr"
+
+        if ([ "$policy" != "sp" ] && [ "$policy" != "wrr" ] && [ "$policy" != "sp_wrr" ]); then
+            echo "Invalid scheduling algorithm"
+        fi
+
+        if [ "$policy" = "wrr" ]; then
+            policynum="1"
+        fi
+
+        if [ "$policy" = "sp_wrr" ]; then  
+           policynum="2"
+        fi
+
+        for class in $classes; do
+            config_get priority "$class" priority "0"
+            config_get weight "$class" weight "0"
+            if ([ "$weight" -ne "0" ] && [ "$policy" != "sp" ] && [ "$priority" -lt 4 ]); then
+                eval weights_$priority=$weight
+            else
+                if ([ "$policy" = "sp" ] && [ "$weight" -ne "0" ] || [ "$priority" -gt 3 ]); then
+                  echo "Invalid switch scheduling values"
+                fi
+            fi
+        done
+        if [ "$policy" = "sp_wrr" ]; then
+          for index in 0 1 2 3
+            do
+              case $index in
+                  0)
+                  weights_indexed=$weights_0
+                  ;;
+                  1)
+                  weights_indexed=$weights_1
+                  ;;
+                  2)
+                  weights_indexed=$weights_2
+                  ;;
+                  3)
+                  weights_indexed=$weights_3
+                  ;;
+              esac
+              if [ "$weights_indexed" -eq "0" ]; then
+                 if [ "$startqueue" -eq "0" ]; then
+                    startqueue=$index
+                 fi
+                 eval weights_$index="1"
+              fi
+           done
+           ethswctl -c cosqsched -v $policynum -t $startqueue -x $weights_0 -y $weights_1 -z $weights_2 -w $weights_3
+        else
+          if  [ "$policy" = "sp" ]; then
+             #This is due to the bcm code if weight are not specified or 0 then the f... code does not work
+             ethswctl -c cosqsched -v $policynum -x 1 -y 1 -z 1 -w 1
+          else
+             ethswctl -c cosqsched -v $policynum -x $weights_0 -y $weights_1 -z $weights_2 -w $weights_3
+          fi
+        fi
+      fi
+    fi
+}
+
+setup() {
+    local MODE=$1
+    local wan
+    config_load ethernet
+    cd /sys/class/net/
+    for intf in eth*; do
+      local match=`echo $intf | grep -e 'eth[[:digit:]]$'`
+      if [ -n "$match" ]; then
+        config_get_bool wan $intf wan '0'
+        if [ $wan -eq 1 ] ; then
+          ethswctl -c wan -i $intf -o enable
+        else
+          ethswctl -c wan -i $intf -o disable
+        fi
+        setup_interface $intf $MODE
+      fi
+    done
+    config_load qos
+    setup_qosscheduling
+}
+
+start() {
+    # Just set all variables; on boot-up this will cause link-down/up on all interfaces
+    setup start
+}
+
+reload() {
+    # Avoid link-down/up if possible
+    setup reload
+}
+
