@@ -1,0 +1,184 @@
+-- Manually generated
+local rpc_WANEthernetInterfaceConfig_ = {
+  objectType = {
+    name = "rpc.wanethernetinterfaceconfig.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ShapingRate = {
+        access = "readWrite",
+        type = "string",
+        Description = "The maximum bit rate in kbps",
+      },
+      ShapingBurstSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+        Description = "The Burst size in bytes",
+      },
+    },
+  }
+}
+
+
+local ucihelper = mapper("ucihelper")
+local get_from_uci = ucihelper.get_from_uci
+local set_on_uci = ucihelper.set_on_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+local binding = { config = "ethernet", sectionname = "", option = "", default = "" }
+local transactions = {}
+local commitapply = commitapply
+
+local function getEthernetPort()
+  local port = ""
+  binding.sectionname = "port"
+  binding.option = nil
+  ucihelper.foreach_on_uci(binding, function(s)
+    if s['wan'] == '1' then
+      port = s['.name']
+      return false
+    end
+  end)
+  return port
+end
+
+local function shaping_set(option_value)
+  binding.option = "mbr"
+  set_on_uci(binding,option_value.mbr,commitapply)
+  binding.option = "mbs"
+  set_on_uci(binding,option_value.mbs,commitapply)
+  binding.option = "rate"
+  set_on_uci(binding,option_value.rate,commitapply)
+  binding.option = "ratio"
+  set_on_uci(binding,option_value.ratio,commitapply)
+  transactions[binding.config] = true
+  return true
+end
+
+local function create_new_trafficdesc_section(new_td_name)
+  binding.sectionname = new_td_name
+  binding.option = nil
+  set_on_uci(binding,"trafficdesc",commitapply)
+  transactions[binding.config] = true
+end
+
+local function remove_trafficdesc_section(devname, td_name)
+    binding.sectionname = td_name
+    binding.option = nil
+    ucihelper.delete_on_uci(binding, commitapply)
+    binding.sectionname = devname
+    binding.option = "td"
+    set_on_uci(binding,"",commitapply)
+    transactions[binding.config] = true
+    return true
+end
+
+rpc_WANEthernetInterfaceConfig_.get = {
+  ShapingRate = function(mapping, param)
+    local devname = getEthernetPort()
+    binding.sectionname = devname
+    binding.option = "td"
+    binding.default = ""
+    local trafficdesc = get_from_uci(binding)
+    if trafficdesc ~= "" then
+      binding.sectionname = trafficdesc
+      binding.option = "mbr"
+      binding.default = "0"
+      return get_from_uci(binding)
+    end
+    return "0"
+  end,
+  ShapingBurstSize = function(mapping, param)
+    local devname = getEthernetPort()
+    binding.sectionname = devname
+    binding.option = "td"
+    binding.default = ""
+    local value = "0"
+    local trafficdesc = get_from_uci(binding)
+    if trafficdesc ~= "" then
+      binding.sectionname = trafficdesc
+      binding.option = "mbs"
+      binding.default = ""
+      value = get_from_uci(binding)
+    end
+    return value == "" and "0" or value
+  end,
+}
+
+rpc_WANEthernetInterfaceConfig_.set = {
+  ShapingRate = function(mapping, param, value)
+    local devname = getEthernetPort()
+    value = tonumber(value)
+    local mbs = "2000"
+    if value then
+      binding.sectionname = devname
+      binding.option = "td"
+      binding.default = ""
+      local trafficdesc = get_from_uci(binding)
+      local new_td_name = binding.option .. binding.sectionname
+      if trafficdesc ~= "" then
+        local ethBinding = { config = "ethernet", sectionname = trafficdesc, option = "mbs", default = "2000" }
+        mbs = get_from_uci(ethBinding)
+      end
+      if trafficdesc == "" and value == 0 then
+        return true
+      elseif trafficdesc == "" and (value ~= 0) then
+        set_on_uci(binding,new_td_name,commitapply)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { mbr = value, mbs = mbs, rate = "enabled", ratio = "" }
+        return shaping_set(option_value)
+      elseif trafficdesc ~= "" and value == 0 then
+        return remove_trafficdesc_section(devname, trafficdesc)
+      else
+        binding.sectionname = trafficdesc
+        local option_value = { mbr = value, mbs = mbs, rate = "enabled", ratio = "" }
+        return shaping_set(option_value)
+      end
+    end
+    return nil,"Not supported"
+  end,
+  ShapingBurstSize = function(mapping, param, value)
+    local devname = getEthernetPort()
+    value = tonumber(value)
+    if value then
+      binding.sectionname = devname
+      binding.option = "td"
+      binding.default = ""
+      local trafficdesc = get_from_uci(binding)
+      local new_td_name = binding.option .. binding.sectionname
+      if trafficdesc == "" and (value == 0) then
+        return true
+      elseif trafficdesc == "" and (value > 0) then
+        set_on_uci(binding,new_td_name,commitapply)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { mbr = "20000", mbs = value, rate = "", ratio = "" }
+        return shaping_set(option_value)
+      elseif trafficdesc ~= "" and (value >= 0) then
+        binding.sectionname = trafficdesc
+        binding.option = "mbs"
+        set_on_uci(binding,value,commitapply)
+        transactions[binding.config] = true
+        return true
+      end
+    end
+    return nil,"Not supported"
+  end,
+
+}
+
+rpc_WANEthernetInterfaceConfig_.commit = function()
+  for config,_ in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+rpc_WANEthernetInterfaceConfig_.revert = function()
+  for config,_ in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(rpc_WANEthernetInterfaceConfig_)

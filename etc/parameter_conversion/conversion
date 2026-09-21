@@ -1,0 +1,170 @@
+debug_on
+
+
+copy_file /etc/cwmpd.db
+copy_file /etc/config/cwmp_transfer
+inline_sh_cmd /usr/lib/cwmpd/transfers/rollback_check.sh %%OLDCONFIG%%
+uci_section cwmpd.cwmpd_config
+copy_dir /usr/lib/lua
+
+uci_set ddns.myddns.enabled ddns.myddns_ipv4.enabled
+uci_set ddns.myddns.service_name ddns.myddns_ipv4.service_name
+uci_set ddns.myddns.domain ddns.myddns_ipv4.domain
+uci_set ddns.myddns.username ddns.myddns_ipv4.username
+uci_set ddns.myddns.password ddns.myddns_ipv4.password
+uci_set ddns.myddns.lookup_host ddns.myddns_ipv4.lookup_host
+uci_del ddns.myddns
+
+uci_set ddns.myddns_ipv4.enabled
+uci_set ddns.myddns_ipv4.service_name
+uci_set ddns.myddns_ipv4.domain
+uci_set ddns.myddns_ipv4.username
+uci_set ddns.myddns_ipv4.password
+uci_set ddns.myddns_ipv4.lookup_host
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') v=o:get('ddns','myddns_ipv4','service_name') if (v == 'No-IP.com' or v == 'NoIP.com' or v == 'noip.com') then n:set('ddns','myddns_ipv4','service_name','no-ip.com') end n:commit('ddns')\"
+
+
+inline_sh_cmd uci delete dhcp.voiprule1
+inline_sh_cmd uci delete dhcp.voiprule2
+inline_sh_cmd uci delete dhcp.iptvrule1
+inline_sh_cmd uci commit dhcp
+uci_section dhcp.@dnsrule
+uci_section dhcp.@host id=mac
+uci_section dhcp.@lan
+
+uci_section firewall.@userrule id=name
+uci_section firewall.@userrule_v6 id=name
+uci_section firewall.@fwconfig
+uci_set firewall.defaultoutgoing.target
+uci_set firewall.normalrules.enabled
+uci_set firewall.laxrules.enabled
+uci_set firewall.highrules.enabled
+uci_set firewall.userrules.enabled
+uci_set firewall.userrules_v6.enabled
+uci_set firewall.defaultrules.enabled
+uci_section firewall.@userredirect
+uci_set firewall.userredirects.enabled
+uci_set firewall.@dmzredirect[0].dest_ip firewall.dmzredirect.dest_ip
+uci_set firewall.dmzredirects.enabled
+uci_set firewall.dmzredirect.dest_mac
+uci_set firewall.dmzredirect.dest_ip
+uci_set firewall.Allow-Ping.enabled
+uci_set firewall.Allow-Ping6.enabled
+inline_sh_cmd lua -e \"uc=require 'uciconv' o=uc.uci('old') n=uc.uci('new') u=o:get('firewall','laxrules','enabled') v=o:get('firewall','highrules','enabled') if (u == '1') then n:set('firewall','fwconfig','level','lax') elseif (v == '1') then n:set('firewall','fwconfig','level','high') else n:set('firewall','fwconfig','level','normal') end n:commit('firewall')\"
+
+copy_file /etc/config/ledfw
+uci_set mmpbxrvsipnet.sip_net.interface
+
+copy_file /etc/config/igmpproxy
+
+copy_file /etc/config/intercept
+
+copy_file /etc/config/ipping
+
+copy_file /etc/config/mcastsnooping
+
+uci_set minidlna.config.enabled dlnad.config.enabled
+uci_set minidlna.config.friendly_name dlnad.config.friendly_name
+
+uci_set dlnad.config.enabled
+uci_set dlnad.config.model_url
+uci_set dlnad.config.model_name
+uci_set dlnad.config.manufacturer_url
+uci_set dlnad.config.friendly_name
+uci_set dlnad.config.radioStations_enabled
+
+
+copy_file /etc/griffinnvs.bin
+
+copy_file /etc/lasdb.db
+inline_sh_cmd lua /usr/bin/convlasdb /etc/lasdb.db
+
+inline_sh_cmd /usr/bin/convmobiledongle %%OLDCONFIG%%
+
+copy_file /etc/config/network
+copy_file /etc/config/mwan
+
+uci_set wansensing.global.l2type
+uci_set wansensing.global.l3type
+
+copy_file /etc/config/nslookupdiag
+copy_file /etc/config/portmirror
+copy_file /etc/config/power
+copy_file /etc/config/pppoerelayd
+copy_file /etc/config/printersharing
+
+uci_set samba.@samba[0].name
+uci_set samba.@samba[0].workgroup
+uci_set samba.@samba[0].description
+uci_set samba.@samba[0].enabled
+
+uci_set system.@system[0].zonename
+uci_set system.@system[0].timezone
+uci_set system.@system[0].network_timezone
+uci_list system.ntp.server
+
+uci_set tod.global.time_change_monfreq
+uci_set tod.global.enabled
+uci_section tod.@host
+
+inline_sh_cmd lua /etc/parameter_conversion/scripts/convtod.lua
+
+copy_file /etc/config/traceroute
+
+copy_file /etc/config/txmember
+
+uci_set upnpd.config.enable_natpmp
+uci_set upnpd.config.enable_upnp
+uci_set upnpd.config.secure_mode
+
+copy_file /etc/config/user_friendly_name
+
+copy_file /etc/config/wifidoctor_station_importance
+
+uci_set wireless.ap0.wep_key
+uci_set wireless.ap0.security_mode
+uci_set wireless.ap0.wpa_psk_key
+uci_set wireless.ap0.state
+uci_set wireless.ap0.public
+uci_set wireless.ap0.wps_state
+uci_set wireless.ap0.acl_mode
+uci_set wireless.ap0.acl_deny_list
+uci_set wireless.ap0.acl_accept_list
+uci_set wireless.ap0.wps_ap_pin
+
+uci_set wireless.ap1.security_mode
+uci_set wireless.ap1.wep_key
+uci_set wireless.ap1.wpa_psk_key
+uci_set wireless.ap1.state
+uci_set wireless.ap1.public
+uci_set wireless.ap1.acl_mode
+uci_set wireless.ap1.acl_accept_list
+uci_set wireless.ap1.acl_deny_list
+uci_set wireless.ap1.wps_state
+uci_set wireless.ap1.wps_ap_pin
+
+uci_set wireless.wl0.ssid
+uci_set wireless.wl1.ssid
+
+uci_set wireless.radio_2G.state
+uci_set wireless.radio_2G.stbc
+uci_set wireless.radio_2G.channel
+uci_set wireless.radio_2G.channelwidth
+uci_set wireless.radio_2G.standard
+uci_set wireless.radio_2G.sgi
+uci_set wireless.radio_2G.cdd
+
+uci_set wireless.radio_5G.channel
+uci_set wireless.radio_5G.channelwidth
+uci_set wireless.radio_5G.state
+uci_set wireless.radio_5G.sgi
+uci_set wireless.radio_5G.cdd
+uci_set wireless.radio_5G.stbc
+uci_set wireless.radio_5G.standard
+
+uci_set xdsl.dsl0.enabled
+
+copy_file /etc/config/xtm
+
+copy_file /etc/config/gpon
+copy_file /etc/config/gponl3

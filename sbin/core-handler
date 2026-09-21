@@ -1,0 +1,55 @@
+#!/bin/sh
+[ $# -lt 2 ] && exit
+exec 3<&0
+exec <&-
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+log() {
+	echo $@ | tee /dev/console | logger -t postmortem
+}
+
+filename=$1
+pid=$2
+action=$(uci_get system @coredump[0] action nocore)
+path=$(uci_get system @coredump[0] path "/tmp")
+reboot=$(uci_get system @coredump[0] reboot 1)
+
+if [ "$action" == "upload" ]
+then
+	url=$(uci_get system @coredump[0] url)
+	version=$(uci_get version @version[0] version unknown)
+	oid=$(uci_get version @version[0] oid unknown)
+	factory_id=$(uci_get env rip factory_id unknown)
+	serial=$(uci_get env rip serial unknown)
+	board=$(uci_get env rip board_mnemonic unknown)
+	[ -z "${url}" ] && exit
+	log "uploading core to ${url}"
+	curl -m 360 -X POST -F "exe=$(readlink -f /proc/${pid}/exe)" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@-;filename=${filename}" ${url} <&3 || action=compress
+fi
+case "${action}" in
+	compress)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core.gz'|xargs rm -f
+		log "core dumped to ${path}/${filename}.gz"
+		gzip -c >${path}/${filename}.gz <&3
+		;;
+
+	store)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core'|xargs rm -f
+		log "core dumped to ${path}/${filename}"
+		cat >${path}/${filename} <&3
+		;;
+
+	upload)
+		;;
+
+	*)
+		log "core dump for pid ${pid} file ${filename} ignored due to system.coredump.action setting"
+		;;
+esac
+
+if [ "${reboot}" -eq 1 ]
+then
+    log "Rebooting due to core dump and system.coredump.reboot=1"
+    /sbin/reboot
+fi

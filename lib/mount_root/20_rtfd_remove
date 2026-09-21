@@ -1,0 +1,25 @@
+#!/bin/sh
+
+RTFD_MARK=/overlay/remove_due_to_rtfd
+
+if [ ! -d /proc/banktable ]; then
+	echo "**************************************************"
+	echo "* RTFD NOT IMPLEMENTED FOR SINGLE BANK PLATFORMS *"
+	echo "**************************************************"
+	exit
+fi
+
+if [ -e /overlay/rtfd_all ]; then
+	echo "workaround for rtfd --all, mtd erase failed"
+	for f in $(find /overlay -xdev -maxdepth 1); do
+		if [ "$f" != "/overlay" -a "$f" != "/overlay/.fs_state" ]; then
+			rm -rf $f
+		fi
+	done
+fi
+
+if [ -L /overlay/remove_due_to_rtfd ]; then
+	reset_bank=$(readlink /overlay/remove_due_to_rtfd)
+	echo "Applying reset to factory default to $reset_bank"
+	rm -rf $reset_bank
+fi

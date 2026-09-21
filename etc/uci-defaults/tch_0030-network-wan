@@ -1,0 +1,154 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+# /etc/config/network
+
+uci set network.lan.ipaddr=192.168.10.1
+
+#Carl Wuyts IPv6 config: removed as it seemingly breaks IPv4 
+#uci set network.lan.ip6assign=64
+#uci set network.lan.ip6hint=0
+#uci set network.wan6=interface
+#uci set network.wan6.ifname=@wan
+#uci set network.wan6.proto=dhcpv6
+#uci set network.wan6.reqopts='23 25'
+#uci set network.wan6.reqaddress=none
+#uci set network.wan6.noslaaconly=1
+
+uci set network.wan=interface
+uci set network.wan.auto='1'
+uci set network.wan.proto='dhcp'
+uci set network.wan.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.wan.vendorid='Telenor_TG799_NATBISP '
+uci set network.wan.hostname='TG799vacXTREAM'
+uci set network.wan.iface6rd='6rd'
+uci set network.wan.mtu6rd='1480'
+uci set network.wan.initboot='1'
+uci set network.wan.macaddr=`uci get env.rip.eth_mac`
+
+uci set network.wwan=interface
+uci set network.wwan.auto='0'
+
+uci set network.iptv=interface
+uci set network.iptv.auto='1'
+uci set network.iptv.proto='dhcp'
+uci set network.iptv.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.iptv.vendorid='Telenor_TG799_IPTV '
+uci set network.iptv.hostname='TG799vacXTREAM'
+uci set network.iptv.ip4table='iptv'
+uci set network.iptv.dnsset='iptv'
+uci set network.iptv.initboot='1'
+uci set network.iptv.macaddr=`uci get env.var.local_wifi_mac`
+
+uci set network.voip=interface
+uci set network.voip.auto='1'
+uci set network.voip.proto='dhcp'
+uci set network.voip.ip4table='voip'
+uci set network.voip.reqopts='1 3 6 15 33 42 51 121 249'
+uci set network.voip.vendorid='Telenor_TG799_VOIP '
+uci set network.voip.hostname='TG799vacXTREAM'
+uci set network.voip.initboot='1'
+uci set network.voip.dnsset='voip'
+uci set network.voip.macaddr=`uci get env.rip.wifi_mac`
+
+#wan interface VLAN 
+uci set network.vlan698=device
+uci set network.vlan698.type='8021q'
+uci set network.vlan698.ifname='ptm0'
+uci set network.vlan698.name='vlan698'
+uci set network.vlan698.vid='698'
+uci set network.vlan698.macaddr=`uci get env.rip.eth_mac`
+
+#iptv interface VLAN
+uci set network.vlan695=device
+uci set network.vlan695.type='8021q'
+uci set network.vlan695.ifname='ptm0'
+uci set network.vlan695.name='vlan695'
+uci set network.vlan695.vid='695'
+uci set network.vlan695.macaddr=`uci get env.var.local_wifi_mac`
+
+#voip interface VLAN
+uci set network.vlan697=device
+uci set network.vlan697.type='8021q'
+uci set network.vlan697.ifname='ptm0'
+uci set network.vlan697.name='vlan697'
+uci set network.vlan697.vid='697'
+uci set network.vlan697.macaddr=`uci get env.rip.wifi_mac`
+
+uci commit network
+
+# /etc/config/mwan
+# mwan requires globals section
+uci set mwan.globals=globals
+
+uci set mwan.iptv_only=policy
+uci set mwan.iptv_only.interface='iptv'
+
+uci set mwan.voip_only=policy
+uci set mwan.voip_only.interface='voip'
+
+uci set mwan.mgmt_only=policy
+uci set mwan.mgmt_only.interface='wan'
+
+add_mwan_rule() {
+        uci batch <<EOF
+add mwan rule
+set mwan.@rule[-1].src='lan'
+set mwan.@rule[-1].dest_ip=$2
+set mwan.@rule[-1].policy=$1
+EOF
+}
+
+add_mwan_host() {
+if [ -n "$3" ]
+then
+        uci batch <<EOF
+add mwan host
+set mwan.@host[-1].path=$2
+set mwan.@host[-1].policy=$1
+set mwan.@host[-1].arg=$3
+EOF
+else
+        uci batch <<EOF
+add mwan host
+set mwan.@host[-1].path=$2
+set mwan.@host[-1].policy=$1
+EOF
+fi
+}
+
+add_mwan_rule 'iptv_only' '213.64.59.0/24'
+add_mwan_rule 'iptv_only' '233.184.49.179/32'
+add_mwan_rule 'iptv_only' '233.184.48.255/32'
+add_mwan_rule 'iptv_only' '233.184.49.217/32'
+add_mwan_rule 'iptv_only' '234.213.112.69/32'
+add_mwan_rule 'iptv_only' '224.0.0.0/4'
+
+#old ip address ranges--------------
+#add_mwan_rule 'iptv_only' '195.54.114.218/32'
+#add_mwan_rule 'iptv_only' '195.54.109.135/32'
+#add_mwan_rule 'iptv_only' '195.54.109.153/32'
+#add_mwan_rule 'iptv_only' '195.54.109.39/32'
+#add_mwan_rule 'iptv_only' '195.54.109.38/32'
+
+#new ip ranges 11aug--------------
+add_mwan_rule 'iptv_only' '195.54.109.32/28'
+add_mwan_rule 'iptv_only' '195.54.109.64/27'
+add_mwan_rule 'iptv_only' '195.54.109.128/27'
+add_mwan_rule 'iptv_only' '195.54.103.0/25'
+
+add_mwan_host 'iptv_only' '/sbin/udhcpc' 'udhcpc-vlan695'
+add_mwan_host 'voip_only' '/sbin/udhcpc' 'udhcpc-vlan697'
+add_mwan_host 'mgmt_only' '/sbin/udhcpc' 'udhcpc-vlan698'
+
+add_mwan_host 'mgmt_only' '/sbin/udhcpc' 'udhcpc-atm_wan'
+add_mwan_host 'iptv_only' '/sbin/udhcpc' 'udhcpc-atm_iptv'
+add_mwan_host 'voip_only' '/sbin/udhcpc' 'udhcpc-atm_voip'
+
+add_mwan_host 'voip_only' '/usr/bin/mmpbxd'
+
+uci commit mwan
+
+exit 0
+
