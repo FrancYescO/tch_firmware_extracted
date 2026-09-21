@@ -1,0 +1,364 @@
+#!/usr/bin/env lua
+local string = require('string')
+local cursor = require('uci').cursor()
+local os = require('os')
+local io = require('io')
+local cursor_state = require('uci').cursor(nil, "/var/state")
+
+-- set to 'true' to enable extended logging
+local logging_enable = false
+
+-- two types of ethernet ports exist ("lan", "wan")
+local ethtype = {}
+local wantype = "wan"
+local lantype = "lan"
+local devconfigtype = "qos_devconfig"
+local intfconfigtype = "qos_intfconfig"
+
+-- fap policy conversion string
+local policystring = {
+   ["sp"] = " 1 ",
+   ["sp_wrr"] = " 2 ",
+   ["wrr"] = " 2 ",
+   ["wdrr"] = " 3 ",
+   ["wfq"] = " 4 ",
+   ["sp_wfq"] = " 4 " }
+
+-- suppoted number of queues in function of realm
+local nbrofqueues = {
+   [wantype] = 8,
+   [lantype] = 8 }
+
+--- Helper function to trace execute the passed commands
+-- @param str The command which needs to be executed
+local function log_execute(str)
+  if logging_enable == true then
+      print(str)
+  end
+  os.execute(str)
+end
+
+--- Helper function to check if the UCI boolean specifies true/false
+-- @param value The option value which needs to be checked
+-- @default defvalue The value which needs to be returned if the parameter is nil
+-- @return true or false
+local function bool_is_true(value, defvalue)
+   if not value then
+      return defvalue
+   elseif value == "1" or value == "on" or value == "true" or value == "enabled" then
+      return true
+   else
+      return false
+   end
+end
+
+--- Helper function to check if a file exists
+-- @param name The file name
+-- @return true if the file exist or false otherwise
+local function file_exists(name)
+   local f=io.open(name,"r")
+   if f~=nil then io.close(f) return true else return false end
+end
+
+--- Helper function which enables the traffic manager on the specified port
+-- @param ethdevice The ethernet netdevice
+local function tm_port_enable(ethdevice)
+   log_execute("tmctl porttminit --devtype 0 --if ".. ethdevice .. " --flag 0x0101")
+   cursor_state:revert("ethernet", ethdevice, "init_done")
+   cursor_state:set("ethernet", ethdevice, "init_done", "1")
+   cursor_state:save("ethernet")
+end
+
+--- Helper function which disables the traffic manager on the specified port
+-- @param ethdevice The ethernet netdevice
+local function tm_port_disable(ethdevice)
+   if cursor_state:revert("ethernet", ethdevice, "init_done")  then
+     cursor_state:save("ethernet")
+   end
+   log_execute("tmctl porttmuninit --devtype 0 --if ".. ethdevice .. " --flag 0x0101")
+end
+
+--- Helper function to do a initial port config. Store the state via uci in /var/state
+-- @param ethdevice The ethernet netdevice
+local function do_once_tm_port_init(ethdevice)
+  local init_done = nil
+  if ethdevice then
+    init_done = cursor_state:get("ethernet", ethdevice, "init_done")
+    if init_done == nil then
+      -- because de previous state is not known a uninit is done first to avoid init failures.
+      tm_port_disable(ethdevice)
+      tm_port_enable(ethdevice)
+    end
+  end
+end
+
+--- Helper function which checks the used QoS configuration for an ethernet device.
+--- The QoS configuraiton of an ethernet device can be done directly by making use
+--- of the "qos.device.ethx" sections or indirectly by deriving it from
+--- the "qos.interface.lan" and "qos.interface.wan" sections.
+--- Both Runner realms (lan/wan) can be configured using antother method. Within a realm
+--- the method needs to be the same.
+-- @param ethdevice The ethernet netdevice
+-- @param config_method in/out table holding the used configuration methods in a realm
+local function check_devconfig(config_method, ethdevice)
+   if cursor:get("qos", ethdevice) then
+      config_method[devconfigtype] = devconfigtype
+   else
+      config_method[intfconfigtype] = intfconfigtype
+   end
+end
+
+--- Helper function:
+---          parsing the ethernet topic to retrieve the ports of the requested device type (lan/wan)
+---          parsing for each port the QoS topic to retrieve the used configuration method
+---          defining the QoS configuration method in use for the requested device type
+-- @param devtype The type of ports which need to be parsed (lan or wan type)
+-- @returns the configuration method (qos.device.ethx versus qos.interface.x)
+local function parse_ethdev_config(devtype)
+   local config_method = {}
+
+   cursor:foreach("ethernet", "port", function(s)
+                                         do_once_tm_port_init(s[".name"])
+
+                                         if devtype == wantype and s["wan"] then
+                                            ethtype[s[".name"]] = wantype
+                                            check_devconfig(config_method, s[".name"])
+                                         end
+                                         if devtype == lantype and not s["wan"] then
+                                            ethtype[s[".name"]] = lantype
+                                            check_devconfig(config_method, s[".name"])
+                                         end
+                                   end)
+
+
+   -- the device configuration will take place only if ALL devices of the requested type are
+   -- configured making use of the 'device type' objects
+   -- otherwise the qos configuration will be derived from the lan or wan qos.interface objects
+   if config_method[devconfigtype] and not config_method[intfconfigtype] then
+      return devconfigtype
+   else
+      return intfconfigtype
+   end
+end
+
+
+--- Function which configures the ethernet device in the Runner trafficmanager
+-- @param ethdevice The ethernet netdevice
+-- @param classgroup Contains the qos.classgroup object (specifies
+--                   the number of queues and arbitration between those)
+-- @param type Specifies the ethernet device realm (lan/wan)
+local function configure_ethdevice(ethdevice, classgroup, type)
+   local policy = nil
+   local classes = nil
+   local classesstring = cursor:get("qos",classgroup,"classes")
+   local trafficdescriptor = nil
+   local validpolicy = {["sp"] = true}
+
+   if not classesstring then return end
+
+   -- flush port config first otherwise config parts could fail
+   tm_port_disable(ethdevice)
+   tm_port_enable(ethdevice)
+
+   trafficdescriptor = cursor:get("ethernet", ethdevice, "td")
+   if trafficdescriptor ~= nil and bool_is_true(cursor:get("ethernet", trafficdescriptor, "enable"), 1) then
+      local mbr = cursor:get("ethernet", trafficdescriptor, "mbr")
+      local mbs = cursor:get("ethernet", trafficdescriptor, "mbs")
+      local ratio = cursor:get("ethernet", trafficdescriptor, "ratio")
+      local rate = cursor:get("ethernet", trafficdescriptor, "rate")
+      if mbr ~= nil and mbs ~= nil then
+         if rate ~= nil then
+            print("Incorrect port configuration: rate option is not supported for ".. ethdevice)
+         elseif ratio ~= nil then
+            print("Incorrect port configuration: ratio option is not supported for ".. ethdevice)
+         else
+            log_execute("tmctl setportshaper --devtype 0 --if ".. ethdevice .." --shapingrate ".. mbr .." --burstsize ".. mbs .. " --minrate 0")
+         end
+      else
+         print("Incorrect port configuration: mbs and mbr needs to be specified for ".. ethdevice)
+      end
+   else
+     log_execute("tmctl setportshaper --devtype 0 --if ".. ethdevice .." --shapingrate 0 --burstsize 0 --minrate 0")
+   end
+
+   -- configure the queue scheduling
+   local cfg_policy=cursor:get("qos", classgroup, "policy")
+   validpolicy={["sp"] = true, ["wrr"] = true, ["sp_wrr"] = true }
+   if cfg_policy == nil or not  validpolicy[cfg_policy] then
+      print("Incorrect configuration for qos." .. classgroup .. " policy " .. cfg_policy .. " is not supported." )
+      return
+   end
+
+   policy=cfg_policy
+
+   --let's parse the per queue shaping configuration
+   classes=string.gmatch(classesstring,"(%S+)%s*")
+   local numclasses=0
+   local weight
+   local priority
+   if policy == "wrr" or policy == "wfq" then
+     weight=1
+   else
+     weight=0
+   end
+   if policy == "sp" then
+     priority=1
+   else
+     priority=0
+   end
+   for class in classes do
+      local cfg_priority = cursor:get("qos", class, "priority")
+      local cfg_weight = cursor:get("qos", class, "weight")
+      local mbr = cursor:get("qos", class, "mbr")
+      local pbr = cursor:get("qos", class, "pbr")
+      local mbs = cursor:get("qos", class, "mbs")
+
+      -- set defaults if not set
+      if mbr == nil then
+        mbr=0
+      end
+
+      if pbr == nil then
+        pbr=0
+      end
+
+      if mbs == nil then
+        mbs=0
+      end
+
+      if cfg_priority ~= nil then
+        priority = tonumber(cfg_priority)
+        if priority == nil or priority < 0 or  priority >= nbrofqueues[type]  then
+          print("Incorrect queue configuration: Invalid priority value for ".. ethdevice .. " class " .. class .. " (range 0..7)")
+          return
+        end
+        if policy == "sp" and numclasses ~= priority then
+          print("Incorrect queue configuration: Class order and priority don't match for ".. ethdevice .. " class " .. class)
+          return
+        elseif (cfg_policy == "wfq"  or cfg_policy == "wrr") and priority ~= 0 then
+          print("Incorrect queue configuration: Invalid priority config for ".. ethdevice .. " class " .. class .. " (have to be zero)")
+          return
+        end
+      else
+        if policy == "sp" then
+          priority=numclasses
+          weight=0
+        else
+          priority=0
+        end
+      end
+
+      if cfg_weight ~= nil then
+        local prev_weight = weight
+        weight = tonumber(cfg_weight)
+        if weight == nil or weight < 0 or weight > 63  then
+          print("Incorrect queue configuration: Invalid weight value for ".. ethdevice .. " class " .. class .. " (range 1..63)")
+          return
+        end
+
+        if policy ~= "sp" and prev_weight > weight then
+          print("Incorrect queue configuration: Invalid weight config for ".. ethdevice .. " class " .. class .. " (invalid weight relation)")
+        elseif policy == "sp" and weight ~= 0 then
+          if (cfg_policy == "sp_wfq" or cfg_policy == "sp_wrr") and priority ~= 0 then
+            print("Incorrect queue configuration: remaining queue config must be sp for ".. ethdevice .. " class " .. class .. " (weight must be zero)")
+            return
+          else
+            print("Incorrect queue configuration: Invalid weight config for ".. ethdevice .. " class " .. class .. " (must be zero)")
+            return
+          end
+        end
+
+      else
+        if cfg_policy == "sp_wrr" or cfg_policy == "sp_wfq" then
+          weight=0
+          policy="sp"
+        end
+      end
+
+      if (cfg_policy == "sp_wfq" or cfg_policy == "sp_wrr") and cfg_weight == nil and cfg_priority == nil then
+          print("Warning: Implicit queue configuration for ".. ethdevice .. " class " .. class)
+          priority=numclasses
+          weight=0
+      end
+
+      if (cfg_policy == "sp_wfq" or cfg_policy == "sp_wrr") and weight == 0 and priority == 0 then
+          print("Incorrect queue configuration: Invalid weight/priority config for ".. ethdevice .. " class " .. class)
+          return
+      end
+
+      log_execute("tmctl setqcfg --devtype 0 --if " .. ethdevice ..
+          " --qid " .. numclasses ..
+          " --priority " .. priority ..
+          " --qsize 512 --weight " .. weight ..
+          " --schedmode " ..  policystring[policy] ..
+          " --shapingrate ".. pbr ..
+          " --burstsize " .. mbs ..
+          " --minrate " ..  mbr )
+
+      numclasses = numclasses + 1
+      if ( numclasses > nbrofqueues[type] ) then
+         print("Incorrect queue configuration: max " .. nbrofqueues[type] .. " classes supported")
+         break
+      end
+   end
+end
+
+-- start of the main logic
+-- check if it is a runner based board
+if not file_exists("/usr/bin/tmctl") then
+   return
+end
+
+-- parse the ethernet configuration associated with the lan/wan
+if parse_ethdev_config(arg[1]) == devconfigtype then
+   -- consisten device configuration is present
+   -- arg[1] indicates the realm (lan/wan) we need to act on
+   cursor:foreach("qos", "device", function(s)
+                                      local classgroup = nil
+                                      if ethtype[s[".name"]] then
+                                         if bool_is_true(s["enable"], 1) then classgroup=s["classgroup"] end
+
+                                         if classgroup ~= nil  then
+                                            configure_ethdevice(s[".name"], classgroup, arg[1])
+                                         else
+                                            tm_port_disable(s[".name"])
+                                         end
+                                      end
+                                end)
+else
+   -- no device configuration present
+   -- falback to interface configuration
+   -- arg[1] indicates the OpenWRT network interface we need to use to find the related ethernet devices
+   cursor:foreach("qos", "interface", function(s)
+                                         local classgroup = nil
+                                         local ethdevices = nil
+                                         if s[".name"] == arg[1] then
+                                            if bool_is_true(s["enabled"], 1) then classgroup=s["classgroup"] end
+
+                                            -- we get the ip-interface get the lower level devices
+                                            ethdevices = cursor:get("network",arg[1],"ifname")
+                                            if ethdevices ~= nil then
+                                               if type(ethdevices) == "string" then
+                                                  for interface in string.gmatch(ethdevices,"eth%d") do
+                                                     if classgroup then
+                                                        configure_ethdevice(interface, classgroup, arg[1])
+                                                     else
+                                                        tm_port_disable(interface)
+                                                     end
+                                                  end
+                                               else
+                                                  for _,interface in ipairs(ethdevices) do
+                                                     if string.match(interface,"eth%d")  ~= nil then
+                                                        if classgroup then
+                                                           configure_ethdevice(interface, classgroup, arg[1])
+                                                        else
+                                                           tm_port_disable(interface)
+                                                        end
+                                                     end
+                                                  end
+                                               end
+                                            end
+                                         end
+                                   end)
+end
+cursor_state:close()

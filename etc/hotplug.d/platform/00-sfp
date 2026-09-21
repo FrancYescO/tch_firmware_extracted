@@ -1,0 +1,28 @@
+. /lib/functions.sh
+
+name="sfp"
+local sfp_i2c_file_0="/proc/i2c_sfp/sfp_eeprom0"
+local sfp_i2c_file_1="/proc/i2c_sfp/sfp_eeprom1"
+
+if [ "$NAME" = "$name" ]; then
+	if [ "$ACTION" = "plugin" ]; then
+		ubus send "sfp" '{"status":"plugin"}'
+		if [ ! -f "$sfp_i2c_file_0" -a ! -f "$sfp_i2c_file_1" ]; then
+			rmmod sff8472_i2c.ko
+			sleep 15
+			insmod sff8472_i2c.ko
+		fi
+		/etc/init.d/sfpmon reload
+	elif [ "$ACTION" = "unplug" ]; then
+		ubus send "sfp" '{"status":"unplug"}'
+		if [ ! -f "$sfp_i2c_file_0" -a ! -f "$sfp_i2c_file_1" ]; then
+			rmmod sff8472_i2c.ko
+		fi
+	elif [ "$ACTION" = "linkup" ]; then
+		ubus send "sfp" '{"status":"linkup"}'
+	elif [ "$ACTION" = "linkdown" ]; then
+		ubus send "sfp" '{"status":"linkdown"}'
+	else
+		echo "invalid action message get from Uevent"
+	fi
+fi
