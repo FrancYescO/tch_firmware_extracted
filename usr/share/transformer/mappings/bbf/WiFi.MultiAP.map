@@ -1,0 +1,88 @@
+local Multi_MultiAP_ = {
+  objectType = {
+    name = "#ROOT.MultiAP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- APDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.MultiAP.APDevice.{i}. is loaded
+    X_000E50_ControllerEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_controller",
+	default = "0",
+      },
+    X_000E50_AgentEnabled = {
+        access = "readWrite",
+        type = "boolean",
+	description = "Enable or Disable multiap_agent",
+	default = "0",
+      },
+    }
+  }
+}
+
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local multiapBinding = { config = "multiap" }
+local transactions = {}
+
+local function getUciParam(sectionName, option, default)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  multiapBinding.default = default
+  return getFromUci(multiapBinding)
+end
+
+local function setUciParam(sectionName, option, value)
+  multiapBinding.sectionname = sectionName
+  multiapBinding.option = option
+  setOnUci(multiapBinding, value, commitApply)
+  transactions["multiap"] = true
+end
+
+Multi_MultiAP_.get = {
+  X_000E50_ControllerEnabled = function(mapping, param)
+    return getUciParam("controller", "enabled", "0")
+  end,
+  X_000E50_AgentEnabled = function(mapping, param)
+    return getUciParam("agent", "enabled", "0")
+  end
+}
+
+Multi_MultiAP_.set = {
+  X_000E50_ControllerEnabled = function(mapping, param, value)
+    setUciParam("controller", "enabled", value)
+  end,
+  X_000E50_AgentEnabled = function(mapping, param, value)
+    setUciParam("agent", "enabled", value)
+  end
+}
+
+Multi_MultiAP_.commit = function()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Multi_MultiAP_.revert = function()
+  for config in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_, "#ROOT", { "Device.WiFi", "rpc.X_000E50_MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

@@ -1,0 +1,76 @@
+local lcm = {
+	objectType = {
+		name = 'rpc.lcmd.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			URL = {
+				access = "readWrite",
+				type = "string",
+			},
+			username = {
+				access = "readWrite",
+				type = "string",
+			},
+			password = {
+				access = "readWrite",
+				type = "string",
+			},
+			execenv = {
+				access = "readWrite",
+				type = "string",
+			},
+			ID = {
+				access = "readWrite",
+				type = "string",
+			},
+			action = {
+				access = "readWrite",
+				type = "string",
+				enumeration = {
+					"install",
+					"uninstall",
+					"delete"
+				}
+			}
+		}
+	}
+}
+
+local function get_default_pkg_config()
+	local package = {
+		properties = {},
+		execenv = "native"
+	}
+	setmetatable(package, { __index = function() return "" end })
+	return package
+end
+
+local pkg = get_default_pkg_config()
+
+local ubus = mapper("ubus").connect()
+
+function lcm.getall()
+	return pkg
+end
+
+function lcm.get(_, paramName)
+	return lcm.getall()[paramName]
+end
+
+function lcm.set(_, param, value)
+	if param == "action" then
+		if value == "install" or value == "uninstall" or value == "delete" then
+			if value ~= "install" then
+				pkg.properties.ID = pkg.ID
+			end
+			ubus:call("lcm", value, pkg)
+			pkg = get_default_pkg_config()
+		end
+	else
+		pkg[param] = value
+	end
+end
+
+register(lcm)

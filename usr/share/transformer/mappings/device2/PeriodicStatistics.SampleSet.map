@@ -1,0 +1,205 @@
+-- Manually generated
+local Device_PeriodicStatistics_SampleSet_i_ = {
+  objectType = {
+    name = "Device.PeriodicStatistics.SampleSet.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "SampleSetNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      FetchSamples = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      Name = {
+        access = "readWrite",
+        type = "string",
+        max = "128",
+      },
+      ReportEndTime = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      ReportSamples = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      SampleInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Trigger",
+        }
+      },
+      TimeReference = {
+        access = "readWrite",
+        type = "dateTime",
+      },
+      -- ParameterNumberOfEntries
+      -- automatically created when Device.PeriodicStatistics.SampleSet.{i}.Parameter.{i}. is loaded
+    }
+  }
+}
+
+local bulk_helper = require "transformer.shared.bulkhelper"
+local uci = mapper("ucihelper")
+
+local defaultOptions = {
+  protocol = "HTTP",
+  encode_type = "JSON",
+  ca_info = "/etc/ssl/certs/ca-certificates.crt",
+  ssl_verify_host = "0",
+  ssl_verify_peer = "1",
+  json_report_format = "NameValuePair",
+  json_report_timestamp = "Unix-Epoch",
+  http_url = "http://abc.com",
+  http_compressions_supported = "GZIP",
+  http_compression = "GZIP",
+  http_methods_supported = "POST",
+  http_method = "POST",
+  http_usedate_header = "1",
+  report_interval = "3600",
+  retain_failed_reports = "23",
+  time_reference = "0001-01-01T00:00:00Z",
+}
+
+local calendar = {
+  ["01"] = 31,
+  ["02"] = 29,
+  ["03"] = 31,
+  ["04"] = 30,
+  ["05"] = 31,
+  ["06"] = 30,
+  ["07"] = 31,
+  ["08"] = 31,
+  ["09"] = 30,
+  ["10"] = 31,
+  ["11"] = 30,
+  ["12"] = 31,
+}
+setmetatable(calendar, { __index = function() return 0 end })
+
+local get_map = {
+  Enable = function(object)
+    return object.enabled and object.enabled or "0"
+  end,
+  FetchSamples = function(object)
+    return object.fetch_samples or "0"
+  end,
+  Name = "name",
+  ReportEndTime = function(object)
+    local endTime
+    local fd = io.popen("ls -1 -t '/etc/bulkdata' | grep ".. object['.name'] .." | head -1")
+    if fd then
+      local latestFile = fd:read("*all")
+      latestFile = latestFile:gsub("%s", "")
+      fd:close()
+      local file = io.open("/etc/bulkdata/" .. latestFile)
+      if file then
+        local output = file:read("*all") or ""
+        endTime = output:match('%"CollectionTime%"%:(%d+)')
+        file:close()
+      end
+    end
+    return endTime and os.date("%Y-%m-%dT%H:%M:%SZ", endTime) or ""
+  end,
+  ReportSamples = function(object)
+    local value = tonumber(object.retain_failed_reports or "0")
+    return tostring(value + 1)
+  end,
+  SampleInterval = "report_interval",
+  Status = function(object)
+    if object.triggered == "1" then
+      return object.enabled == "1" and "Trigger" or "Disabled"
+    end
+    return object.enabled == "1" and "Enabled" or "Disabled"
+  end,
+  TimeReference = "time_reference",
+}
+
+local set_map = {
+  Enable = function(binding, value)
+    if value == "0" then
+      binding.option = "sample_counter"
+      uci.set_on_uci(binding, "0", commitapply)
+      binding.option = "triggered"
+      uci.set_on_uci(binding, "0", commitapply)
+    end
+    binding.option = "enabled"
+    uci.set_on_uci(binding, value, commitapply)
+    return true
+  end,
+  Name = "name",
+  FetchSamples = "fetch_samples",
+  ReportSamples = function(binding, value)
+    binding.option = "retain_failed_reports"
+    uci.set_on_uci(binding, value - 1, commitapply)
+    return true
+  end,
+  SampleInterval = "report_interval",
+  TimeReference = function(binding, value)
+    local year, month, day = value:match("^(%d+)-(%d+)-(%d+)T%d+:%d+:%d+Z$")
+    if year and calendar[month] >= tonumber(day) and not (tonumber(year)%4 ~= 0 and month == "02" and day == "29") then
+      binding.option = "time_reference"
+      uci.set_on_uci(binding, value, commitapply)
+      return true
+    else
+      return nil, "The date value or format is invalid! The format should be 0001-01-01T00:00:00Z"
+    end
+  end
+}
+
+bulk_helper.SetProfileMap(Device_PeriodicStatistics_SampleSet_i_, {get=get_map, set=set_map}, commitapply)
+
+Device_PeriodicStatistics_SampleSet_i_.entries = function(mapping)
+  return mapping._profile:getProfileKeys("periodic")
+end
+
+local function ubusEventCb(mapping, event, data)
+  if data.triggered == "1" then
+    return { {key=data.profile, paramname="Status"} }
+  end
+end
+
+Device_PeriodicStatistics_SampleSet_i_.add_watchers = function(mapping, param, key)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, ubusEventCb, "bulkdata.periodicstatistics")
+end
+
+Device_PeriodicStatistics_SampleSet_i_.getall = bulk_helper.getall
+Device_PeriodicStatistics_SampleSet_i_.get = bulk_helper.get
+Device_PeriodicStatistics_SampleSet_i_.set = bulk_helper.set
+Device_PeriodicStatistics_SampleSet_i_.add = function(mapping)
+  local newProfile =  bulk_helper.add_profile(mapping, "periodic")
+  local bulkdataBinding = {config = 'bulkdata' , sectionname = newProfile}
+  for option, value in pairs(defaultOptions) do
+    bulkdataBinding.option = option
+    uci.set_on_uci(bulkdataBinding, value, commitapply)
+  end
+  return newProfile
+end
+Device_PeriodicStatistics_SampleSet_i_.delete = bulk_helper.delete_profile
+Device_PeriodicStatistics_SampleSet_i_.commit = bulk_helper.commit
+Device_PeriodicStatistics_SampleSet_i_.revert = bulk_helper.revert
+
+register(Device_PeriodicStatistics_SampleSet_i_)

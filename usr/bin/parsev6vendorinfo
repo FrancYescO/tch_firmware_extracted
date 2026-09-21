@@ -1,0 +1,39 @@
+#!/usr/bin/env lua
+logger=require('transformer.logger')
+l=logger.new('parsev6vendorinfo',6)
+interface=arg[1]
+v6vendorinfo=arg[2]
+suboptions={}
+suboption=nil
+
+local function hexstr2str(hexstr)
+  return hexstr:gsub("%x%x", function (s) return string.char(tonumber(s,16)) end)
+end
+
+local function optiondata2table(option_data)
+  local t = {}
+  while option_data:len() ~= 0 do
+    suboption = tonumber(option_data:sub(1,4), 16)
+    local option_len = tonumber(option_data:sub(5,8), 16)
+    local option_value = hexstr2str(option_data:sub(9, 8+option_len*2))
+    t[tostring(suboption)] = option_value
+    option_data = option_data:sub(9+option_len*2)
+  end
+  return t
+end
+suboptions = optiondata2table(v6vendorinfo:sub(9))
+
+-- check if there is a processing script installed
+-- and that it exposes a method 'process'
+f=io.open("/usr/lib/lua/processv6vendorinfo.lua","r")
+if f then
+	f:close()
+	processv6vendorinfo=require('processv6vendorinfo')
+	if processv6vendorinfo.process then
+		processv6vendorinfo.process(interface,suboptions)
+	else
+		l:error("processv6vendorinfo.lua does not expose a process method")
+	end
+else
+	l:error("failed to find processing script /usr/lib/lua/processv6vendorinfo.lua")
+end

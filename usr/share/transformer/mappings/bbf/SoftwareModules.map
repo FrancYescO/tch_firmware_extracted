@@ -1,0 +1,846 @@
+-- luacheck: globals register mapper resolve
+local duplicator = mapper("multiroot").duplicate
+local dm_roots = { "InternetGatewayDevice", "Device", "sys" }
+
+local function duplicate_and_register(mapping)
+  local duplicates = duplicator(mapping, "#ROOT", dm_roots)
+  for _, m in ipairs(duplicates) do
+    local root = m.objectType.name:match("([^%.]+)%.")
+    m.root = root
+    for _, param in pairs(m.objectType.parameters) do
+      local targetParent = param.targetParent
+      if targetParent then
+        param.targetParent = targetParent:gsub("#ROOT", root)
+      end
+    end
+    register(m)
+  end
+end
+
+
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_SoftwareModules_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- ExecEnvNumberOfEntries
+      -- automatically created when Device.SoftwareModules.ExecEnv.{i}. is loaded
+      -- DeploymentUnitNumberOfEntries
+      -- automatically created when Device.SoftwareModules.DeploymentUnit.{i}. is loaded
+      -- ExecutionUnitNumberOfEntries
+      -- automatically created when Device.SoftwareModules.ExecutionUnit.{i}. is loaded
+      X_BELGACOM_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      },
+      X_000E50_DefaultExecutionEnvironment = {
+        access = "readWrite",
+        type = "string",
+      }
+    }
+  }
+}
+
+do
+  local uci_helper = mapper("ucihelper")
+  local default_ee_binding={config="lcmd", sectionname="daemon_config", option="default_execution_environment"}
+
+  Device_SoftwareModules_.get = {
+    X_BELGACOM_DefaultExecutionEnvironment = function (mapping, paramname, key)
+      local value = uci_helper.get_from_uci(default_ee_binding)
+      return resolve("Device.SoftwareModules.ExecEnv.{i}.", value) or ""
+    end,
+    X_000E50_DefaultExecutionEnvironment = function (mapping, paramname, key)
+      local value = uci_helper.get_from_uci(default_ee_binding)
+      return resolve("Device.SoftwareModules.ExecEnv.{i}.", value) or ""
+    end,
+  }
+
+  Device_SoftwareModules_.set = {
+    X_BELGACOM_DefaultExecutionEnvironment = function (mapping, param, value)
+      local rc, value = pcall(tokey, value, "Device.SoftwareModules.ExecEnv.{i}.")
+      if not rc or not value then
+        return nil, "invalid value"
+      end
+      uci_helper.set_on_uci(default_ee_binding, value, commitapply)
+    end,
+    X_000E50_DefaultExecutionEnvironment = function (mapping, param, value)
+      local rc, value = pcall(tokey, value, "Device.SoftwareModules.ExecEnv.{i}.")
+      if not rc or not value then
+        return nil, "invalid value"
+      end
+      uci_helper.set_on_uci(default_ee_binding, value, commitapply)
+    end,
+  }
+
+  Device_SoftwareModules_.commit = function()
+    uci_helper.commit(default_ee_binding)
+  end
+
+  Device_SoftwareModules_.revert = function()
+    uci_helper.revert(default_ee_binding)
+  end
+end
+
+duplicate_and_register(Device_SoftwareModules_)
+-----------------------------------------------------------------------------------------
+local ubus = mapper("ubus").connect()
+local ipairs, pairs = ipairs, pairs
+local concat = table.concat
+
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_SoftwareModules_ExecEnv_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ExecEnvNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly",  -- readWrite currently not supported
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Error",
+          "Disabled",
+        },
+      },
+--[[
+      Reset = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
+--]]
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      InitialRunLevel = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      RequestedRunLevel = {
+        access = "readWrite",
+        command = "true",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      CurrentRunLevel = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      InitialExecutionUnitRunLevel = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "65535",
+          },
+        },
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      ParentExecEnv = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+--[[
+      AllocatedDiskSpace = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AvailableDiskSpace = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AllocatedMemory = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      AvailableMemory = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+--]]
+      ActiveExecutionUnits = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+      },
+--[[
+      ProcessorRefList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.Processor.{i}.",
+      },
+--]]
+      X_000E50_Reboot = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+      },
+    }
+  },
+  aliasDefault = "Name",
+}
+
+do
+  local ubus_arg = {}
+
+  Device_SoftwareModules_ExecEnv_i_.entries = function()
+    local entries = {}
+    ubus_arg.name = nil
+    local execenvs = ubus:call("lcm", "list_execenvs", ubus_arg)
+    if not execenvs then
+      return entries
+    end
+    for _, execenv in ipairs(execenvs.execenvs) do
+      entries[#entries + 1] = execenv.name
+    end
+    return entries
+  end
+
+  local function get_ubus_data(name)
+    ubus_arg.name = name
+    local execenv = ubus:call("lcm", "list_execenvs", ubus_arg)
+    if execenv then
+      return execenv.execenvs[1]
+    end
+  end
+
+  local dm_to_ubus_names = {
+    Name = "name",
+    Vendor = "vendor",
+    Version = "version"
+  }
+
+  local function get(_, paramname, key)
+    local execenv = get_ubus_data(key)
+    local value = ""
+    if execenv then
+      if paramname == "Type" then
+        value = execenv.name .. " " .. execenv.version
+      else
+        value = execenv[dm_to_ubus_names[paramname]]
+      end
+    end
+    return value
+  end
+
+  local function get_active_EUs(mapping, _, key)
+    local EUs = ubus:call("lcm", "list_packages", { properties = { execenv = key, state = "running" } })
+    if EUs then
+      local paths = {}
+      local typepath = mapping.root .. ".SoftwareModules.ExecutionUnit.{i}."
+      for _, pkg in ipairs(EUs.packages) do
+        paths[#paths + 1] = resolve(typepath, pkg.ID)
+      end
+      return concat(paths, ",")
+    end
+    return ""
+  end
+
+  Device_SoftwareModules_ExecEnv_i_.get = {
+    Enable = "1",
+    Status = "Up",
+    Name = get,
+    Type = get,
+    InitialRunLevel = "0",
+    RequestedRunLevel = "-1",
+    CurrentRunLevel = "-1",
+    InitialExecutionUnitRunLevel = "-1",
+    Vendor = get,
+    Version = get,
+    ParentExecEnv = "",
+    ActiveExecutionUnits = get_active_EUs,
+    X_000E50_Reboot = "0"
+  }
+
+  Device_SoftwareModules_ExecEnv_i_.getall = function(_, key)
+    local execenv = get_ubus_data(key)
+    local data = {}
+    if execenv then
+      data.Name = execenv.name
+      data.Vendor = execenv.vendor
+      data.Version = execenv.version
+      data.Type = execenv.name .. " " .. execenv.version
+    end
+    return data
+  end
+
+  local function dummy_set()
+  end
+
+  local function lxc_reboot(mapping, param, value, key)
+    if value == "1" then
+      local container_name = get(mapping, "Name", key)
+      if container_name == "native" then
+         return nil,"cannot reboot native ExecEnv"
+      end
+      local f = io.open("/tmp/.lxc_name","w")
+      if f then
+        f:write(container_name)
+        f:close()
+        commitapply:newset("Device.SoftwareModules.ExecEnv.{i}.X_000E50_Reboot")
+      else
+        return nil, "unexpected write error"
+      end
+    end
+  end
+
+  Device_SoftwareModules_ExecEnv_i_.set = {
+    InitialRunLevel = dummy_set,
+    RequestedRunLevel = dummy_set,
+    InitialExecutionUnitRunLevel = dummy_set,
+    X_000E50_Reboot = lxc_reboot,
+  }
+end
+
+duplicate_and_register(Device_SoftwareModules_ExecEnv_i_)
+-----------------------------------------------------------------------------------------
+
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_SoftwareModules_DeploymentUnit_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.DeploymentUnit.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "DeploymentUnitNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      UUID = {
+        access = "readOnly",
+        type = "string",
+        max = "36",
+      },
+      DUID = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Status = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "Installing",
+          "Installed",
+          "Updating",
+          "Uninstalling",
+          "Uninstalled",
+        },
+      },
+--[[
+      Resolved = {
+        access = "readOnly",
+        type = "boolean",
+      },
+--]]
+      URL = {
+        access = "readOnly",
+        type = "string",
+        max = "1024",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+--[[
+      VendorLogList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+      },
+      VendorConfigList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorConfigFile.{i}.",
+      },
+--]]
+      ExecutionUnitList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+      },
+      ExecutionEnvRef = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+    }
+  }
+}
+
+local pkg_ubus_arg = { properties = {} }
+
+local function get_pkg_ubus_data(ID)
+  pkg_ubus_arg.properties.ID = ID
+  local pkg = ubus:call("lcm", "list_packages", pkg_ubus_arg)
+  if pkg then
+    return pkg.packages[1]
+  end
+end
+
+local pkg_state_to_EU_state = {
+  new          = false,
+  downloading  = false,
+  downloaded   = false,
+  installing   = false,
+  installed    = "Idle",
+  starting     = "Starting",
+  running      = "Active",
+  stopping     = "Stopping",
+  uninstalling = false,
+  retired      = false
+}
+
+do
+  local dm_to_ubus_names = {
+    UUID = "UUID",
+    DUID = "ID",
+    Name = "name",
+    Status = "state",
+    URL = "URL",
+    Description = "Description",
+    Vendor = "vendor",
+    Version = "version",
+    ExecutionUnitList = "state", -- may seem strange but see below in get()
+    ExecutionEnvRef = "execenv"
+  }
+
+  local pkg_state_to_DU_state = {
+    new          = "Installing",
+    downloading  = "Installing",
+    downloaded   = "Installing",
+    installing   = "Installing",
+    installed    = "Installed",
+    starting     = "Installed",
+    running      = "Installed",
+    stopping     = "Installed",
+    uninstalling = "Uninstalling",
+    retired      = "Uninstalled"
+  }
+
+  local function pkg_entries()
+    local entries = {}
+    pkg_ubus_arg.properties.ID = nil
+    local packages = ubus:call("lcm", "list_packages", pkg_ubus_arg)
+    if not packages then
+      return entries
+    end
+    for _, pkg in ipairs(packages.packages) do
+      -- TODO: TR-157 fig 4 sequence diagram only shows a DU in the data model
+      -- after the download has succeeded
+      entries[#entries + 1] = pkg.ID
+    end
+    return entries
+  end
+
+  local function get(mapping, paramname, key, pkg)
+    pkg = pkg or get_pkg_ubus_data(key)
+    local value = ""
+    if pkg then
+      value = pkg[dm_to_ubus_names[paramname]] or ""
+      if paramname == "Status" then
+        value = pkg_state_to_DU_state[value]
+      elseif paramname == "ExecutionUnitList" then
+        -- Knowing that EUs have the same key as DUs we could do a plain
+        -- resolve() but:
+        -- - It's possible that for a DU the corresponding EU is not visible
+        --   in the data model, depending on the state of the package.
+        -- - resolve() will first consult Transformer's DB but if not found
+        --   there it will issue a sync to the objecttype. This can be
+        --   relatively expensive. Since we know when an EU should be visible
+        --   in the datamodel we can make sure to only call resolve() when
+        --   it's actually relevant.
+        if pkg_state_to_EU_state[value] then
+          value = resolve(mapping.root .. ".SoftwareModules.ExecutionUnit.{i}.", key) or ""
+        else
+          value = ""
+        end
+      elseif paramname == "ExecutionEnvRef" then
+        value = resolve(mapping.root .. ".SoftwareModules.ExecEnv.{i}.", value) or ""
+      end
+    end
+    return value
+  end
+
+  Device_SoftwareModules_DeploymentUnit_i_.entries = pkg_entries
+  Device_SoftwareModules_DeploymentUnit_i_.get = get
+  Device_SoftwareModules_DeploymentUnit_i_.getall = function(mapping, key)
+    local pkg = get_pkg_ubus_data(key)
+    local data = {}
+    for paramname in pairs(dm_to_ubus_names) do
+      data[paramname] = get(mapping, paramname, key, pkg)
+    end
+    return data
+  end
+end
+
+duplicate_and_register(Device_SoftwareModules_DeploymentUnit_i_)
+-----------------------------------------------------------------------------------------
+
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_SoftwareModules_ExecutionUnit_i_ = {
+  objectType = {
+    name = "#ROOT.SoftwareModules.ExecutionUnit.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ExecutionUnitNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      EUID = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      ExecEnvLabel = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Status = {
+        access = "readOnly",
+        activeNotify = "forceDefaultEnabled",
+        type = "string",
+        enumeration = {
+          "Idle",
+          "Starting",
+          "Active",
+          "Stopping",
+        },
+      },
+      RequestedState = {
+        access = "readWrite",
+        command = "true",
+        type = "string",
+        enumeration = {
+          "Idle",
+          "Active",
+        },
+      },
+--[[
+      ExecutionFaultCode = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "NoFault",
+          "FailureOnStart",
+          "FailureOnAutoStart",
+          "FailureOnStop",
+          "FailureWhileActive",
+          "DependencyFailure",
+          "UnStartable",
+        },
+      },
+      ExecutionFaultMessage = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+--]]
+      AutoStart = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      RunLevel = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      Vendor = {
+        access = "readOnly",
+        type = "string",
+        max = "128",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "32",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+--[[
+      DiskSpaceInUse = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      MemoryInUse = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      References = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+      },
+      AssociatedProcessList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.ProcessStatus.Process.{i}.",
+      },
+      VendorLogList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+      },
+      VendorConfigList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.VendorConfigFile.{i}.",
+      },
+      SupportedDataModelList = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.DeviceInfo.SupportedDataModel.{i}.",
+      },
+--]]
+      ExecutionEnvRef = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        targetParent = "#ROOT.SoftwareModules.ExecEnv.{i}.",
+      },
+    }
+  }
+}
+
+do
+  local dm_to_ubus_names = {
+    AutoStart = "autostart",
+    EUID = "ID",
+    Name = "name",
+    ExecEnvLabel = "name",
+    Status = "state",
+    Vendor = "vendor",
+    Version = "version",
+    Description = "Description",
+    ExecutionEnvRef = "execenv"
+  }
+
+  local function pkg_entries()
+    local entries = {}
+    pkg_ubus_arg.properties.ID = nil
+    local packages = ubus:call("lcm", "list_packages", pkg_ubus_arg)
+    if not packages then
+      return entries
+    end
+    for _, pkg in ipairs(packages.packages) do
+      if pkg_state_to_EU_state[pkg.state] then
+        entries[#entries + 1] = pkg.ID
+      end
+    end
+    return entries
+  end
+
+  local function get(mapping, paramname, key, pkg)
+    local value = ""
+    if paramname == "RequestedState" then
+      return value
+    end
+    if paramname == "RunLevel" then
+      return "0"
+    end
+    pkg = pkg or get_pkg_ubus_data(key)
+    if pkg then
+      value = pkg[dm_to_ubus_names[paramname]] or ""
+      if paramname == "Status" then
+        value = pkg_state_to_EU_state[value] or "Idle"
+      elseif paramname == "ExecutionEnvRef" then
+        value = resolve(mapping.root .. ".SoftwareModules.ExecEnv.{i}.", value) or ""
+      end
+    end
+    return value
+  end
+
+  local actions = {}
+
+  local function set(_, paramname, paramvalue, key)
+    if paramname == "RequestedState" then
+      local method = (paramvalue == "Idle") and "stop" or "start"
+      actions[#actions + 1] = { method = method, properties = { ID = key } }
+    elseif paramname == "AutoStart" then
+      actions[#actions + 1] = { method = "modify_package", ID = key, properties = { autostart = paramvalue }}
+    end
+  end
+
+  local function commit()
+    for i, action_details in ipairs(actions) do
+      local method = action_details.method
+      action_details.method = nil
+      ubus:call("lcm", method, action_details)
+      actions[i] = nil
+    end
+  end
+
+  local function revert()
+    actions = {}
+  end
+
+  Device_SoftwareModules_ExecutionUnit_i_.entries = pkg_entries
+  Device_SoftwareModules_ExecutionUnit_i_.get = get
+  Device_SoftwareModules_ExecutionUnit_i_.set = set
+  Device_SoftwareModules_ExecutionUnit_i_.commit = commit
+  Device_SoftwareModules_ExecutionUnit_i_.revert = revert
+  Device_SoftwareModules_ExecutionUnit_i_.getall = function(mapping, key)
+    local pkg = get_pkg_ubus_data(key)
+    local data = {}
+    for paramname in pairs(dm_to_ubus_names) do
+      data[paramname] = get(mapping, paramname, key, pkg)
+    end
+    return data
+  end
+end
+
+duplicate_and_register(Device_SoftwareModules_ExecutionUnit_i_)
+
+
+-- TODO: eventing
+-- TODO: transactional behavior on SPV?

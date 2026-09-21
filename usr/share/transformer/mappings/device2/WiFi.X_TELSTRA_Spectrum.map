@@ -1,0 +1,301 @@
+-- Device.WiFi.X_TELSTRA_Spectrum.
+local Device_WiFi_X_TELSTRA_Spectrum_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_Spectrum.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  }
+}
+
+-- Device.WiFi.X_TELSTRA_Spectrum.ChannelUtilisation.
+local Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_Spectrum.ChannelUtilisation.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      CaptureTime = {
+        access = "readOnly",
+        type = "dateTime",
+        description = "The time the results were last written in UTC",
+      },
+    },
+  },
+}
+
+local conn = mapper("ubus").connect()
+local utilisation_content = {}
+local interferer_content = {}
+
+local function to_datetime(time)
+  if time == nil or time == "" or tostring(time) == "0" then
+    return "0001-01-01T00:00:00Z"
+  else
+    return os.date("%Y-%m-%dT%H:%M:%SZ", time)
+  end
+end
+
+local function to_str(input)
+  if input == nil then
+    return ""
+  else
+    return tostring(input)
+  end
+end
+
+Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_.get = function(mapping, param, parent, key)
+  utilisation_content = conn:call("airiq.utilisation", "get", {}) or {}
+
+  return to_datetime(utilisation_content.CaptureTime)
+end
+
+-- Device.WiFi.X_TELSTRA_Spectrum.ChannelUtilisation.Channels.{i}.
+local Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_Spectrum.ChannelUtilisation.Channels.{i}.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 38,
+    parameters = {
+      Number = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The channel number (as it relates to the frequency band)",
+      },
+      FrequencyCentre = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The center frequency of the channel (in KHz)",
+      },
+      Bandwidth = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The channel bandwidth (in MHz)",
+      },
+      WLANDeviceUtilisationAvg = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The averge over the 15 minute sampling period of the channelutilisation by IEE802.11 compliant WLAN devices inpercent (50% is encoded as 5000)",
+      },
+      WLANDevceUtilisationMax = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The maximum over the 15 minute sampling period of the channelutilisation by IEE802.11 compliant WLAN devices inpercent (50% is encoded as 5000)",
+      },
+      NonWLANDeviceUtilisationAvg = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The averge over the 15 minute sampling period of the channelutilisation by non-WLANdevices in percent (50% is encoded as 5000)",
+      },
+      NonWLANDeviceUtilisationMax = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The maximum over the 15 minute sampling period of the channelutilisation by non-WLANdevices in percent (50% is encoded as 5000)",
+      },
+      InterferersAvg = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The average over the 15 minute sampling period of the number of interferers impacting the channel",
+      },
+      InterferersMax = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The maximum over the 15 minute sampling period of the number of interferers impacting the channel",
+      },
+      UtilisationHistory = {
+        access = "readOnly",
+        type = "string",
+        max = 16,
+        description = "An array divided into 5 buckets (0%, more than 0 to 25%, more than 25 to 50%, more than 50 to 75% and more than 75 to 100%) where each value is the number of times the total channelutilisation was observed to be in the bucket over the last 15 minutes in ~5 second sampling intervals",
+      },
+    },
+  },
+}
+
+Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_.entries = function()
+  local entries = {}
+
+  -- ubus call airiq.utilisation get
+  utilisation_content = conn:call("airiq.utilisation", "get", {}) or {}
+  if type(utilisation_content) == 'table' then
+    for k, v in pairs(utilisation_content) do
+      if type(v) == 'table' then
+        entries[#entries+1] = tostring(k)
+      end
+    end
+  end
+
+  return entries
+end
+
+Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_.getall = function(mapping, key, parentKey)
+  local params = {
+    Number = to_str(utilisation_content[key].Number),
+    FrequencyCentre = to_str(utilisation_content[key].FrequencyCentre),
+    Bandwidth = to_str(utilisation_content[key].Bandwidth),
+    WLANDeviceUtilisationAvg = to_str(utilisation_content[key].WLANDeviceUtilisationAvg),
+    WLANDevceUtilisationMax = to_str(utilisation_content[key].WLANDeviceUtilisationMax),
+    NonWLANDeviceUtilisationAvg = to_str(utilisation_content[key].NonWLANDeviceUtilisationAvg),
+    NonWLANDeviceUtilisationMax = to_str(utilisation_content[key].NonWLANDeviceUtilisationMax),
+    InterferersAvg = to_str(utilisation_content[key].InterferersAvg),
+    InterferersMax = to_str(utilisation_content[key].InterferersAvg),
+    UtilisationHistory = to_str(utilisation_content[key].UtilisationHistory),
+  }
+
+  return params
+end
+
+Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_.get = function(mapping, param, parent, key)
+  return Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_.getall(mapping, parent, key)[param] or ""
+end
+
+-- Device.WiFi.X_TELSTRA_Spectrum.Interferers.
+local Device_WiFi_X_TELSTRA_Spectrum_Interferers_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_Spectrum.Interferers.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      CaptureTime = {
+        access = "readOnly",
+        type = "dateTime",
+        description = "The time the results were last written in UTC",
+      },
+    },
+  },
+}
+
+Device_WiFi_X_TELSTRA_Spectrum_Interferers_.get = function(mapping, param, parent, key)
+  interferer_content = conn:call("airiq.interferer", "get", {}) or {}
+
+  return to_datetime(interferer_content.CaptureTime)
+end
+
+-- Device.WiFi.X_TELSTRA_Spectrum.Interferers.Identifiers.{i}.
+local Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_ = {
+  objectType = {
+    name = "Device.WiFi.X_TELSTRA_Spectrum.Interferers.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = 100,
+    parameters = {
+      Fingerprint = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "An identifier that is unique to the interferer",
+      },
+      StartTime = {
+        access = "readOnly",
+        type = "dateTime",
+        description = "Timestamp for when the interferer was first detected in UTC",
+      },
+      StopTime = {
+        access = "readOnly",
+        type = "dateTime",
+        description = "Timestamp for when the interferer was last detected in UTC",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether the interferer is currently active",
+      },
+      InterfererType = {
+        --[[
+          /*Value*/   /*Description*/
+          0x00000001  Unknown interferer
+          0x00000002  Conventional microwave oven
+          0x00000004  Inverter-type microwave oven
+          0x00000008  Narrowband continuouswave modulated or unmodulated signal
+          0x00000010  Bluetooth frequency-hopping device
+          0x00000020  Direct Sequence Spread Spectrum (DSSS) digital cordless telephone
+          0x00000080  Wireless video camera transmitter
+          0x00000100  Frequency Hopping Spread Spectrum (FHSS) digital cordless telephone
+          0x00000200  Digital baby monitor (Single carrier)
+          0x00001000  Possible Interferer
+          0x00002000  RF Jammer
+          0x00004000  S-Band Motion Detector
+          0x00010000  YDI Narrowband Jammer
+          0x00100000  XBOX Game Controller Comments
+        --]]
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The type of interferer",
+      },
+      RSSIMax = {
+        access = "readOnly",
+        type = "int",
+        description = "The maximum RSSI observed for the interferer in dBm",
+      },
+      RSSIMin = {
+        access = "readOnly",
+        type = "int",
+        description = "The minimum RSSI observed for the interferer in dBm",
+      },
+      RSSIAvg = {
+        access = "readOnly",
+        type = "int",
+        description = "The average RSSI observed for the interferer in dBm",
+      },
+      Frequency = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The RF frequency where the interferer was detected",
+      },
+      ChannelsImpacted = {
+        access = "readOnly",
+        type = "string",
+        max = 1024,
+        description = "An array of channel numbers that were impacted by the interferer. This is formatted as a comma separated list",
+      },
+    },
+  },
+}
+
+Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_.entries = function()
+  local entries = {}
+
+  -- ubus call airiq.interferers get
+  interferer_content = conn:call("airiq.interferers", "get", {}) or {}
+  if type(interferer_content) == 'table' then
+    for k, v in pairs(interferer_content) do
+      if type(v) == 'table' then
+        entries[#entries+1] = tostring(k)
+      end
+    end
+  end
+
+  return entries
+end
+
+Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_.getall = function(mapping, key, parentKey)
+  local params = {
+    CaptureTime = to_datetime(interferer_content.CaptureTime),
+    Fingerprint = to_str(interferer_content[key].Fingerprint),
+    StartTime = to_datetime(interferer_content[key].StartTime),
+    StopTime = to_datetime(interferer_content[key].StopTime),
+    Active = to_str(interferer_content[key].Active),
+    InterfererType = to_str(interferer_content[key].InterfererType),
+    RSSIMax = to_str(interferer_content[key].RSSIMax),
+    RSSIMin = to_str(interferer_content[key].RSSIMin),
+    RSSIAvg = to_str(interferer_content[key].RSSIAvg),
+    Frequency = to_str(interferer_content[key].Frequency),
+    ChannelsImpacted = to_str(interferer_content[key].ChannelsImpacted),
+  }
+
+  return params
+end
+
+Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_.get = function(mapping, param, parent, key)
+  return Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_.getall(mapping, parent, key)[param] or ""
+end
+
+local objects = {Device_WiFi_X_TELSTRA_Spectrum_, Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_, Device_WiFi_X_TELSTRA_Spectrum_ChannelUtilisation_Channels_i_, Device_WiFi_X_TELSTRA_Spectrum_Interferers_, Device_WiFi_X_TELSTRA_Spectrum_Interferers_Indentifiers_i_}
+
+for _, obj in ipairs(objects) do
+  register(obj)
+end
