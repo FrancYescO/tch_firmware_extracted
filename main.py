@@ -56,7 +56,7 @@ def decrypt( file ):
 
 		while True:
 			payloadtype = data[0]
-			if payloadtype == 0xB0: # in chiaro
+			if payloadtype == 0xB0: # plaintext
 				data = data[1+4+1:]
 				break
 			elif payloadtype == 0xB8: # sha256
@@ -78,9 +78,9 @@ def decrypt( file ):
 				data = decryptor.update(data[80:]) + decryptor.finalize()
 				data = data[:-data[-1]]
 
-		output_name = file[:(file.find("rbi"))]+"bin" #rimuove estensione rbi
-		output_file = open(output_name,"w+b") #crea il bin
-		output_file.write(data) #Scrive i dati
+		output_name = file[:(file.find("rbi"))]+"bin" #remove rbi extension
+		output_file = open(output_name,"w+b") #create the bin
+		output_file.write(data) #write the data
 
 		print("Decrypted:",output_name)
 		return output_name
@@ -184,8 +184,46 @@ def extract_rootfs(dec_filename):
 NO_PUSH="--no-push" in sys.argv
 KEEP="--keep" in sys.argv
 
+try:
+	from git import Repo, RemoteReference
+except ImportError:
+	Repo=None
+
+REPO_URL=None
+remote_branches=None
+if not NO_PUSH:
+	if Repo is None:
+		print("GitPython not installed, pushing disabled")
+		NO_PUSH=True
+	else:
+		try:
+			local_repo=Repo(".") # use the current repository's origin remote, no hardcoded URL
+			REPO_URL=local_repo.remotes.origin.url
+			try:
+				local_repo.remotes.origin.fetch("--prune","--quiet") # best-effort: refresh refs if the network is available
+			except Exception:
+				pass
+			remote_branches={ref.name[len("origin/"):] for ref in local_repo.refs if isinstance(ref,RemoteReference) and not ref.name.endswith("/HEAD")}
+		except Exception:
+			print("No origin remote found, pushing disabled")
+			NO_PUSH=True
+
+def normalize_branch(name):
+	# git does not allow spaces and other characters in branch names,
+	# normalization is deterministic so the filename check still works
+	name=re.sub(r'[\s~^:?*\[\]\\]+','_',name)
+	name=re.sub(r'\.{2,}','_',name)
+	name=re.sub(r'^[./]+|[./]+$','',name)
+	if name.endswith(".lock"):
+		name=name[:-5]+"_"
+	return name
+
 os.chdir("./")
 for file in glob.glob("*.rbi"):
+	branch_name=normalize_branch(os.path.splitext(file)[0]) # filename without extension, normalized
+	if remote_branches is not None and branch_name in remote_branches:
+		print("Skipping %s: branch %s already exists"%(file,branch_name))
+		continue
 	print("Decrypting %s..."%file)
 	dec_filename=decrypt(file)
 	if not dec_filename:
@@ -193,12 +231,10 @@ for file in glob.glob("*.rbi"):
 	path_to_push,mountpoint,dmg,sqsh=extract_rootfs(dec_filename)
 	if path_to_push and os.path.isdir(path_to_push):
 		if not NO_PUSH:
-			from git import Repo
 			print("Pushing to github...")
 			repo = Repo.init(path_to_push) #create repo object of the other repository
-			repo.create_remote('origin', 'https://github.com/FrancYescO/tch_firmware_extracted')
+			repo.create_remote('origin', REPO_URL)
 			repo.remotes[0].fetch()
-			branch_name=dec_filename[:(dec_filename.find(".bin"))]
 			repo.git.checkout('-b', branch_name)
 			repo.git.add('.') # same as git add file
 			repo.git.commit(m = branch_name) # same as git commit -m "commit message"
