@@ -1,0 +1,339 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local tostring, ipairs, register, type = tostring, ipairs, register, type
+local mapper, resolve ,setmetatable = mapper, resolve, setmetatable
+local uciHelper = mapper("ucihelper")
+local setOnUci = uciHelper.set_on_uci
+local mmpbxDeviceBinding = { config = "mmpbx", sectionname = "device"}
+local internalMapBinding = { config = "mmpbx", sectionname = "internal_map" }
+local internalNetBinding = { config = "mmpbxinternalnet" , sectionname = "profile" }
+local conn = mapper("ubus").connect()
+local fxsBinding =  { config = "mmpbxbrcmfxsdev"}
+local dectBinding = { config = "mmpbxdectdev"}
+local transactions = {}
+local deviceData = {}
+
+local Multi_Services_VoiceService_i_CallControl_Extension_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Extension.{i}.",
+        access = "readWrite",
+        numEntriesParameter = "ExtensionNumberOfEntries",
+        enableParameter = "Enable",
+        minEntries = 0,
+        maxEntries = math.huge,
+     -- aliasParameter = "Alias",
+        parameters = {
+            Enable = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "boolean",
+                default = "false",
+                description = "Enable or disable this extension",
+            },
+            --[[QuiescentMode = {
+              access = "readWrite",
+              type = "boolean",
+            },]]--
+            Status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Up",
+                    "Initializing",
+                    "Error",
+                    "Testing",
+                    "Quiescent",
+                    "Disabled",
+                },
+                default = "Disabled",
+                description = "Indicates the status of this extension",
+            },
+            --[[Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            CallStatus = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Idle",
+                    "Dialing",
+                    "Delivered",
+                    "Connected",
+                    "Alerting",
+                    "Disconnected",
+                },
+                description = "Indicates the call status for this extension",
+            },
+            Origin = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "AutoConfigured",
+                    "Static",
+                },
+                default = "Static",
+                description = "Mechanism via which the Extension object is assigned",
+            },
+            Name = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                description = "The name of this extension",
+            },
+            ExtensionNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+                default = "",
+                description = "The number assigned to this extension for internal calls",
+            },
+            Provider = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.SIP.Registrar.{i}.Account.{i}. VoiceService.ISDN.BRI.{i}. VoiceService.ISDN.PRI.{i}. VoiceService.POTS.FXS.{i}. VoiceService.DECT.Portable.{i}. VoiceService.Terminal.{i}. VoiceService.CallControl.Group.{i}.",
+                description = "Provider for the extension",
+            },
+            NumberingPlan = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.NumberingPlan.{i}.",
+                description = "Numbering plan to be used for outgoing calls",
+            },
+            CallingFeatures = {
+                access = "readOnly", -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.",
+                description = "Set of calling features to apply to this extension",
+            },
+            CallWaitingStatus = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Disabled",
+                    "Idle",
+                    "SecondaryRinging",
+                    "SecondaryConnecting",
+                    "SecondaryConnected",
+                },
+                description = "Status of endpoint managed call waiting, if supported",
+            },
+            ConferenceCallingStatus = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Disabled",
+                    "Idle",
+                    "SecondaryCalling",
+                    "SecondaryConnecting",
+                    "SecondaryConnected",
+                    "InConferenceCall",
+                },
+                description = "Status of endpoint managed conference calling, if supported",
+            },
+            ConferenceCallingSessionCount = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Number of active sessions on this extension",
+            },
+            --[[VoiceMail = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Mailbox.{i}.",
+          },]]--
+        }
+    }
+}
+
+local function commit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local callStates = setmetatable({
+    MMPBX_CALLSTATE_DIALING = "Dialing",
+    MMPBX_CALLSTATE_ALERTING = "Alerting",
+    MMPBX_CALLSTATE_CALL_DELIVERED = "Delivered",
+    MMPBX_CALLSTATE_CONNECTED = "Connected",
+    MMPBX_CALLSTATE_DISCONNECTED = "Disconnected"
+}, { __index = function() return "Idle" end })
+
+local function getCallStatus(key)
+    local calls = conn:call("mmpbx.call", "get", {}) or {}
+    local callTable = {}
+    local mediaTable = {}
+    if calls and type(calls) == "table" then
+        for _,v in pairs(calls) do
+            if v.callState and v.device == key then
+                callTable[#callTable + 1] = v.callState
+                mediaTable[#callTable + 1] = v.mediaState
+            end
+        end
+        if (#callTable > 0) then
+            if #callTable == 2 and #mediaTable == 2 then
+                return callStates[callTable[1]]
+            elseif #callTable == 2 and #mediaTable == 1 then
+                if callTable[1] == "MMPBX_CALLSTATE_CONNECTED" then
+                    return callStates[callTable[2]]
+                elseif callTable[2] == "MMPBX_CALLSTATE_CONNECTED" then
+                    return callStates[callTable[1]]
+                end
+            else
+                return callStates[callTable[1]]
+            end
+        end
+    end
+    return "Idle"
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    uciHelper.foreach_on_uci(mmpbxDeviceBinding, function(s)
+        if s['.name']:sub(1,1) == "f" or s['.name']:sub(1,1) == "d" or s['.name']:sub(1,1) == "s" then
+            entries[#entries + 1] = s['.name']
+        end
+    end)
+    deviceData = conn:call("mmpbx.device", "get", {}) or {}
+    return entries
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.get  = {
+    Enable = function()
+        return "1"
+    end,
+    Status = function(mapping, param, key)
+        if deviceData and  deviceData[key] then
+            if deviceData[key]["deviceUsable"] then
+                return "Up"
+            else
+                return "Disabled"
+            end
+        end
+        return ""
+    end,
+    CallStatus = function(mapping, param, key)
+        return getCallStatus(key)
+
+    end,
+    Origin = "Static",
+    Name = function(mapping, param, key)
+        return deviceData and deviceData[key] and deviceData[key]["friendlyName"] or ""
+    end,
+    ExtensionNumber = function(mapping, param, key)
+        local profile
+        uciHelper.foreach_on_uci(internalMapBinding, function(s)
+            if s.device == key then
+                profile = s.profile
+            end
+        end)
+        local number
+        internalNetBinding.sectionname = "profile"
+        uciHelper.foreach_on_uci(internalNetBinding, function(a)
+            if a['.name'] == profile then
+                number = a.number
+            end
+        end)
+        return tostring(number)
+    end,
+    Provider = function(mapping, param, key)
+        if key:match("fxs") then
+            return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.POTS.FXS.{i}.', key) or ""
+        elseif key:match("dect") then
+            return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.DECT.Portable.{i}.', key) or ""
+        end
+    end,
+    NumberingPlan = function(mapping, param, key)
+        return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.CallControl.NumberingPlan.{i}.', key) or "" -- TODO: key value should be based on VoiceService.CallControl.NumberingPlan.{i}. creation.
+    end,
+    CallingFeatures = function(mapping, param, key)
+        local path = ""
+        local incomingBinding = { config = "mmpbx", sectionname = "incoming_map" }
+        uciHelper.foreach_on_uci(incomingBinding, function(s)
+            if s.profile:match("sip") and s.device and type(s.device) == "table" and table.concat(s.device, " "):match(key) then
+                path = resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.', s.profile)
+                return false
+            end
+        end)
+        return path
+    end,
+    CallWaitingStatus = function(mapping, param, key)
+        return deviceData and deviceData[key] and deviceData[key]["callWaitingStatus"] or ""
+    end,
+    ConferenceCallingStatus = function(mapping, param, key)
+        return deviceData and deviceData[key] and deviceData[key]["conferenceCallingStatus"] or ""
+    end,
+    ConferenceCallingSessionCount = function(mapping, param, key)
+        return deviceData and deviceData[key] and tostring(deviceData[key]["conferenceCallingSessionCount"]) or ""
+    end
+}
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.set  = {
+    Name = function(mapping, param, value, key)
+        if key:match("fxs") then
+            fxsBinding.sectionname = key
+            fxsBinding.option = "user_friendly_name"
+            setOnUci(fxsBinding, value, commitapply)
+            transactions[fxsBinding.config] = true
+        elseif key:match("dect") then
+            dectBinding.sectionname = key
+            dectBinding.option = "user_friendly_name"
+            setOnUci(dectBinding, value, commitapply)
+            transactions[dectBinding.config] = true
+        end
+    end,
+    ExtensionNumber = function(mapping, param, value, key)
+        local profile
+        uciHelper.foreach_on_uci(internalMapBinding, function(s)
+            if s.device == key then
+                profile = s.profile
+                return false
+            end
+        end)
+        uciHelper.foreach_on_uci(internalNetBinding, function(a)
+            if a['.name'] == profile then
+                internalNetBinding.sectionname = profile
+                internalNetBinding.option = "number"
+                setOnUci(internalNetBinding, value, commitapply)
+                transactions[internalNetBinding.config] = true
+            end
+        end)
+    end,
+}
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.commit = commit
+Multi_Services_VoiceService_i_CallControl_Extension_i_.revert = revert
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.add = function(mapping, parentKey)
+    return nil, "Not supported for add"
+end
+
+Multi_Services_VoiceService_i_CallControl_Extension_i_.delete = function(mapping, key, parentKey)
+    return nil, "Not supported for delete"
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_VoiceService_i_CallControl_Extension_i_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, object in ipairs(duplicates) do
+    register(object)
+end

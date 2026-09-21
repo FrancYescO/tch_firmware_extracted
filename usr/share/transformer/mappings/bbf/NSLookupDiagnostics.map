@@ -1,0 +1,324 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_DNS_Diagnostics_ = {
+  objectType = {
+    name = "Device.DNS.Diagnostics.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+
+register(Device_DNS_Diagnostics_)
+
+local Multi_NSLookupDiagnostics_ = {
+  objectType = {
+    name = "#ROOT.NSLookupDiagnostics.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+		DiagnosticsState = {
+			access = "readWrite",
+			activeNotify = "canDeny",
+			type = "string",
+			enumeration = {
+				"None",
+				"Requested",
+				"Complete",
+				"Error_DNSServerNotResolved",
+				"Error_Internal",
+				"Error_Other",
+			},
+		},
+		Interface = {
+			access = "readWrite",
+			type = "string",
+			max = "256",
+		},
+		HostName = {
+			access = "readWrite",
+			type = "string",
+			max = "256",
+		},
+		DNSServer = {
+			access = "readWrite",
+			type = "string",
+			max = "256",
+		},
+		Timeout = {
+			access = "readWrite",
+			type = "unsignedInt",
+			range = {
+				{
+					min = "1",
+				},
+			},
+		},
+		NumberOfRepetitions = {
+			access = "readWrite",
+			type = "unsignedInt",
+			range = {
+				{
+					min = "1",
+				},
+			},
+		},
+		SuccessCount = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "unsignedInt",
+		},
+		-- ResultNumberOfEntries
+		-- automatically created when InternetGatewayDevice.NSLookupDiagnostics.Result.{i}. is loaded
+		},
+    }
+}
+
+local Multi_NSLookupDiagnostics_Result_i_ = {
+  objectType = {
+    name = "#ROOT.NSLookupDiagnostics.Result.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ResultNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+		Status = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "string",
+			enumeration = {
+				"Success",
+				"Error_DNSServerNotAvailable",
+				"Error_HostNameNotResolved",
+				"Error_DNSServerNotResolved",
+				"Error_Timeout",
+				"Error_Other",
+			},
+		},
+		AnswerType = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "string",
+			enumeration = {
+				"None",
+				"Authoritative",
+				"NonAuthoritative",
+			},
+		},
+		HostNameReturned = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "string",
+		},
+		IPAddresses = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "string",
+		},
+		DNSServerIP = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "string",
+		},
+		ResponseTime = {
+			access = "readOnly",
+			activeNotify = "canDeny",
+			type = "unsignedInt",
+		},
+    }
+  }
+}
+
+
+local uci_helper = mapper("ucihelper")
+local resolve, tokey = resolve, tokey
+local common = mapper('nwcommon')
+local split_key = common.split_key
+local findLanWanInterfaces = common.findLanWanInterfaces
+local helper = require("transformer.shared.nslookupdiaghelper")
+local clear_nslookupdiag_results = helper.clear_nslookupdiag_results
+local startup = helper.startup
+local read_nslookupdiag_results = helper.read_nslookupdiag_results
+local wanconn = require("transformer.shared.wanconnection")
+
+local function getIgdInterface(mapping, param)
+  local value = uci_helper.get_from_uci(mapping._uciBinding[param])
+  local path = ""
+  local lanInterfaces = findLanWanInterfaces(false)
+  local isLan = false
+  for _,j in pairs(lanInterfaces) do
+    if (value == j) then
+      isLan = true
+      break
+    end
+  end
+  if (isLan) then
+    path = resolve('InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.', value)
+  else
+    local key, status = wanconn.get_connection_key(value)
+    if key and status then
+      if status.proto == "pppoe" or status.proto == "pppoa" then
+        path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key)
+      else
+        path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key)
+      end
+    end
+  end
+  value = path or ""
+  return value
+end
+
+
+local function getFromNSLookupDiagHelper(mapping, param)
+  return helper.uci_nslookupdiag_get(mapping._section, param)
+end
+
+local function getDev2Interface(mapping, param)
+  local value = getFromNSLookupDiagHelper(mapping, param)
+  return resolve("Device.IP.Interface.{i}.", value) or ""
+end
+
+local function SetOnNSLookupDiagHelper(mapping, param, value)
+  -- As per specs, only writable value for DiagnosticsState parameter is "Requested"
+  if param == "DiagnosticsState" and value ~= "Requested" then
+    return nil, "Invalid value"
+  end
+  helper.uci_nslookupdiag_set(mapping._section, param, value, commitapply)
+end
+
+local function setIgdInterface(mapping, param, value)
+  -- Interface is displayed in IGD/Device2 as path, but stored as UCI/UBUS interface in UCI, so convert it first
+  -- allow empty value
+  -- Convert path to key; this is always the UCI/UBUS interface name, like wan, lan, ...
+  local intf = ""
+  if value ~= "" then
+    value = tokey(value,
+      "InternetGatewayDevice.LANDevice.{i}.LANHostConfigManagement.IPInterface.{i}.",
+      "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.",
+      "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.")
+    if value and value:match("|") then
+      -- Interface name is the first part of the WANDevice.WANConnectionDevice.WANIP/WANPPP key
+      -- Interface name is the second part of the WANDevice.WANConnectionDevice.WANIP/WANPPP key for active devices
+      value, intf = split_key(value)
+    end
+    if not value then
+      return nil, "Invalid value"
+    end
+  end
+  if value == "ACTIVE" then
+    SetOnNSLookupDiagHelper(mapping, param, intf)
+  else
+    SetOnNSLookupDiagHelper(mapping, param, value)
+  end
+end
+
+local function setDev2Interface(mapping, param, value)
+  if value ~= "" then
+    value = tokey(value, "Device.IP.Interface.{i}.")
+    if not value then
+      return nil, "Invalid value"
+    end
+  end
+  SetOnNSLookupDiagHelper(mapping, param, value)
+end
+
+
+local uciBindingParamMap = {
+  DiagnosticsState =  "state",
+  Interface = "interface",
+  HostName = "hostname",
+  DNSServer = "dnsserver",
+  NumberOfRepetitions = "repetitions",
+  Timeout = "timeout",
+}
+
+local function getSectionName(mapping)
+  if mapping.objectType.name:match("^InternetGatewayDevice.") then
+    return "igd"
+  else
+    return "device2"
+  end
+end
+
+
+local function getSuccessCount(mapping,param)
+    local results, SuccessCount = read_nslookupdiag_results(mapping._section)
+    return (SuccessCount and tostring(SuccessCount)) or "0"
+end
+
+Multi_NSLookupDiagnostics_.get = {
+  DiagnosticsState = getFromNSLookupDiagHelper,
+  Interface = function(mapping, param)
+    return mapping._getInterface(mapping,param)
+  end,
+  Timeout = getFromNSLookupDiagHelper,
+  HostName = getFromNSLookupDiagHelper,
+  DNSServer = getFromNSLookupDiagHelper,
+  NumberOfRepetitions = getFromNSLookupDiagHelper,
+  SuccessCount = getSuccessCount,
+}
+
+Multi_NSLookupDiagnostics_.set = {
+  DiagnosticsState = SetOnNSLookupDiagHelper ,
+  Interface = function(mapping, param, value)
+    return mapping._setInterface(mapping, param, value)
+  end ,
+  HostName = SetOnNSLookupDiagHelper ,
+  NumberOfRepetitions = SetOnNSLookupDiagHelper ,
+  Timeout = SetOnNSLookupDiagHelper ,
+  DNSServer = SetOnNSLookupDiagHelper ,
+}
+
+Multi_NSLookupDiagnostics_Result_i_.get = function(mapping, param, key)
+  local res = read_nslookupdiag_results(mapping._section)
+  local rres = (res and res[tonumber(key)] and res[tonumber(key)][param]) or ""
+  return rres
+end
+
+Multi_NSLookupDiagnostics_Result_i_.entries = function(mapping, parentkey)
+  local result = {}
+  local res = read_nslookupdiag_results(mapping._section)
+  if type(res) == "table" then
+	  for i,_ in ipairs(res) do
+		result[#result + 1]=tostring(i)
+	  end
+  end
+  return result
+end
+
+Multi_NSLookupDiagnostics_.commit = helper.uci_nslookupdiag_commit
+Multi_NSLookupDiagnostics_.revert = helper.uci_nslookupdiag_revert
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_NSLookupDiagnostics_, "#ROOT", {"InternetGatewayDevice", "Device.DNS.Diagnostics"})
+for _, dupli in ipairs(duplicates) do
+  dupli._section = getSectionName(dupli)
+  dupli._uciBinding = {}
+  for param, opt in pairs(uciBindingParamMap) do
+    dupli._uciBinding[param] = { config = "nslookupdiag", sectionname = dupli._section, option = opt }
+  end
+  if dupli._section == 'igd' then
+    dupli._getInterface = getIgdInterface
+    dupli._setInterface = setIgdInterface
+  else
+    dupli.objectType.parameters.Interface.targetParent = "Device.IP.Interface.{i}."
+    dupli._getInterface = getDev2Interface
+    dupli._setInterface = setDev2Interface
+  end
+  startup(dupli._section, dupli._uciBinding)
+  --read_nslookupdiag_results(dupli._section)
+  clear_nslookupdiag_results(dupli._section)
+  register (dupli)
+end
+
+local duplicates = duplicator(Multi_NSLookupDiagnostics_Result_i_, "#ROOT", {"InternetGatewayDevice", "Device.DNS.Diagnostics"})
+for _, dupli in ipairs(duplicates) do
+      dupli._section = getSectionName(dupli)
+    read_nslookupdiag_results(dupli._section)
+    register (dupli)
+end
+
+
