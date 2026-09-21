@@ -1,0 +1,459 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DHCPv4_Client_i_ = {
+  objectType = {
+    name = "Device.DHCPv4.Client.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ClientNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 1,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- readWrite makes no sense as it cannot be
+        -- disabled independently of the interface.
+        type = "boolean",
+        default = "false",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max  = "64",
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        default = "",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+--[[ TODO
+      DHCPStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Init",
+          "Selecting",
+          "Requesting",
+          "Rebinding",
+          "Bound",
+          "Renewing",
+        },
+      },
+]]--
+      Renew = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+        default = "false",
+      },
+      X_000E50_ReleaseRenew = {
+        access = "readWrite",
+        command = "true",
+        type = "boolean",
+	description = "When set to true, trigger an IPv4 DHCP release/renew",
+        default = "false",
+      },
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      SubnetMask = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      IPRouters = {
+        access = "readOnly",
+        list = true,
+        max = "256",
+        type = "string",
+        default = "",
+      },
+      DNSServers = {
+        access = "readOnly",
+        list = true,
+        max = "256",
+        type = "string",
+        default = "",
+      },
+--[[ TODO
+      LeaseTimeRemaining = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "0",
+      },
+      DHCPServer = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+--]]
+      PassthroughEnable = {
+        access = "readOnly",  -- readwrite currently not supported
+        type = "boolean",
+        default = "false",
+      },
+      PassthroughDHCPPool = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.DHCPv4.Server.Pool.{i}.",
+        default = "",
+      },
+      -- SentOptionNumberOfEntries
+      -- automatically created when Device.DHCPv4.Client.{i}.SentOption.{i}. is loaded
+      -- ReqOptionNumberOfEntries
+      -- automatically created when Device.DHCPv4.Client.{i}.ReqOption.{i}. is loaded
+
+    }
+  }
+}
+
+local mapper, commitApply, concat, pairs = mapper, commitapply, table.concat, pairs
+local nwcommon = mapper("nwcommon")
+local ucihelper = mapper("ucihelper")
+local register, resolve, tokey, open = register, resolve, tokey, io.open
+local get_ubus_interface_status = nwcommon.get_ubus_interface_status
+local nwmodel = require "transformer.shared.models.device2.network"
+local uciobject = require "transformer.shared.uciobject"
+local model
+local transactions = {}
+
+local function getUciParam(config, key, option, default)
+  local binding = {
+    config = config,
+    sectionname = key,
+    option = option,
+    default = default,
+  }
+  if option then
+    return ucihelper.get_from_uci(binding)
+  end
+  return ucihelper.getall_from_uci(binding)
+end
+
+local function setUciParam(config, key, option, value)
+  local binding = {
+    config = config,
+    sectionname = key,
+    option = option,
+  }
+  ucihelper.set_on_uci(binding, value, commitApply)
+  transactions[config] = true
+end
+
+local function load_dynamic_instances()
+  local keys = {}
+  local intf_map = {}
+  ucihelper.foreach_on_uci({config="network", sectionname="dhcp4client"}, function(s)
+    local key = "dyn:"..s['.name']
+    keys[#keys+1] = key
+    local intf = s.linkedto
+    if intf then
+      intf_map[intf] = key
+    end
+  end)
+  return keys, intf_map
+end
+
+Device_DHCPv4_Client_i_.entries = function()
+  model = nwmodel.load()
+  local entries = {}
+  local dynkeys, dynintf = load_dynamic_instances()
+  local intf = model:getKeys("IPInterface")
+  for _, iface in pairs (intf) do
+    local proto = getUciParam("network", model:getUciKey(iface), "proto")
+    if proto == "dhcp" and not dynintf[intf] then
+      entries[#entries + 1] = iface
+    end
+  end
+  for _, key in ipairs(dynkeys) do
+    entries[#entries+1] = key
+  end
+  return entries
+end
+
+Device_DHCPv4_Client_i_.add = function()
+  local key = uciobject.create("network", "dhcp4client", "dhcp_dyn", {
+    dev2_dynamic = "1",
+    proto = "dhcp"
+  }, commitapply)
+  return "dyn:"..key
+end
+
+Device_DHCPv4_Client_i_.delete = function(_, key)
+  if not uciobject.is_dynamic("network", key) then
+    return nil, "Can not delete predefined instances"
+  end
+  uciobject.delete("network", key, commitapply)
+end
+
+local function cache_get(cache, option, getfn)
+  local v = cache and cache[option]
+  if not v then
+    v = { getfn() }
+    if cache then
+      cache[option] = v
+    end
+  end
+  return v[1]
+end
+
+local function dynamicKey(key)
+  return key:match("^dyn:(.*)$")
+end
+
+local function interfaceOf(key, cache)
+  return cache_get(cache, "Interface", function()
+    local dynkey = dynamicKey(key)
+    if dynkey then
+      return getUciParam("network", dynkey, "linkedto")
+    else
+      return model:getBaseKey(key)
+    end
+  end)
+end
+
+local function getEnabled(key, cache)
+  return cache_get(cache, "Enabled", function()
+    local intf = interfaceOf(key, cache)
+    if intf ~= "" then
+      return getUciParam("network", intf, "auto", "1") == "1"
+    end
+    return false
+  end)
+end
+
+local function getUbusInterfaceStatus(key, cache)
+  return cache_get(cache, "ubusStatus", function()
+    local intf = interfaceOf(key, cache)
+    if intf ~= "" then
+      return get_ubus_interface_status(intf)
+    end
+    return {}
+  end)
+end
+
+local function getIPv4Address(key, cache)
+  return cache_get(cache, "IPv4", function()
+    local status = getUbusInterfaceStatus(key, cache)
+    return (status and status['ipv4-address'] and status['ipv4-address'] or {})[1] or {}
+  end)
+end
+
+local function getPassthroughSection(key, cache)
+  return cache_get(cache, "PassthroughSection", function()
+    local intf = interfaceOf(key, cache)
+    if intf == "" then
+      return ""
+    end
+    local section = ""
+    ucihelper.foreach_on_uci({config="dhcp", sectionname="passthru"}, function(s)
+      if s.interface == intf then
+        section = s[".name"]
+        return false
+      end
+    end)
+    return section
+  end)
+end
+
+local getters = {
+  Enable = function(key, cache)
+    return getEnabled(key, cache) and "1" or "0"
+  end,
+  Status = function(key, cache)
+    return getEnabled(key, cache) and "Enabled" or "Disabled"
+  end,
+  Interface = function(key, cache)
+    local intf = interfaceOf(key, cache)
+    if intf ~= "" then
+      return resolve("Device.IP.Interface.{i}.", intf) or ""
+    end
+    return ""
+  end,
+  IPAddress = function(key, cache)
+    local ipv4 = getIPv4Address(key, cache)
+    return ipv4.address or ""
+  end,
+  SubnetMask = function(key, cache)
+    local ipv4 = getIPv4Address(key, cache)
+    local mask = ipv4.mask
+    if mask then
+      return nwcommon.netmask2mask(mask)
+    end
+    return ""
+  end,
+  IPRouters = function(key, cache)
+    local status = getUbusInterfaceStatus(key, cache)
+    local routes = status.route or {}
+    local ipRoutes = {}
+    for _, route in pairs(routes) do
+      ipRoutes[#ipRoutes+1] = route.nexthop
+    end
+    return concat(ipRoutes, ",")
+  end,
+  DNSServers = function(key, cache)
+    local status = getUbusInterfaceStatus(key, cache)
+    return concat(status and status["dns-server"] or {}, ",")
+  end,
+  PassthroughEnable = function(key, cache)
+    return getPassthroughSection(key, cache) ~= "" and "1" or "0"
+  end,
+  PassthroughDHCPPool = function(key, cache)
+    local section = getPassthroughSection(key, cache)
+    local dhcp_pool = getUciParam("dhcp", section, "dhcp_pool")
+    local passthruIntf = getUciParam("dhcp", dhcp_pool, "interface")
+    return resolve('Device.DHCPv4.Server.Pool.{i}.', passthruIntf) or ""
+  end,
+  Renew = function()
+    return "0"
+  end,
+  X_000E50_ReleaseRenew = function()
+    return "0"
+  end,
+}
+
+Device_DHCPv4_Client_i_.get = {}
+for param, getter in pairs(getters) do
+  Device_DHCPv4_Client_i_.get[param] = function(_, _, key)
+    return getter(key)
+  end
+end
+
+Device_DHCPv4_Client_i_.getall = function(_, key)
+  local r = {}
+  local cache = {}
+  for param, getter in pairs(getters) do
+    r[param] = getter(key, cache)
+  end
+  return r
+end
+
+local function safe_tokey(akey, path, ...)
+  local ok, r = pcall(tokey, akey, path, ...)
+  if ok then
+    return r
+  end
+end
+
+Device_DHCPv4_Client_i_.set = {
+  Renew = function(_, _, value, key)
+    local intf = interfaceOf(key)
+    if (intf~="") and (value == "1") then
+      local ifname = getUciParam("network", intf, "ifname")
+      local fileHandler = open("/var/run/odhcpc-"..ifname..".pid","r")
+      if fileHandler then
+        local renewProcessID = fileHandler:read()
+        fileHandler:close()
+        local outFile = open("/tmp/.dhcpv4_clients","a")
+        if outFile then
+          outFile:write(renewProcessID,"\n")
+          outFile:close()
+          commitApply:newset("Device.DHCPv4.Client.{i}.Renew")
+        end
+      end
+    end
+  end,
+
+  X_000E50_ReleaseRenew = function(_, _, value, key)
+    local intf = interfaceOf(key)
+    if (intf~="") and (value == "1") then
+      local ifname = getUciParam("network", intf, "ifname")
+      local outFile = io.open("/tmp/.dhcpv4_release_renew_clients","a")
+      if outFile then
+        outFile:write(ifname,"\n")
+        outFile:close()
+        commitApply:newset("dhcpv4_ReleaseRenew")
+      end
+    end
+  end,
+
+  PassthroughDHCPPool = function(_, _, value, key)
+    local section = getPassthroughSection(key)
+    if section ~= "" and value ~= "" then
+      value = safe_tokey(value, "Device.DHCPv4.Server.Pool.{i}.")
+      if not value then
+        return nil, "Invalid value"
+      end
+      setUciParam("dhcp", section, "dhcp_pool", value)
+    elseif section == "" then
+      return nil, "Error setting Passthrough DHCP Pool! Passthru section does not exist!"
+    end
+  end,
+
+  Interface = function(_, _, value, key)
+    local dynkey = dynamicKey(key)
+    if not dynkey then
+      return nil, "can not change predefined entry"
+    end
+    if value ~= "" then
+      local intf = safe_tokey(value, "Device.IP.Interface.{i}.")
+      if not intf then
+        return nil, "Invalid value"
+      end
+      intf = model:getUciKey(intf)
+      local proto = getUciParam("network", intf, "proto")
+      if proto:match("^ppp") then
+        return nil, "can not link to interface using PPP"
+      end
+      if proto == "dhcp" then
+        if getUciParam("network", dynkey, "linkedto")==intf then
+          return true -- tried to set the same value
+        end
+        return nil, "interface already linked to another DHCPv4.Client instance"
+      end
+      setUciParam("network", dynkey, "linkedto", intf)
+      setUciParam("network", intf, "proto", "dhcp")
+    else
+      local intf = getUciParam("network", dynkey, "linkedto")
+      if intf ~= "" then
+        setUciParam("network", dynkey, "linkedto", "")
+        setUciParam("network", intf, "proto", "static")
+      end
+    end
+  end,
+}
+
+Device_DHCPv4_Client_i_.commit = function()
+  uciobject.commit()
+  for config in pairs(transactions) do
+    ucihelper.commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_DHCPv4_Client_i_.revert = function()
+  uciobject.revert()
+  for config in pairs(transactions) do
+    ucihelper.revert({config = config})
+  end
+  transactions = {}
+  os.remove("/tmp/.dhcpv4_clients")
+end
+
+register(Device_DHCPv4_Client_i_)
+

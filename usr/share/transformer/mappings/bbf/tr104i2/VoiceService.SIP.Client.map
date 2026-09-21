@@ -1,0 +1,448 @@
+-- Automatically generated from VoiceService:2.0
+-- using generator version 2.3
+
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local profileHelper = require("transformer.shared.profile_helper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local sipnetBinding = {config = "mmpbxrvsipnet" }
+local fxsBinding = { config = "mmpbxbrcmfxsdev", sectionname = "global", option = "fax_transport" }
+local crypto = require("tch.simplecrypto")
+local incomingBinding = { config = "mmpbx", sectionname = "incoming_map" }
+local conn = mapper("ubus").connect()
+local match, commitapply, mapper, math = string.match, commitapply, mapper, math
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local numOfFxs, numOfDect, numOfSipdev
+local foreachOnUci = uciHelper.foreach_on_uci
+local mt = { __index = function() return "" end }
+local commonDefault = setmetatable({}, mt)
+local transactions = {}
+local duplicator = mapper("multiroot").duplicate
+local duplicates
+
+local Multi_Services_VoiceService_i_SIP_Client_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.SIP.Client.{i}.",
+        access = "readWrite",
+        numEntriesParameter = "ClientNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Enable or disable the client",
+            },
+            --[[QuiescentMode = {
+                access = "readWrite",
+                type = "boolean",
+            },]]--
+            Status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Up",
+                    "Initializing",
+                    "Registering",
+                    "Deregistering",
+                    "Error_Network",
+                    "Quiescent",
+                    "Disabled",
+                },
+                default = "Disabled",
+                description = "Display the status of the client",
+            },
+            --[[ Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            Origin = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "AutoConfigured",
+                    "Static",
+                },
+                default = "Static",
+                description = "Mechanism via which this instance was assigned",
+            },
+            RegisterMode = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+              --    "Disabled", -- Not supported
+              --    "STATIC",   -- Not supported
+              --    "RFC6140",  -- Not supported
+              --    "TISPAN",   -- Not supported
+                    "RFC3261",
+                },
+                description = "Display the SIP registration procedure",
+            },
+            AuthUserName = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+                default = "",
+                description = "Display the username to authenticate the connection to the server",
+            },
+            AuthPassword = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+                default = "",
+                description = "Password used to authenticate the connection to the server",
+            },
+            Network = {
+                access = "readOnly", -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.SIP.Network.{i}.",
+                description = "SIP network with which this SIP client is associated",
+            },
+            MaxSessions = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "0",
+                description = "Display the limit on the number of simultaneous voice sessions across this client",
+            },
+            RegisterURI = {
+                access = "readWrite",
+                type = "string",
+                max = "389",
+                description = "RegisterURI display the identity of SIP client",
+            },
+            --[[E164Format = {
+                access = "readWrite",
+                type = "boolean",
+                default = "true",
+            },]]--
+            T38Enable = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or disable the use of T.38",
+            },
+            -- SIPEventSubscribeNumberOfEntries
+            -- automatically created when VoiceService.{i}.SIP.Client.{i}.EventSubscribe.{i}. is loaded
+            -- ContactNumberOfEntries
+            -- automatically created when VoiceService.{i}.SIP.Client.{i}.Contact.{i}. is loaded
+        },
+    },
+}
+
+local profileRegStatus = setmetatable({
+    Registering = "Registering",
+    Registered = "Up",
+    Unregistering = "Deregistering",
+}, mt)
+
+local function sipClientCommit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function sipClientRevert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local configs = {
+    {"mmpbxrvsipnet", "profile", "SIPUA"}
+}
+
+local function getInfoFromKey(key, parentKey)
+    if key then
+        local name, ltype = key:match("((%w+_%w+)_%d+)$")
+        return parentKey, name, ltype
+    end
+end
+
+local function getT38Enable(mapping, param, key)
+    local fxsBinding = { config = "mmpbxbrcmfxsdev" }
+    local listFxs = {}
+    local deviceList = {}
+    foreachOnUci(incomingBinding, function(s)
+        if s.profile == key and type(s.device) == "table" then
+            deviceList = s.device
+            return false
+        end
+    end)
+    for _, device in pairs(deviceList) do
+        if device:match("fxs") then
+            fxsBinding.sectionname = device
+            fxsBinding.option = "fax_transport"
+            listFxs[device] = getFromUci(fxsBinding)
+        end
+    end
+    if #listFxs then
+        for _, deviceValue in pairs(listFxs) do
+            if deviceValue ~= "t38" then
+                return "0"
+            end
+        end
+        return "1"
+    else
+        fxsBinding.sectionname = "global"
+        fxsBinding.option = "fax_transport"
+        return getFromUci(fxsBinding)
+    end
+end
+
+local faxValue = {
+    ["0"] = "inband_renegotiation",
+    ["1"] = "t38"
+}
+
+local function setT38Enable(mapping, value, key)
+    local fxsList = {}
+    local deviceList = {}
+    foreachOnUci(incomingBinding, function(s)
+        if s.profile == key and type(s.device) == "table" then
+            deviceList = s.device
+            return false
+        end
+    end)
+    if #deviceList then
+        for _, device in ipairs(deviceList) do
+            if match(device, "fxs") then
+                fxsList[#fxsList+1] = device
+            end
+        end
+        for _, fxsSection in pairs(fxsList) do
+            fxsBinding.sectionname = fxsSection
+            setOnUci(fxsBinding, faxValue[value], commitapply)
+        end
+    else
+        fxsBinding.sectionname = "global"
+        setOnUci(fxsBinding, faxValue[value], commitapply)
+    end
+    transactions[fxsBinding.config] = true
+end
+
+Multi_Services_VoiceService_i_SIP_Client_i_.add = function(mapping, parentKey)
+    for _, v in pairs(configs) do
+        if v[3] == parentKey then
+            return profileHelper.profile_add(true, transactions, commitapply)
+        end
+    end
+end
+
+local lineSipClient = {
+    value = {
+        Enable = function(config, name)
+            return voiceHelper.getEnable(sipnetBinding)
+        end,
+        Status = function(config, name)
+            local profiles = conn:call("mmpbx.profile", "get", {}) or {}
+            if profiles and profiles[name] then
+                local registrationStatus = profiles[name]["sipRegisterState"] or ""
+                local failReason = profiles[name]["failReason"] or ""
+                if registrationStatus == "Unregistered" and failReason == "MMPBX_REG_CLIENT_REASON_NETWORK_ERROR" then
+                    return "Error_Network"
+                elseif registrationStatus == "Unregistered" and profiles[name]["enable"] == "true" then
+                    return "Error_Registration"
+                elseif profiles[name]["enable"] == "false" then
+                    return "Disabled"
+                else
+                    return profileRegStatus[registrationStatus]
+                end
+            end
+            return "Disabled"
+        end,
+        AuthUserName = "user_name",
+        AuthPassword = "password",
+        MaxSessions = voiceHelper.getMaxSessions,
+        RegisterURI = "uri",
+        Origin = function(mapping, param, key)
+            return "Static"
+        end,
+        RegisterMode = function(mapping, param, key)
+            return "RFC3261"
+        end,
+        T38Enable = function(mapping, param, key)
+           return getT38Enable(mapping, param, key)
+        end
+    },
+    default = commonDefault,
+}
+
+local sipClientMaps = {
+    sip_profile = lineSipClient,
+}
+
+local setLineSipClient = {
+    Enable = function(sipnetBinding, value)
+        return voiceHelper.setEnable(sipnetBinding, value, commitapply)
+    end,
+    AuthUserName = true,
+    AuthPassword = function(sipnetBinding, value)
+        return profileHelper.authPassword(sipnetBinding, value, commitapply)
+    end,
+    MaxSessions = function(mapping, paramValue, paramName, key)
+        return voiceHelper.setMaxSessions(paramValue, transactions, commitapply)
+    end,
+    RegisterURI = function(sipnetBinding, value)
+        return profileHelper.registerURI(sipnetBinding, value, commitapply)
+    end,
+    T38Enable = function(mapping, value, key)
+        return setT38Enable(mapping, value, key, transactions)
+    end,
+    RegisterMode =  function(mapping, paramValue, paramName, key)
+        return true
+    end
+}
+
+local setSipClientMaps = {
+    sip_profile = setLineSipClient,
+}
+
+Multi_Services_VoiceService_i_SIP_Client_i_.entries = function(mapping, parentKey, key)
+    local entries = {}
+    for _, v in pairs(configs) do
+        if v[3] == parentKey then
+            sipnetBinding.config = v[1]
+            sipnetBinding.sectionname = v[2]
+            foreachOnUci(sipnetBinding, function(s)
+                entries[#entries + 1] = s['.name']
+            end)
+        end
+    end
+    numOfFxs, numOfDect, numOfSipdev = profileHelper.find_device_support(parentKey)
+    return entries
+end
+
+local function getParam(sipClientMaps)
+    return function(mapping, param, key, parentKey)
+        local config, name, ltype, map
+        for _, v in pairs(configs) do
+            if v[3] == parentKey then
+                config, name, ltype = getInfoFromKey(key,v[1])
+            end
+        end
+        map = sipClientMaps[ltype]
+        sipnetBinding.config = config
+        sipnetBinding.sectionname = name
+        if map.value[param] then
+            if type(map.value[param]) == "function" then
+                if param == "T38Enable" then
+                    return map.value[param](fxsBinding, param, key)
+                else
+                    return map.value[param](sipnetBinding, key, name)
+                end
+            end
+            sipnetBinding.option = map.value[param]
+            if param == "AuthPassword" then
+                local value, errMsg
+                value = getFromUci(sipnetBinding)
+                if profileHelper.isEncrypted(value) then
+                    value, errMsg = crypto.decrypt(value)
+                    if not value then
+                        return nil, errMsg
+                    end
+                    return value
+                end
+            end
+            return getFromUci(sipnetBinding)
+        end
+        return map.default[param]
+    end
+end
+
+local function setParam(maps, setMaps)
+    return function(mapping, param, value, key, parentKey)
+        local config, name, ltype, map, setMap
+        for _, v in pairs(configs) do
+            if v[3] == parentKey then
+                config, name, ltype = getInfoFromKey(key,v[1])
+            end
+        end
+        sipnetBinding.config = config
+        sipnetBinding.sectionname = name
+        map = maps[ltype]
+        setMap = setMaps[ltype]
+        if setMap[param] then
+            if type(setMap[param]) == "function" then
+                local err, msg
+                if param == "T38Enable" then
+                    err, msg = setMap[param](fxsBinding, value, key)
+                else
+                    err, msg = setMap[param](sipnetBinding, value)
+                end
+                if not err and msg then
+                    return err, msg
+                end
+            elseif type(map.value[param]) == "string" then
+                sipnetBinding.option = map.value[param]
+                local oldValue = getFromUci(sipnetBinding)
+                if oldValue ~= value then
+                    setOnUci(sipnetBinding, value, commitapply)
+                end
+            end
+            transactions[sipnetBinding.config] = true
+            return true
+        end
+        return nil, "Not supported currently"
+    end
+end
+
+Multi_Services_VoiceService_i_SIP_Client_i_.delete = function(mapping, key, parentKey)
+    local _, _, ltype = getInfoFromKey(key, parentKey)
+    if ltype == "sip_profile" then
+        profileHelper.profile_delete(key, transactions, commitapply)
+        return true
+    end
+    return nil, "Not supported for delete"
+end
+
+Multi_Services_VoiceService_i_SIP_Client_i_.get = getParam(sipClientMaps)
+Multi_Services_VoiceService_i_SIP_Client_i_.set = setParam(sipClientMaps, setSipClientMaps)
+Multi_Services_VoiceService_i_SIP_Client_i_.commit = sipClientCommit
+Multi_Services_VoiceService_i_SIP_Client_i_.revert = sipClientRevert
+
+Multi_Services_VoiceService_i_SIP_Client_i_.getall = function(mapping, key, parentKey)
+    local config, name, ltype = getInfoFromKey(key, parentKey)
+    local map = sipClientMaps[ltype]
+    sipnetBinding.sectionname = name
+    local object = uciHelper.getall_from_uci(sipnetBinding)
+    local data = {}
+    for params, _ in pairs(Multi_Services_VoiceService_i_SIP_Client_i_.objectType.parameters) do
+        if map.value[params] then
+            if type(map.value[params]) == "function" then
+                if params == "T38Enable" then
+                    data[params] = getT38Enable(mapping, param, key)
+                else
+                    data[params] = map.value[params](config, name)
+                end
+            elseif params == "AuthPassword" then
+                local value = object[map.value[params]]
+                if profileHelper.isEncrypted(value) then
+                    value = crypto.decrypt(value)
+                end
+                data[params] = value or map.default[params]
+            else
+                data[params] = object[map.value[params]]
+            end
+        else
+            data[params] = data[params] or map.default[params]
+        end
+    end
+    return data
+end
+
+duplicates = duplicator(Multi_Services_VoiceService_i_SIP_Client_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, object in ipairs(duplicates) do
+    register(object)
+end
+
