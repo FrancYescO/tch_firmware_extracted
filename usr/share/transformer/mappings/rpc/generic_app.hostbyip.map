@@ -1,0 +1,50 @@
+
+local hostbyip_mapping = {
+  objectType = {
+    name = "rpc.generic_app.hostbyip.@.",
+    access = "readOnly",
+    description = "connected hosts info indexed by IP address",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "The MAC address of the host",
+      },
+      IPv4 = {
+        access = "readOnly",
+        type = "string",
+        description = "The IPv4 address of the host",
+      },
+    },
+  },
+}
+
+local ubus = mapper("ubus").connect()
+local hostbyip = require 'generic.mappings.hostbyip'
+
+local host_cache
+function hostbyip_mapping.entries()
+  local entries
+  entries, host_cache = hostbyip.load(ubus)
+  return entries
+end
+
+local function valueOfHostField(hostID, field)
+  local host = host_cache[hostID]
+  return host and host[field] or ""
+end
+
+local function hostField(field)
+  return function(_, _, key)
+    return valueOfHostField(key, field)
+  end
+end
+
+hostbyip_mapping.get = {
+  MACAddress = hostField("MAC"),
+  IPv4 = hostField("IPv4"),
+}
+
+register(hostbyip_mapping)

@@ -1,0 +1,164 @@
+-- Manually generated
+local Multi_MultiAP_X_000E50_BandSteering_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_BandSteering.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Object to customize BandSteering",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or disable bandsteering",
+      },
+      BandsteerThresh2p4GHZ = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-99",
+            max = "0"
+          },
+        },
+        description = "Threshold of 2.4GHz bandsteer"
+      },
+      BandsteerThresh5GHZ = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-99",
+            max = "0"
+          },
+        },
+        description = "Threshold of 5GHz bandsteer"
+      },
+      BandsteerHoldTime = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "This is timeout period to stop consecutive band steering attempts"
+      },
+      Status = {
+        access = "readOnly",
+        type = "boolean",
+        description = "To provide the Easymesh bandsteer operational state value"
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local steeringBinding = { config = "wee" , sectionname = "cs"}
+local multiapBinding = { config = "multiap" }
+local configChanged
+local process = require("tch.process")
+local tostring = tostring
+
+-- The below function return the operational bandsteer of easymesh
+-- The output of the steeralgo_status is matched for the value 0/1 respresenting operational state of bandsteer as disabled/enabled
+local function getBandsteerStatus()
+  local bs_status = false
+  local file = assert(process.popen("mesh-xl-cli", {"steeralgo_status"}))
+  if file then
+    for line in file:lines() do
+      if line:match("bandsteer_status") then
+        bs_status = string.match(line, "%d+") == "1" and true
+      end
+    end
+  end
+  file:close()
+  return bs_status
+end
+
+local function getUciValue(section, option)
+  multiapBinding.sectionname = section
+  multiapBinding.option = option
+  return getFromUci(multiapBinding)
+end
+
+--Checking the cred1 and cred2 ssid, mode and key are same then return nil
+local function getWifiCredentials()
+  if getUciValue("cred0", "ssid") == getUciValue("cred1", "ssid") and getUciValue("cred0", "security_mode")  == getUciValue("cred1", "security_mode") and getUciValue("cred0", "wpa_psk_key") == getUciValue("cred1", "wpa_psk_key") then
+    return
+  end
+  return "0"
+end
+
+local optionMappingTable = {
+  ["Enabled"] = "enable_band_steering",
+  ["BandsteerThresh2p4GHZ"] = "2G_bandsteer_thresh",
+  ["BandsteerThresh5GHZ"] = "5G_bandsteer_thresh",
+  ["BandsteerHoldTime"] = "bandsteer_hold_time",
+  ["Status"] = tostring(getBandsteerStatus())
+}
+
+local defaultMap = {
+  ["BandsteerThresh_5GHZ"] = "-65",
+  ["BandsteerThresh_2p4GHZ"] = "-35",
+  ["Enabled"] = "1",
+  ["BandsteerHoldTime"] = "1800",
+  ["Status"] = tostring(getBandsteerStatus())
+}
+
+local function setUciValue(option, value)
+  steeringBinding.option = option
+  setOnUci(steeringBinding, value, commitApply)
+  configChanged = true
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.set = function(mapping, param, value)
+  if param == "Enabled" and getUciValue("cred1", "state") == "1" then
+    return nil, "cannot set easymesh bandsteer when split mode is enabled"
+  end
+  setUciValue(optionMappingTable[param], value)
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.get = function(mapping, param)
+  steeringBinding.default = defaultMap[param]
+  steeringBinding.option = optionMappingTable[param]
+  if param == "Enabled" then
+    return getUciValue("cred1", "state") == "1" and getWifiCredentials() or getFromUci(steeringBinding) or defaultMap[param]
+  else
+    return getFromUci(steeringBinding) or defaultMap[param]
+  end
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.getall = function(mapping)
+  local getAllValues = {}
+  local result = getAllFromUci(steeringBinding) or {}
+  for param, option in pairs(optionMappingTable) do
+    if param == "Enabled" then
+      getAllValues[param] = getUciValue("cred1", "state") == "1" and getWifiCredentials() or result[option] or defaultMap[param]
+    else
+      getAllValues[param] = result[option] or defaultMap[param]
+    end
+  end
+  return getAllValues
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.commit = function()
+  if configChanged then
+    commit({config = "wee"})
+  end
+  configChanged = false
+end
+
+Multi_MultiAP_X_000E50_BandSteering_.revert = function()
+  if configChanged then
+    revert({config =  "wee"})
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_X_000E50_BandSteering_, "#ROOT", { "Device.WiFi.MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" ,"rpc.multiap"})
+for _, dupli in ipairs(duplicates) do
+   register(dupli)
+end

@@ -1,0 +1,70 @@
+-- Automatically generated from Device:2.11
+-- using generator version 2.3
+local Device_DHCPv6_Server_Pool_i_Client_i_ = {
+  objectType = {
+    name = "Device.DHCPv6.Server.Pool.{i}.Client.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "PoolNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      SourceAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local dhcpBinding = { config = "dhcp" }
+local ubusConnection = mapper("ubus").connect()
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+
+local function getUciParam(section, option)
+  dhcpBinding.sectionname = section
+  dhcpBinding.option = option
+  return uciHelper.get_from_uci(dhcpBinding)
+end
+
+Device_DHCPv6_Server_Pool_i_Client_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local data = ubusConnection:call("hostmanager.device", "get",  {})
+  local interfaceName = getUciParam(parentkey, "interface")
+  local l3Interface = nwCommon.getIntfName(interfaceName)
+  for key, val in pairs(data) do
+    if val.ipv6 and val.l3interface == l3Interface then
+      for _, value in pairs(val.ipv6) do
+        if value.state == "connected" or value.state == "stale" then
+          entries[#entries+1] = key .."|" .. parentkey .. "|" .. value.address
+        end
+      end
+    end
+  end
+  return entries
+end
+
+Device_DHCPv6_Server_Pool_i_Client_i_.get = {
+  SourceAddress = function(mapping, param, key)
+    local _, IPv6Address = splitKey(key)
+    _, IPv6Address = splitKey(IPv6Address)
+    return IPv6Address
+  end,
+  Active = "1",
+}
+
+register(Device_DHCPv6_Server_Pool_i_Client_i_)

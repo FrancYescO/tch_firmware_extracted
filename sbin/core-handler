@@ -1,0 +1,135 @@
+#!/bin/sh
+[ $# -lt 2 ] && exit
+exec 3<&0
+exec <&-
+
+. "$IPKG_INSTROOT/lib/functions.sh"
+. "$IPKG_INSTROOT/lib/functions/reboot_reason.sh"
+
+log() {
+	echo $@ | tee /dev/console | logger -t postmortem
+}
+
+filename="$1"
+pid="$2"
+action="$(uci_get system @coredump[0] action nocore)"
+path="$(uci_get system @coredump[0] path /tmp)"
+reboot="$(uci_get system @coredump[0] reboot 1)"
+crash_history="$(uci_get system @system[0] crash_history 0)"
+reboot_history="$(uci_get system @system[0] reboot_history 0)"
+exceptions="$(uci_get system @coredump[0] reboot_exceptions)"
+pName=$(echo $filename | awk -F'[.]' '{print $1}')
+history_file="/overlay/crash_history.txt"
+tmp_history_file="/tmp/crash_history.txt"
+tmp_file="/tmp/crash.txt"
+is_history_updated=0
+
+if [ "${crash_history}" -eq 1 ]; then
+	if [ -f $history_file ]; then
+		count=$(wc -l < $history_file)
+		if [ $count -ge 20 ]; then
+			sed -i -n -e '2,$p' $history_file
+		fi
+		if [ $count -gt 1 ]; then
+			sed 's/[^ ]* //' $history_file > $tmp_file
+			mv $tmp_file $history_file
+		fi
+	fi
+fi
+
+for fname in $exceptions; do
+	fname_trunc=${fname:0:15}
+	tmp=`echo $filename | sed "s/^$fname_trunc.$pid//"`
+	if [ "$filename" != "$tmp" ]; then
+		#  Process is on reboot exception list, make/keep a coredump and don't reboot
+		log "core dump reboot exception from binary $fname"
+                if [ "${crash_history}" -eq 1 ]; then
+			date +"%m_%d_%Y/%H:%M:%S $pName recoverable" | tee -a $history_file >> $tmp_history_file
+			is_history_updated=1
+                fi
+		reboot=0
+		break
+	fi
+done
+
+if [ "${crash_history}" -eq 1 ]; then
+	if [ "${is_history_updated}" -eq 0 ]; then
+		date +"%m_%d_%Y/%H:%M:%S $pName non-recoverable" | tee -a $history_file >> $tmp_history_file
+	fi
+	awk '{ print FNR " " $0 }' $history_file > $tmp_file
+	mv $tmp_file $history_file
+	while read line; do
+		echo "$line" | awk -F'[ ]' '{print $2}' >> $tmp_file
+	done < $tmp_history_file
+	crash_count=$(sort $tmp_file | uniq -c | sort -nr | awk '{print $1}' | head -n 1)
+	name=$(sort $tmp_file | uniq -c | sort -nr | awk '{print $2}' | head -n 1)
+	if [ $crash_count -gt 3 ]; then
+		log "$name crashed more than 3 times"
+		reboot="$(uci_get system @coredump[0] reboot 1)"
+	fi
+fi
+
+action_option="system.@coredump[0].action"
+reboot_option="system.@coredump[0].reboot"
+
+if [ -f /sbin/core-handler-lxc ]; then
+  . /sbin/core-handler-lxc
+fi
+
+if [ "$action" = "upload" ]
+then
+	url="$(uci_get system @coredump[0] url)"
+	version="$(uci_get version @version[0] version unknown)"
+	oid="$(uci_get version @version[0] oid unknown)"
+	factory_id="$(uci_get env rip factory_id unknown)"
+	serial="$(uci_get env rip serial unknown)"
+	board="$(uci_get env rip board_mnemonic unknown)"
+
+	# Insert the ngwfdd tag when uploading to Kibana
+	tag="$(uci_get ngwfdd config tag)"
+	capath="$(uci_get ngwfdd config capath)"
+	if [ -z "${capath}" ]; then
+		# Use default ca path if it is not set
+		capath="/etc/ssl/certs/"
+	fi
+
+	if [ -z "${url}" ]; then
+		action=compress
+	else
+		log "uploading core to ${url}"
+                find $path -maxdepth 1 -type f -name '*.*.*.*.core'|xargs rm -f
+                cat >${path}/${filename} <&3
+
+                curl -m 360 -X POST -F "exe=$(readlink -f /proc/${pid}/exe)" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@/${path}/${filename}" ${tag:+-F tag="$tag"} "${url}" --capath "${capath}" <&3 || action=compress
+               rm -f ${path}/${filename}
+	fi
+fi
+case "${action}" in
+	compress)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core.gz'|xargs rm -f
+		log "core dumped to ${path}/${filename}.gz"
+		gzip -c >${path}/${filename}.gz <&3
+		;;
+
+	store)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core'|xargs rm -f
+		log "core dumped to ${path}/${filename}"
+		cat >${path}/${filename} <&3
+		;;
+
+	upload)
+		;;
+
+	*)
+		log "core dump for pid ${pid} file ${filename} ignored due to $action_option=${action} setting"
+		;;
+esac
+
+if [ "${reboot}" -eq 1 ]; then
+	log "Rebooting due to core dump and $reboot_option=1"
+	set_reboot_reason CRASH
+	if [ "${reboot_history}" -eq 1 ]; then
+		echo "${filename}" > /etc/crashdetails.txt
+	fi
+	/sbin/reboot
+fi
