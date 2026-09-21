@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+
+boot(){
+	local cfg_type cfg_name
+	config_cb() {
+		cfg_type="$1"
+		cfg_name="$2"
+	}
+
+	option_cb() {
+		[ "$cfg_type" = "module" ] || return 1
+
+		local paramfile=/sys/module/"${cfg_name}"/parameters/"$1"
+		if [ ! -f "${paramfile}" ]; then
+			echo "${paramfile} does not exist"
+			return 2
+		fi
+
+		echo "$2" > "${paramfile}"
+	}
+	config_load kmodparams
+}
+

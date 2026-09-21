@@ -1,0 +1,821 @@
+#!/usr/bin/env lua
+
+local proxy = require("datamodel")
+local cursor = require("uci").cursor()
+local curl = require("cURL").easy_init()
+local json = require("dkjson")
+local lfs = require("lfs")
+local zlib = require("zlib")
+local uci = require("uci")
+
+local setmetatable = setmetatable
+local ipairs = ipairs
+local pairs = pairs
+local pcall = pcall
+local unpack = unpack
+local remove = table.remove
+local concat = table.concat
+local insert = table.insert
+local sort = table.sort
+local format = string.format
+local match = string.match
+local gmatch = string.gmatch
+local gsub = string.gsub
+local upper = string.upper
+local find = string.find
+local tonumber = tonumber
+local time = os.time
+local date = os.date
+local open = io.open
+-- for content saving and transferring
+local path_retain = "/etc/bulkdata"
+local max_retain_failed_reports = 10
+local conn = require("ubus").connect()
+
+-- for crontab updating
+local cron_path = "/etc/crontabs"
+local cron_root = "/etc/crontabs/root"
+local profiletimed = {}
+
+local threads = {}
+
+-- configure CPE information for HTTP URI
+local cpe_uri = {
+  oui = ".DeviceInfo.ManufacturerOUI",
+  pc  = ".DeviceInfo.ProductClass",
+  sn  = ".DeviceInfo.SerialNumber",
+}
+
+-- number type predefiend
+local number_type = {
+  unsignedInt = true,
+  unsignedLong = true,
+  int = true,
+  long = true,
+}
+
+-- Get the name and reference from the structure of "<reference>|<name>"
+-- Parameters:
+--   [string] the string value structured by "<reference>|<name>"
+-- Returns:
+--   [string] name, reference
+local function get_name_reference(str)
+  -- the format is reference|name
+  local reference, name = match(str, "(.*)|(.*)")
+  return name or "", reference or ""
+end
+
+-- Create HTTP URI parameters including manufacturer OUI, product class,
+-- serial number and configured uri parameters
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [string] HTTP URI parameters which contacted by "&"
+local function get_http_uri(profile)
+  local httpuri = profile.http_uri
+  local uri = {}
+  local temp = {}
+  local result
+
+  -- get uri from the configuration
+  if httpuri and #httpuri > 0 then
+    for _,v in pairs(httpuri) do
+      local name, reference = get_name_reference(v)
+      if name ~= "" and reference ~= "" then
+        uri[name] = reference
+      end
+    end
+  end
+
+  for _,dm in ipairs({"Device", "InternetGatewayDevice"}) do
+    for k,v in pairs(cpe_uri) do
+      uri[k] = format("%s%s", dm, v)
+    end
+    temp = {}
+    for _,v in pairs(uri) do
+      temp[#temp+1] = v
+    end
+    result = proxy.get(unpack(temp))
+    if result then
+      break
+    end
+  end
+
+  if result then
+    for _,v in ipairs(result) do
+      temp[v.path..v.param] = v.value
+    end
+    result = {}
+    for k,v in pairs(uri) do
+      result[#result+1] = format("%s=%s", curl:escape(k), curl:escape(temp[v] or ""))
+    end
+  end
+  return concat(result or {}, "&")
+end
+
+-- Get http user name and password for transfer data
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [string] http user name and password string for curl or nil
+local function get_http_userpwd(profile)
+  local user = profile.http_username
+  local pwd = profile.http_password
+  if user and pwd then
+    return format("%s:%s", user, pwd)
+  else
+    return nil
+  end
+end
+
+-- Get http header table for JSON type
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [table] http header table for JSON type
+local function get_http_header(profile)
+  local http_usedate_header = (profile.http_usedate_header ~= '0')
+  local report_format = profile.json_report_format or "ObjectHierarchy"
+
+  local httpheader = {
+    "Accept: application/json",
+    "Content-Type: application/json",
+  }
+
+  httpheader[#httpheader+1] = format("BBF-Report-Format: %s", report_format)
+  if http_usedate_header then
+    httpheader[#httpheader+1] = format("Date: %s", date("!%a, %d %b %Y %H:%M:%S GMT"))
+  end
+  return httpheader
+end
+
+-- Initialize table including several levels
+-- Parameters:
+--   [table] table contented the different levle key
+--   [table] the table to be initialized
+-- Returns:
+--   [table] the last level table has been initialized
+local function get_table(index, t)
+  if #index > 0 then
+    local name = index[1]
+    if t[name] == nil then
+      t[name] = {}
+    end
+    remove(index, 1)
+    return get_table(index, t[name])
+  else
+    return t
+  end
+end
+
+-- Update number of samples collected
+-- Change value of status parameter back to Enabled if it is FetchSample Sample interval
+-- Reset the samples collected counter to 0, once it reaches FetchSamples
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+local function update_number_of_samples_counter(profile)
+  local cursor = uci.cursor()
+  local enabled = cursor:get("bulkdata", profile['.name'], "enabled") or "0"
+  if enabled ~= "1" then
+    return
+  end
+  local counter = profile.sample_counter or 0
+  counter = tonumber(counter) + 1
+  local report_samples = profile.retain_failed_reports and tonumber(profile.retain_failed_reports) or 0
+  local fetch_samples = profile.fetch_samples and tonumber(profile.fetch_samples) or 0
+  if report_samples > 1 and fetch_samples > 0 and counter == fetch_samples and counter <= report_samples+1 then
+    -- To show the state transition of status Parameter give a sleep of 3 seconds.
+    os.execute("sleep 3")
+    cursor:set("bulkdata", profile['.name'], "triggered", "0")
+    counter = 0
+  end
+  cursor:set("bulkdata", profile['.name'], "sample_counter", tostring(counter))
+  cursor:commit("bulkdata")
+  cursor:close()
+end
+
+-- Save current profile report content to a file
+-- This file will be deleted after succeed reporting or it is too old to be deleted
+-- Parameters:
+--   [table] the profile contents
+--   [string] the timestamp for filename
+--   [string] the content of tranferred profile data
+-- Returns:
+local function save_retain_file(profile, timestamp, content)
+  local filename = format("%s/%s_%s.json", path_retain, profile['.name'], timestamp)
+  --save content to a file
+  local of = open(filename, "w")
+  if of then
+    of:write(content)
+    of:close()
+  end
+  update_number_of_samples_counter(profile)
+end
+
+-- Get failed report file list and at the same time delete all the oldest failed reports
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [table] file list table
+local function get_retain_filelist(profile)
+  local filelist = {}
+  local retain_failed_reports = tonumber(profile.retain_failed_reports) or 0
+
+  -- retain_failed_reports is the number of failed reports to be retained and transmitted.
+  --  0 indicates that failed reports are not to be retained for transmission in the next reporting interval
+  -- -1 indicates that the CPE will retain as many failed reports as possible
+  -- the current CPE maximize supported is set to '10'
+  if retain_failed_reports == -1 then
+    retain_failed_reports = max_retain_failed_reports
+  end
+  -- get the retain contents and remove the surplus
+  if retain_failed_reports > 0 then
+    lfs.chdir(path_retain)
+    for file in lfs.dir(path_retain) do
+      if find(file, "%.json$") then
+        if find(file, format("^%s_%%d+%%.json$", profile['.name'])) then
+          filelist[#filelist+1] = file
+        end
+      else
+        os.remove(file)
+      end
+    end
+    -- sorted the file by timestamp
+    sort(filelist, function(a,b) return a>b end)
+    -- remove the surplus
+    if #filelist > retain_failed_reports then
+      for i=retain_failed_reports+1,#filelist do
+        os.remove(filelist[i])
+        filelist[i] = nil
+      end
+    end
+  end
+  return filelist
+end
+
+-- Delete all retained reports for the current profile
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+local function delete_all_retain_file(profile)
+  -- remove the saved encoded files
+  lfs.chdir(path_retain)
+  for file in lfs.dir(path_retain) do
+    if find(file, format("^%s_%%d+%%.json$", profile['.name'])) then
+      os.remove(file)
+    end
+  end
+end
+
+-- Get encoding name from the parameter configed name
+-- Parameters:
+--   [table] names: the name and reference mapping table
+--   [string] nameid: identifier to getting the name from name list
+--   [table] ids: instance identifiers for wildcard and partial path
+--   [string] param: parameter name for partial path
+-- Returns:
+--   [string] encoding_name: the name to be used in the report
+local function get_encoding_name(names, nameid, ids, param)
+  if type(names) ~= "table" or not names[nameid] or names[nameid] == "" then
+    return
+  end
+  local name = names[nameid]
+  -- Remove non digital index from ids table
+  local indexs = {}
+  for k,v in ipairs(ids) do
+    if v:match("^%d+$") then
+      insert(indexs, v)
+    elseif v:match("%.") then
+      insert(indexs,match(v,"(%w+)%.%w+"))
+    end
+  end
+  if #indexs > 0 and indexs[1]:match("^%d+$") then
+    local idstr = concat(indexs, ".")
+    name = format("%s.%s", name, idstr)
+  end
+  if type(param) == "string" then
+    name = format("%s.%s", name, param)
+  end
+  return name
+end
+
+-- Check whether iteration counter is FetchSample Sample interval
+-- If so change value of status parameter to triggered
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+local function set_status_trigger(profile)
+  local cursor = uci.cursor()
+  local enabled = cursor:get("bulkdata", profile['.name'], "enabled") or "0"
+  if enabled ~= "1" then
+    return
+  end
+  local counter = profile.sample_counter and tonumber(profile.sample_counter) or 0
+  local report_samples = profile.retain_failed_reports and tonumber(profile.retain_failed_reports) or 0
+  local fetch_samples = profile.fetch_samples and tonumber(profile.fetch_samples) or 0
+  if report_samples > 1 and fetch_samples > 0 and counter == fetch_samples-1 and counter <= report_samples then
+    cursor:set("bulkdata", profile['.name'], "triggered", "1")
+    conn:send("bulkdata.periodicstatistics", {profile = profile['.name'], triggered = "1"})
+    cursor:commit("bulkdata")
+  end
+  cursor:close()
+end
+
+-- Encode the data defined by profile to JSON and save the content to a file
+-- The format of the content:
+--     {
+--       <reporting data>
+--     }
+-- <reporting data> has two formats: ObjectHierarchy and NameVaulePair
+--
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [string] the JSON encoded content of reporting data
+local function json_encode_content(profile)
+  local report_format = profile.json_report_format or "ObjectHierarchy"
+  local report_timestamp = profile.json_report_timestamp or "Unix-Epoch"
+  local parameters = profile.parameters
+
+  local data = {}
+  local names = {}
+  local paths = {}
+  local pathset = {}
+  local partial_pathset = {}
+
+  local timestamp = time()
+  if report_timestamp == "Unix-Epoch" then
+    data["CollectionTime"] = timestamp
+  elseif report_timestamp == "ISO-8601" then
+    data["CollectionTime"] = date("%Y-%m-%dT%H:%M:%SZ", timestamp)
+  end
+
+  if parameters and #parameters > 0 then
+    for _,v in ipairs(parameters) do
+      local name, reference = get_name_reference(v)
+      if reference ~= "" then
+        --deal with the wildcards in the reference object instances
+        --get the first part path not including "*" and save all references to a set of path
+        paths[#paths+1] = match(reference, "^([^\*]+)")
+        --save all references for checking
+        if reference:sub(-1, -1) == "." then
+          local part = gsub(reference, "%*", "([%%w_]+)")
+          part = gsub(part, "%.", "%%.")
+          part = part .. "*([%w_%.]*)"
+          partial_pathset[#partial_pathset+1] = part
+          names[part] = name
+        else
+          pathset[#pathset+1] = reference
+          names[reference] = name
+        end
+      end
+    end
+  end
+
+  local result = proxy.get(unpack(paths))
+  local pathstr = concat(pathset, " ")
+  local limits = {}
+  for _, pl in ipairs(profile.param_limits or {}) do
+    local l_pattern, l_max = pl:match("^(.*)|(.*)")
+    insert(limits, {pattern = l_pattern, max = tonumber(l_max), count = 0, index = {} })
+  end
+  for _,param in ipairs(result or {}) do
+    -- deal with full path
+    local name = format("%s%s", param.path, param.param)
+    -- encoding name
+    local encoding_name = name
+    --replace all "." to a real character, not replace all characters
+    local pattern = gsub(name, "%.", "%.")
+    --because of the wildcard is "*" and in the real path it is a digital number
+    --create patten as a filter including digitals and wildcard "*" for getting the corresponding parameters
+    pattern = gsub(pattern, "(%d+)", "[%1*]+")
+    --get all possible paths
+    local matched = false
+    for p in gmatch(pathstr, pattern) do
+      --reverse checking
+      local np = gsub(p, "%*", "(%%d+)")
+      local ids = { match(name, np) }
+      if #ids > 0 then
+        encoding_name = get_encoding_name(names, p, ids)
+        matched = true
+        break
+      end
+    end
+    -- deal with partial path
+    if not matched and #partial_pathset > 0 then
+      local temp_path  = format("%s%s", param.path, param.param)
+      for _,p in ipairs(partial_pathset) do
+        local ids = { match(temp_path, p) }
+        local ignore = false
+        if #ids > 0 then
+          --Deal with limitation for the parameter configuration
+          for _, lim in ipairs(limits) do
+            local limid = temp_path:match(format("%s(%%d+)", lim.pattern))
+            if limid then
+              if lim.count < lim.max then
+                if not lim.index[limid] then
+                  lim.count = lim.count + 1
+                  lim.index[limid] = true
+                end
+              else
+                ignore = true
+              end
+              break
+            end
+          end
+          if not ignore then
+            encoding_name = get_encoding_name(names, p, ids, param.param)
+            matched = true
+            break
+          end
+        end
+      end
+    end
+
+    if matched then
+      local value
+      if number_type[param.type] then
+        value = tonumber(param.value)
+      else
+        value = param.value
+      end
+      if report_format == "NameValuePair" then
+        if not encoding_name then
+          encoding_name = name
+        end
+        data[encoding_name] = value
+      elseif report_format == "ObjectHierarchy" then
+        local index = {}
+        for k in gmatch(param.path, "([^\.]+)") do
+          index[#index+1] = k
+        end
+        get_table(index, data)[param.param] = value
+      end
+    end
+  end
+
+  local content = json.encode(data, {indent = true, level = 2, keyorder = {"CollectionTime"}})
+  --add indent space for the first line
+  content = ("  "):rep(2) .. content
+
+  --save content for failed reporting
+  save_retain_file(profile, timestamp, content)
+
+  return content
+end
+
+-- Generate reporting JSON encode data to be transferrd
+-- The layout of content for failed report transmissions or only current reporting files
+-- {
+--   "Report": [
+--     {
+--       Report from a failed reporting interval
+--     },
+--     {
+--       Report from the current reporting interval
+--     }
+--   ]
+-- }
+--
+-- Parameters:
+--   [table] the profile contents
+--   [table] http header table
+-- Returns:
+--   [string] to be transferred data or nil and error message
+local function generate_transfer_data(profile, httpheader)
+  local http_compression = upper(profile.http_compression or "NONE")
+  local header = "{\n  \"Report\":["
+  local tail = "  ]\n}"
+  local data = header
+
+  local filelist = get_retain_filelist(profile)
+  -- decode and write to the transfer file
+  for _,file in ipairs(filelist or {}) do
+    local inf = open(format("%s/%s", path_retain, file), "r")
+    if inf then
+      data = format("%s\n%s,", data, inf:read("*all"))
+      inf:close()
+    end
+  end
+
+  -- add the current content
+  local content = json_encode_content(profile)
+  data = format("%s\n%s\n%s", data, content, tail)
+  if http_compression == "GZIP" then
+    httpheader[#httpheader+1] = "Content-Encoding: gzip"
+    return zlib.compress(data, zlib.BEST_COMPRESSION, nil, zlib.DEFAULT_WINDOWBITS+zlib.GZIP_WINDOWBITS)
+  else
+    return data
+  end
+end
+
+-- Generate a random number between min and max
+-- Parameters:
+--   [number] min number
+--   [number] max number
+-- Returns:
+--   [number] a random number between min and max
+local function random(min, max)
+  local number = ("%d"):rep(3)
+  local fd = assert(open("/dev/urandom", "r"))
+  local bytes = fd:read(3)
+  fd:close()
+  local num = tonumber(number:format(bytes:byte(1,3)))
+  local subnum = max - min
+  if subnum > 0 then
+    return num % subnum + min
+  else
+    return min
+  end
+end
+
+-- Transfer the profile data to server according to the parameter settings
+-- The current only support HTTP POST and JSON encode content
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+--   [boolean] true, or nil, errmsg
+local function do_transfer_data(profile)
+  local protocol = upper(profile.protocol or "HTTP")
+  local encode_type = upper(profile.encode_type or "JSON")
+  local http_method = upper(profile.http_method or "POST")
+  local retry_enable = (profile.retry_enable == '1')
+  local m = tonumber(profile.retry_min_interval) or 5
+  local k = tonumber(profile.retry_interval_multiplier) or 2000
+  local report_interval = tonumber(profile.report_interval) or 86400
+  local ca_info = profile.ca_info or "/etc/ssl/certs/ca-certificates.crt"
+  local ssl_verifyhost = profile.ssl_verify_host == '1' and 2 or 0
+  local ssl_verifypeer = profile.ssl_verify_peer == '1' and 2 or 0
+
+  if protocol == "HTTP" and encode_type == "JSON" and http_method == "POST" then
+    local httpurl = profile.http_url
+    if not httpurl then
+      return nil, "Please first set http url!"
+    end
+    curl:setopt_url(format("%s?%s", httpurl, get_http_uri(profile)))
+
+    local userpwd = get_http_userpwd(profile)
+    if userpwd then
+      curl:setopt_userpwd(userpwd)
+    end
+
+    local httpheader = get_http_header(profile)
+    set_status_trigger(profile)
+    local data = generate_transfer_data(profile, httpheader)
+    curl:setopt_post(1)
+    curl:setopt_httpheader(httpheader)
+    curl:setopt_postfields(data)
+    curl:setopt_postfieldsize(#data)
+
+    curl:setopt_ssl_verifyhost(ssl_verifyhost)
+    curl:setopt_ssl_verifypeer(ssl_verifypeer)
+    curl:setopt_cainfo(ca_info)
+    k = math.ceil(k/1000)
+    local interval = random(m, m*k)
+    local attempt = 0
+    local total_time = 0
+    local success
+
+    repeat
+      success = false
+      pcall(curl.perform, curl, {
+        headerfunction = function(str)
+          if str and match(str, "^HTTP/%d%.%d%s+(2%d%d)%s+") then
+            success = true
+          end
+        end,
+      })
+
+      if not success and retry_enable and interval < report_interval then
+        coroutine.yield()
+        os.execute("sleep " .. interval)
+        -- calculate the next time interval according to retry mechanism defined by A2.2.1 of TR-157_Amendment-10
+        total_time = total_time + interval
+        attempt = attempt + 1
+        if attempt < 10 then
+          interval = interval*k
+        end
+      elseif success then
+        delete_all_retain_file(profile)
+      end
+    until (success or (not retry_enable) or (total_time > report_interval) or (interval >= report_interval))
+    if not success then
+      return nil, "Sending is failed!"
+    else
+      return true
+    end
+  else
+    return nil, "Not supported!"
+  end
+end
+
+-- Calculate to be set value to cron task
+-- Parameters:
+--   [string] number string: to be set time value
+--   [string] number string: current time value
+--   [boolean] the reporting interval value in the time loop or not
+-- Returns:
+--   [string] the string to be set to crontab
+local function get_cron_config_value(set, cur, inflag)
+  local value = set
+  local snum = tonumber(set)
+  local rnum = tonumber(cur)
+  if inflag and (snum == rnum or snum == rnum+1) then
+    value = "*"
+  end
+  return value
+end
+
+-- Fill the crontab tasks to crontask to be configed for crontab
+-- For the different profiles, if the setting time is same, they will be combined to one task
+-- Parameters:
+--   [table] the profile contents
+-- Returns:
+local function do_update_crontab(profile)
+  local name = profile['.name']
+  local report_interval = tonumber(profile.report_interval) or 86400
+  local time_reference = profile.time_reference or '0001-01-01T00:00:00Z'
+  local pattern = "^(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)Z$"
+  local timeref = {}
+
+  -- get reference time by seconds
+  timeref.year, timeref.month, timeref.day, timeref.hour, timeref.min, timeref.sec = match(time_reference, pattern)
+  timeref.sec = 0
+  local reference = time(timeref)
+  -- add 1 seconds offset for current time to avoid transfer too fast to update next crontab task
+  local current = time() + 1
+  -- when time is invalid, set the reference time of current date 00:00:00
+  if not reference then
+    timeref = date("*t", current)
+    timeref.hour = 0
+    timeref.min = 0
+    timeref.sec = 0
+    reference = time(timeref)
+  end
+  -- calculate the setting time according to reference time and reporting interval
+  local setting = ((math.ceil((current - reference)/report_interval)*report_interval)+reference)
+  local timeset = date("*t", setting)
+  local timecur = date("*t", current)
+  -- for the crontab task time values(minute hour day month):
+  -- day or month: according to the condition to be set "*" or real value
+  local day = get_cron_config_value(timeset.day, timecur.day, (report_interval <= 86400))
+  local month = get_cron_config_value(timeset.month, timecur.month, (report_interval <= 86400*28))
+  -- minute and hour: to be set based on the SampleInterval
+  -- If SampleInterval set in interval of secs within a min, modified crontab task time to the next minute
+  if timeset.sec > 0 then
+    if timeset.min < 59 then
+      timeset.min = timeset.min + 1
+    else
+      if timeset.hour < 23 then
+        timeset.hour = timeset.hour + 1
+        timeset.min = 0
+      else
+        timeset.hour = 0
+        timeset.min = 1
+      end
+    end
+  end
+  profiletimed[name] = format("%s %s %s %s", timeset.min, timeset.hour, day, month)
+end
+
+local function get_tables_from_file()
+  local crontask = {}
+  local profiletimed = {}
+  -- open the crontab file to read the current tasks
+  local fd = open(cron_root, "r+")
+  if fd then
+    for l in fd:lines() do
+      -- task is bulkdata task
+      if find(l, "bulkdata") then
+        local time, profiles = l:match("([%d%*]+ [%d%*]+ [%d%*]+ [%d%*]+).*/usr/bin/bulkdata transfer (.*)")
+        if profiles then
+          for profile in profiles:gmatch("(profile_%d+)") do
+            profiletimed[profile] = time
+          end
+          for profile in profiles:gmatch("(periodic_%d+)") do
+            profiletimed[profile] = time
+          end
+        end
+      else
+        crontask[#crontask+1] = l
+      end
+    end
+  fd:close()
+  end
+  return crontask, profiletimed
+end
+
+local function do_help()
+  print [=[
+List of commands:
+    update <profile name list>    Update crontab for the different profiles
+    transfer <profile name list>  Transfer data to server for the different profiles
+  ]=]
+end
+
+local function do_transfer(profile)
+  if profile then
+    -- check profile enable status
+    if profile.enabled ~= '0' then
+      -- transfer data
+      local co = coroutine.create(function()
+        do_transfer_data(profile)
+      end)
+      insert(threads, co)
+    end
+    -- update crontab
+    do_update_crontab(profile)
+  end
+  return
+end
+
+local function dispatch()
+  local i = 1
+  while true do
+    if threads[i] == nil then
+      if threads[1] == nil then
+        break
+      end
+      i = 1
+    end
+    local status, res = coroutine.resume(threads[i])
+    if not status then
+      remove(threads, i)
+    else
+      i = i+1
+    end
+  end
+end
+
+local actions = {
+  update = do_update_crontab,
+  transfer = do_transfer,
+  __index = function(_, action)
+    return function()
+      print(format("invalid command: %s", tostring(action)))
+    end
+  end
+}
+setmetatable(actions, actions)
+
+local function main(args)
+  if #args > 1 then
+    local action = remove(args, 1)
+    profiletimed = {}
+    local seconds = {}
+    local profiles = {}
+    local pattern = "^%d+%-%d+%-%d+T%d+:%d+:(%d+)Z$"
+    for _,v in ipairs(args) do
+      profiles[v] = cursor:get_all("bulkdata", v)
+      if profiles[v] and profiles[v].enabled ~= "0" then
+        insert(seconds, {v, tonumber(match(profiles[v].time_reference, pattern) or 0)})
+      end
+    end
+    sort(seconds, function(a,b) return a[2]<b[2] end)
+    local presecond = 0
+    for _,v in ipairs(seconds) do
+      if action == "transfer" then
+        local delay = v[2]-presecond
+        presecond = v[2]
+        if delay > 0 then
+          os.execute("sleep " .. tostring(delay))
+        end
+      end
+      actions[action](profiles[v[1]])
+    end
+
+    -- according to update status to decide reconfiguration crontab or not
+    local cronupdateapply = false
+    local crontask, pre_profiletimed = get_tables_from_file()
+    for profile, time in pairs(profiletimed) do
+      if pre_profiletimed[profile] ~= time then
+        pre_profiletimed[profile] = time
+        cronupdateapply = true
+      end
+    end
+
+    if cronupdateapply then
+      local tasktimed = {}
+      for profile, time in pairs(pre_profiletimed) do
+        if not tasktimed[time] then
+          tasktimed[time] = profile
+        else
+          tasktimed[time] = format("%s %s", tasktimed[time], profile)
+        end
+      end
+      for time,profiles in pairs(tasktimed) do
+        crontask[#crontask+1] = format("%s * /usr/bin/bulkdata transfer %s", time, profiles)
+      end
+      local taskstr = concat(crontask, "\n")
+      local command = format("echo \"%s\" | crontab -c %s -", taskstr, cron_path)
+      os.execute(command)
+    end
+    -- main loop for transfer
+    dispatch()
+    return
+  end
+  do_help()
+end
+
+main({...})
