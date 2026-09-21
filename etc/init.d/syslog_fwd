@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+
+START=10
+STOP=96
+
+log_filter_add() {
+	local val=$1
+	if [ "${log_filter}" ] ; then
+		log_filter="${log_filter}|(${val})"
+	else
+		log_filter="(${val})"
+	fi
+}
+
+logfilter_config() {
+	local cfg="$1"
+
+	local args log_filter_ip log_port log_type log_file log_filter
+	config_get log_filter_ip "$cfg" log_filter_ip
+	config_get log_port "$cfg" log_port 514
+	config_get log_type "$cfg" log_type circular
+	config_get log_file "$cfg" log_file "/var/log/messages"
+	config_list_foreach "$cfg" log_filter log_filter_add
+	[ "${log_filter}" ] && log_filter="(${log_filter})"
+	echo "syslog startup : filter:'${log_filter}' filter_ip:'${log_filter_ip}' port:'${log_port}' type:'${log_type}' file:'${log_file}'" >>/var/log/slfwd.txt
+	if [ "${log_filter}" -a  "${log_filter_ip}" ] ; then
+#		mkfifo /var/log/filt_msg
+		touch /var/log/filt_msg
+#		echo "Started..." >>/var/log/filt_msg
+		if [ "$log_type" = "file" ] ; then
+			tail -F -n +1 "${log_file}" | awk -v pattern="${log_filter}" -f /etc/syslog_fwd/syslog_fwd.awk >>/var/log/filt_msg &
+		else
+			logread -f | awk -v pattern="${log_filter}" -f /etc/syslog_fwd/syslog_fwd.awk >>/var/log/filt_msg &
+		fi
+	fi
+#	echo "`ls -l /var/log/filt_msg`" >>/var/log/slfwd.txt
+}
+
+start() {
+    config_load system
+    config_foreach logfilter_config system
+}
+
+stop() {
+	filt_pid=$(ps | grep -v "/awk" | awk '/awk -v pattern/ {print $1}')
+#	will also kill the corresponding 'tail' or 'logread'
+	if [ -n "${filt_pid}" ] ; then kill -9 ${filt_pid} ; fi
+	rm -f /var/log/filt_msg
+}

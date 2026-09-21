@@ -1,0 +1,77 @@
+local wanconn = require("transformer.shared.wanconnection")
+local InternetGatewayDevice_Services_X_000E50_Internet_ = {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_Internet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      WANConnection = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+
+local ucihelper = mapper("ucihelper")
+local get_lower_layers = mapper("nwcommon").get_lower_layers
+local resolve = resolve
+
+local binding = { config = "cwmpd", sectionname = "cwmpd_config", option = "interface" }
+local function get_cwmpd_interface()
+	return ucihelper.get_from_uci(binding)
+end
+
+local vlan_device_binding = {config='network', sectionname='device'}
+local vopi_binding = {config='network', sectionname='bcmvopi'}
+
+local function find_device(binding, option, value)
+	local section
+	ucihelper.foreach_on_uci(binding, function(s)
+		if s[option]==value then
+			section = s
+			return false
+		end
+	end)
+	return section
+end
+
+local function get_physical_interface(intf)
+	local ll_intf
+	if intf then
+		ll_intf = get_lower_layers(intf)[1] -- get_lower_layers always returns a table.
+	end
+	if ll_intf then
+		local device
+		-- find vlan device
+		device = find_device(vlan_device_binding, 'name', ll_intf)
+		if device then
+			return device['ifname']
+		end
+		-- not a vlan device, maybe a vopi
+		device = find_device(vopi_binding, '.name', ll_intf)
+		if device then
+			return device['if']
+		end
+		-- not a vlan device nor a vopi, strip of the vlan if present
+		return ll_intf:gsub('%.%d+', '')
+	end
+end
+
+InternetGatewayDevice_Services_X_000E50_Internet_.get = function(mapping, paramname, key)
+	local if_cwmp = get_cwmpd_interface()
+	local key, status = wanconn.get_connection_key(if_cwmp)
+
+	if key and status then
+        if status.proto == "pppoe" or status.proto == "pppoa" then
+            return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", key) or ""
+        else
+            return resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", key) or ""
+        end
+	end
+	return ""
+end
+
+register(InternetGatewayDevice_Services_X_000E50_Internet_)

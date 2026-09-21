@@ -1,0 +1,69 @@
+local logger = require("transformer.logger")
+local log = logger.new("wireless.bssid", 2)
+local register = register;
+local pairs = pairs
+
+local wireless_bssid_ = {
+  objectType = {
+    name = "rpc.wireless.bssid.@.",
+    access = "readOnly",
+    numEntriesParameter = "RadiosNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {},
+  }
+}
+
+local require, mapper, error = require, mapper, error
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function getDataForRadio(radio)
+    local result = conn:call("wireless.radio", "get", { name = radio })
+    if result == nil then
+        log:error("Cannot retrieve radio info for radio " .. radio)
+        return {}
+    end
+    return result[radio]
+end
+
+local function entriesWirelessRadio(mapping)
+    local entries = {}
+    local result = conn:call("wireless.radio", "get", { })
+    if result ~= nil then
+        for k,_ in pairs(result) do
+            entries[#entries+1] = k
+        end
+    end
+    return entries
+end
+
+local function getall(mapping, key)
+	local radioData = getDataForRadio(key)
+	local sanitizedData = {}
+	for k,v in pairs(radioData) do
+		sanitizedData[k] = nilToEmptyString(v)
+	end
+	return sanitizedData
+end
+
+local function get(mapping, paramName, key)
+	local radioData = getDataForRadio(key)
+	return nilToEmptyString(radioData[paramName]);
+end
+
+wireless_bssid_.entries = entriesWirelessRadio
+wireless_bssid_.getall = getall
+wireless_bssid_.get = get
+
+
+register(wireless_bssid_)
+

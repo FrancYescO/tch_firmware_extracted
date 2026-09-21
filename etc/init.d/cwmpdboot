@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+SERVICE_WRITE_PID=1
+SERVICE_DAEMONIZE=1
+unset SERVICE_MATCH_EXEC
+
+wait_for_voice_up() {
+        config_load mmpbx
+        config_get mmpbxenabled global enabled 0
+        [ "$mmpbxenabled" == "0" ] && return
+         
+	count=0
+	while [ $count -lt 15 ]
+	do
+		local mmpbx_state=$(uci_get_state mmpbx state "")
+
+		if [ "$mmpbx_state" == "RUNNING" ] ; then
+			break
+		fi
+
+		logger -t cwmpd " Voice not up yet ... delaying startup"
+
+		sleep 5
+                                                     
+		count=`expr $count + 1`
+	done
+}
+
+boot() {
+	logger -t cwmpd "Starting cwmpd on boot"
+	wait_for_voice_up
+	service_start /usr/bin/cwmpd
+	service_start /usr/bin/cwmpevents
+}

@@ -1,0 +1,40 @@
+# set wwan mode from environment
+opengt
+ set comecho on
+ set com 115200n81
+ set senddelay 0.02
+ waitquiet 1 0.2
+ flash 0.1
+
+
+:start
+ let t1=val($env("MBD_TO_MAX"))
+ if t1 != 0 goto startcmd
+ let t1=10*60*5
+:startcmd
+ send $env("MBD_AT_CMD")
+ send "^m"
+ let x=0
+:loop
+ inc x
+ get 0.1 "^m" $s
+ let l=len($s)
+ let $j=$s
+ if l > 1 goto check
+ if x < t1 goto loop
+:end
+ print "\n---- command finished - timeout --- t=",x," tmax=",t1,"\n"
+ exit 0
+:check
+ let $y=$toupper($s)
+ print $y
+ let $s2=$mid($y,1,l)
+ if $s2 = "OK" goto continue
+ if $s2 = "ERROR" goto continue
+ if $s2 = "COMMAND NOT SUPPORT" goto continue
+ let $s3=$mid($y,1,11)
+ if $s3 = "+CME ERROR:" goto continue
+ if x < t1 goto loop
+:continue
+ print "\n---- command finished ---- to=",x," tmax=",t1,"\n"
+  exit 0
