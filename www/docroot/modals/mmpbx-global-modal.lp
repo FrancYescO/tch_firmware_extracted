@@ -1,0 +1,233 @@
+<%
+-- Enable localization
+gettext.textdomain('webui-voice')
+
+local tinsert = table.insert
+local ngx = ngx
+local proxy = require ("datamodel")
+local ui_helper = require("web.ui_helper")
+local post_helper = require("web.post_helper")
+local content_helper = require("web.content_helper")
+local uimessage_helper = require("web.uimessage_helper")
+local format, match, floor = string.format, string.match, math.floor
+local session = ngx.ctx.session
+
+local mapValid = {
+    mmpbx_enabled = post_helper.validateBoolean,
+}
+
+local mapParams = {
+    mmpbx_enabled = "uci.mmpbx.mmpbx.@global.enabled",
+}
+
+local transport_types = {
+    {"TCP",T"TCP"},
+    {"UDP",T"UDP"},
+    {"undefined",T"Undefined"}
+}
+
+-- Retrieving emission state
+local emission_content = {
+    emission_state = "rpc.mmpbx.dectemission.state",
+}
+content_helper.getExactContent(emission_content)
+emission_state = format("%s", emission_content.emission_state)
+
+if ngx.req.get_method() == "POST" then
+     local args = ngx.req.get_post_args()
+     local action = args["action"]
+     if args["domain_state"] == "0" then
+         proxy.set("uci.mmpbxrvsipnet.network.@sip_net.domain_name","")
+     elseif args["domain_state"] then
+         mapParams.domain_name = "uci.mmpbxrvsipnet.network.@sip_net.domain_name"
+         mapValid.domain_name = post_helper.validateStringIsDomainName
+     end
+     if action == "emission_on" then
+	   proxy.set("rpc.mmpbx.dectemission.state","1")
+     end
+     if action == "emission_off" then
+	   proxy.set("rpc.mmpbx.dectemission.state","0")
+     end
+     proxy.apply()
+end
+local content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
+
+local domainName = proxy.get("uci.mmpbxrvsipnet.network.@sip_net.domain_name")[1].value
+local domain_state = "0"
+if domainName ~= "" then
+    domain_state = "1"
+end
+
+-- SIP Networks
+local sipnet_columns = {
+  {
+    header = T"Name",
+    name = "user_friendly_name",
+    param = "user_friendly_name",
+    type = "label",
+    readonly = true,
+    attr = { input = { class="span2" }},
+  },
+  {
+    header = T"Primary Registrar",
+    name = "primaryRegistrar",
+    param = "primary_registrar",
+    type = "text",
+    attr = { input = { class="span2" } },
+  },
+  {
+    header = T"Primary RegistrarPort",
+    name = "primaryRegistrarPort",
+    param = "primary_registrar_port",
+    type = "text",
+    attr = { input = { class="span2" } },
+  },
+  {
+    header = T"Primary Proxy",
+    name = "primaryProxy",
+    param = "primary_proxy",
+    type = "text",
+    attr = { input = { class="span2" } },
+  },
+  {
+    header = T"Primary ProxyPort",
+    name = "primaryProxyPort",
+    param = "primary_proxy_port",
+    type = "text",
+    attr = { input = { class="span2" } },
+  },
+  {
+    header = T"Expire Time",
+    name = "regExpire",
+    param = "reg_expire",
+    type = "text",
+    attr = { input = { class="span2" } },
+  },
+  {
+    header = T"SIP Transport Type",
+    name = "transportType",
+    param = "transport_type",
+    type = "select",
+    values = transport_types,
+    attr = { select = { class="span2" } },
+  }
+}
+
+local function validateStringIsVoicePort(value, object, key)
+    value = value and match(value, "^[%s0]*(%d+)%s*$")
+    local port = value and tonumber(value)
+    if port and (floor(port) == port) and (port == 0 or (port >=1024 and port < 65536)) then
+        return true
+    end
+    return nil, T"Port is invalid. It should be 0 or between 1024 and 65535."
+end
+
+local sipnet_valid = {
+    primaryRegistrarPort = validateStringIsVoicePort,
+    primaryRegistrar = post_helper.getOrValidation(post_helper.validateStringIsIP,post_helper.validateStringIsDomainName),
+    primaryProxy = post_helper.getOrValidation(post_helper.validateStringIsIP,post_helper.validateStringIsDomainName),
+    primaryProxyPort = validateStringIsVoicePort,
+    regExpire = post_helper.validateRegExpire,
+    transportType = post_helper.getValidateInEnumSelect(transport_types)
+}
+
+local sipnet_options = {
+    canEdit = true,
+    canAdd = false,
+    canDelete = false,
+    tableid = "sipnet",
+    basepath = "uci.mmpbxrvsipnet.network.",
+    sorted = "user_friendly_name",
+}
+
+local sipnet_data, sipnet_helpmsg = post_helper.handleTableQuery(sipnet_columns, sipnet_options, nil, nil, sipnet_valid)
+
+local uri = ngx.var.uri
+if ngx.var.args and string.len(ngx.var.args) > 0 then
+    uri = uri .. "?" .. ngx.var.args
+end
+%>
+
+<%= ui_helper.createHeader(T"Telephony", false, true) %>
+
+<div class="modal-body update">
+  <%
+  local lp = require("web.lp")
+  lp.setpath("/www/snippets/")
+  lp.include("tabs-voice.lp")
+  %>
+  <form class="form-horizontal" method="post" action="<%= uri %>">
+  <%=ui_helper.createMessages(uimessage_helper.popMessages())%>
+	<fieldset id="mmpbx-global-tab">
+	    <legend><%= T"Global Information" %></legend>
+	    <%= ui_helper.createSwitch(T"Enabled", "mmpbx_enabled", content["mmpbx_enabled"]) %>
+	</fieldset>
+    <%if content and content["mmpbx_enabled"] == "1" then %>
+	<%if session:hasAccess("/modals/mmpbx-dect-modal.lp") then %>
+	<fieldset>
+      <legend><%= T"DECT Emission" %></legend>
+      <%
+	local html = {}
+	if emission_state == "0" then
+		local emission_on_class = {
+			button = {
+				["data-name"] = "action",
+				["data-value"] = "emission_on",
+			}
+		}
+	       tinsert (html, ui_helper.createButton (T"Emission Mode", T"On", "icon-bolt", emission_on_class))
+	 else
+		local emission_off_class = {
+                        button = {
+                                ["data-name"] = "action",
+                                ["data-value"] = "emission_off",
+                        }
+                }
+                tinsert (html, ui_helper.createButton (T"Emission Mode", T"Off", "icon-ban-circle icon-large red", emission_off_class))
+         end
+	 ngx.print (html)
+      %>
+    </fieldset>
+     <%end%>
+        <fieldset>
+            <legend><%= T"SIP Network" %></legend>
+            <%local switch_class_enable = {
+                input = {
+                    class = "monitor-changes"
+                }
+            }%>
+            <%=ui_helper.createSwitch(T"Dedicated Domain", "domain_state", domain_state, switch_class_enable)%>
+            <%local domain_name = {
+                group = {
+                    class ="monitor-domain_state monitor-1",
+                },
+                input = {
+                    maxlength= "255",
+                    class = "span2",
+                },
+            }%>
+            <%=ui_helper.createInputText(T"Domain Name", "domain_name", domainName, domain_name, helpmsg["domain_name"])%>
+            <%=ui_helper.createTable(sipnet_columns, sipnet_data, sipnet_options, nil, sipnet_helpmsg)%>
+        </fieldset>
+    <%end%>
+    </form>
+</div>
+
+<%= ui_helper.createFooter() %>
+<%if content and content["mmpbx_enabled"] == "0" then %>
+  <style>
+    .disabled{
+       cursor:not-allowed !important;
+       color:#666;
+    }
+  </style>
+  <script>
+    $(".nav li a").addClass("disabled");
+  </script>
+<%else%>
+  <script>
+    if($(".nav li a").hasClass("disabled")){
+      $(".nav li a").removeClass("disabled");
+    }
+  </script>
+<%end%>

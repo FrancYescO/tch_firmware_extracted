@@ -1,0 +1,83 @@
+<%
+-- NG-59939
+-- Enable localization
+gettext.textdomain('webui-core')
+
+local lp = require("web.lp")
+local post_helper = require("web.post_helper")
+local content_helper = require("web.content_helper")
+local message_helper = require("web.uimessage_helper")
+local ui_helper = require("web.ui_helper")
+local tim_helper = require("web.tim_helper")
+
+lp.include("broadband-xdsl.lp")
+
+local session = ngx.ctx.session
+local role = session:getrole()
+local tech = false
+if role == "engineer" or role == "ispuser" then
+	tech = true
+end
+
+local allowed_encs = {                                                                                        
+    {"llc",T"LLC"},                                                                                           
+    {"vcmux",T"VCMUX"}                                                                                        
+}           
+
+local wan = {
+    iface = "uci.network.interface.@wan.ifname",
+}
+content_helper.getExactContent(wan)
+local iface = wan.iface
+
+local content, helpmsg
+
+if iface then
+    iface = iface:untaint()
+
+    local gVNIR = tim_helper.getValidateNumberInRange
+    local gVIES = post_helper.getValidateInEnumSelect
+    local mapValid = {
+        adsl_vp = gVNIR(0, 255),
+        adsl_vc = gVNIR(0, 65535),
+        adsl_enc = gVIES(allowed_encs),
+    }
+
+    local mapParams = {
+        adsl_vp = "uci.xtm.atmdevice.@" .. iface .. ".vpi",
+        adsl_vc = "uci.xtm.atmdevice.@" .. iface .. ".vci",
+        adsl_enc = "uci.xtm.atmdevice.@" .. iface .. ".enc",
+    }
+    content, helpmsg = post_helper.handleQuery(mapParams, mapValid)
+end
+%>
+
+<fieldset>
+  <%
+    ngx.print(ui_helper.createMessages(message_helper.popMessages()))
+  %>
+  <legend><%= T"Internet VPC" %></legend>
+  <%
+    local html = {}
+    if tech then
+      if content and content.adsl_vp and content.adsl_vc and content.adsl_enc then
+        html[#html + 1] = ui_helper.createInputText(T"VP", "adsl_vp", content["adsl_vp"], nil, helpmsg["adsl_vp"])
+        html[#html + 1] = ui_helper.createInputText(T"VC", "adsl_vc", content["adsl_vc"], nil, helpmsg["adsl_vc"])
+        if role == "ispuser" then
+            html[#html + 1] = ui_helper.createInputSelect(T"Encapsulation", "adsl_enc", allowed_encs, content["adsl_enc"])
+        end
+      else
+        html[#html + 1]=  ui_helper.createAlertBlock(T"Configuration of VP/VC not available")
+      end
+    else
+	if content and content.adsl_vp and content.adsl_vc then
+          html[#html + 1] = ui_helper.createLabel(T"VP", content["adsl_vp"])
+	  html[#html + 1] = ui_helper.createLabel(T"VC", content["adsl_vc"])
+	else
+ 	  html[#html + 1]=  ui_helper.createAlertBlock(T"VP/VC is not configured")
+	end
+    end
+
+    ngx.print(html)
+  %>
+</fieldset>
