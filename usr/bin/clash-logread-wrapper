@@ -1,0 +1,122 @@
+#!/usr/bin/env lua
+-- Functions made available from the CLI environment
+local print = print
+local process = require 'tch.process'
+local cf = require("clash.helper.filter")
+local posix = require("tch.posix")
+local open, popen = io.open, process.popen
+local plpath = require("pl.path")
+
+--[[
+  clash-logread-wrapper is designed for the CLI's (clash) logread command.
+  It may be used from a root shell, but this is not its main purpose.
+
+  Summary:
+    The script has three options available:
+      '-f'       : Output data as log grows; see `logread -f`
+      '-i'       : If a filter is set, filter the output case-insensitive
+      '-F'       : Output data in the file which is set by option 'log_file' in /etc/config/system
+      '--filter' : A Lua pattern filter;
+              only lines that match the filter are printed.
+
+    The wrapper script provides a mechanism to filter logread's output against a set filter, if any.
+
+  Background:
+    Clash knows a `filter` feature on a selection of commands, such as `logread` and `get`.
+      For `get`, the filter is implemented by using Lua pattern matching. `get` is an internal command in which case the
+      filtering is performed within Clash core code.
+      To keep user experience consistent throughout Clash, it is desirable to apply the same filtering mechanism for logread.
+
+      Logread, however, is an external debug command, which once launched simply pipes all its output to Clash.
+      Plainly launching `/sbin/logread` would thus provide no facilities for post-processing such as matching the output
+      against a pattern (i.e. filtering).
+
+    The wrapper script provides a solution by capturing the logread output and filtering when required.
+    Hence the script's main tasks:
+      * Checking prerequisites, and reporting errors if necessary:
+          * `logread -f` must not be used with a filter.
+          * Option `-i` must only be used with a filter.
+      * For `logread -f`, simply launch a task by execv(); filtering is currently not supported with `-f`.
+      * For normal logread (without `-f`), capture the output and either:
+          * Simply print when no filter active.
+          * Match against the filter (with `-i`, case-insensitive) and print when matching.
+]]--
+
+local flags = ""
+local filter
+local caseInsensitive
+local readFromFile
+
+-- Known arguments: `-f`, `-i`,`-F`, `--filter`.
+--   `-i` is only valid when used with `--filter`.
+--   `--filter` must not be used with `-f`
+local function parseArg(arg)
+  local skip
+  for key, value in ipairs(arg) do
+    if key ~= skip then
+      -- Rolling logread?
+      if value == "-f" then
+        flags = flags .. value .. " "
+      elseif value == "-F" then
+        readFromFile = true
+      -- Case insensitive filter?
+      elseif value == "-i" then
+        caseInsensitive = true
+      -- Filter
+      elseif value == "--filter" then
+        -- Next element is the actual filter
+        filter = arg[key + 1]
+        -- Skip the filter for parsing; it could e.g. be `-f`
+        skip = key + 1
+      end
+    end
+  end
+end
+
+parseArg(arg)
+
+local function print_log_file(do_open, file_name)
+  local file = do_open(file_name)
+  if file then
+    for line in file:lines() do
+      if not filter or cf(line, filter, caseInsensitive) then
+        print(line)
+      end
+    end
+    file:close()
+  end
+end
+
+if caseInsensitive and not filter then
+  print("Option `-i` must only be used with a filter")
+elseif flags:match("-f") then
+  if filter then
+    print("Option `-f` cannot be used with a filter")
+  else
+    local _, errmsg = posix.execv("/sbin/logread", { "-f" })
+    -- execv() never returns, unless errors
+    print("Error: " .. (errmsg or "unkown error"))
+  end
+elseif readFromFile then
+  local cursor = require("uci").cursor()
+  local log_file = cursor:get("system.@system[0].log_file")
+  cursor:close()
+  local path = ""
+  if log_file then
+    path = plpath.normpath(log_file)
+  end
+
+  if path:match("^/custo/") then
+    if lfs.attributes(log_file, "mode") == "file" then
+      local old_log_file = log_file .. ".old"
+      if lfs.attributes(old_log_file, "mode") == "file" then
+        print_log_file(open, old_log_file)
+      end
+      print_log_file(open, log_file)
+    end
+  else
+    print("Wrong path: please set 'log_file' to '/custo/xxx' in system config")
+  end
+else
+  print_log_file(popen, "logread")
+end

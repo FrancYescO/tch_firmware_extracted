@@ -1,0 +1,201 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+ucidef_set_interface_lan "eth0 eth1 eth2 eth3"
+
+uci set network.lan.ip6assign=64
+uci set network.lan.force_link=0
+uci set network.lan.neighlocktime=-1
+#button added in Local Network for enabling STP, should be disabled by default:
+uci set network.lan.stp=0
+# stp will only work if we are the elected ROOT bridge, this is needed to force root bridge: 
+uci set network.lan.priority='0x0001'
+
+ucidef_set_switch "bcmsw" "1" "0"
+uci set network.bcmsw.qosimppauseenable=0
+uci set network.bcmsw.jumbo=0
+uci set network.lan.ifname="`uci -q get \"network.lan.ifname\"` eth5"
+
+#/*******************************************************************/
+#/		env variables need for bridging			*/
+#/*******************************************************************/
+uci set env.var.lanvlan="vlan_eth0 vlan_eth1 vlan_eth2 vlan_eth3"
+uci set env.var.datavlan="eth0_databr eth1_databr eth2_databr eth3_databr"
+uci set env.var.switch="0* 1* 2* 3* 5*"
+uci set env.var.iptv="eth0_iptvbr eth1_iptvbr eth2_iptvbr eth3_iptvbr"
+uci commit env
+
+
+#/*******************************************************************/
+#/		vlan device mode for bridging standard Setup				*/
+#/*******************************************************************/
+
+uci set network.vlan_eth0=device
+uci set network.vlan_eth0.type=8021q
+uci set network.vlan_eth0.ifname=eth0
+uci set network.vlan_eth0.name=vlan_eth0
+uci set network.vlan_eth0.vid=1
+
+uci set network.vlan_eth1=device
+uci set network.vlan_eth1.type=8021q
+uci set network.vlan_eth1.ifname=eth1
+uci set network.vlan_eth1.name=vlan_eth1
+uci set network.vlan_eth1.vid=1
+
+uci set network.vlan_eth2=device
+uci set network.vlan_eth2.type=8021q
+uci set network.vlan_eth2.ifname=eth2
+uci set network.vlan_eth2.name=vlan_eth2
+uci set network.vlan_eth2.vid=1
+
+uci set network.vlan_eth3=device
+uci set network.vlan_eth3.type=8021q
+uci set network.vlan_eth3.ifname=eth3
+uci set network.vlan_eth3.name=vlan_eth3
+uci set network.vlan_eth3.vid=1
+
+
+
+#/*****************************************************************************************/
+#/     Due to Quantenna the eth5 port used needs to be put into the vlan devaice mode also*/
+#/     network.lan needs to be extended also											  */
+#/*****************************************************************************************/
+uci set network.vlan_eth5=device
+uci set network.vlan_eth5.type=8021q
+uci set network.vlan_eth5.ifname=eth5
+uci set network.vlan_eth5.name=vlan_eth5
+uci set network.vlan_eth5.vid=1
+
+uci set network.lan.ifname='vlan_eth0 vlan_eth1 vlan_eth2 vlan_eth3 vlan_eth5'
+
+
+#/*******************************************************************/
+#/		Configure Switch parameters, this is board specific			*/
+#/		Adopt depending on board parameter unit (external Switch=1)	*/
+#/		adopt parameter ports depending on used board				*/
+#/*******************************************************************/
+
+uci set network.bcmsw.enable_vlan=1
+uci set network.bcmsw.unit=1
+
+uci set network.lansw=switch_vlan
+uci set network.lansw.device=bcmsw
+uci set network.lansw.vlan=1
+
+
+#/*****************************************************************************************/
+#/     Due to Quantenna the eth5 port used needs to be put into the vlan devaice mode also*/
+#/     network.lan needs to be extended also											  */
+#/*****************************************************************************************/
+uci set network.lansw.ports='0* 1* 2* 3* 5* 8t'
+
+#/***********************************************************************/
+#/ Prepare LAN device for Bridging on Dummy vlan 2 for lan to Data WAN	*/
+#/		all Ethernet LAN Ports	prepared								*/
+#/***********************************************************************/			
+
+uci set network.eth0_databr=device
+uci set network.eth0_databr.type=8021q
+uci set network.eth0_databr.ifname=eth0
+uci set network.eth0_databr.name=eth0_databr
+uci set network.eth0_databr.vid=2040
+
+uci set network.eth1_databr=device
+uci set network.eth1_databr.type=8021q
+uci set network.eth1_databr.ifname=eth1
+uci set network.eth1_databr.name=eth1_databr
+uci set network.eth1_databr.vid=2040
+
+uci set network.eth2_databr=device
+uci set network.eth2_databr.type=8021q
+uci set network.eth2_databr.ifname=eth2
+uci set network.eth2_databr.name=eth2_databr
+uci set network.eth2_databr.vid=2040
+
+uci set network.eth3_databr=device
+uci set network.eth3_databr.type=8021q
+uci set network.eth3_databr.ifname=eth3
+uci set network.eth3_databr.name=eth3_databr
+uci set network.eth3_databr.vid=2040
+
+
+uci set network.datasw=switch_vlan
+uci set network.datasw.device=bcmsw
+uci set network.datasw.vlan=2040
+uci set network.datasw.ports='8t'
+
+#/***********************************************************************/
+#/ Prepare LAN device for Bridging on VLAN501 for lan to IPTV WAN		*/
+#/		all Ethernet LAN Ports	prepared Ownit Case						*/
+#/***********************************************************************/			
+
+uci set network.eth0_iptvbr=device
+uci set network.eth0_iptvbr.type=8021q
+uci set network.eth0_iptvbr.ifname=eth0
+uci set network.eth0_iptvbr.name=eth0_iptvbr
+uci set network.eth0_iptvbr.vid=2042
+
+uci set network.eth1_iptvbr=device
+uci set network.eth1_iptvbr.type=8021q
+uci set network.eth1_iptvbr.ifname=eth1
+uci set network.eth1_iptvbr.name=eth1_iptvbr
+uci set network.eth1_iptvbr.vid=2042
+
+uci set network.eth2_iptvbr=device
+uci set network.eth2_iptvbr.type=8021q
+uci set network.eth2_iptvbr.ifname=eth2
+uci set network.eth2_iptvbr.name=eth2_iptvbr
+uci set network.eth2_iptvbr.vid=2042
+
+uci set network.eth3_iptvbr=device
+uci set network.eth3_iptvbr.type=8021q
+uci set network.eth3_iptvbr.ifname=eth3
+uci set network.eth3_iptvbr.name=eth3_iptvbr
+uci set network.eth3_iptvbr.vid=2042
+
+uci set network.iptvsw=switch_vlan
+uci set network.iptvsw.device=bcmsw
+uci set network.iptvsw.vlan=2042
+uci set network.iptvsw.ports='8t'
+
+#For Guest Network config
+#2.4GHz
+uci set network.wlnet_b_24=interface
+uci set network.wlnet_b_24.proto=static
+uci set network.wlnet_b_24.ip6assign=64
+uci set network.wlnet_b_24.ipv6=0
+uci set network.wlnet_b_24.ip6hint=1
+uci set network.wlnet_b_24.netmask=255.255.255.128
+uci set network.wlnet_b_24.ipaddr=192.168.168.1
+uci set network.wlnet_b_24.ifname=wl0_1
+uci set network.wlnet_b_24.force_link=0
+#5GHz
+uci set network.wlnet_b_5=interface
+uci set network.wlnet_b_5.proto=static
+uci set network.wlnet_b_5.ip6assign=64
+uci set network.wlnet_b_5.ipv6=0
+uci set network.wlnet_b_5.ip6hint=2
+uci set network.wlnet_b_5.netmask=255.255.255.128
+uci set network.wlnet_b_5.ipaddr=192.168.168.129
+uci set network.wlnet_b_5.ifname=wl1_1
+uci set network.wlnet_b_5.force_link=0
+
+#Quantenna specific settings
+uci set network.wlnet_b_5eth5=device
+uci set network.wlnet_b_5eth5.type=8021q
+uci set network.wlnet_b_5eth5.name=wl1_1
+uci set network.wlnet_b_5eth5.enable=1
+uci set network.wlnet_b_5eth5.ifname=eth5
+uci set network.wlnet_b_5eth5.vid=3
+uci set network.wlnet_b_5eth5.ipv6='0'
+
+
+#add config from CONFIG_WLAN_FAPI_QUANTENNA_ETH_INTERFACE
+
+#uci set network.lan.ifname="`uci -q get \"network.lan.ifname\"`"
+uci set network.lan.ifname='vlan_eth0 vlan_eth1 vlan_eth2 vlan_eth3 vlan_eth5'
+
+uci commit network
+
+exit 0

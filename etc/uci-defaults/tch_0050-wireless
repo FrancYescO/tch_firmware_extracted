@@ -1,0 +1,61 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+# To make sure it is set to the correct vendor
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+PRE="TN_wifi_"
+uci set wireless.wl0.ssid=$PRE`uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+
+  #both radios will use the same mac_postfix after the "TN_xx"-part!  
+  PRE5="TN_wifi_"
+  uci set wireless.wl1.ssid=$PRE5`uci get env.var.ssid_mac_postfix_r0`  
+
+#both radios will use the same key for WPA and WEP!  
+  uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s0`
+  
+  uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+  
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+  
+  uci set wireless.ap1_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+fi
+
+uci commit wireless
+
+#to update the default security mode in env
+uci set env.var.default_security_mode_r0_s0=`uci get wireless.ap0.security_mode`
+uci set env.var.default_security_mode_r1_s0=`uci get wireless.ap1.security_mode`
+
+uci commit env
+
+#/*******************************************************************/
+#/*             datamodel ordering for wireless devices             */
+#/*******************************************************************/
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.wlandevices=ordering
+uci set dmordering.wlandevices.name='InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.'
+# devices that are instantiated under `InternetGatewayDevice.LANDevice`:
+uci add_list dmordering.wlandevices.order=wl0
+uci add_list dmordering.wlandevices.order=wl1_remote
+uci commit dmordering
+
