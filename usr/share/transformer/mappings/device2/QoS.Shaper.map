@@ -1,0 +1,282 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_QoS_Shaper_i_ = {
+  objectType = {
+    name = "Device.QoS.Shaper.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ShaperNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        default = "",
+      },
+      ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "-1",
+      },
+      ShapingBurstSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local nwcommon = mapper("nwcommon")
+local split_key = nwcommon.split_key
+local fmod = math.fmod
+local ucihelper = mapper("ucihelper")
+local get_from_uci = ucihelper.get_from_uci
+local set_on_uci = ucihelper.set_on_uci
+local foreach_on_uci = ucihelper.foreach_on_uci
+local add_on_uci = ucihelper.add_on_uci
+local delete_on_uci = ucihelper.delete_on_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+local transactions = {}
+local eth_binding = {config = "ethernet"}
+local xdsl_binding = {config = "xdsl"}
+
+
+local function getFromUci(binding, section, option, default)
+  binding.sectionname = section
+  if option then
+    binding.option = option
+    binding.default = default
+    return get_from_uci(binding)
+  end
+  return uciHelper.getall_from_uci(binding)
+end
+
+local function setOnUci(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  set_on_uci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+Device_QoS_Shaper_i_.entries = function()
+  local Shapers = {}
+  -- check Ethernet trafficdesc
+  eth_binding.sectionname = "trafficdesc"
+  foreach_on_uci(eth_binding, function(s)
+    Shapers[#Shapers+1] = "ETH|" .. s['.name']
+  end)
+  -- check xdsl maxusdatarate
+  xdsl_binding.sectionname = "xdsl"
+  xdsl_binding.option = nil
+  foreach_on_uci(xdsl_binding, function(s)
+    Shapers[#Shapers+1] = "DSL|" .. s['.name']
+  end)
+  return Shapers
+end
+
+Device_QoS_Shaper_i_.get = {
+  Enable = function(mapping, param, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      local intf
+      eth_binding.sectionname = "port"
+      foreach_on_uci(eth_binding, function(s)
+        if s.td and s.td == sectname then
+          intf = s['.name']
+          return false -- break
+        end
+      end)
+      local max_bit_rate = getFromUci(eth_binding, sectname, "max_burst_rate")
+      local max_burst_size = getFromUci(eth_binding, sectname, "max_burst_size")
+      return (intf and max_bit_rate ~= "" and max_burst_size ~= "" and "true") or "false"
+    elseif devtype == "DSL" then
+      local maxusdatarate = getFromUci(xdsl_binding, sectname, "maxusdatarate")
+      return (maxusdatarate ~= "" and "true") or "false"
+    end
+    return "false"
+  end,
+  Status = function(mapping, param, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      local intf
+      eth_binding.sectionname = "port"
+      foreach_on_uci(eth_binding, function(s)
+        if s.td and s.td == sectname then
+          intf = s['.name']
+          return false -- break
+        end
+      end)
+      local max_bit_rate = getFromUci(eth_binding, sectname, "max_bit_rate")
+      local max_burst_size = getFromUci(eth_binding, sectname, "max_burst_size")
+      return (intf and max_bit_rate ~= "" and max_burst_size ~= "" and "Enabled") or "Disabled"
+    elseif devtype == "DSL" then
+      local maxusdatarate = getFromUci(xdsl_binding, sectname, "maxusdatarate")
+      return (maxusdatarate ~= "" and "Enabled") or "Disabled"
+    end
+    return "Disabled"
+  end,
+  Interface = function(mapping, param, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      local intf
+      eth_binding.sectionname = "port"
+      foreach_on_uci(eth_binding, function(s)
+        if s.td and s.td == sectname then
+          intf = s['.name']
+          return false -- break
+        end
+      end)
+      return resolve("Device.Ethernet.Interface.{i}.", intf) or ""
+    elseif devtype == "DSL" then
+      return resolve("Device.DSL.Line.{i}.", "dsl:"..sectname) or ""
+    end
+    return ""
+  end,
+  ShapingRate = function(mapping, param, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      local max_bit_rate = getFromUci(eth_binding, sectname, "max_bit_rate")
+      max_bit_rate = tonumber(max_bit_rate)
+      return max_bit_rate and tostring(max_bit_rate * 1000) or "-1"
+    elseif devtype == "DSL" then
+      local maxusdatarate = getFromUci(xdsl_binding, sectname, "maxusdatarate")
+      maxusdatarate = tonumber(maxusdatarate)
+      return maxusdatarate and tostring(maxusdatarate * 1000) or "-1"
+    end
+    return "-1"
+  end,
+  ShapingBurstSize = function(mapping, param, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      return getFromUci(eth_binding, sectname, "max_burst_size")
+    elseif devtype == "DSL" then
+      -- Now not implemented rate limiting at the xdsl layer
+      return "0"
+    end
+    return ""
+  end,
+}
+
+Device_QoS_Shaper_i_.set = {
+  Enable = function(mapping, param, value, key)
+    -- Not implemented, US NG-85602 has been created for this
+    return nil,"Not supported"
+  end,
+  Interface = function(mapping, param, value, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      local intf = tokey(value,
+        "Device.Ethernet.Interface.{i}."
+      )
+      if not intf then
+        return nil, "Invalid value"
+      end
+      -- clear original interface
+      eth_binding.sectionname = "port"
+      foreach_on_uci(eth_binding, function(s)
+        if s.td and s.td == sectname and s['.name'] ~= intf then
+          setOnUci(eth_binding, s['.name'], "td", "")
+        end
+      end)
+      setOnUci(eth_binding, intf, "td", sectname)
+    elseif devtype == "DSL" then
+      -- Not implemented, US NG-85602 has been created for this
+      return nil,"Not supported on xdsl interface"
+    end
+  end,
+  ShapingRate = function(mapping, param, value, key)
+    local devtype, sectname = split_key(key)
+    value = tonumber(value)
+    if value ~= -1 and fmod(value, 1000) ~= 0 then
+      return nil,"The value should be -1 or multiples of 1000 bps"
+    end
+    if value == -1 then
+      value = ""
+    else
+      value = tostring(value/1000)
+    end
+    if devtype == "ETH" then
+      local old_value = getFromUci(eth_binding, sectname, "max_bit_rate")
+      if old_value ~= value then
+        setOnUci(eth_binding, sectname, "max_bit_rate", value)
+      end
+    elseif devtype == "DSL" then
+      local old_value = getFromUci(xdsl_binding, sectname, "maxusdatarate")
+      if old_value ~= value then
+        setOnUci(xdsl_binding, sectname, "maxusdatarate", value)
+      end
+    end
+  end,
+  ShapingBurstSize = function(mapping, param, value, key)
+    local devtype, sectname = split_key(key)
+    if devtype == "ETH" then
+      if not tonumber(value) then
+        return nil, "Invalid value"
+      end
+      local old_value = getFromUci(eth_binding, sectname, "max_burst_size")
+      if old_value ~= value then
+        setOnUci(eth_binding, sectname, "max_burst_size", value)
+      end
+    elseif devtype == "DSL" then
+      -- Now not implemented rate limiting at the xdsl layer
+      return nil,"Not supported on xdsl interface"
+    end
+  end,
+}
+
+-- To be implemented, US NG-85602 has been created for this
+Device_QoS_Shaper_i_.add = function(mapping)
+  error("Not implemented")
+end
+
+Device_QoS_Shaper_i_.delete = function(mapping, key)
+  error("Not implemented")
+end
+
+Device_QoS_Shaper_i_.commit = function()
+  for config,_ in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_QoS_Shaper_i_.revert = function()
+  for config,_ in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(Device_QoS_Shaper_i_)
+
