@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+
+boot() {
+	. $IPKG_INSTROOT//lib/config/uci.sh
+
+	local MODULE_DIR="/lib/modules/$(uname -r)"
+
+	local enable
+	enable=$(uci_get system config enable_usb3_support 1)
+	[ "$enable" -ne 0 ] && { insmod xhci-hcd; [ -f "$MODULE_DIR"/xhci-plat-hcd.ko ] && insmod xhci-plat-hcd; }
+	enable=$(uci_get system config enable_usb2_support 1)
+	[ "$enable" -ne 0 ] && { insmod ehci-hcd; [ -f "$MODULE_DIR"/ehci-platform.ko ] && insmod ehci-platform; }
+	enable=$(uci_get system config enable_usb1_support 1)
+	[ "$enable" -ne 0 ] && { insmod ohci-hcd; [ -f "$MODULE_DIR"/ohci-platform.ko ] && insmod ohci-platform; }
+
+	return 0
+}
