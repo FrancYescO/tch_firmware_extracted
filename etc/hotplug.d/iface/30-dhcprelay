@@ -1,0 +1,54 @@
+#!/bin/sh
+# Copyright (C) 2015 Technicolor Delivery Technologies, SAS
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+. $IPKG_INSTROOT/lib/functions/service.sh
+
+SERVICE_DAEMONIZE=1
+
+_iface_to_dev() {
+    local device=""
+    local iface="$1"
+    network_get_device device "$iface"
+    echo $device
+}
+
+start() {
+    config_load dhcprelay
+    config_get serverip config serverip
+    config_get serveriface config serveriface
+    config_get clientiface config clientiface
+    config_get_bool enabled config enabled
+
+    [ "$enabled" = 1 ] && [ $INTERFACE = "$serveriface" -o $INTERFACE = "$clientiface" ] && {
+        local serverdev=$(_iface_to_dev "$serveriface")
+        local clientdev=$(_iface_to_dev "$clientiface")
+
+        [ -z "$serverdev" -o -z "$clientdev" ] && {
+            logger -t dhcprelay "No valid client or server interface specified"
+            exit 1
+        }
+
+        logger -t dhcprelay "Starting due to $ACTION of $INTERFACE: relaying $clientdev ($clientiface) to $serverdev (IP=$serverip)"
+        service_start /usr/sbin/dhcprelay $clientdev $serverdev $serverip
+    }
+}
+
+stop() {
+    config_load dhcprelay
+    config_get serveriface config serveriface
+    config_get clientiface config clientiface
+
+    [ $INTERFACE = $serveriface -o $INTERFACE = $clientiface ] && {
+        logger -t dhcprelay "Stopping due to $ACTION of $INTERFACE"
+        service_stop /usr/sbin/dhcprelay
+    }
+}
+
+[ "$ACTION" = ifup ] && {
+    start
+}
+
+[ "$ACTION" = ifdown ] && {
+    stop
+}

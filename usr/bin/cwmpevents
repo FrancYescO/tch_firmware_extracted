@@ -1,0 +1,50 @@
+#!/usr/bin/env lua
+-- This script is a bridge between ubus and Transformer. Due to multithreading
+-- issues in uloop we can't have the cwmpd Transformer backend listen directly
+-- on ubus. Instead this script runs standalone and on certain ubus events it
+-- does a set on a dummy mapping in Transformer. The backend is subscribed on
+-- this change and will then forward this event to cwmpd core.
+
+local uloop = require("uloop")
+uloop.init()  -- needs to be done before ubus.connect() or it doesn't work...
+
+local dm = require("datamodel")
+local cursor = require("uci").cursor(nil, "/var/state") -- Do NOT commit on this cursor!
+local logger = require("transformer.logger").new("cwmpd", 3)
+
+local config = "cwmpd"
+
+-- function to fetch the datamodel that cwmpd is configured to use
+-- Returns two boolean values, containing the enable status of IGD and Device2 datamodels in cwmpd respectively
+local function getCwmpDataModel()
+  cursor:load(config)
+  local cwmpDataModel = cursor:get(config, "cwmpd_config", "datamodel")
+  if not cwmpDataModel then
+    cwmpDataModel = "InternetGatewayDevice" --set default datamodel as IGD
+  end
+  cursor:unload(config)
+  return cwmpDataModel == "InternetGatewayDevice" , cwmpDataModel == "Device"
+end
+
+local function diag_complete_cb()
+  dm.set("uci.cwmpd.events.DiagnosticsComplete", "1")
+end
+
+local isIgdCwmpEnabled, isDev2CwmpEnabled = getCwmpDataModel()
+
+-- subscribe on ubus for events
+local conn = require("ubus").connect()
+conn:listen({
+  ["nslookupdiag.nslookupdiag_igd"] = diag_complete_cb,
+  ["ipping.ipping_igd"] = isIgdCwmpEnabled and diag_complete_cb,
+  ["ipping.ipping_device2"] = isDev2CwmpEnabled and diag_complete_cb,
+  ["traceroute.traceroute_igd"] = isIgdCwmpEnabled and diag_complete_cb,
+  ["traceroute.traceroute_device2"] = isDev2CwmpEnabled and diag_complete_cb,
+  ["atmping.atmloopback"] = diag_complete_cb,
+  ["upload.upload_dm"] = diag_complete_cb,
+  ["download.download_dm"] = diag_complete_cb,
+  ["mmbrcmfxs.debug.slic.test.event"] = diag_complete_cb,
+  ["dsl.loopdiagnostics_igd"] = diag_complete_cb,
+})
+
+uloop.run()
