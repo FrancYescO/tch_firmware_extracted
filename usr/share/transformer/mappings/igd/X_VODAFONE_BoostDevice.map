@@ -1,0 +1,136 @@
+-- Manually generated
+local InternetGatewayDevice_X_VODAFONE_BoostDevice_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_VODAFONE_BoostDevice.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Shows which device is currently getting a 'boost' (eg. receives a higher QoS priority)",
+    parameters = {
+      MACAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "The MAC address of the currently boosted device",
+      },
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "The IP address of the currently boosted device",
+      },
+      EndTime = {
+        access = "readOnly",
+        type = "string",
+        description = "The schedule end time for the currently boosted device",
+      },
+    }
+  }
+}
+
+local logger = require("transformer.logger")
+local log = logger.new("X_VODAFONE_BoostDevice", 2)
+local uciHelper = require("transformer.mapper.ucihelper")
+local nwcommon = mapper("nwcommon")
+local conn = mapper("ubus").connect()
+local pairs, type = pairs, type
+local match = string.match
+
+local boost_object = { config = "tod", sectionname = "Boost", option = "object" }
+local boost_enable = { config = "tod", sectionname = "Boost", option = "enabled" }
+local boost_end_time = { config = "tod", sectionname = "boosttimer", option = "stop_time" }
+local modified = false
+local boosted = false
+local boosted_object
+
+
+-- Return the MAC address currently configured for the boosted device.
+local function getBoostedMac()
+  return uciHelper.get_from_uci(boost_object)
+end
+
+-- return the IPv4 Address of the boosted device.
+local function getBoostedIPAddress(boosted_mac)
+  local boostDevice = conn:call("hostmanager.device", "get", { ["mac-address"] = boosted_mac })
+  if boostDevice then
+    local ipv4Address = {}
+    for _, device_data in pairs(boostDevice) do
+      if device_data.ipv4 then
+        ipv4Address = device_data.ipv4
+      end
+    end
+    for _, info in pairs(ipv4Address) do
+      if info.state == "connected" or info.state == "stale" then
+        return info.address or ""
+      end
+    end
+  end
+  return ""
+end
+
+-- return boost EndTime of the current boosted device.
+local function getBoostEndTime()
+  return uciHelper.get_from_uci(boost_end_time)
+end
+
+InternetGatewayDevice_X_VODAFONE_BoostDevice_.get = function(_, paramname)
+  local boosted_mac = getBoostedMac()
+  if paramname == "MACAddress" then
+    return boosted_mac
+  elseif paramname == "IPAddress" then
+    return getBoostedIPAddress(boosted_mac)
+  elseif paramname == "EndTime" then
+    return getBoostEndTime()
+  end
+end
+
+InternetGatewayDevice_X_VODAFONE_BoostDevice_.set = function(_, _, paramvalue)
+
+  local section
+
+  if not nwcommon.isMAC(paramvalue) then
+    return nil, "Illegal MAC for BoostDevice"
+  end
+  uciHelper.set_on_uci(boost_object, paramvalue, commitapply)
+  modified = true
+  uciHelper.set_on_uci(boost_enable, "1", commitapply)
+
+  uciHelper.foreach_on_uci({config="qos", sectionname="rule"},function(s)
+    if s["srcmac"] ~= nil and s["target"] == "Boost" and s["order"] == "5" then
+      boosted = true
+      section = s[".name"]
+      return false
+    end
+  end)
+
+  if boosted  then
+    logger:error("Update the MAC address of the boosted device")
+    boosted_object = { config = "qos", sectionname = section, option = "srcmac" }
+    uciHelper.set_on_uci(boosted_object, paramvalue, commitapply)
+  else
+    logger:error("Nothing to be done, ToD script will be triggered")
+  end
+
+end
+
+InternetGatewayDevice_X_VODAFONE_BoostDevice_.commit = function()
+  if modified then
+    uciHelper.commit(boost_object)
+    if boosted then
+      uciHelper.commit(boosted_object)
+     end
+    modified = false
+    boosted = false
+  end
+end
+
+InternetGatewayDevice_X_VODAFONE_BoostDevice_.revert = function()
+  if modified then
+    uciHelper.revert(boost_object)
+    if boosted then
+      uciHelper.revert(boosted_object)
+    end
+    modified = false
+    boosted = false
+  end
+end
+
+register(InternetGatewayDevice_X_VODAFONE_BoostDevice_)

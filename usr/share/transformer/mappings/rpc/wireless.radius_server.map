@@ -1,0 +1,53 @@
+local register, pairs = register, pairs
+local match = string.match
+
+local wireless_radiusserver_ = {
+  objectType = {
+    name = "rpc.wireless.radiusserver.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+        max_request = {
+            access = "readWrite",
+            type = "unsignedInt",
+        },
+    }
+  }
+}
+
+local require, mapper = require, mapper
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+
+local function entriesRadiusServer(mapping)
+    local entries = {}
+    local wirelessBinding = {config="wireless", sectionname="wifi-radius-server"}
+    uci_helper.foreach_on_uci(wirelessBinding, function(s)
+        entries[#entries+1] = s[".name"]
+    end)
+    return entries
+end
+
+local function get(mapping, paramName, key)
+    local ap = key:match('(.*)_')
+    local radiusInstance = key:match('_(.*)')
+    local result = conn:call("wireless.accesspoint.radius", "get", { name = ap }) or {}
+    return result[ap] and result[ap][radiusInstance] and tostring(result[ap][radiusInstance][paramName]) or ""
+end
+
+local set = function(mapping, param, value, key)
+    uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = param}, value, commitapply)
+end
+
+wireless_radiusserver_.entries = entriesRadiusServer
+wireless_radiusserver_.get = get
+wireless_radiusserver_.set = set
+wireless_radiusserver_.commit = function()
+    uci_helper.commit({config = "wireless"})
+end
+wireless_radiusserver_.revert = function()
+    uci_helper.revert({config = "wireless"})
+end
+
+register(wireless_radiusserver_)

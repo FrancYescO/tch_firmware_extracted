@@ -1,0 +1,293 @@
+-- Manually generated
+local Multi_Services_StorageService_i_ = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Description = {
+        type = "string",
+        access = "readOnly",
+        description = "Samba and DLNA related Parameters"
+      }
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local sambaBinding = { config = "samba" }
+local dlnadBinding = { config = "dlnad" }
+local transactions = {}
+
+local function getUciValue(binding, section, option)
+  binding.sectionname = section
+  binding.option = option
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  uciHelper.set_on_uci(binding, value, commitapply)
+  transactions[binding.config] = true
+end
+
+local function bridgeModeValue()
+  return getUciValue({config = "env"}, "var", "bridgemode")
+end
+
+Multi_Services_StorageService_i_.entries = function()
+  local entries = {}
+  local samba = uciHelper.getall_from_uci(sambaBinding)
+  local dlnad = uciHelper.getall_from_uci(dlnadBinding)
+  if next(samba) and next(dlnad) then
+    -- At most one entry should be formed which represents our CPE
+    entries[#entries + 1] = "storage"
+  end
+  return entries
+end
+
+Multi_Services_StorageService_i_.get = {
+  Description = function(mapping, param)
+     return "Samba and DLNA Related Parameters"
+  end
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_StorageService_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_NetworkServer = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.NetworkServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      SMBEnable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/Disable Samba"
+      },
+    }
+  }
+}
+
+Multi_Services_StorageService_i_NetworkServer.get = {
+  SMBEnable = function(mapping, param)
+    return getUciValue(sambaBinding, "samba", "enabled")
+  end
+}
+
+Multi_Services_StorageService_i_NetworkServer.set = {
+  SMBEnable = function(mapping, param, value)
+    if bridgeModeValue() == "1" then
+      return nil, "Cannot modify the value when bridgemode is enabled"
+    end
+    setUciValue(sambaBinding, "samba", "enabled", value)
+  end
+}
+
+Multi_Services_StorageService_i_NetworkServer.commit = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_Services_StorageService_i_NetworkServer.revert = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.revert(binding)
+  end
+  transactions = {}
+end
+
+duplicates = duplicator(Multi_Services_StorageService_i_NetworkServer, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_X_000E50_SMBServer = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.X_000E50_SMBServer.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Name = {
+        access = "readWrite",
+        type = "string",
+        description = "Samba Name"
+      },
+      Filesharing = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/Disable Filesharing"
+      },
+      Workgroup = {
+        access = "readWrite",
+        type = "string",
+        description = "Samba WorkGroup",
+        min = "1",
+        max = "16"
+      },
+      Description = {
+        access = "readWrite",
+        type = "string",
+        description = "Samba Description"
+      },
+      Authentication = {
+        access = "readWrite",
+        type = "string",
+        description = "Enable/Disable Disk Protection"
+      },
+      AuthUserName = {
+        access = "readWrite",
+        type = "string",
+        description = "Disk Protection User Name"
+      },
+      AuthPassword = {
+        access = "readWrite",
+        type = "string",
+        description = "Disk Protection Password"
+      }
+    }
+  }
+}
+
+local sambaParams = {
+  Workgroup = "workgroup",
+  Description = "description",
+  Name = "name",
+}
+
+local userAuthParams = {
+  Authentication = "authentication",
+  AuthUserName = "username1",
+  AuthPassword = "password1"
+}
+
+Multi_Services_StorageService_i_X_000E50_SMBServer.get = function(mapping, param)
+  if param == "Filesharing" then
+    return getUciValue(sambaBinding, "samba", "filesharing")
+  elseif sambaParams[param] then
+    return getUciValue(sambaBinding, "samba", sambaParams[param])
+  elseif userAuthParams[param] then
+    return getUciValue(sambaBinding, "userauth", userAuthParams[param])
+  end
+end
+
+Multi_Services_StorageService_i_X_000E50_SMBServer.set = function(mapping, param, value)
+  if param == "Filesharing" then
+    if bridgeModeValue() == "1" then
+      return nil, "Cannot modify the value when bridgemode is enabled"
+    end
+    local sambaEnabled =  getUciValue(sambaBinding, "samba", "enabled")
+    if value == "1" and sambaEnabled ~= "1" then
+      return nil, "Enable Samba to turn on Samba Filesharing"
+    end
+    setUciValue(sambaBinding, "samba", "filesharing", value)
+  elseif sambaParams[param] then
+    if sambaParams[param] == "workgroup" and string.match(value, "[^%w _%-]") then
+      return nil, "Only alphanumeric, space, underscore and dash characters allowed"
+    end
+    setUciValue(sambaBinding, "samba", sambaParams[param], value)
+  elseif userAuthParams[param] then
+    setUciValue(sambaBinding, "userauth", userAuthParams[param], value)
+  end
+end
+
+Multi_Services_StorageService_i_X_000E50_SMBServer.commit = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_Services_StorageService_i_X_000E50_SMBServer.revert = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.revert(binding)
+  end
+  transactions = {}
+end
+
+duplicates = duplicator(Multi_Services_StorageService_i_X_000E50_SMBServer, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_StorageService_i_X_000E50_DLNA = {
+  objectType = {
+    name = "#ROOT.Services.StorageService.{i}.X_000E50_DLNA.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/Disable DLNA"
+      },
+      FriendlyName = {
+        access = "readWrite",
+        type = "string",
+        description = "DLNA Friendly Name"
+      }
+    }
+  }
+}
+
+Multi_Services_StorageService_i_X_000E50_DLNA.get = {
+  FriendlyName = function(mapping, param)
+   return getUciValue(dlnadBinding, "config", "friendly_name")
+  end,
+  Enabled = function(mapping, param)
+   return getUciValue(dlnadBinding, "config", "enabled")
+  end
+}
+
+Multi_Services_StorageService_i_X_000E50_DLNA.set = {
+  FriendlyName = function(mapping, param, value)
+    setUciValue(dlnadBinding, "config", "friendly_name", value)
+  end,
+  Enabled = function(mapping, param, value)
+    if bridgeModeValue() == "1" then
+      return nil, "Cannot modify the value when bridgemode is enabled"
+    end
+    setUciValue(dlnadBinding, "config", "enabled", value)
+  end
+}
+
+Multi_Services_StorageService_i_X_000E50_DLNA.commit = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_Services_StorageService_i_X_000E50_DLNA.revert = function()
+  local binding = {}
+  for config in pairs(transactions) do
+    binding.config = config
+    uciHelper.revert(binding)
+  end
+  transactions = {}
+end
+
+duplicates = duplicator(Multi_Services_StorageService_i_X_000E50_DLNA, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
