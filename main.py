@@ -6,7 +6,7 @@ import glob, os, shutil
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
-try:			
+try:
 	assert sys.version_info >= (3,0)
 except AssertionError:
 	print("Questo script necessita di python 3.x per funzionare")
@@ -15,6 +15,7 @@ except AssertionError:
 osck_list = {
 	"DANT-7":b'\xA5\x68\xCB\xE5\x70\x60\xA8\xF6\xE5\xEC\xA4\xE5\xC8\xCB\x7C\xEB\x09\xFC\xE0\xA0\xD1\x20\x20\xF4\xB2\x58\x40\x4B\x04\x92\x70\x53',
 	"GANT-1":b'\x03\x73\x85\x33\x14\xB4\x86\xE3\x35\xE4\x64\xB3\x87\x2E\x56\x39\x66\x34\xDF\xD5\xB6\xDB\x9B\xD0\x3A\x3D\xFA\xDE\x0E\x37\x14\x6D',
+	"VANT-2":b'\xB0\xE8\x82\x49\xB1\x50\xC9\x34\xAC\x2B\xA3\x5E\x7A\x7C\x71\x2B\x32\x44\x83\x3E\xD8\xDA\x10\xAB\xAB\x5D\xAA\x91\xAE\x9F\x45\x5F',
 	"VANT-6":b'\x54\x62\x59\xAF\xD4\xE8\x5A\xA6\xFF\xCE\x35\x8C\xE0\xA9\x34\x52\xE2\x5A\x84\x81\x38\xA6\x7C\x14\x2E\x42\xFE\xC7\x9F\x4F\x37\x84',
 	"VANT-9":b'\x89\xBC\xC0\x9E\xAB\xE2\x1F\xA7\x38\xE6\x2E\x6D\x91\x1F\xA8\x0C\xAF\x09\x12\x33\xEC\xCF\xF8\x84\x42\xFA\xA5\xD7\xAF\x65\x1A\x30',
 	"VANT-F":b'\x7F\xA2\xFD\xF4\xD4\xDC\x31\xBF\x66\xF9\x1D\xDA\x9A\x3E\x87\x77\xB7\xD7\xD2\xEC\x6E\x8D\xB1\x92\x6C\x08\x31\xCA\x2A\x27\x9F\xDB',
@@ -52,7 +53,7 @@ def decrypt( file ):
 		payloadstart = struct.unpack_from(">H", globalheader, 0x2A)[0]
 		datafile.seek(payloadstart)
 		data = datafile.read()
-		
+
 		while True:
 			payloadtype = data[0]
 			if payloadtype == 0xB0: # in chiaro
@@ -76,17 +77,17 @@ def decrypt( file ):
 				decryptor = cipher.decryptor()
 				data = decryptor.update(data[80:]) + decryptor.finalize()
 				data = data[:-data[-1]]
-		
+
 		output_name = file[:(file.find("rbi"))]+"bin" #rimuove estensione rbi
 		output_file = open(output_name,"w+b") #crea il bin
 		output_file.write(data) #Scrive i dati
-	
+
 		print("Decrypted:",output_name)
 		return output_name
 	except Exception as e:
 		print("Decrypting Failed: "+str(e))
 
-		
+
 VOL_NAME="TCHXTRACT"
 
 def fs_is_case_sensitive(path):
