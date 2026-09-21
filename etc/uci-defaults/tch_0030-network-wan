@@ -1,0 +1,119 @@
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+
+
+#/*******************************************************************/
+#/		ADSL 3 interface definition				*/
+#/       for PPP L3 sensing
+#/*******************************************************************/
+
+
+uci set network.wan=interface
+uci set network.wan.proto=pppoe
+uci set network.wan.ifname=atm_8_36
+uci set network.wan.keepalive=5,10
+uci set network.wan.username=thomsonprovisioning
+uci set network.wan.password=provisioning
+uci set network.wan.macaddr=`uci get env.rip.eth_mac`
+uci set network.wan.graceful_restart='1'
+uci set network.wan.auto=0
+
+uci set network.wanpppoa=interface
+uci set network.wanpppoa.proto=pppoa
+uci set network.wanpppoa.ifname=atm_8_35
+uci set network.wanpppoa.keepalive=5,10
+uci set network.wanpppoa.username=thomsonprovisioning
+uci set network.wanpppoa.password=provisioning
+uci set network.wanpppoa.auto=1
+uci set network.wanpppoa.macaddr=`uci get env.rip.eth_mac`
+
+uci set network.wanpppoe=interface
+uci set network.wanpppoe.proto=pppoe
+uci set network.wanpppoe.ifname=atm_8_36
+uci set network.wanpppoe.keepalive=5,10
+uci set network.wanpppoe.username=thomsonprovisioning
+uci set network.wanpppoe.password=provisioning
+uci set network.wanpppoe.auto=1
+uci set network.wanpppoe.macaddr=`uci get env.rip.eth_mac`
+
+
+#/*******************************************************************/
+#/		vlan device definition				*/
+#/       eth4-based
+#/*******************************************************************/
+uci set network.waneth4=device
+uci set network.waneth4.enabled=1
+uci set network.waneth4.type=8021q
+uci set network.waneth4.name=waneth4
+uci set network.waneth4.macaddr=`uci get env.rip.eth_mac`
+uci set network.waneth4.ifname=eth4
+uci set network.waneth4.vid=835
+
+#/*******************************************************************/
+#/		vlan device definition				*/
+#/       VDSL-based
+#/*******************************************************************/
+uci set network.wanptm0=device
+uci set network.wanptm0.type=8021q
+uci set network.wanptm0.name=wanptm0
+uci set network.wanptm0.macaddr=`uci get env.rip.eth_mac`
+uci set network.wanptm0.ifname=ptm0
+uci set network.wanptm0.vid=835
+
+
+#/*******************************************************************/
+#/		vlan device definition				*/
+#/       eth4-based for Voice
+#/*******************************************************************/
+uci set network.voipeth4=device
+uci set network.voipeth4.enabled=1
+uci set network.voipeth4.type=8021q
+uci set network.voipeth4.name=voipeth4
+uci set network.voipeth4.macaddr=`uci get env.rip.eth_mac`
+uci set network.voipeth4.ifname=eth4
+uci set network.voipeth4.vid=935
+
+#/*******************************************************************/
+#/		vlan device definition				*/
+#/       VDSL-based for Voice
+#/*******************************************************************/
+uci set network.voipptm0=device
+uci set network.voipptm0.type=8021q
+uci set network.voipptm0.name=voipptm0
+uci set network.voipptm0.macaddr=`uci get env.rip.eth_mac`
+uci set network.voipptm0.ifname=ptm0
+uci set network.voipptm0.vid=935
+
+#/*******************************************************************/
+#/		2nd  VoIP fixIP multi WAN-Interface definition 				*/
+#/     
+#/*******************************************************************/
+uci set network.broadif1=interface
+uci set network.broadif1.auto='1'
+uci set network.broadif1.proto=static
+uci set network.broadif1.ipaddr=10.50.1.1
+uci set network.broadif1.netmask=255.255.255.240
+
+uci set network.broadif1.macaddr=`uci get env.var.local_eth_mac`
+uci set network.broadif1.ifname=atm_9_35
+uci set network.broadif1.defaultroute='1'
+uci set network.broadif1.peerdns='0'
+uci add_list network.broadif1.dns='10.139.156.110'
+uci add_list network.broadif1.dns='10.139.156.126'
+
+uci set network.broadif1_default=route
+uci set network.broadif1_default.interface='broadif1'
+uci set network.broadif1_default.target='10.0.0.0'
+uci set network.broadif1_default.netmask='255.0.0.0'
+uci set network.broadif1_default.gateway='10.50.0.0'
+uci set network.broadif1_default.metric='1'
+
+uci set network.broadif1.ip4table='voip'
+
+uci set network.wwan=interface
+uci set network.wwan.auto='1'
+
+uci commit network
+
+exit 0

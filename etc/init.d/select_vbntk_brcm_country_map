@@ -1,0 +1,31 @@
+#!/bin/sh /etc/rc.common
+
+#VBNT-K has two wlan hardware variants
+# DGA4130: Normal
+# DGA4132: With SFP
+
+START=10
+
+boot() {
+  if [ "`uci get env.rip.board_mnemonic`" = "VBNT-K" ]; then
+    MAP_FILE=/etc/wlan/brcm_country_map_2G
+
+    BOARD=DGA4130
+
+    SFP=`uci get env.rip.sfp 2> /dev/null`
+    if [ "$?" = "0" ] && [ "$SFP" = "1" ]; then
+      BOARD=DGA4132
+    fi
+
+    echo "select_vbntk_brcm_country_map: board is a $BOARD" > /dev/console
+
+    LINK=`readlink $MAP_FILE`
+    NEW_LINK=brcm_country_map_2G_$BOARD
+
+    if [ "$LINK" != "$NEW_LINK" ]; then
+      echo "select_vbntk_brcm_country_map: changing country map file to $NEW_LINK" > /dev/console
+      ln -sf $NEW_LINK $MAP_FILE
+    fi
+  fi
+}
+
