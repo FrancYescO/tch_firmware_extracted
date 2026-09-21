@@ -1,0 +1,79 @@
+--Manually generated
+local Multi_X_000E50_GUILastAccess_= {
+  objectType = {
+    name = "#ROOT.X_000E50_GUILastAccess.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "To get the username, IP address, and time from the last access of GUI locally or remotely",
+    parameters = {
+      Time = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        description = "Time of last login",
+      },
+      User = {
+        access = "readOnly",
+        type = "string",
+        max = "63",
+        description = "User Name of last login",
+      },
+      IpAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+        description = "Ip Address of last login",
+      },
+    }
+  }
+}
+
+local function readFile(filename)
+  local result = ""
+  local fd = io.open(filename)
+  if fd then
+    result = fd:read("*a") or ""
+    fd:close()
+  end
+  return result
+end
+
+local lastaccess = {}
+
+local lastaccessMap = {
+  ["user"] = "User",
+  ["time"] = "Time",
+  ["clientIp"] = "IpAddress"
+}
+
+local function getData()
+  local data = readFile("/etc/lastaccess")
+  for k, v in string.gmatch(data, "(%w+)=(%S+)") do
+    if k and lastaccessMap[k] then
+      lastaccess[lastaccessMap[k]] = v
+    end
+  end
+end
+
+Multi_X_000E50_GUILastAccess_.get = function(mapping, param)
+  getData()
+  return lastaccess[param] or ""
+end
+
+
+Multi_X_000E50_GUILastAccess_.getall = function(mapping)
+  getData()
+  return {
+    User = lastaccess["User"] or "",
+    Time = lastaccess["Time"] or "",
+    IpAddress = lastaccess["IpAddress"] or "",
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_GUILastAccess_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
