@@ -1,0 +1,22 @@
+#!/bin/sh
+
+[ -d /etc/ispconfig ] || mkdir /etc/ispconfig
+
+ispconfig_file=/etc/ispconfig/tch_0000-ispconfig
+
+if [ -f $ispconfig_file ]; then
+    . $ispconfig_file
+fi
+
+STS=/usr/lib/cwmpd/transfers/exec_config.lua
+SCRIPT=/etc/ispconfig/ispconfig.sts
+if [ -f $STS -a -f $SCRIPT ]; then
+    DRYRUN=$(mktemp -d)
+    lua $STS --ispconfig --dryrun=$DRYRUN $SCRIPT /dev/null
+    if [ $? -eq 0 ]; then
+        lua $STS --ispconfig $SCRIPT /dev/null
+    fi
+    rm -rf $DRYRUN
+fi
+
+exit 0
