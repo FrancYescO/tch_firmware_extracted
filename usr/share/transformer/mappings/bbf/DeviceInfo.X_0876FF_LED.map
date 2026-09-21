@@ -1,0 +1,203 @@
+-- Manually generated
+local Multi_LED_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the LED Status",
+    parameters = {
+      InternetLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the internet LED",
+      },
+      PowerLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Power LED",
+      },
+      WirelessLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Wireless LED",
+      },
+      DSLLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the DSL LED",
+      },
+      WirelessLEDState_5G = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Wireless 5G LED",
+      },
+      EthernetLED = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet LED",
+      },
+      WPSLED = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the WPS LED",
+      },
+      IPTVLED = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the IPTV LED",
+      },
+      InetLEDHostname = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the Hostname of the smart LED",
+      },
+      InetLEDColor = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the LED color of the smart LED",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Displays the LED status of the smart LED",
+      },
+    }
+  }
+}
+
+local lfs = require("lfs")
+local open = io.open
+local mapper = mapper
+local uciHelper = mapper('ucihelper')
+local duplicator = mapper("multiroot").duplicate
+local foreachOnUci = uciHelper.foreach_on_uci
+local smartLEDBinding = { config = "smartled" }
+local isConfigChanged = false
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+
+local function isDir(path)
+  local mode = lfs.attributes(path, "mode")
+  if mode and mode == "directory" then
+    return true
+  end
+  return false
+end
+
+local PARAM_MAP = {
+  InternetLEDState = "internet",
+  PowerLEDState    = "power",
+  WirelessLEDState = "wireless",
+  WirelessLEDState_5G = "wireless_5g",
+  DSLLEDState      = "broadband",
+  WPSLED           = "wps",
+  IPTV             = "iptv",
+  EthernetLED      = "ethernet"
+}
+
+local function getFromUci(section, option, default)
+  smartLEDBinding.sectionname = section
+  smartLEDBinding.option = option
+  smartLEDBinding.default = default
+  return uciHelper.get_from_uci(smartLEDBinding)
+end
+
+local function setOnUci(section, option, value)
+  smartLEDBinding.sectionname = section
+  smartLEDBinding.option = option
+  uciHelper.set_on_uci(smartLEDBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+--- Retrieves the LED status
+-- @param param the parameter name
+-- @return the led status
+local function getLedState(param)
+  local path = "/sys/class/leds/"
+  if not isDir(path) then
+    return "off"
+  end
+  local fileName
+  for file in lfs.dir(path) do
+    if file:match("^"..PARAM_MAP[param]) then
+      fileName = path .. file
+      local fileBrightness = path .. file .. "/brightness"
+      local brightness = 0
+      local fd = open(fileBrightness)
+      if fd then
+        brightness = fd:read()
+        fd:close()
+      end
+      if lfs.attributes(fileName .. "/delayon", "mode") == "file" or lfs.attributes(fileName .. "/traffic_div_fact", "mode") == "file" then
+        if tonumber(brightness) > 0 then
+          local color = file:match(".*:(.*)")
+          return color .. "-blink"
+        end
+      elseif tonumber(brightness) > 0 then
+        return file:match(".*:(.*)")
+      end
+    end
+  end
+  return "off"
+end
+
+-- Retrieves the Smart LED Color
+-- @return color of LED or ""
+local function getInetLEDColor()
+  local section
+  smartLEDBinding.sectionname = "dnstxtrecord"
+  foreachOnUci(smartLEDBinding, function(s)
+    section = s[".name"]
+  end)
+  if section then
+    return getFromUci(section, "inet_led_color")
+  end
+  return ""
+end
+
+-- Retrieves the Smart LED HostName
+-- @return Host Name of the Smart LED
+local function getInetHostName()
+  return getFromUci("globals", "host")
+end
+
+Multi_LED_.get = function(mapping, param)
+  if PARAM_MAP[param] then
+    return getLedState(param)
+  elseif param == "InetLEDHostname" then
+    return getInetHostName()
+  elseif param == "InetLEDColor" then
+    return getInetLEDColor()
+  end
+  return getFromUci("globals", "enable")
+end
+
+Multi_LED_.set = function(mapping, param, value)
+  setOnUci("globals", "enable", value)
+end
+
+Multi_LED_.commit = function()
+  if isConfigChanged then
+    commit(smartLEDBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_LED_.revert = function()
+  if isConfigChanged then
+    revert(smartLEDBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicates = duplicator(Multi_LED_, "#ROOT", { "InternetGatewayDevice.DeviceInfo.X_0876FF_LED.", "InternetGatewayDevice.DeviceInfo.X_000E50_LED.", "Device.DeviceInfo.X_0876FF_LED.", "Device.DeviceInfo.X_000E50_LED." })
+for _, dupli in ipairs(duplicates) do
+  -- Currently SmartLED Feature is available for CenturyLink alone. So neglecting Generic Parameters.
+  if dupli.objectType.name:match("Device.DeviceInfo.X_000E50_LED.") then
+    dupli.objectType.parameters.InetLEDHostname = nil
+    dupli.objectType.parameters.InetLEDColor = nil
+    dupli.objectType.parameters.Enable = nil
+  end
+  register(dupli)
+end

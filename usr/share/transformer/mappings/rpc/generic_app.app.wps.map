@@ -1,0 +1,88 @@
+
+local wps_map = {
+  objectType = {
+    name = "rpc.generic_app.app.wps.",
+    access = "readOnly",
+    description = "object for smartapp WPS activity",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Set to 1 to initiate WPS pairing",
+      },
+      UDPPort = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          min = 1,
+          max = 65535
+        },
+      },
+    },
+  },
+}
+
+local ubus = mapper('ubus').connect()
+local WpsState = require('wireless.generic_app.wpsstate').connect(ubus)
+local WpsRequest = require('wireless.generic_app.wpsrequest').WpsRequest
+
+local function uciRequested()
+  local uci = {}
+  local req = WpsRequest()
+  uci.requested = req:requested()
+  uci.udpport = req:udpPort()
+  req:close()
+  return uci
+end
+
+local function wps_enabled(mapping)
+  local uci = uciRequested()
+  if uci.requested then
+    return uci.requested=='1'
+  end
+  return WpsState():enabled()
+end
+
+wps_map.get = {
+  Enabled = function(mapping)
+    return wps_enabled(mapping) and "1" or "0"
+  end,
+  UDPPort = function(mapping)
+    local uci = uciRequested()
+    return tostring(uci.udpport)
+  end,
+}
+
+wps_map.set = {
+  Enabled = function(mapping, _, enable)
+    enable = enable=="1"
+    if enable and wps_enabled(mapping) then
+      return nil, "wps pairing already in progress"
+    end
+    mapping._wps_enable_req = {enable=enable}
+    commitapply:newset("generic_app.wpsrequest.wpsrequest.requested")
+  end
+}
+
+function wps_map:_endTransaction(action)
+  local wps = self._wps_enable_req
+  if wps and action=="save"then
+    local req = WpsRequest()
+    req:request(wps.enable and '1' or '0')
+    req:save()
+    req:close()
+  end
+  self._wps_enable_req = nil
+end
+
+function wps_map:commit()
+  self:_endTransaction("save")
+end
+
+function wps_map:revert()
+  self:_endTransaction("revert")
+end
+
+register(wps_map)
