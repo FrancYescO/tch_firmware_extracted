@@ -1,0 +1,18 @@
+return {
+    ["23400"]                   = T"Virgin UK (23400)",
+    ["23410"]                   = T"O2 UK (23410)",
+    ["23415"]                   = T"Vodafone UK (23415)",
+    ["23420"]                   = T"3 UK (23420)",
+    ["23430"]                   = T"T-Mobile / Virgin UK (23430)",
+    ["23433"]                   = T"EE UK (23433)",
+    ["23450"]                   = T"Jersey Telecom (23450)",
+    ["23455"]                   = T"Guernsey Telecom (23455)",
+    ["23458"]                   = T"Manx Telecom (23458)",
+    ["27201"]                   = T"Vodafone Ireland (27201)",
+    ["27202"]                   = T"3 Ireland (27202)",
+    ["27203"]                   = T"Meteor Ireland (27203)",
+    ["27205"]                   = T"3 Ireland (27205)",
+    ["27207"]                   = T"Eircom Ireland (27207)",
+    ["28802"]                   = T"Vodafone Faroe Islands (28802)",
+    ["NA"]                      = T"",
+}

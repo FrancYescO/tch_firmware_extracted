@@ -1,0 +1,87 @@
+local table = table
+local string = string
+local uci_helper = mapper("ucihelper")
+
+local sys_eth_ = {
+    objectType = {
+        name = "sys.eth.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {},
+    }
+}
+
+register(sys_eth_)
+
+-- sys.eth.port.{i}
+local sys_eth_port_i_ = {
+  objectType = {
+    name = "sys.eth.port.@.",
+    access = "readOnly",
+    numEntriesParameter = "PortNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      status = {
+        access = "readOnly",
+        type = "string",
+      },
+      speed = {
+        access = "readOnly",
+        type = "string",
+      },
+      mode = {
+        access = "readOnly",
+        type = "string",
+      }
+    }
+  }
+}
+
+local function entriesEthPorts()
+    local entries = {}
+    local eth_binding = {config="ethernet", sectionname="port"}
+    uci_helper.foreach_on_uci(eth_binding, function(s)
+      table.insert(entries, s['.name'])
+    end)
+    return entries
+end
+
+local match_table = {
+    status = "Link is (%a+)[\n]$",
+    speed = "The autonegotiated media type is (%d+).+",
+    mode = "The autonegotiated media type is (%d+[^%.%s]+)",
+}
+
+sys_eth_port_i_.get = function(mapping, param, key)
+    local p = io.popen("ethctl " .. key .. " media-type  2>&1")
+    if not p then
+      return ""
+    end
+    local output = p:read("*a")
+    p:close()
+
+    if not output then
+      return ""  
+    end
+
+    return output:match(match_table[param]) or ""
+end
+
+sys_eth_port_i_.getall = function(mapping, key)
+    local p = io.popen("ethctl " .. key .. " media-type  2>&1")
+    if not p then
+      return ""
+    end
+    local output = p:read("*a")
+    p:close()
+    local values = {}
+    for k,v in pairs(match_table) do
+        values[k] = output:match(v) or ""
+    end
+    return values
+end
+
+sys_eth_port_i_.entries = entriesEthPorts
+register(sys_eth_port_i_)

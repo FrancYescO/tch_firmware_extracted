@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+STOP=90
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+
+handle_network_hooks() {
+	network_system() { return 0; }
+
+	include /lib/network
+	network_system $1
+}
+
+init_switch() {
+	setup_switch() { return 0; }
+
+	include /lib/network
+	setup_switch
+}
+
+boot() {
+	# this can be checked by hotplug scripts to prevent them from running
+	# for each ifup during boot (mwan,igmpproxy,miniupnpd,firewall,pppoe-relay)
+	touch /var/state/bootnetwork
+	start
+	# firewall hotplug script disabled during boot but reload needed at least once
+	# do not remove file yet, we do not want firewall hotplug scripts to fire
+	# those are handled by succesive /etc/init.d/ files
+	fw3 -q reload
+	rm -f /var/state/bootnetwork
+}
+
+start() {
+	stop
+	[ -e /proc/sys/kernel/core_pattern ] && {
+		ulimit -c unlimited
+	}
+
+	handle_network_hooks start
+	service_start /sbin/netifd
+	init_switch
+}
+
+restart() {
+	ifdown -a
+	sleep 1
+	start
+}
+
+shutdown() {
+	ifdown -a
+	sleep 1
+}
+
+stop() {
+	service_stop /sbin/netifd
+	handle_network_hooks stop
+}
+
+reload() {
+	# Added init_switch to network reload to ensure changes in UCI switch config get
+	# applied when reloading the network configs, and not just for a network restart.
+	init_switch
+	ubus call network reload
+}

@@ -1,0 +1,578 @@
+#!/bin/sh
+#
+# --------------------------------------------------------------------------------------------------------
+# [ Home Storage ]:
+# Auto mount all partitions to /mnt/usb/uuid_of_partition. < Called by hotplug2 / udev >
+#   eg: /dev/sda1 => /mnt/usb/uuid_of_sda1
+# For disk without partition table ( USB-FDD? )
+#   eg: /dev/sda => /mnt/usb/uuid_of_sda
+#
+#
+# udev : Input ENVs
+#   ...
+# ACTION='add' / 'remove'
+# DEVNAME='/dev/sda'
+# DEVPATH='/devices/platform/bl-lilac-ehci.0/usb1/1-1/1-1:1.0/host33/target33:0:0/33:0:0:0/block/sda'
+# DEVTYPE='disk'
+# SUBSYSTEM='block'
+#  ...
+#
+#
+# DEVNAME='/dev/sda1'
+# DEVPATH='/devices/platform/bl-lilac-ehci.0/usb1/1-1/1-1:1.0/host33/target33:0:0/33:0:0:0/block/sda/sda1'
+# DEVTYPE='partition'
+# SUBSYSTEM='block'
+#   ...
+#
+#
+# --------------------------------------------------------------------------------------------------------
+# hotplug2 : Input ENVs
+#   ...
+#
+# ACTION='add' / 'remove'
+# SUBSYSTEM=usb
+# DEVPATH=/devices/pci0000:00/0000:00:0a.0/usb1/1-2, DEVICENAME=1-2
+# or
+# DEVPATH=/devices/pci0000:00/0000:00:0a.0/usb1/1-2/1-2:1.0, DEVICENAME=1-2:1.0
+#   ...
+#
+#=========================================================================================================
+#
+# DEVINFO=/dev/sda
+# DEVNODE=sda1 ('sda' without Partition table)
+#
+#
+
+UTX=". $$"
+mountusb_print() {
+	logger -t mount-usb "$1$UTX"
+}
+mountusb_print "@@ NEW INSTANCE"
+
+# Input param:  Y = hotplug, N = udev
+HOTPLUG_CALLED=$1
+
+MOUNT_DIR=/mnt/usb
+MOUNT_SYNC="  "
+DEVPATH=`echo /sys$DEVPATH`
+MOUNTS_EXT=/var/state/mounts_ext
+
+# check for valid partition table (as legacy)
+has_partitiontable()
+{
+	PARTITIONDEV=$1
+
+	# first check: bytes 510-511 should read 55h AAh
+	SIGNATURE=`hexdump -x -n 2 -s 510 /dev/$PARTITIONDEV | head -n 1 | sed 's/  */ /g' | cut -f 2 -d ' '`
+	if [ "x$SIGNATURE" = "x55aa" ] ; then
+		SIGNATURE=`hexdump -x -n 3 -s 0 /dev/$PARTITIONDEV | head -n 1 | sed 's/  */ /g' | cut -f 2-3 -d ' ' | sed 's/\(..\)\(..\)/\1XX/'`
+		if [ "x$SIGNATURE" = "xebXX 9000" ] ; then
+			echo "NO"
+			return
+		fi
+
+		# or in case of 16 bit: check for e9XX XX so replace the two characters after the space also with 'XX'
+		SIGNATURE=`echo $SIGNATURE | sed 's/\(.... \)\(..\)/\1XX/'`
+		if [ "x$SIGNATURE" = "xe9XX XX00" ] ; then
+			echo "NO"
+			return
+		fi
+
+		echo "YES"
+		return
+	fi
+
+	echo "NO"
+}
+
+# determine filesystem type (as legacy)
+fstype()
+{
+	# most likely: FAT32
+	if [ x`dd if=/dev/$PARTITIONDEV bs=1 count=5 skip=82 2> /dev/null` = "xFAT32" ] ; then
+		echo "FAT32"
+		return
+	fi
+
+	# less likely: FAT12, FAT16
+	SIGNATURE=`dd if=/dev/$PARTITIONDEV bs=1 count=5 skip=54 2> /dev/null`
+	if [ x$SIGNATURE = "xFAT16" ] ; then
+		echo "FAT16"
+		return
+	fi
+
+	if [ x$SIGNATURE = "xFAT12" ] ; then
+		echo "FAT12"
+		return
+	fi
+
+	# NTFS
+	if [ x`dd if=/dev/$PARTITIONDEV bs=1 count=4 skip=3 2> /dev/null` = "xNTFS" ] ; then
+		echo "NTFS"
+		return
+	fi
+
+	# EXT3
+	# the superblock is located at offset 1024
+	# at offset 56 within the superblock the EXT2/EXT3/EXT4 magic (53ef) can be read
+	# Refactored : endian independent, shorter, less complex, more readable/maintainable
+	extfsmagic="53ef"
+	has_journal_flag="0x0400"
+	fsmagic=$(dd if=/dev/$PARTITIONDEV bs=1 count=2 skip=1080 2>/dev/null | hexdump -C | awk '{if (NR==1) print $2$3}')
+	# flag EXT3_FEATURE_COMPAT_HAS_JOURNAL (0x04) identifies an Ext3 FS
+	fsflags=0x$(dd if=/dev/$PARTITIONDEV bs=1 count=2 skip=1116 2>/dev/null | hexdump -C | awk '{if (NR==1) print $2$3}')
+	if [ "${fsmagic}" = "${extfsmagic}" ] ; then
+		if [ $((${fsflags} & ${has_journal_flag} )) -gt 0 ]; then
+			echo "EXT3";
+		else
+			echo "EXT2";
+		fi
+		return
+	fi
+
+	#XFS
+	SIGNATURE=$(dd if=/dev/$PARTITIONDEV bs=1 count=4 2> /dev/null)
+	if [ $SIGNATURE = "XFSB" ] ; then
+		echo "XFS"
+		return
+	fi
+
+	# HFS(+/X)
+	SIGNATURE=$(dd if=/dev/$PARTITIONDEV bs=1 skip=1024 count=2 2>/dev/null)
+	case $SIGNATURE in
+		H+|HX)
+			echo "HFS+"
+			;;
+		*)
+			echo "Unknown"
+			;;
+	esac
+	return
+}
+
+# get uuid
+calc_uuid()
+{
+	partitionpath=$(find $DEVICEDIR -name $PARTITIONDEV)
+	part_num=0
+
+	if [ "$HAS_PARTITIONS" == "YES" ]; then
+		if [ -f ${partitionpath}/start ]; then
+			start=$(cat ${partitionpath}/start)
+		fi
+		if [ -f ${partitionpath}/partition ]; then
+			part_num=$(cat ${partitionpath}/partition)
+		fi
+
+	else
+		start=0
+	fi
+	if [ -f ${partitionpath}/size ]; then
+		size=$(cat ${partitionpath}/size)
+	fi
+
+	if [ -f $DEVICEINFO/serial ]; then
+		serial=$(cat $DEVICEINFO/serial)
+	else
+		serial="dummyserial"
+	fi
+
+	if [ -f $DEVICEINFO/idVendor ]; then
+		vendorId=$(cat $DEVICEINFO/idVendor)
+	fi
+
+	if [ -f $DEVICEINFO/idProduct ]; then
+		productId=$(cat $DEVICEINFO/idProduct)
+	fi
+
+	if [ -f $DEVICEINFO/manufacturer ]; then
+		manufact=$(cat $DEVICEINFO/manufacturer | sed 's/ //g')
+	fi
+
+	if [ -f $DEVICEINFO/product ]; then
+		prod=$(cat $DEVICEINFO/product | sed 's/ //g')
+	fi
+
+	hash=`echo ${serial}${start}${size} | sha256sum | cut -c1-4`
+
+
+#was :
+#	echo "$MOUNT_DIR/${vendorId}_${productId}_${serial}_${start}_${size}"
+#more user friendly; adding 4 hex digit hash on serial number, partition begin and size, to make it uniq
+  if [ $(part_num) -eq 0 ]; then
+		echo "$MOUNT_DIR/${manufact}_${prod}_${hash}"
+	else
+		echo "$MOUNT_DIR/${manufact}_${prod}_${part_num}_${hash}"
+	fi
+	return 0
+
+}
+
+mount_disk_or_partition()
+{
+	FSTYPE=$1
+	UCI_CHARSET=`uci get system.config.usb_filesystem_charset`
+	UCI_CODEPAGE=`uci get system.config.usb_filesystem_codepage`
+
+	if [ -z "$UCI_CHARSET" ]; then
+		CHARSET="-o iocharset=iso8859-1"
+	else
+		CHARSET="-o iocharset=$UCI_CHARSET"
+	fi
+
+	if [ -n "$UCI_CODEPAGE" ]; then
+		CODEPAGE="-o codepage=$UCI_CODEPAGE"
+	fi
+
+	if [ $? = 0 ] && [ -z "$(grep "^/dev/${PARTITIONDEV}\>" /proc/mounts)" ]; then
+		echo "Trying to mounting device: $PARTITIONDEV"
+
+
+		case "$FSTYPE" in
+			FAT32 | FAT16 | FAT12 | vfat)
+				MOUNT_OPTIONS="-t vfat -o umask=0000,noatime,errors=continue $CHARSET"
+				;;
+
+			NTFS | ntfs)
+				lsmod | grep ufsd >/dev/null
+				if [[ $? -eq 0 ]]; then
+					MOUNT_OPTIONS="-t ufsd -o noatime,sparse,nocase,nobuf -o uid=000 -o gid=000 $CODEPAGE -o umask=000 $CHARSET -o force"
+				else
+					echo "Cannot mount $PARTITIONDEV (no NTFS support)"
+					return 1
+				fi
+				;;
+
+			EXT3 | EXT2 | ext )
+				if [ -e /usr/lib/opkg/info/kmod-fs-ext4.control ]; then
+					MOUNT_OPTIONS="-o errors=continue"
+				else
+					echo "$PARTITIONDEV fs-ext4 not support"
+					return 1
+				fi
+				;;
+
+			HFS+)
+				# HFS+ ?
+				lsmod | grep ufsd >/dev/null
+				if [[ $? -eq 0 ]]; then
+					MOUNT_OPTIONS="-t ufsd -o noatime -o uid=000 -o gid=000 -o umask=000 $CODEPAGE $CHARSET -o force"
+				else
+					echo "Cannot mount $PARTITIONDEV (no HFS+ support)"
+					return 1
+				fi
+				;;
+
+			XFS)
+				MOUNT_OPTIONS="-t xfs -o noatime -f"
+				;;
+		esac
+
+		/bin/mkdir -p $MOUNT_POINT
+		/bin/mount $MOUNT_OPTIONS $MOUNT_SYNC $DEVNAME $MOUNT_POINT
+		if [ $? != 0 ] ; then
+			echo "Mounting unsuccessful"
+			rmdir "$MOUNT_POINT"
+			return 1
+		else
+			# export detailed filesystem type to $MOUNTS_EXT
+			volume_name=`echo ${MOUNT_POINT##*/}`
+			devnode_name=`echo ${DEVNAME##*/}`
+			if [ -e $MOUNTS_EXT ]; then
+				sed -i /$volume_name/d $MOUNTS_EXT
+				sed -i /$devnode_name/d $MOUNTS_EXT
+			fi
+			echo $DEVNAME $MOUNT_POINT $FSTYPE >> $MOUNTS_EXT
+
+			if [ $FS = EXT3 ] || [ $FS = EXT2 ] || [ $FS = ext ] || [ $FS = XFS ] ; then
+				chmod 777 $MOUNT_POINT
+			fi
+			echo "Mounted $MOUNT_POINT successfully"
+# /*VH*/ add from uci minidlna **TODO**
+			startDir=$(uci get minidlna.config.start_dir)
+			uci del_list minidlna.config.media_dir="/mnt"
+			delDir=$(uci export minidlna | grep media_dir | grep $MOUNT_POINT | awk '{print $3}' | uniq | tr -d "'" )
+			uci del_list minidlna.config.media_dir="$delDir"
+			#support auto_dlna
+			if [ "0"x != "$(uci get minidlna.config.auto_share)"x ]; then
+	#			avoid duplicate entries : first remove from list (if already existing)
+				uci del_list minidlna.config.media_dir="${MOUNT_POINT}$startDir"
+				uci add_list minidlna.config.media_dir="${MOUNT_POINT}$startDir"
+				if [ "$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db")" = "" ] ; then
+					echo nothing found
+					if [ -z $(uci get minidlna.config.db_dir | grep "\.dlna") ] ; then
+						mkdir ${MOUNT_POINT}/.dlna
+						uci set minidlna.config.db_dir="${MOUNT_POINT}/.dlna"
+						uci set minidlna.config.log_dir="${MOUNT_POINT}/.dlna"
+					fi
+				else
+				echo found !
+	#				(remove from other disks, and/or) set to first from the list if db_dir was still default (not pointing to a usb disk /.dlna directory)
+					if [ -z $(uci get minidlna.config.db_dir | grep "\.dlna") ] ; then
+						firstFound=$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db" -m1 | cut -d '/' -f1-5)
+						uci set minidlna.config.db_dir="${firstFound}"
+						uci set minidlna.config.log_dir="${firstFound}"
+					fi
+				fi
+			fi
+			mountusb_print "[$DEVNAME] mounted at [$MOUNT_POINT]"
+		fi
+	fi
+}
+
+handle_action()
+{
+	case "$ACTION" in
+		add)
+			# incase already mounted
+			MOUNT_TEST=`/bin/mount |grep $DEVNODE`
+			if [ $? = "0" ] ; then
+				echo "$DEVNODE already mounted"
+				return
+			else
+				echo "$DEVNODE NOT MOUNTED"
+			fi
+
+			MOUNT_POINT=`calc_uuid $DEVNODE`
+			if [ $? != 0 ] ; then
+				return 1
+			fi
+
+			curcount=0
+			while [ $curcount -lt 60 ]; do
+				let "curcount++"
+				#mountusb_print "current count $curcount , $DEVNAME"
+				if [ -b $DEVNAME ]; then
+					break
+				fi
+				sleep 1
+			done
+
+			if [ -b $DEVNAME ] ; then
+				if [ $DEVTYPE="disk" ]; then
+				# try fstype to check for unknowFS
+					FS=`fstype $PARTITIONDEV`
+					if [ $FS = "Unknown" ] ; then
+						echo "Unkown partition"
+						return 1
+					else
+						mount_disk_or_partition  $FS
+						return $?
+					fi
+				fi
+
+				if [ -n `which fdisk` ]; then
+					fdisk -l $DEVINFO | grep $DEVNAME | grep -v Extended | grep -v Ext.d | while read line
+					do
+						isfat=`echo $line | grep FAT`
+						isext=`echo $line | grep Linux`
+						isntfs=`echo $line | grep NTFS`
+						if [ "$isfat" ]; then
+							FS=vfat
+						elif [ "$isext" ]; then
+							FS=ext
+						elif [ "$isntfs" ]; then
+							FS=ntfs
+						else
+							echo "$DEVNODE unknowFS"
+							# try fstype to check for unknowFS
+							FS=`fstype $PARTITIONDEV`
+							if [ $FS = "Unknown" ] ; then
+								continue
+							fi
+						fi
+
+					mount_disk_or_partition  $FS
+				done;
+			fi
+		fi
+	;;
+	remove)
+		MOUNT_POINT=`mount |grep $DEVNAME | cut -d ' ' -f 3`
+		/bin/umount -l $MOUNT_POINT
+		rm -rf $MOUNT_POINT
+
+		#to check whether there is mount usb
+		DEV_COUNT=`df -h | grep "sd" | /usr/bin/wc -l`
+		if [ $DEV_COUNT == 0 ] ; then
+			if [ $(ls -d /mnt/usb/* | grep . -m1 ) ] ; then
+				rm -rf $(ls -d /mnt/usb/* | grep . -m1 )
+			fi
+		fi
+
+# /*VH*/ remove from uci minidlna
+#				startDir=$(uci get minidlna.config.start_dir)
+#				delDir=${MOUNT_POINT}/$startDir
+		delDir=$(uci export minidlna | grep media_dir | grep $MOUNT_POINT | awk '{print $3}' | uniq | tr -d "'" )
+		uci del_list minidlna.config.media_dir="$delDir"
+#/*change location of index database file and log file*/
+		if [ "$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db")" = "" ] ; then
+#			none : default
+			if [ $DEV_COUNT != 0 ] ; then
+				if [ $(ls -d /mnt/usb/*) ] ; then
+					dbDir="$(ls -d /mnt/usb/* | grep . -m1 )/.dlna"
+					logDir="$dbDir"
+					mkdir $dbDir
+				else
+					dbDir="/var/run/minidlna"
+					logDir="/var/log"
+				fi
+				uci set minidlna.config.db_dir="${dbDir}"
+				uci set minidlna.config.log_dir="${logDir}"
+			else
+				uci set minidlna.config.db_dir=""
+				uci set minidlna.config.log_dir=""
+			fi
+		else
+			if [ -z $(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db" | grep $(uci get minidlna.config.db_dir) ) ] ; then
+				firstFound=$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db" -m1 | cut -d '/' -f1-5)
+				uci set minidlna.config.db_dir="${firstFound}"
+				uci set minidlna.config.log_dir="${firstFound}"
+			fi
+		fi
+#/**/
+		uci commit minidlna
+		/etc/init.d/minidlna restart
+	;;
+	*)
+esac
+}
+
+
+if [ $HOTPLUG_CALLED = "Y" ]; then
+	mountusb_print "Launched by hotplug"
+
+	if [ $SUBSYSTEM != 'usb' ] ; then
+		return
+	fi
+
+	if [ "$(expr substr ${INTERFACE} 1 2)" == "7/" ]; then
+		/etc/init.d/samba reload
+		return
+	fi
+
+	if [ $ACTION = 'remove' ] ; then
+		/bin/mount | grep "/dev/sd[a-z][0-9]" | while read line
+		do
+			DEVNAME=`echo "$line" | cut -d ' ' -f 1`
+			MOUNT_POINT=`echo "$line" | cut -d ' ' -f 3`
+
+			if [ -b $DEVNAME ] ; then
+				mountusb_print "[$DEVNAME] not removed"
+			else
+				/bin/umount -l $MOUNT_POINT
+				rm -rf $MOUNT_POINT
+
+				#to check whether there is mount usb
+				DEV_COUNT=`df -h | grep "sd" | /usr/bin/wc -l`
+				if [ $DEV_COUNT == 0 ] ; then
+					if [ $(ls -d /mnt/usb/* | grep . -m1 ) ] ; then
+						rm -rf $(ls -d /mnt/usb/* | grep . -m1 )
+					fi
+				fi
+
+# /*VH*/ remove from uci minidlna
+#				startDir=$(uci get minidlna.config.start_dir)
+#				delDir=${MOUNT_POINT}/$startDir
+				delDir=$(uci export minidlna | grep media_dir | grep $MOUNT_POINT | awk '{print $3}' | uniq | tr -d "'" )
+				uci del_list minidlna.config.media_dir="$delDir"
+#/*change location of index database file and log file*/
+				if [ "$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db")" = "" ] ; then
+#					none : default
+					if [ $DEV_COUNT != 0 ] ; then
+						if [ $(ls -d /mnt/usb/*) ] ; then
+							dbDir="$(ls -d /mnt/usb/* | grep . -m1 )/.dlna"
+							logDir="$dbDir"
+							mkdir $dbDir
+						else
+							dbDir="/var/run/minidlna"
+							logDir="/var/log"
+						fi
+						uci set minidlna.config.db_dir="${dbDir}"
+						uci set minidlna.config.log_dir="${logDir}"
+					else
+						uci set minidlna.config.db_dir=""
+						uci set minidlna.config.log_dir=""
+					fi
+				else
+					if [ -z $(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db" | grep $(uci get minidlna.config.db_dir) ) ] ; then
+						firstFound=$(find /mnt/usb/ -maxdepth 3 -name files.db | grep "/.dlna/files.db" -m1 | cut -d '/' -f1-5)
+						uci set minidlna.config.db_dir="${firstFound}"
+						uci set minidlna.config.log_dir="${firstFound}"
+					fi
+				fi
+#/**/
+				mountusb_print "[$DEVNAME] unmounted from [$MOUNT_POINT]"
+			fi
+		done
+		uci commit minidlna
+		/etc/init.d/minidlna restart
+		return
+	fi
+
+	DEVICEDIR=`echo $DEVPATH | cut -d '/' -f1-7`
+	DEVICEINFO=`echo $DEVPATH | awk -F/ '{$NF="";print}' OFS=/`
+
+	# In case some delay, retry 60 seconds
+	i=0;
+	while [ $i -lt 12 ] ; do
+		sleep 5
+		let "i++"
+		DEV_COUNT=`/usr/bin/find $DEVICEDIR -name sd* | /usr/bin/wc -l`
+		# without partition table : decide to 'break' only if no sda[0-9] partition entries after 3 retries
+		if [ $DEV_COUNT -eq 1 -a $i -gt 3 ]; then
+			break;
+		fi 
+		if [ $DEV_COUNT -gt 1 ] ; then
+			break;
+		fi
+	done
+
+	if [ $DEV_COUNT = 1 ] ; then
+		mountusb_print "No partition device on [$DEVICEDIR]"
+
+		HAS_PARTITIONS="NO"
+		DEVTYPE='disk'
+		DEVPATH=`/usr/bin/find $DEVICEDIR -name "sd[a-z]"`
+		DEVNODE=`echo "$DEVPATH" | awk -F"/"  '{ print  $NF }'`
+		DEVNAME="/dev/$DEVNODE"
+		DEVINFO=`echo $DEVNAME | cut -c1-8`
+		PARTITIONDEV=$DEVNODE
+		handle_action
+		uci commit minidlna
+		/etc/init.d/minidlna restart
+	else
+		mountusb_print "Partitions found on [$DEVICEDIR]"
+		/usr/bin/find $DEVICEDIR -name "sd[a-z][0-9]" | while read line
+		do
+			HAS_PARTITIONS="YES"
+			DEVTYPE='partition'
+			DEVPATH=$line
+			DEVNODE=`echo "$line" | awk -F"/"  '{ print  $NF }'`
+			DEVNAME="/dev/$DEVNODE"
+			DEVINFO=`echo $DEVNAME | cut -c1-8`
+			PARTITIONDEV=$DEVNODE
+			handle_action
+		done
+		uci commit minidlna
+		/etc/init.d/minidlna restart
+	fi
+else
+	mountusb_print "Launched by udev"
+	DEVICEDIR=`echo $DEVPATH | cut -d '/' -f2-7`
+	DEVICEDIR=`echo /$DEVICEDIR`
+	DEVINFO=`echo $DEVNAME | cut -c1-8`
+	DEVNODE=`echo $DEVNAME | cut -c 6-`
+	PARTITIONDEV=$DEVNODE
+	if [ $DEVTYPE = "disk" ]; then
+		HAS_PARTITIONS=`has_partitiontable $DEVNODE`
+		# ignore disk /dev/sd[a-z] with partition table
+		if [ $HAS_PARTITIONS = "YES" ]; then
+			return
+		fi
+	else
+		HAS_PARTITIONS="YES"
+	fi
+
+	handle_action
+fi

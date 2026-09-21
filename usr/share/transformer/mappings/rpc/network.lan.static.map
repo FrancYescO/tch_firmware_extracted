@@ -1,0 +1,87 @@
+local rpc_network_lan_ = {
+    objectType = {
+        name = 'rpc.network.lan.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {}
+    }
+}
+
+register(rpc_network_lan_)
+
+-- Manually generated
+local rpc_network_lan_static_ = {
+  objectType = {
+    name = "rpc.network.lan.static.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ipaddress = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      subnetmask = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      action = {
+        access = "readWrite",
+         type = "string",
+         enumeration = {
+           "up",
+           "down",
+         },
+      },
+    }
+  }
+}
+
+local string = string
+local ipAddress = ""
+local subnetMask = ""
+local action = "down"
+local mapper = mapper
+local nwCommon = mapper("nwcommon")
+
+rpc_network_lan_static_.get = {
+  ipaddress = function(mapping,param)
+    return ipAddress
+  end,
+  subnetmask = function(mapping,param)
+    return subnetMask
+  end,
+  action = function(mapping,param)
+    return action
+  end,
+}
+
+rpc_network_lan_static_.set = function(mapping,param,value)
+    local check = nwCommon.isIPv4(value)
+    if param == "ipaddress" then
+      if check then
+        ipAddress = value
+      else
+        return nil,string.format("%s is not a valid IP address",value or "nil")
+      end
+    elseif param == "subnetmask" then
+      if check then
+        subnetMask = value
+      else
+        return nil,string.format("%s is not a valid Subnet address",value or "nil")
+      end
+    else
+      local fp = io.open("/tmp/.lanStaticIP",'w')
+      if fp then
+        fp:write(ipAddress .. " netmask " .. subnetMask .. " " .. value)
+        fp:close()
+        action = value
+        commitapply:newset("network.lan.static")
+      end
+    end
+end
+
+register(rpc_network_lan_static_)

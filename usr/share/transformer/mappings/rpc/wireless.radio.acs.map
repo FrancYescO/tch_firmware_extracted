@@ -1,0 +1,53 @@
+local logger = require("transformer.logger")
+local log = logger.new("wireless.radio.acs", 2)
+local register = register;
+
+local wireless_radio_acs_ = {
+  objectType = {
+    name = "rpc.wireless.radio.@.acs.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      scan_report = { 
+          access = "readOnly",
+          type = "string",
+      },
+      rescan = { 
+          access = "readWrite",
+          type = "string",
+          default = "false", 
+      },
+    },
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local ubus = require("ubus")
+local conn = ubus.connect()
+if not conn then
+    error("Failed to connect to ubusd")
+end
+
+local function get (mapping, paramname, key)
+    local content = {}                                   
+    content = conn:call("wireless.radio.acs", "get", { name = key } )
+    if content == nil then                                             
+        log:error(format("Cannot retrieve acs object %s", key))
+    elseif content[key] and content[key][paramname] then  
+        return tostring(content[key][paramname])                      
+    end                                                                       
+    return ""                                                                 
+end                                                                           
+                                                                              
+local set ={
+  rescan = function(mapping, paramname, key)
+  	log:error("ACS Rescan "..key)
+  	local rescan = conn:call("wireless.radio.acs", "rescan", { name = key } )
+  end
+} 
+
+wireless_radio_acs_.get = get
+wireless_radio_acs_.set = set
+register(wireless_radio_acs_)
+

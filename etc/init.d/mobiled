@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+
+START=65
+
+APP=/usr/bin/mobiled.sh
+
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+SERVICE_STOP_TIME=30
+unset SERVICE_MATCH_EXEC
+
+SERVICE_NAME=mobiled
+
+start() {
+    local _ENABLED=$(uci_get mobiled globals enabled "1")
+    if [ "$_ENABLED" = "1" ]; then
+        service_start $APP
+    else
+        logger -t mobiled "Mobiled disabled"
+    fi
+}
+
+stop() {
+    service_stop $APP || kill -9 $(cat /var/run/$SERVICE_NAME.pid)
+    rm /var/run/$SERVICE_NAME.pid
+}
+
+reload() {
+    service_reload $APP
+}
