@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+
+START=65
+USE_PROCD=1
+LOGTAG="mobiled"
+
+. "$IPKG_INSTROOT/lib/functions.sh"
+
+start_service() {
+	config_load mobiled
+	local SERVICE_ENABLED
+	config_get SERVICE_ENABLED globals enabled 1
+	if [ "$SERVICE_ENABLED" = "1" ]; then
+		local PID=$(pgrep -f /usr/bin/mobiled)
+		if [ -n "$PID" ]; then
+			logger -t "$LOGTAG" "Delaying Mobiled startup. Waiting for $PID to terminate"
+			while kill -0 "$PID"; do
+				kill "$PID"
+				sleep 2
+			done
+		fi
+
+		logger -t "$LOGTAG" "Starting Mobiled"
+		procd_open_instance
+		procd_set_param command /usr/bin/mobiled.sh
+		procd_set_param respawn
+		procd_close_instance
+	else
+		logger -t "$LOGTAG" "Mobiled disabled"
+	fi
+}
+
+service_triggers() {
+	procd_add_reload_trigger "mobiled"
+}
+
+reload_service() {
+	config_load mobiled
+	local SERVICE_ENABLED
+	config_get SERVICE_ENABLED globals enabled 1
+	if [ "$SERVICE_ENABLED" = "1" ]; then
+		ubus call mobiled reload
+	fi
+}

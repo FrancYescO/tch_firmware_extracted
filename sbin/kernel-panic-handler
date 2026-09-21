@@ -1,0 +1,66 @@
+#!/bin/sh
+
+. "$IPKG_INSTROOT/lib/functions.sh"
+
+log() {
+	echo $@ | tee /dev/console | logger -t "kernel-crash-handler"
+}
+
+action="$(uci_get system @kernel_crash[0] action nocore)"
+path="$(uci_get system @kernel_crash[0] path /tmp)"
+
+clear_prozone=1
+filename="kernel_crash"
+
+tmpfile="$(mktemp)"
+cat "/proc/prozone/panic" > "$tmpfile"
+[ -s "$tmpfile" ] || {
+	rm -f "$tmpfile"
+	exit 0
+}
+
+case "${action}" in
+	compress)
+		log "kernel panic info dumped to ${path}/${filename}.gz"
+		gzip -c "$tmpfile" > "${path}/${filename}.gz"
+	;;
+	store)
+		log "kernel panic info dumped to ${path}/${filename}"
+		cp "$tmpfile" "${path}/${filename}"
+	;;
+	upload)
+		url="$(uci_get system @kernel_crash[0] url)"
+		if [ -n "${url}" ]; then
+			version="$(uci_get version @version[0] version unknown)"
+			factory_id="$(uci_get env rip factory_id unknown)"
+			board="$(uci_get env rip board_mnemonic unknown)"
+			oid="$(uci_get version @version[0] oid unknown)"
+			serial="$(uci_get env rip serial unknown)"
+
+			# Insert the ngwfdd tag when uploading to Kibana
+			[ "$(uci_get ngwfdd config enable)" = "1" -a "$url" = "$(uci_get ngwfdd config core_url)" ] && tag="$(uci_get ngwfdd config tag)"
+
+			log "uploading kernel panic info to ${url}"
+			if ! curl -m 360 -X POST -F "exe=kernel_panic" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@$tmpfile" ${tag:+-F tag="$tag"} "${url}"; then
+				log "failed to upload kernel panic info"
+				clear_prozone=0
+			else
+				log "kernel panic info uploaded"
+			fi
+		else
+			log "invalid kernel panic info upload url"
+			clear_prozone=0
+		fi
+	;;
+	*)
+		log "unknown kernel panic info action"
+		clear_prozone=0
+	;;
+esac
+
+rm -rf "$tmpfile"
+
+if [ "$clear_prozone" = "1" ]; then
+	log "wiping kernel panic info from prozone"
+	echo 0 > "/proc/prozone/panic"
+fi

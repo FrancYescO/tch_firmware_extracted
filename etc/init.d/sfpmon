@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+source $IPKG_INSTROOT/lib/functions/functions-tch.sh
+
+START=99
+STOP=21
+
+#service for sfp monitor currently only do insert sff8472_i2c ko, will do more in future
+
+handle_SFP_Tx_Dis()
+{
+  config_load optical
+  local tx_dis_file="/proc/sfp_tx_dis"
+  local sfp_state=`cat /proc/ethernet/sfp_status | grep "link up"`
+  if [ -f "$tx_dis_file" ]; then
+     local proc_tx_dis=$(cat /proc/sfp_tx_dis)
+     if [ "$proc_tx_dis" = off ] || [ "$proc_tx_dis" = on ]; then
+        local section_sfp="optical"
+        local enable
+        config_get enable $section_sfp enable ""
+        if [ "$enable" = "1" ] ; then
+            sfpi2cctl -set tx_dis off
+            if [ "$proc_tx_dis" = on ]; then
+               echo off > /proc/sfp_tx_dis
+               ubus send "sfp" '{"status":"tx_enable"}'
+            fi
+            if [ -n "$sfp_state" ]; then
+               ifup wan
+            fi
+        fi
+        if [ "$enable" = "0" ] ; then
+            sfpi2cctl -set tx_dis on
+            if [ "$proc_tx_dis" = off ]; then
+               echo on > /proc/sfp_tx_dis
+               ubus send "sfp" '{"status":"tx_disable"}'
+            fi
+            if [ -n "$sfp_state" ]; then
+               ifup wan
+            fi
+        fi
+     fi
+  fi
+}
+
+reload() {
+        handle_SFP_Tx_Dis
+}
+
+start() {
+
+	local sfp_i2c_file_0="/proc/i2c_sfp/sfp_eeprom0"
+	local sfp_i2c_file_1="/proc/i2c_sfp/sfp_eeprom1"
+	if [ ! -f "$sfp_i2c_file_0" -a ! -f "$sfp_i2c_file_1" ]; then
+		rmmod sff8472_i2c
+		insmod sff8472_i2c
+	fi
+	handle_SFP_Tx_Dis
+}
+
+stop() {
+        sfp_get.sh --reboot
+}
+

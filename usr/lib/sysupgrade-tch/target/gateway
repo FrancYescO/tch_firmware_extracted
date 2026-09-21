@@ -1,0 +1,36 @@
+#!/bin/sh
+
+upgrade_url="$1"
+shift
+
+signature_option=
+reboot_option=
+gui_option=
+for argument; do
+	case "$argument" in
+		-S|--skip-signature)
+			signature_option=--nosig
+		;;
+
+		-o)
+			reboot_option='-o -s'
+		;;
+
+		--gui)
+			gui_option=--gui
+		;;
+
+		*)
+			echo "Invalid argument: $argument"
+			exit 1
+		;;
+	esac
+done
+
+if ! sysupgrade --safe $reboot_option $gui_option $signature_option "$upgrade_url"; then
+	if [ -f /tmp/getimageerr ]; then
+		rm -rf /tmp/getimageerr
+		exit 1
+	fi
+	exit 2
+fi
