@@ -1,0 +1,175 @@
+local Device_X_000E50_ParentalControl_ = {
+  objectType = {
+    name = "Device.X_000E50_ParentalControl.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Parameters associated with the Parental Control configuration",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/Disable the Parental Control feature",
+      }
+    }
+  }
+}
+
+local mapper = mapper
+local uci_helper = mapper("ucihelper")
+local binding = {config = "parental"}
+local network = require("transformer.shared.common.network")
+local nwCommon = mapper("nwcommon")
+local configChanged = false
+local gsub = string.gsub
+
+local function getUciValue(key, option, default)
+  binding.sectionname = key
+  binding.option = option
+  binding.default = default
+  return uci_helper.get_from_uci(binding)
+end
+
+local function setUciValue(key, option, value)
+  binding.sectionname = key
+  binding.option = option
+  uci_helper.set_on_uci(binding, value, commitapply)
+  configChanged = true
+end
+
+local function commit()
+  if configChanged then
+    uci_helper.commit(binding)
+    configChanged = false
+  end
+end
+
+local function revert()
+  if configChanged then
+    uci_helper.revert(binding)
+    configChanged = false
+  end
+end
+
+Device_X_000E50_ParentalControl_.get = function(_, param)
+  if param == "Enabled" then
+    return getUciValue("general", "enable", "1")
+  end
+end
+
+Device_X_000E50_ParentalControl_.set = {
+  Enabled = function(_, _, value)
+    setUciValue("general", "enable", value)
+  end
+}
+
+Device_X_000E50_ParentalControl_.commit = commit
+Device_X_000E50_ParentalControl_.revert = revert
+
+register(Device_X_000E50_ParentalControl_)
+
+local Device_X_000E50_ParentalControl_Profile_i_= {
+  objectType = {
+    name = "Device.X_000E50_ParentalControl.Profile.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ProfileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Parameters associated with each URL filtering profile",
+    parameters = {
+    Name = {
+      access = "readOnly",
+      type = "string",
+      description = "Name of the URL filter profile",
+    },
+    MACAddress  = {
+      access = "readWrite",
+      type = "string",
+      description = "The device to which the URL filtering is applied to",
+    },
+    BlockedURL = {
+      access = "readWrite",
+      type = "string",
+      description = "The URL blocked by the parental control feature",
+      }
+    }
+  }
+}
+
+local function setURL(site, key)
+  site = gsub(site, " ", "")
+  if site:match("://") then
+    site = site:match("//([^/]+)")
+  end
+  if site:match("www") then
+    site = site:match("%.(%S+)")
+  end
+  site = site:match("([^/]+)")
+  if site and site ~= "" then
+    setUciValue(key, "site", site)
+    setUciValue(key, "device", "all")
+    return true
+  end
+  return nil, "Invalid URL"
+end
+
+Device_X_000E50_ParentalControl_Profile_i_.entries = function()
+  local entries = {}
+  binding.sectionname = "URLfilter"
+  uci_helper.foreach_on_uci(binding, function(s)
+    entries[#entries + 1] = s[".name"]
+  end)
+  return entries
+end
+
+Device_X_000E50_ParentalControl_Profile_i_.get = function(_, param, key)
+  if param == "Name" then
+    return key
+  elseif param == "MACAddress" then
+    return getUciValue(key, "mac")
+  elseif param == "BlockedURL" then
+    return getUciValue(key, "site")
+  end
+end
+
+Device_X_000E50_ParentalControl_Profile_i_.set = {
+  MACAddress = function(_, _, value, key)
+    if value == "" then
+      setUciValue(key, "device", "all")
+      setUciValue(key, "mac", value)
+    elseif nwCommon.isMAC(value) then
+      setUciValue(key, "device", "single")
+      setUciValue(key, "mac", value)
+    else
+      return nil, "Invalid MAC address"
+    end
+  end,
+  BlockedURL = function(_, _, value, key)
+    if value == "" then
+      return nil, "Cannot set empty URL"
+    end
+    return setURL(value, key)
+  end
+}
+
+Device_X_000E50_ParentalControl_Profile_i_.add = function()
+  local URLfilter = network.getNewSection("parental", "URLfilter")
+  binding.sectionname = URLfilter
+  binding.option = nil
+  uci_helper.set_on_uci(binding, "URLfilter", commitapply)
+  configChanged = true
+  return URLfilter
+end
+
+Device_X_000E50_ParentalControl_Profile_i_.delete = function(_, key)
+  binding.sectionname = key
+  binding.option = nil
+  uci_helper.delete_on_uci(binding, commitapply)
+  configChanged = true
+  return true
+end
+
+Device_X_000E50_ParentalControl_Profile_i_.commit = commit
+Device_X_000E50_ParentalControl_Profile_i_.revert = revert
+
+register(Device_X_000E50_ParentalControl_Profile_i_)

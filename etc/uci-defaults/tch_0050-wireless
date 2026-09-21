@@ -1,0 +1,158 @@
+#!/bin/sh
+
+#init env
+wireless_init_uci_env.sh
+
+#Update parameters
+
+# To make sure it is set to the correct vendor
+uci set wireless.radio_2G.type=`wireless_get_radio_type.sh radio_2G`
+
+uci set wireless.wl0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+# Is there a STA (endpoint) configured ?
+DUMMY_STA=`uci get wireless.wl0.mode`
+[ "$DUMMY_STA" == "sta" ] && uci set wireless.wl0_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+uci set wireless.ap0.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+uci set wireless.ap0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+uci set wireless.ap0.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+uci set wireless.ap0_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+SUPPORTED=`uci get wireless.ap0.supported_security_modes`
+for security in $SUPPORTED
+do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+    uci set wireless.ap0_credential0=wifi-ap-credential
+    uci set wireless.ap0_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+  fi
+done
+
+# Is there a dual radio config ?
+DUMMY=`uci get wireless.radio_5G 2> /dev/null`
+
+if [ "$?" == "0" ] ; then
+  uci set wireless.radio_5G.type=`wireless_get_radio_type.sh radio_5G`
+
+  uci set wireless.wl1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+  # Is there a STA (endpoint) configured ?
+  DUMMY_STA=`uci get wireless.wl1.mode`
+  [ "$DUMMY_STA" == "sta" ] && uci set wireless.wl1_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+
+  uci set wireless.ap1.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+  uci set wireless.ap1.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap1.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+  uci set wireless.ap1_auth0.secret=`uci get env.var.default_key_r0_s0`
+
+  SUPPORTED=`uci get wireless.ap1.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap1_credential0=wifi-ap-credential
+      uci set wireless.ap1_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+    fi
+  done
+fi
+
+DUMMY=`uci get wireless.radio2 2> /dev/null`
+
+if [ "$?" == "0" ] ; then
+  RADIO_NUM=3
+
+  uci set wireless.radio2.type=`wireless_get_radio_type.sh radio2`
+
+  uci set wireless.wl2.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r2`
+
+  # Is there a STA (endpoint) configured ?
+  DUMMY_STA=`uci get wireless.wl2.mode`
+  [ "$DUMMY_STA" == "sta" ] && uci set wireless.wl2_1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r2`
+
+  uci set wireless.ap2.wep_key=`uci get env.var.default_wep_key_r2_s0`
+
+  uci set wireless.ap2.wpa_psk_key=`uci get env.var.default_key_r2_s0`
+
+  uci set wireless.ap2.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r2_s0`
+
+  uci set wireless.ap2_auth0.secret=`uci get env.var.default_key_r2_s0`
+
+  SUPPORTED=`uci get wireless.ap2.supported_security_modes 2> /dev/null`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap2_credential0=wifi-ap-credential
+      uci set wireless.ap2_credential0.passphrase=`uci get env.var.default_key_r2_s0`
+    fi
+  done
+fi
+
+
+
+# It is for GUEST_Radio_2G config
+guest_2G=`uci get wireless.ap3 2> /dev/null`
+
+if [ "$guest_2G" = "wifi-ap" ] && [ "$RADIO_NUM" != "3" ] ; then
+  uci set wireless.ap3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+
+  uci set wireless.ap3.wep_key=`uci get env.var.default_wep_key_r0_s0`
+
+  uci set wireless.ap3.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s0`
+
+  SUPPORTED=`uci get wireless.ap3.supported_security_modes 2> /dev/null`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap3_credential0=wifi-ap-credential
+      uci set wireless.ap3_credential0.passphrase=`uci get env.var.default_key_r0_s0`
+    fi
+  done
+fi
+
+# It is for GUEST_Radio_5G config
+guest_5G=`uci get wireless.ap4 2> /dev/null`
+
+if [ "$guest_5G" = "wifi-ap" ] && [ "$RADIO_NUM" != "3" ] ; then
+  uci set wireless.ap4.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+  uci set wireless.ap4.wep_key=`uci get env.var.default_wep_key_r1_s0`
+
+  uci set wireless.ap4.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r1_s0`
+
+  SUPPORTED=`uci get wireless.ap4.supported_security_modes`
+  for security in $SUPPORTED
+  do
+  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+      uci set wireless.ap4_credential0=wifi-ap-credential
+      uci set wireless.ap4_credential0.passphrase=`uci get env.var.default_key_r1_s0`
+    fi
+  done
+fi
+
+uci commit wireless
+
+#to update the default security mode in env
+uci set env.var.default_security_mode_r0_s0=`uci get wireless.ap0.security_mode`
+uci set env.var.default_security_mode_r1_s0=`uci get wireless.ap1.security_mode`
+if [ "$RADIO_NUM" == "3" ] ; then
+  uci set env.var.default_security_mode_r2_s0=`uci get wireless.ap2.security_mode`
+fi 
+
+uci commit env
+
+#/*******************************************************************/
+#/*             datamodel ordering for wireless devices             */
+#/*******************************************************************/
+uci show dmordering >/dev/null 2>/dev/null || touch /etc/config/dmordering
+uci set dmordering.wlandevices=ordering
+uci set dmordering.wlandevices.name='InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.'
+# devices that are instantiated under `InternetGatewayDevice.LANDevice`:
+uci add_list dmordering.wlandevices.order=wl0
+uci add_list dmordering.wlandevices.order=wl1_remote
+uci commit dmordering
+

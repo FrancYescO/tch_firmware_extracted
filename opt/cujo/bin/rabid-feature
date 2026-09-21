@@ -1,0 +1,222 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+VERBOSE=${VERBOSE:-}
+if [ -n "$VERBOSE" ]; then
+    set -x
+fi
+
+CUJO_HOME=${CUJO_HOME:-}
+if [ -z "$CUJO_HOME" ]; then
+    # Emulate dirname, as it is not available on all platforms
+    # remove everything after last '/'
+    a="/${0%/*}"
+    # if $a is unset or null, replace it with '.'
+    a=${a:-.}
+    # remove '/' from beginning of the string and add '/' at the end
+    a=${a#/}/
+    # this script should be in $CUJO_HOME/bin folder
+    CUJO_HOME=$(cd "$a"/..; pwd)
+fi
+export CUJO_HOME
+
+# shellcheck source=/dev/null
+. "$CUJO_HOME/bin/rabid-sh-env"
+
+FEATURES=" fingerprint safebro.reputation safebro.profiles safebro.trackerblock "
+FEATURES=" $FEATURES tcptracker apptracker appblocker "
+SAFEBRO_VARIANTS=" reputation profiles trackerblock "
+
+CUJO_EXT_NF_RULES=${CUJO_EXT_NF_RULES+x}
+
+USAGE="Utility for controlling rabid features
+
+Usage:
+
+    ${0##*/} status
+        Show status of rabid and all of the supported features
+
+    ${0##*/} status <feature>
+        Show status of selected <feature>
+
+    ${0##*/} on <feature>
+    ${0##*/} off <feature>
+        Turn rabid <feature> on or off
+
+    Supported features are $FEATURES
+
+    ${0##*/} set <runtime-configs>
+        Restart Rabid with a new runtime configuration defined
+        by a comma-delimited list of keys or key=value pairs
+"
+
+usage_error_exit() {
+    error_message=$1
+    error_code=$2
+
+    echo "ERROR: $error_message"
+    echo
+    echo "$USAGE"
+
+    exit "$error_code"
+} >&2
+
+feature_state() {
+    feature=$1
+    "$CUJO_HOME/bin/rabidsh" -e "if (cujo.$feature.enable:get()) then return 'ON' else return 'OFF' end"
+}
+
+status() {
+    if [ "$#" -eq 0 ]; then
+        for feature in $FEATURES; do
+            state=$(feature_state "$feature")
+            echo "$feature is $state"
+        done
+    else
+        if [ "$#" -gt 1 ]; then
+            usage_error_exit "Too many arguments" 105
+        fi
+
+        feature=$1
+        if [ -n "${FEATURES##* $feature *}" ]; then
+            usage_error_exit "Unsupported feature" 104
+        fi
+
+        state=$(feature_state "$feature")
+        echo "$feature is $state"
+    fi
+}
+
+# is_safebro_on: check is any variant of safebro feature enabled, except one provided
+# parameters:
+#   $1: safebro (sub)feature to exclude from checks
+is_safebro_on() {
+    [ "${1:0:7}" != "safebro" ] && return
+    for subfeat in $SAFEBRO_VARIANTS; do
+        [ "$1" == "safebro.${subfeat}" ] && continue
+
+        status=$(feature_state "safebro.${subfeat}")
+        if [ "$status" == "ON" ]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# exec_raptr: run raptr command
+# parameters:
+#   $1: raptr operation {set|clear}
+#   $2: named set of netfilter rules {appblocker | fingerprint | ...}
+exec_raptr() {
+    raptr_cmd="$CUJO_HOME/bin/raptr $1 $2"
+    if ! eval "$raptr_cmd"; then
+        printf >&2 "Handling netfilter rules for %s FAILED!" "$2"
+        exit 201
+    fi
+}
+
+# safebro_rules_ctrl: set or clear safebro related netfilter rules
+# parameters:
+#   $1: raptr operation {set|clear}
+safebro_rules_ctrl() {
+    if [ "$1" == "set" ] || is_safebro_on "$2"; then
+        exec_raptr "set" "safebro"
+    else
+        exec_raptr "clear" "safebro"
+    fi
+}
+
+# tracker_rules_ctrl: set or clear apptracker and tcptracker netfilter rules
+# parameters:
+#   $1: raptr operation {set|clear}
+#   $2: feature {apptracker | tcptracker}
+trackers_rules_ctrl() {
+    if [ "$2" == "apptracker" ]; then
+        exec_raptr "$1" "apptracker"
+        if [ "$1" == "set" ]; then
+            exec_raptr "set" "tcptracker"
+        elif [ "$(feature_state tcptracker)" == "OFF" ]; then
+            exec_raptr "clear" "tcptracker"
+        fi
+    else
+    # "$2" == "tcptracker"
+        if [ "$1" == "set" ]; then
+            exec_raptr "set" "tcptracker"
+        elif [ "$(feature_state apptracker)" == "OFF" ]; then
+            exec_raptr "clear" "tcptracker"
+        fi
+    fi
+}
+
+
+feature_onoff() {
+    if [ "$#" -lt 2 ]; then
+        usage_error_exit "Missing feature" 103
+    fi
+
+    feature=$2
+    if [ -n "${FEATURES##* $feature *}" ]; then
+        usage_error_exit "Unsupported feature" 104
+    fi
+
+    if [ -n "$CUJO_EXT_NF_RULES" ]; then
+        operation="set"
+        if [ "$1" = "off" ]; then
+            operation="clear"
+        fi
+
+        if [ "${feature:0:7}" == "safebro" ]; then
+            safebro_rules_ctrl "$operation" "$feature"
+        elif [ "$feature" == "apptracker" ] || [ "$feature" == "tcptracker" ]; then
+            trackers_rules_ctrl "$operation" "$feature"
+        else
+            exec_raptr "$operation" "$feature"
+        fi
+    fi
+
+    turn_on="true"
+    if [ "$1" = "off" ]; then
+        turn_on="false"
+    fi
+
+    if "$CUJO_HOME/bin/rabidsh" --async -e "cujo.$feature.enable:set($turn_on, async_cb)"; then
+        status "$feature"
+    else
+        exit 202
+    fi
+}
+
+runtime_settings() {
+    export CUJO_RUNTIME_SETTINGS="$*"
+    /etc/init.d/rabid restart
+}
+
+if [ "$#" -lt 1 ]; then
+    usage_error_exit "Command is missing" 101
+fi
+
+case $1 in
+    status)
+        shift
+        status "$@"
+        ;;
+
+    on|off)
+        feature_onoff "$@"
+        ;;
+
+    set)
+        shift
+        runtime_settings "$@"
+        ;;
+
+    *)
+        usage_error_exit "Invalid command" 102
+        ;;
+esac

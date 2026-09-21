@@ -1,0 +1,118 @@
+-- Manually generated
+local Multi_MultiAP_APDevice_i_Radio_i_ = {
+  objectType = {
+    name = "#ROOT.APDevice.{i}.Radio.{i}.",
+    numEntriesParameter = "RadioNumberOfEntries",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17",
+      },
+      OperatingFrequencyBand = {
+        access = "readOnly",
+        type = "string"
+      },
+      OperatingStandards = {
+        access = "readOnly",
+        type = "string"
+      },
+      Channel = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "255",
+          },
+        },
+      },
+      CurrentOperatingChannelBandwidth = {
+        access = "readOnly",
+        type = "string"
+      },
+      ExtensionChannel = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "None",
+          "AboveControlChannel",
+          "BelowControlChannel",
+        },
+      },
+      TransmitPower = {
+        access = "readOnly",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+            max = "100",
+          },
+        },
+      },
+      -- APNumberOfEntries
+      -- automatically created when #ROOT.MultiAP.APDevice.{i}.Radio.{i}.AP.{i}. is loaded
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+
+local paramMap = {
+  OperatingStandards = "cap",
+  Channel = "channel",
+  CurrentOperatingChannelBandwidth = "bw",
+  TransmitPower = "tx_pwr",
+}
+
+local FrequencyBands = {
+  radio_2G = "2.4GHz",
+  radio_5G = "5GHz"
+}
+
+Multi_MultiAP_APDevice_i_Radio_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  cacheData = conn:call("multiap.controller.agent_info", "get", { almac = parentkey }) or {}
+  cacheData = cacheData[parentkey] and cacheData[parentkey]["radio_info"] or {}
+  for radioMac in pairs(cacheData) do
+    entries[#entries + 1] = radioMac
+  end
+  return entries
+end
+
+Multi_MultiAP_APDevice_i_Radio_i_.get = function(mapping, param, key, parentkey)
+  local result = cacheData[key] or {}
+  if param == "MACAddress" then
+    return key
+  elseif param == "ExtensionChannel" then
+    return result["bw"] and tostring(result["bw"]) ~= "40" and "None" or "BelowControlChannel"
+  elseif param == "OperatingFrequencyBand" then
+    return result["freq"] and tostring(FrequencyBands[result["freq"]]) or ""
+  elseif paramMap[param] then
+    return result[paramMap[param]] and tostring(result[paramMap[param]]) or ""
+  end
+  return ""
+end
+
+Multi_MultiAP_APDevice_i_Radio_i_.getall = function(mapping, key, parentkey)
+  local allValues = {}
+  local data = cacheData[key] or {}
+  allValues.MACAddress = key
+  allValues.ExtensionChannel = data["bw"] and tostring(data["bw"]) ~= "40" and "None" or "BelowControlChannel"
+  allValues.OperatingFrequencyBand = data["freq"] and tostring(FrequencyBands[data["freq"]]) or ""
+  for param, option in pairs(paramMap) do
+    allValues[param] = data[option] and tostring(data[option]) or ""
+  end
+  return allValues
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_MultiAP_APDevice_i_Radio_i_, "#ROOT", { "Device.WiFi.MultiAP", "InternetGatewayDevice.X_000E50_MultiAP" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

@@ -1,0 +1,155 @@
+-- Manually generated
+
+local conn = mapper("ubus").connect()
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+
+local multiap_device_i_radio_i_ = {
+  objectType = {
+    name = "rpc.multiap.device.@.radio.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      radio_id = {
+          access = "readOnly",
+          type = "string",
+      },
+      freq = {
+          access = "readOnly",
+          type = "string",
+      },
+      cap = {
+          access = "readOnly",
+          type = "string",
+      },
+      sec = {
+          access = "readOnly",
+          type = "string",
+      },
+      op_class = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      channel = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      bw = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      tx_pwr = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      bss_count = {
+          access = "readOnly",
+          type = "unsignedInt",
+      },
+      ExtensionChannel = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "None",
+          "AboveControlChannel",
+          "BelowControlChannel",
+        },
+      },
+    }
+  }
+}
+
+local radio_info = {}
+local paramMap = {
+  freq = "freq",
+  cap = "cap",
+  sec = "sec",
+  op_class = "op_class",
+  channel = "channel",
+  bw = "bw",
+  tx_pwr = "tx_pwr",
+  bss_count = "bss_count"
+}
+
+multiap_device_i_radio_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  radio_info = data[parentkey] and data[parentkey]["radio_info"] or {}
+  for radio_mac in pairs(radio_info) do
+    entries[#entries + 1] = radio_mac
+  end
+  return entries
+end
+
+multiap_device_i_radio_i_.get = function(mapping, param, key, parentkey)
+  if param == "radio_id" then
+    return key
+  elseif param == "ExtensionChannel" then
+    return radio_info[key]["bw"] and tostring(radio_info[key]["bw"]) ~= "40" and "None" or "BelowControlChannel"
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+    local result = data[parentkey] and data[parentkey]["radio_info"] and data[parentkey]["radio_info"][key] or {}
+    return result[paramMap[param]] and tostring(result[paramMap[param]]) or ""
+  end
+end
+
+register(multiap_device_i_radio_i_)
+
+local multiap_device_i_radio_i_bss_i_ = {
+  objectType = {
+    name = "rpc.multiap.device.@.radio.@.bss.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      bssid = {
+        access = "readOnly",
+        type = "string"
+      },
+      ssid = {
+        access = "readOnly",
+        type = "string"
+      },
+      bss_type = {
+        access = "readOnly",
+        type = "string"
+      },
+      sta_list = {
+        access = "readOnly",
+        type = "string"
+      },
+    }
+  }
+}
+
+local paramMap = {
+  ssid = "ssid",
+  bss_type = "bss_type",
+  sta_list = "sta_list"
+}
+
+multiap_device_i_radio_i_bss_i_.entries = function(mapping, parentkey, grandparentkey)
+  local entries = {}
+  local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+  local bss_info = data[grandparentkey] and data[grandparentkey]["radio_info"] and data[grandparentkey]["radio_info"][parentkey] and data[grandparentkey]["radio_info"][parentkey]["bss_info"] or {}
+  for bss_mac, value in pairs(bss_info) do
+    if value["bss_type"] ~= "backhaul" then
+      entries[#entries + 1] = bss_mac
+    end
+  end
+  return entries
+end
+
+multiap_device_i_radio_i_bss_i_.get = function(mapping, param, key, parentkey, grandparentkey)
+  if param == "bssid" then
+    return key
+  elseif paramMap[param] then
+    local data = conn:call("multiap.controller.agent_info", "get", {}) or {}
+    local result = data[grandparentkey] and data[grandparentkey]["radio_info"] and data[grandparentkey]["radio_info"][parentkey] and data[grandparentkey]["radio_info"][parentkey]["bss_info"][key] or {}
+    result = result[paramMap[param]] or ""
+    return type(result) == "table" and table.concat(result, " ") or tostring(result)
+  end
+end
+
+register(multiap_device_i_radio_i_bss_i_)

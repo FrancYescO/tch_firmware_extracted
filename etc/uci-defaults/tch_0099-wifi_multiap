@@ -1,0 +1,59 @@
+#!/bin/sh
+
+
+wireless_init_uci_env.sh
+
+# cred0 - Fronthaul
+# cred 1 - 5G Fronthaul . This will be in disabled state in config and will
+# be used only when there is a requirement for different SSID for 2G and 5G
+# cred 2 - Backhaul only
+
+# Set controller_credentials for FH
+
+uci set multiap.cred0.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+uci set multiap.cred1.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r1`
+
+uci set multiap.cred0.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+uci set multiap.cred1.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+
+# Set controller_credentials for BH
+uci set multiap.cred2.ssid="BH-$(uci get env.var.ssid_mac_postfix_r0)"
+uci set multiap.cred2.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+
+new_layout=`uci get env.var.em_new_ui_layout`
+if [ $new_layout == 1 ] ; then
+	uci set multiap.cred3=controller_credentials
+	uci set multiap.cred3.state="0"
+	uci set multiap.cred3.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r0`
+	uci set multiap.cred3.wpa_psk_key=`uci get env.var.default_key_r0_s0`
+	uci set multiap.cred3.security_mode="wpa2-psk"
+	uci set multiap.cred3.fronthaul="1"
+	uci set multiap.cred3.backhaul="0"
+	uci set multiap.cred4=controller_credentials
+	uci set multiap.cred4.state="0"
+	uci set multiap.cred4.ssid=`uci get env.var.ssid_prefix``uci get env.var.ssid_mac_postfix_r1`
+	uci set multiap.cred4.wpa_psk_key=`uci get env.var.default_key_r1_s0`
+	uci set multiap.cred4.security_mode="wpa2-psk"
+	uci set multiap.cred4.fronthaul="1"
+	uci set multiap.cred4.backhaul="0"
+	uci set multiap.cred4.frequency_bands="radio_5Gl,radio_5Gu"
+fi
+
+# set frequency_bands based on the splitssid value
+mainsplitssid=`uci get web.main.splitssid`
+if [ $mainsplitssid == "0" ]; then
+  uci set multiap.cred0.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+else
+  uci set multiap.cred0.frequency_bands="radio_2G"
+fi
+
+guestsplitssid=`uci get web.guest.splitssid`
+if [ $guestsplitssid == "0" ]; then
+  uci set multiap.cred3.frequency_bands="radio_2G,radio_5Gl,radio_5Gu"
+else
+  uci set multiap.cred3.frequency_bands="radio_2G"
+fi
+# Commit the changes
+
+uci commit multiap
+

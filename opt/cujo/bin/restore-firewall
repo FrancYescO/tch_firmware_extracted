@@ -1,0 +1,106 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+VERBOSE=${VERBOSE:-}
+if [ -n "$VERBOSE" ]; then
+    set -x
+fi
+
+CUJO_HOME=${CUJO_HOME:-}
+if [ -z "$CUJO_HOME" ]; then
+    # Emulate dirname, as it is not available on all platforms
+    # remove everything after last '/'
+    a="/${0%/*}"
+    # if $a is unset or null, replace it with '.'
+    a=${a:-.}
+    # remove '/' from beginning of the string and add '/' at the end
+    a=${a#/}/
+    # this script should be in $CUJO_HOME/bin folder
+    CUJO_HOME=$(cd "$a"/..; pwd)
+fi
+export CUJO_HOME
+
+# shellcheck source=/dev/null
+. "$CUJO_HOME/bin/rabid-sh-env"
+
+
+
+CUJO_EXT_NF_RULES=${CUJO_EXT_NF_RULES+x}
+
+USAGE="Restores the missing CUJO firewall rules.
+
+This will check which rabid features are enabled, then if the rules are present
+and will restore the missing rules.
+
+Use this script after a system event has removed the existing firewall rules.
+
+Usage:
+    ${0##*/} -n  perform a dry run - outputs the iptables commands that
+    would be run without running them
+
+    ${0##*/} -h show this help
+"
+
+DRY_RUN=0
+if [ "$#" -gt 1 ]; then
+    echo "Too many arguments"
+    exit 105
+elif [ "$#" -eq 1 ]; then
+    if [ "$1" = "-h" ]; then
+        echo "$USAGE"
+        exit 101
+    elif [ "$1" = "-n" ]; then
+        DRY_RUN=1
+    else
+        echo "Unknown option $1"
+        echo "$USAGE"
+        exit 104
+    fi
+fi
+
+raptr_disabled() {
+    echo "Checking Rules for $1"
+    ! raptr -q check group "$1"
+}
+
+
+raptr_enable() {
+    echo "Enable Rules for $1"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        raptr -n set "$1"
+    else
+        raptr set "$1"
+    fi
+}
+
+
+feature_enabled() {
+    echo "Checking feature $1"
+    rabid-feature status "$1" | grep -q "ON"
+}
+
+if [ ! -f "$RABID_PID_FILE" ] || ! rabidsh 2> /dev/null; then
+    echo "rabid is not (fully) up, firewall rules not restored"
+    exit 0
+fi
+
+# Check base rules
+raptr_disabled base && raptr_enable base
+
+SIMPLE_FEATURES=" fingerprint tcptracker apptracker appblocker "
+for feature in $SIMPLE_FEATURES; do
+    feature_enabled "$feature" && raptr_disabled "$feature" && raptr_enable "$feature"
+done
+
+SAFEBRO_VARIANTS=" reputation profiles trackerblock "
+
+for variant in $SAFEBRO_VARIANTS; do
+    feature_enabled "safebro.$variant" && raptr_disabled "safebro" && raptr_enable "safebro"
+done
+
+exit 0
