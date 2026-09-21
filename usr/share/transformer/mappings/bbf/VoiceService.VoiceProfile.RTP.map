@@ -1,0 +1,373 @@
+local lfs = require("lfs")
+local format, gmatch = string.format, string.gmatch
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+  return
+end
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local binding = {}
+local transactions = {}
+local mt = { __index = function() return "" end }
+local common_default = setmetatable({}, mt)
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local dynamic_binding = {config = "mmpbx", sectionname = "codec_filter"}
+local firewallBinding  = {config = "firewall", sectionname = "siploopback", option = "dest_port"}
+local qosBinding = {config = "qos"}
+local countryBinding = {config = "mmpbxbrcmcountry", sectionname = "global", option = "rtcp", default = "1"}
+local voiceHelper = require("transformer.shared.voice_helper")
+
+local function Commit()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+local function Revert()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local function getAllParams(maps, parameters)
+    return function(mapping, key)
+        local config, sectionname = key:match("(.*)|(.*)")
+        binding.config = config
+        binding.sectionname = sectionname
+        binding.option = nil
+        local object = uci_helper.getall_from_uci(binding)
+        local map = maps[config]
+
+        local data = {}
+
+        for p,_ in pairs(parameters) do
+            if map.value[p] then
+                if type(map.value[p]) == 'function' then
+                    data[p] = map.value[p](object)
+                else
+                    data[p] = object[map.value[p]]
+                end
+            end
+            data[p] = data[p] or map.default[p]
+        end
+        return data
+    end
+end
+
+local function getParam(maps)
+    return function(mapping, param, key)
+        local config, sectionname = key:match("(.*)|(.*)")
+        binding.config = config
+        binding.sectionname = sectionname
+        local map = maps[config]
+        if map.value[param] then
+            if type(map.value[param]) == "function" then
+                return map.value[param](binding)
+            else
+                binding.option = map.value[param]
+                binding.default = map.default[param]
+                return uci_helper.get_from_uci(binding)
+            end
+        else
+            return map.default[param]
+        end
+    end
+end
+
+local function setParam(maps, set_maps)
+    return function(mapping, param, value, key)
+        local config, sectionname = key:match("(.*)|(.*)")
+        binding.config = config
+        binding.sectionname = sectionname
+        local map = maps[config]
+        local set_map = set_maps[config]
+        local msg, err
+
+        if set_map[param] then
+            if type(set_map[param]) == "function" then
+                msg, err = set_map[param](binding, value)
+                transactions[binding.config] = true
+                if err then
+                    return nil, err
+                end
+                return true
+            elseif type(map.value[param]) == "string" then
+                binding.option = map.value[param]
+                if uci_helper.get_from_uci(binding) ~= value then
+                    uci_helper.set_on_uci(binding, value, commitapply)
+                    transactions[binding.config] = true
+                end
+                return true
+            end
+        end
+        return nil, "Not supported currently"
+    end
+end
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_RTP_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.RTP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            LocalPortMin = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0",
+            },
+            LocalPortMax = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "0",
+            },
+            DSCPMark = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "63",
+                    },
+                },
+            },
+            VLANIDMark = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                default = "-1",
+            },
+            EthernetPriorityMark = {
+                access = "readOnly",
+                type = "int",
+                range = {
+                    {
+                        min = "-1",
+                    },
+                },
+                default = "-1",
+            },
+            TelephoneEventPayloadType = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                         min = "0",
+                         max = "128",
+                    },
+                },
+            },
+        }
+    }
+}
+
+local rtp_net_map = {
+    value = {
+        LocalPortMin = "rtp_local_port_min",
+        LocalPortMax = "rtp_local_port_max",
+        DSCPMark = function(object)
+            return voiceHelper.getDscpMark(object, "realtime_qos_field", "realtime_qos_value")
+        end,
+        TelephoneEventPayloadType = voiceHelper.getPayLoadType,
+        EthernetPriorityMark = function(object)
+            local dscpMark = voiceHelper.getDscpMark(object, "realtime_qos_field", "realtime_qos_value")
+            local pbit
+            local binding = { config = "qos", sectionname = "Voice_Data", option = "dscp"}
+            local dscpValue = get_from_uci(binding)
+            if dscpValue == "" then
+                pbit = ""
+            elseif (dscp[string.lower(dscpValue)] == dscpMark) then
+                binding = { config = "qos", sectionname = "Voice_Data", option = "pcp"}
+                pbit = get_from_uci(binding)
+                if pbit == "" then
+                    pbit = "-1"
+                end
+            else
+                pbit = "-1"
+            end
+            return pbit
+        end,
+        VLANIDMark = function(object)
+            return voiceHelper.getVlanIdMark(object)
+        end,
+    },
+    default = common_default,
+}
+
+local rtp_server_map = {
+    value = {
+    },
+    default = common_default,
+}
+
+local rtp_mobilenet_map = {
+    value = { },
+    default = common_default,
+}
+
+local rtp_maps = {
+    mmpbxrvsipnet = rtp_net_map,
+    mmpbxrvsipdev = rtp_server_map,
+    mmpbxmobilenet = rtp_mobilenet_map,
+}
+
+local set_rtp_net_map = {
+    LocalPortMin = true,
+    LocalPortMax = true,
+    DSCPMark = function(binding, value)
+        voiceHelper.setDscpMark(binding, value, "realtime_qos_field", "realtime_qos_value")
+    end,
+    TelephoneEventPayloadType = function(binding, value)
+        voiceHelper.setPayLoadType(value, transactions, commitapply)
+    end
+}
+
+local set_rtp_maps = {
+    mmpbxrvsipnet = set_rtp_net_map,
+    mmpbxrvsipdev = {},
+    mmpbxmobilenet = {},
+}
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.getall = getAllParams(rtp_maps, Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.objectType.parameters)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.get = getParam(rtp_maps)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.set = setParam(rtp_maps, set_rtp_maps)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.commit = Commit
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_.revert = Revert
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_VoiceService_i_VoiceProfile_i_RTP_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoiceProfile.{i}.RTP.RTCP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+            },
+            TxRepeatInterval = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "0",
+                        max = "65535",
+                    },
+                },
+                default = "5000",
+            },
+        }
+    }
+}
+
+local rtcp_net_map = {
+    value = {
+        Enable = function(object)
+            return get_from_uci(countryBinding)
+        end,
+        TxRepeatInterval = function(binding, value)
+            local res
+            binding.config = "mmpbxbrcmfxsdev"
+            binding.sectionname = "device"
+            binding.option = nil
+            uci_helper.foreach_on_uci(binding, function(s)
+                 res = s.rtcp_interval
+                 return false
+            end)
+            return res or "5000"
+        end,
+    },
+    default = common_default,
+}
+
+local rtcp_server_map = {
+    value = { },
+    default = common_default,
+}
+
+local rtcp_mobilenet_map = {
+    value = { },
+    default = common_default,
+}
+
+local rtcp_maps = {
+    mmpbxrvsipnet = rtcp_net_map,
+    mmpbxrvsipdev = rtcp_server_map,
+    mmpbxmobilenet = rtcp_mobilenet_map,
+}
+
+local set_rtcp_net_map = {
+        Enable = function(binding, value)
+             uci_helper.set_on_uci(countryBinding, value, commitapply)
+             transactions[countryBinding.config] = true
+        end,
+        TxRepeatInterval = function(binding, value)
+             binding.config = "mmpbxbrcmfxsdev"
+             binding.sectionname = "device"
+             binding.option = nil
+
+             local set_binding = {config = "mmpbxbrcmfxsdev"}
+             set_binding.option = "rtcp_interval"
+             uci_helper.foreach_on_uci(binding, function(s)
+                 set_binding.sectionname = s[".name"]
+                 uci_helper.set_on_uci(set_binding, value, commitapply)
+             end)
+             transactions[set_binding.config] = true
+        end,
+}
+
+local set_rtcp_maps = {
+    mmpbxrvsipnet = set_rtcp_net_map,
+    mmpbxrvsipdev = {},
+    mmpbxmobilenet = {},
+}
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.getall = getAllParams(rtcp_maps,
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.objectType.parameters)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.get = getParam(rtcp_maps)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.set = setParam(rtcp_maps, set_rtcp_maps)
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.commit = Commit
+
+Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP.revert = Revert
+
+duplicates = duplicator(Multi_Services_VoiceService_i_VoiceProfile_i_RTP_RTCP, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+

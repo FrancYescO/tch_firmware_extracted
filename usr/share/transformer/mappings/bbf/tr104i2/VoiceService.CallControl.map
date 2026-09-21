@@ -1,0 +1,100 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local tostring, ipairs, register = tostring, ipairs, register
+local mapper = mapper
+local profileHelper = require("transformer.shared.profile_helper")
+local tr104Helper = require("transformer.shared.tr104helper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local countryBinding = { config = "mmpbxbrcmcountry"}
+local uciHelper = mapper("ucihelper")
+local transactions = {}
+local configChanged = false
+local commitApply = commitapply
+
+local Multi_Services_VoiceService_i_CallControl_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            MaxNumberOfLines = {
+                access = "readOnly",    -- ReadWrite not supported
+                type = "unsignedInt",
+                description = "Maximum number of lines supported",
+            },
+            MaxNumberOfExtensions = {
+                access = "readOnly",    -- ReadWrite not supported
+                type = "unsignedInt",
+                description = "Maximum number of extensions supported",
+            },
+            X_SC_CLID_MODE = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "RING",
+                    "LRCARIR",
+                    "DTAS",
+                    "RPAS",
+                    "LRAS",
+                },
+                description = "Caller ID signalling mode",
+            },
+            -- LineNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.Line.{i}. is loaded
+            -- ExtensionNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.Extension.{i}. is loaded
+            -- MailboxNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.Mailbox.{i}. is loaded
+            -- IncomingMapNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.IncomingMap.{i}. is loaded
+            -- OutgoingMapNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.OutgoingMap.{i}. is loaded
+            -- NumberingPlanNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.NumberingPlan.{i}. is loaded
+            -- GroupNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.Group.{i}. is loaded
+        }
+    }
+}
+
+local function commit()
+    if configChanged then
+        uciHelper.commit(countryBinding)
+    end
+    configChanged = false
+end
+
+local function revert()
+    if configChanged then
+        uciHelper.revert(countryBinding)
+    end
+    configChanged = false
+end
+
+Multi_Services_VoiceService_i_CallControl_.get = {
+    MaxNumberOfLines = "30",
+    MaxNumberOfExtensions = function ()
+        local numOfFxs, numOfDect, numOfSipdev = profileHelper.find_device_support()
+        return tostring(numOfFxs + numOfDect + numOfSipdev)
+    end,
+    X_SC_CLID_MODE = voiceHelper.getCidMode,
+}
+
+Multi_Services_VoiceService_i_CallControl_.set = {
+    X_SC_CLID_MODE =  function (mapping, paramName, paramValue)
+        if voiceHelper.setCidMode(paramValue, transactions, commitApply) then
+            configChanged = true
+        end
+    end,
+}
+
+Multi_Services_VoiceService_i_CallControl_.commit = commit
+Multi_Services_VoiceService_i_CallControl_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_", Multi_Services_VoiceService_i_CallControl_, register)
+

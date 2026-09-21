@@ -1,0 +1,178 @@
+#!/bin/sh
+
+. /lib/functions.sh
+[[ -f /lib/functions/efu_handler.sh ]] && . /lib/functions/efu_handler.sh
+
+# Helper function for logging
+__log() {
+	logger -t "$(basename "$0")" "$*"
+}
+
+__check_parent_process() { # parent_name protocol_name
+  local parent_name="${1}"
+  local protocol_name="${2}"
+  local curr="self"
+  local Name=""
+  local PPid=""
+
+  # Test if I'm forked by the expected parent process
+  until [ "$Name" = "${parent_name}" ] || [ "$PPid" = "1" ]
+  do
+    Name=$(awk '/Name:/{print $2}' /proc/$curr/status)
+    PPid=$(awk '/PPid:/{print $2}' /proc/$curr/status)
+    curr="$PPid"
+  done
+
+  if [ "$Name" = "${parent_name}" ]; then
+    __log "User $USER is connecting through ${protocol_name}..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if the current session is established by a Telnet connection
+_is_telnet() {
+  # Test if user is connecting through telnet
+  readlink -f /proc/self/fd/0 | grep -q pts
+  if [ "$?" -ne 0 ]; then
+    return 1
+  fi
+  __check_parent_process "telnetd" "Telnet"
+  return $?
+}
+
+# Check if the current session is established by a SSH connection
+_is_ssh() {
+  __check_parent_process "dropbear" "SSH"
+  return $?
+}
+
+# Check if the current session is established by a crontab daemon
+_is_crontab() {
+  __check_parent_process "crond" "Crontab"
+  return $?
+}
+
+# Check if the current session is established over a serial connection
+_is_serial() {
+
+  # Test if user is connecting through serial
+  readlink -f /proc/self/fd/0 | grep -q tty
+
+  if [ "$?" -eq 0 ]; then
+    __log "User $USER is connecting through tty..."
+    return 0
+  fi
+
+  return 1
+}
+
+# UCI function used for returning the value of clash.<user>.serial
+_is_clash_user_allowed_on_serial() {
+	[ "$serial_clash_user_found" -eq 1 ] && return
+	config_get serial "$1" serial
+	serial_clash_user_found="$serial"
+}
+
+# Return 0 if there is at least 1 clash user allowed on serial
+_is_any_clash_serial_user(){
+	config_load clash
+	serial_clash_user_found=0
+	config_foreach _is_clash_user_allowed_on_serial user
+
+	return $((! serial_clash_user_found))
+}
+
+# Verify if specified user has access to clash over the specified interface.
+#   * SSH: on any interface `uci.clash.user.ssh` or list of interfaces `uci.clash.user.ssh_interface`
+#   * Serial: `uci.clash.user.serial`
+#   * Telnet: `uci.clash.user.telnet`
+# 1: the connection type; should be `serial`, `ssh` or `telnet`
+_verify_clash_access() {
+  local access
+  access=$(lua - "$1" <<EOF
+    local acc
+    local lib_loaded, lib = pcall(require, 'clash-access-control')
+    if lib_loaded then
+        acc = lib.check(...)
+    end
+    print(acc and "1" or "")
+EOF
+)
+  if [ ! -z "$access" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Verify if the user has shell access.
+_verify_shell_access() {
+  if [[ "$USER" = "root" ]]; then
+    if type 'efu_handler_is_unlocked' >/dev/null 2>/dev/null; then
+      efu_handler_is_unlocked "root_shell_access" && return 0
+    fi
+  fi
+  return 1
+}
+
+# Check if the current session is established by a SCP command
+_is_scp() {
+  if [ $# -gt 0 -a "${1}" = "-c" ]; then
+    # Drop the argument added by SSH
+    shift 1
+  fi
+  if [ $# -gt 0 ]; then
+    # There are still arguments, check that the first one doesn't start with scp
+    first_word=$(echo "${1}" | cut -d " " -f 1)
+    if [ "${first_word}" = "scp" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+
+# Check all pre-conditions before starting the shell:
+#   (1) Connection must be through serial or SSH or telnet, nothing else.
+#   (2) User must have access over that respective connection.
+# Anything else is not allowed or supported.
+
+_is_crontab && exec /bin/ash "$@"
+
+_is_serial && interface="serial"
+[[ -z "$interface" ]] && _is_ssh && interface="ssh"
+[[ -z "$interface" ]] && _is_telnet && interface="telnet"
+[[ -z "$interface" ]] && exit 1
+
+if _verify_clash_access "$interface"; then
+	__log "User $USER is allowed to run clash on $interface"
+	[[ "$interface" = "ssh"  ]] && { _is_scp "$@" && exit 1; } # clash doesn't support scp
+	[[ $# -gt 0 && "${1}" = "-c" ]] && shift 1; # Drop the argument added by SSH
+	exec /usr/bin/clash "$@"
+fi
+if _verify_shell_access && [[ -n "$USER" ]]; then
+	if _is_scp "$@"; then
+		__log "User $USER is allowed to run scp on $interface"
+		exec /bin/ash "$@"
+	elif [[ "$interface" = "ssh" && $# -gt 1 ]]; then
+		__log "User $USER is allowed to run a specific command on ssh"
+		exec /bin/ash "$@"
+	else
+		__log "User $USER is allowed to get a shell on $interface"
+		exec /bin/ash --login "$@"
+	fi
+fi
+if [[ "$interface" = "serial" ]]; then
+	show_login="0"
+	# Show login on serial if root shell access is allowed OR any clash user is allowed
+	_is_any_clash_serial_user && show_login="1"
+	[[ "$show_login" = "0" ]] && [[ -z "$USER" ]] && USER="root" && _verify_shell_access && show_login="1"
+	if [[ "$show_login" = "1" ]]; then
+		__log "Connection on serial, start login"
+		exec /bin/login
+	fi
+fi
+
+__log "No suitable login found for $USER on $interface"
+exit 1
