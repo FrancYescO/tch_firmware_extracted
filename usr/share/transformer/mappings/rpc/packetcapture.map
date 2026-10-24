@@ -1,0 +1,201 @@
+local rpc_packetcapture_ = {
+  objectType = {
+    name = "rpc.packetcapture.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      connectedIntf = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "ANY",
+          "LANMain",
+          "WANData",
+          "Mobile",
+          "LANGuest",
+        },
+        default = "WANData",
+      },
+      usbStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Connected",
+          "Disconnected",
+        },
+      },
+      startCapture = {
+        access = "readWrite",
+        type = "string",
+      },
+      status = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local mapper, commitapply, popen = mapper, commitapply, io.popen
+local common = mapper("nwcommon")
+local uciHelper = mapper('ucihelper')
+local lfs = require("lfs")
+local conn = mapper("ubus").connect()
+
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local getUbusInterfaceStatus = common.get_ubus_interface_status
+
+local tracingBinding = {config = "tracingtool"}
+local configChanged
+
+-- function to get the interface l3 device
+local function getWanDevice(interface)
+  local status = getUbusInterfaceStatus(interface)
+  return status and status.l3_device
+end
+
+local function get_interfaceMap(value)
+  if value == "ANY" then
+    return "any"
+  elseif value == "LANMain" then
+    return getWanDevice("lan") or ""
+  elseif value == "LANGuest" then
+    return getWanDevice("guest") or ""
+  elseif value == "Mobile" then
+    return getWanDevice("wwan") or ""
+  elseif value == "WANData" then
+    return getWanDevice("wan") or ""
+  end
+  return ""
+end
+
+local function getUciValue(sectionName, option, default)
+  local toolBinding = { config = tracingBinding.config, sectionname = sectionName, option = option , default = default }
+  return getFromUci(toolBinding)
+end
+
+local function setUciValue(sectionName, option, value)
+  local toolBinding = { config = tracingBinding.config, sectionname = sectionName, option = option}
+  setOnUci(toolBinding, value, commitapply)
+  configChanged = true
+end
+
+-- Function to return the dirctory name in the path specified(used to get the usb mount path) in case of reboot the mount path changes
+local function getDirName()
+  local path = "/mnt/usb"
+  for file in lfs.dir(path) do
+    if lfs.attributes(file, "mode") ~= "directory" then
+      return (path .. "/" .. file)
+    end
+  end
+  return ""
+end
+
+local function stopProcess(processcmd)
+  local data = popen(processcmd)
+  if data then
+    for line in data:lines() do
+      local pid = line:match("^%s*(%d+)")
+      if pid then
+        os.execute("kill -9 " .. pid)
+        break
+      end
+    end
+    data:close()
+  end
+end
+
+--- Function to get USB status
+local function getUSBStatus()
+  local value = getFromUci({config = "mountd", sectionname = "mountd", option = "mounted", state = "true"})
+  local vNum = value ~= "" and tonumber(value) or 0
+  return vNum > 0 and "Connected" or "Disconnected"
+end
+
+rpc_packetcapture_.get = {
+  usbStatus = function(mapping, param)
+    return getUSBStatus()
+  end,
+  connectedIntf = function(mapping, param)
+    return getUciValue("tracingtool", "interface", "WANData")
+  end,
+  startCapture = function(mapping, param)
+    local value = getUciValue("tracingtool", "state", "stop")
+    if value == "inprogress" and getUSBStatus() == "Disconnected" then
+      setUciValue("tracingtool", "state", "stop")
+      setUciValue("tracingtool", "status", "completed")
+      uciHelper.commit(tracingBinding)
+    end
+    return getUciValue("tracingtool", "state", "stop")
+  end,
+  status = function(mapping, param)
+    return getUciValue("tracingtool", "status", "stop")
+  end,
+}
+
+rpc_packetcapture_.set = {
+  connectedIntf = function(mapping, param, value)
+    local intf = get_interfaceMap (value)
+    setUciValue("tracingtool", "device", intf)
+    setUciValue("tracingtool", "interface", value)
+  end,
+  startCapture = function(mapping, param, value)
+    if value == "start" then
+      if getDirName() ~= "" then
+        local status = getUciValue("tracingtool", "state", "stop")
+        if status ~= "inprogress" then
+          local intf = getUciValue("tracingtool", "device")
+          if intf ~= "any" then
+            local intfStatus = conn:call("network.device", "status", { ["name"] = intf }) or {}
+            if intf == "" then
+              setUciValue("tracingtool", "status", "Please ensure that the WAN cable is connected to the gateway")
+              return nil, "The WAN appears to not be connected. Click Ok, ensure the WAN cable is connected to the gateway"
+            elseif not intfStatus.carrier then
+              setUciValue("tracingtool", "status", "The selected interface appears to be disconnected")
+              return nil, "The Ethernet appears to not be connected. Click Ok, ensure the Ethernet cable you specified is connected to the gateway"
+            end
+          end
+          commitapply:newset("start_capture")
+        else
+          return nil, "Capture is in progress"
+        end
+      else
+        return nil, "The USB Stick appears to not be connected. Click Ok, reinsert the USB Stick to the gateway"
+      end
+    elseif value == "stop" then
+      local cmd = getUciValue("tracingtool", "tcp", "")
+      if cmd ~= "" then
+        stopProcess("ps w | grep '" .. cmd .. "'")
+        stopProcess('ps w | grep "packetcapture_isr.sh"')
+      end
+      setUciValue("tracingtool", "state", "stop")
+      local intf = getUciValue("tracingtool", "device")
+      if intf == "" then
+        setUciValue("tracingtool", "status", "Please ensure that the WAN cable is connected to the gateway")
+      else
+        setUciValue("tracingtool", "status", "completed")
+      end
+    else
+      return nil, "Invalid Value"
+    end
+  end,
+}
+
+rpc_packetcapture_.commit = function()
+  if configChanged == true then
+    uciHelper.commit(tracingBinding)
+    configChanged = false
+  end
+end
+
+rpc_packetcapture_.revert = function()
+  if configChanged == true then
+    uciHelper.commit(tracingBinding)
+    configChanged = false
+  end
+end
+
+register(rpc_packetcapture_)
+

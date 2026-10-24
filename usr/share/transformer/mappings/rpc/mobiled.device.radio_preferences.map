@@ -1,0 +1,68 @@
+local string, tonumber, type = string, tonumber, type
+
+local mobiled_device_radio_preferences = {
+       objectType = {
+                name = 'rpc.mobiled.device.@.radio_preference.@.',
+                access = 'readOnly',
+                numEntriesParameter = "RadioPreferenceNumberOfEntries",
+                minEntries = 0,
+                maxEntries = math.huge,
+                parameters = {
+                        name = {
+                                access = "readOnly",
+                                type = "string",
+                        },
+                        radios = {
+                                access = "readOnly",
+                                type = "string",
+                        }
+                }
+        }
+}
+
+local helper = require("mobiled.scripthelpers")
+
+local conn = mapper("ubus").connect()
+if not conn then
+       return
+end
+
+local function getMobiledDeviceInfo(parentKey)
+	local dev_id = tonumber(parentKey and string.match(parentKey, "%d+$"))
+	return helper.getUbusData(conn, "mobiled.device", "radio_preferences", { dev_idx = dev_id }) or {}
+end
+
+local function getRadioPreferenceData(key, parent_key)
+	local data = getMobiledDeviceInfo(parent_key)
+	local radio_preference_id = tonumber(string.match(key, "%d"))
+	if radio_preference_id and radio_preference_id > 0 then
+		local radio_preference = data.radio_preferences[radio_preference_id]
+		if radio_preference and type(radio_preference) == "table" then
+			return radio_preference
+		end
+	end
+	return {}
+end
+
+local function getall(mapping, key, parent_key)
+        return getRadioPreferenceData(key, parent_key)
+end
+
+local function get(mapping, paramName, key, parent_key)
+        return getRadioPreferenceData(key, parent_key)[paramName]
+end
+
+local function radioPreferenceEntries(mapping, key, parent_key)
+        local data = getMobiledDeviceInfo(parent_key)
+        local radio_preferences = {}
+                for i=1, #data.radio_preferences do
+                         radio_preferences[#radio_preferences + 1] =  "radio_preference" ..tostring(i)
+                end
+        return radio_preferences
+end
+
+mobiled_device_radio_preferences.getall = getall
+mobiled_device_radio_preferences.get = get
+mobiled_device_radio_preferences.entries = radioPreferenceEntries
+
+register(mobiled_device_radio_preferences)

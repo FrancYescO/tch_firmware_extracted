@@ -1,0 +1,227 @@
+-- Manually generated
+local Multi_LED_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Displays the LED Status",
+    parameters = {
+      InternetLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the internet LED",
+      },
+      PowerLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Power LED",
+      },
+      WirelessLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Wireless LED",
+      },
+      DSLLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the DSL LED",
+      },
+      USBLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the USB LED",
+      },
+      Ethernet1LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet1 LED",
+      },
+      Ethernet2LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet2 LED",
+      },
+      Ethernet3LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet3 LED",
+      },
+      Ethernet4LEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Ethernet4 LED",
+      },
+      WANLEDState = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the status of the Eth wan LED",
+      },
+      InetLEDHostname = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the Hostname of the smart LED",
+      },
+      InetLEDColor = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the LED color of the smart LED",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Displays the LED status of the smart LED",
+      },
+    }
+  }
+}
+
+local lfs = require("lfs")
+local open = io.open
+local mapper = mapper
+local uciHelper = mapper('ucihelper')
+local duplicator = mapper("multiroot").duplicate
+local foreachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local smartLEDBinding = {config = "smartled"}
+local setOnUci = uciHelper.set_on_uci
+local isConfigChanged = false
+
+local function isLedOrderInverted()
+  local prodNum = getFromUci({config="env", sectionname="var", option="prod_number"})
+  if prodNum == "C2100T" or prodNum == "C1100T" or prodNum == "C2000T" then
+    return true
+  end
+  return false
+end
+
+local PARAM_MAP = {
+  InternetLEDState = "internet",
+  PowerLEDState    = "power",
+  WirelessLEDState = "wireless",
+  DSLLEDState      = "broadband",
+  USBLEDState      = "usb",
+  WANLEDState      = "wanlan"
+}
+
+--TODO: The set of LED's should be determined via configuration or dynamically
+local ETH_PARAM_MAP = {
+  Ethernet1LEDState = isLedOrderInverted() and "eth3" or "eth0",
+  Ethernet2LEDState = isLedOrderInverted() and "eth2" or "eth1",
+  Ethernet3LEDState = isLedOrderInverted() and "eth1" or "eth2",
+  Ethernet4LEDState = isLedOrderInverted() and "eth0" or "eth3"
+}
+
+--- Retrieves the LED status
+-- @param param the parameter name
+-- @return the led status
+local function getLedState(param)
+  local path = "/sys/class/leds/"
+  local fileName
+  for file in lfs.dir(path) do
+    if file:match("^"..PARAM_MAP[param]) then
+      fileName = path .. file
+      local fileBrightness = path .. file .. "/brightness"
+      local brightness = 0
+      local fd = open(fileBrightness)
+      if fd then
+        brightness = fd:read()
+        fd:close()
+      end
+      if lfs.attributes(fileName .. "/delayon", "mode") == "file" or lfs.attributes(fileName .. "/traffic_div_fact", "mode") == "file" then
+        if tonumber(brightness) > 0 then
+          local color = file:match(".*:(.*)")
+          return color .. "-blink"
+        end
+      elseif tonumber(brightness) > 0 then
+        return file:match(".*:(.*)")
+      end
+    end
+  end
+  return "off"
+end
+
+--- Retrieves the state of the Ethernet
+-- @param param the parameter name
+-- @return on/off based on the oper state of ethernet
+local function getEthLedState(param)
+  local fileName = "/sys/class/net/" .. ETH_PARAM_MAP[param] .. "/operstate"
+  local fd = open(fileName)
+  if fd then
+    local state = fd:read()
+    fd:close()
+    if state == "up" then
+      return "on"
+    end
+  end
+  return "off"
+end
+
+-- Retrieves the Smart LED Color
+-- @return color of LED or ""
+local function getInetLEDColor()
+  local section
+  smartLEDBinding.sectionname = "dnstxtrecord"
+  foreachOnUci(smartLEDBinding, function(s)
+    section = s[".name"]
+  end)
+  if section then
+    smartLEDBinding.sectionname = section
+    smartLEDBinding.option = "inet_led_color"
+  end
+  return getFromUci(smartLEDBinding) or ""
+end
+
+-- Retrieves the Smart LED HostName
+-- @return Host Name of the Smart LED
+local function getInetHostName()
+  smartLEDBinding.sectionname = "globals"
+  smartLEDBinding.option = "host"
+  return getFromUci(smartLEDBinding) or ""
+end
+
+Multi_LED_.get = function(mapping, param)
+  if PARAM_MAP[param] then
+    return getLedState(param)
+  elseif ETH_PARAM_MAP[param] then
+    return getEthLedState(param)
+  elseif param == "InetLEDHostname" then
+    return getInetHostName()
+  elseif param == "InetLEDColor" then
+    return getInetLEDColor()
+  end
+  smartLEDBinding.sectionname = "globals"
+  smartLEDBinding.option = "enable"
+  return(getFromUci(smartLEDBinding))
+end
+
+Multi_LED_.set = function(mapping, param, value)
+  smartLEDBinding.sectionname = "globals"
+  smartLEDBinding.option = "enable"
+  setOnUci(smartLEDBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+Multi_LED_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(smartLEDBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_LED_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(smartLEDBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicates = duplicator(Multi_LED_, "#ROOT", { "InternetGatewayDevice.DeviceInfo.X_0876FF_LED.", "InternetGatewayDevice.DeviceInfo.X_000E50_LED." })
+for _, dupli in ipairs(duplicates) do
+  -- Currently SmartLED Feature is available for CenturyLink alone. So neglecting Generic Parameters.
+  if dupli.objectType.name:match("InternetGatewayDevice.DeviceInfo.X_000E50_LED.") then
+    dupli.objectType.parameters.InetLEDHostname = nil
+    dupli.objectType.parameters.InetLEDColor = nil
+  end
+  register(dupli)
+end

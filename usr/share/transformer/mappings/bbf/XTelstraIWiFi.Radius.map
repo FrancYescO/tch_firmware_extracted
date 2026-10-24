@@ -1,0 +1,145 @@
+local uci_helper = mapper("ucihelper")
+local transactions = {}
+local binding = { config = "hotspotd" }
+
+local Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.RADIUS.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            AuthServer = {
+                access = "readWrite",
+                type = "string",
+                max = "1024",
+            },
+            AcctServer = {
+                access = "readWrite",
+                type = "string",
+                max = "1024",
+            },
+            Secret = {
+                access = "readWrite",
+                type = "string",
+                max = "255",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_.getall = function(mapping)
+    local data = {
+        AuthServer = "",
+        AcctServer = "",
+        Secret = "",
+    }
+    binding.sectionname = "radauth"
+    binding.option = "server"
+    local v = uci_helper.get_from_uci(binding)
+    data.AuthServer = v and type(v) == "table" and table.concat(v, ",") or data.AuthServer
+
+    binding.sectionname = "radacct"
+    binding.option = "server"
+    local v = uci_helper.get_from_uci(binding)
+    data.AcctServer = v and type(v) == "table" and table.concat(v, ",") or data.AcctServer
+
+    binding.sectionname = "radacct"
+    binding.option = "secret"
+    data.Secret = uci_helper.get_from_uci(binding)
+
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_.get = {
+    AuthServer = function(mapping, param, key)
+        binding.sectionname = "radauth"
+        binding.option = "server"
+        local value = uci_helper.get_from_uci(binding)
+        if type(value) == "table" then
+            return table.concat(value, ",")
+        end
+        return ""
+    end,
+    AcctServer = function(mapping, param, key)
+        binding.sectionname = "radacct"
+        binding.option = "server"
+        local value = uci_helper.get_from_uci(binding)
+        if type(value) == "table" then
+            return table.concat(value, ",")
+        end
+        return ""
+    end,
+    Secret = function(mapping, param, key)
+        binding.sectionname = "radacct"
+        binding.option = "secret"
+        return uci_helper.get_from_uci(binding)
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_.set = {
+    AuthServer = function(mapping, param, value, key)
+        binding.sectionname = "radauth"
+        binding.option = "server"
+        local tvalue = {}
+        for v in string.gmatch(value, "[^,%s]+") do
+            if string.find(v, "%.") then
+                tvalue[#tvalue + 1] = v
+            end
+        end
+        if #tvalue > 0 then
+            uci_helper.set_on_uci(binding, tvalue, commitapply)
+            transactions[binding.config] = true
+        else
+            return nil, "The parmeter value is illegal."
+        end
+    end,
+    AcctServer = function(mapping, param, value, key)
+        binding.sectionname = "radacct"
+        binding.option = "server"
+        local tvalue = {}
+        for v in string.gmatch(value, "[^,%s]+") do
+            if string.find(v, "%.") then
+                tvalue[#tvalue + 1] = v
+            end
+        end
+        if #tvalue > 0 then
+            uci_helper.set_on_uci(binding, tvalue, commitapply)
+            transactions[binding.config] = true
+        else
+            return nil, "The parmeter value is illegal."
+        end
+    end,
+    Secret = function(mapping, param, value, key)
+        binding.sectionname = "radacct"
+        binding.option = "secret"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_.commit = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_.revert = function()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_RADIUS_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

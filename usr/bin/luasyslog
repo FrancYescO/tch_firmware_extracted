@@ -1,0 +1,75 @@
+#!/usr/bin/env lua
+
+-- ************* COPYRIGHT AND CONFIDENTIALITY INFORMATION **********************
+-- **                                                                          **
+-- ** Copyright (c) 2015 Technicolor                                           **
+-- ** All Rights Reserved                                                      **
+-- **                                                                          **
+-- ** This program contains proprietary information which is a trade           **
+-- ** secret of TECHNICOLOR and/or its affiliates and also is protected as     **
+-- ** an unpublished work under applicable Copyright laws. Recipient is        **
+-- ** to retain this program in confidence and is not permitted to use or      **
+-- ** make copies thereof other than as permitted in a written agreement       **
+-- ** with TECHNICOLOR, UNLESS OTHERWISE EXPRESSLY ALLOWED BY APPLICABLE LAWS. **
+-- **                                                                          **
+-- ******************************************************************************
+
+
+
+local lsl = require("luasyslog")
+local signal = require("signal").signal
+local buffers = lsl.buffer_uci_get("system","buffer")
+
+local buffer = {
+  tmpfs = "/tmp",
+  logdir = "log",
+  logname = buffers.logname,
+  size = buffers.size,
+}
+local sync_buffer_file = "luasyslog.sync"
+
+local args = {...}
+local f
+local input = args[1]
+if input then
+  f = assert(io.open(input, "r"))
+else
+  f = io.stdin
+end
+f:setvbuf("no")
+
+local rules = lsl.parse_uci("system", "log")
+local res,timer_start,errmsg = lsl.init_logfiles(rules, buffer)
+local timeout = buffers.timeout
+
+local function cleanup()
+   lsl.sync_buffer_ifstop(rules, buffer)
+   lsl.close_logfiles(rules)
+   if buffer.size ~= nil and buffer.size ~= 0 and buffer.fd ~= nil and buffer.fd ~= 0 then
+       buffer.fd:close()
+       local tmpBuffer = string.format("%s/%s/%s", buffer.tmpfs, buffer.logdir, buffer.logname)
+       os.remove(tmpBuffer)
+   end
+   os.exit(0)
+end
+
+signal("SIGTERM", function() cleanup() end)
+signal("SIGINT", function() cleanup() end)
+
+if res and timer_start then
+   for s in f:lines() do
+       local timer_update = lsl.handle_message(s, rules, buffer,timer_start,timeout)
+       if timer_update ~= nil and timer_update ~=0 then
+           timer_start = timer_update
+       end
+       if buffer.size ~= nil and buffer.size ~= 0 then
+         local timer_update2 = lsl.sync_buffer_ifneed(string.format("%s/%s/%s", buffer.tmpfs, buffer.logdir, sync_buffer_file),rules, buffer)
+         if timer_update2 ~= nil and timer_update2 ~=0 then
+             timer_start = timer_update2
+         end
+       end
+   end
+else
+   print(errmsg)
+end
+cleanup()

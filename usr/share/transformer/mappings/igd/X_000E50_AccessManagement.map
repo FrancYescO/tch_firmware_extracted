@@ -1,0 +1,233 @@
+local InternetGatewayDevice_X_000E50_AccessManagement_= {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_AccessManagement.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  },
+}
+
+register(InternetGatewayDevice_X_000E50_AccessManagement_)
+
+local InternetGatewayDevice_X_000E50_AccessManagement_SSH_= {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_AccessManagement.SSH.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+  },
+}
+
+register(InternetGatewayDevice_X_000E50_AccessManagement_SSH_)
+
+local InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_= {
+  objectType = {
+    name = "InternetGatewayDevice.Services.X_000E50_AccessManagement.SSH.CliUsers.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Parameters to configure Clash/CLI users via the ACS",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/disable SSH access",
+      },
+      Username = {
+        access = "readOnly",
+        type = "string",
+        description = "Username for SSH access",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        description = "Password for SSH access",
+      },
+      Access = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "LAN",
+          "WAN",
+          "ANY",
+          "NONE",
+        },
+        description = "Specifies via which interface SSH access will be allowed",
+      },
+      RebootPersistent = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Specifies whether to retain non-default SSH settings after reboot",
+      },
+    },
+  },
+}
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+local mapper = mapper
+local common = mapper('nwcommon')
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local password = require("transformer.shared.setClashPassword")
+local uciDefaultsBinding = { config = "uci-defaults" }
+local clashBinding = { config = "clash" }
+local configChanged = false
+local lanIntf = {}
+local wanIntf = {}
+
+local lanInterfaces = common.findLanWanInterfaces(false)
+local wanInterfaces = common.findLanWanInterfaces(true)
+
+local optionMap = {
+  LAN = lanInterfaces,
+  WAN = wanInterfaces,
+}
+
+local function getUciValue(key, option, default)
+  clashBinding.sectionname = key
+  clashBinding.option = option
+  clashBinding.default = default
+  return getFromUci(clashBinding)
+end
+
+local function setUciValue(key, option, value)
+  local binding = { config = clashBinding.config }
+  binding.sectionname = key
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  configChanged = true
+end
+
+local function setDefaultPassword(user)
+  uciDefaultsBinding.sectionname = user
+  uciDefaultsBinding.option = "hash_pwd"
+  local passw = getFromUci(uciDefaultsBinding)
+  if passw ~= "" then
+    password.setCryptedPassword(user, passw)
+  end
+end
+
+local function setDefaults()
+  clashBinding.sectionname = "user"
+  forEachOnUci(clashBinding, function(s)
+    if s.persist_ssh_on_reboot == "0" then
+      setUciValue(s['.name'], "ssh", "0")
+      setUciValue(s['.name'], "ssh_interface", "")
+      setDefaultPassword(s['.name'])
+    end
+  end)
+  uciHelper.commit(clashBinding)
+end
+
+local function listToLookUp()
+  for _, v in ipairs(lanInterfaces) do
+    lanIntf[v] = true
+  end
+  for _, n in ipairs(wanInterfaces) do
+    wanIntf[n] = true
+  end
+end
+
+setDefaults()
+listToLookUp()
+
+local function sshIntfCheck(key)
+  local access = getUciValue(key, "ssh_interface", {})
+  for _, intf in ipairs(access) do
+    if lanIntf[intf] or wanIntf[intf] then
+      return true
+    end
+  end
+  return false
+end
+
+InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_.entries = function(mapping)
+  local entries = {}
+  clashBinding.sectionname = "user"
+  forEachOnUci(clashBinding, function(s)
+    entries[#entries + 1] = s['.name']
+  end)
+  return entries
+end
+
+InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_.get = {
+  Enable = function(mapping, param, key)
+    local sshAccess = getUciValue(key, "ssh", "")
+    if sshAccess ~= "" then
+      return sshAccess
+    elseif sshIntfCheck(key) then
+      return "1"
+    end
+    return "0"
+  end,
+  Username = function(mapping, param, key)
+    return key
+  end,
+  Password = "",
+  Access = function(mapping, param, key)
+    local sshAccess = getUciValue(key, "ssh")
+    if sshAccess == "" then
+      local access = getUciValue(key, "ssh_interface", {})
+      for _, v in ipairs(access) do
+        if lanIntf[v] then
+          return "LAN"
+        elseif wanIntf[v] then
+          return "WAN"
+        else
+          return "NONE"
+        end
+      end
+    else
+      return sshAccess == "1" and "ANY" or "NONE"
+    end
+  end,
+  RebootPersistent = function(mapping, param, key)
+    return getUciValue(key, "persist_ssh_on_reboot", "1")
+  end
+}
+
+InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_.set = {
+  Enable = function(mapping, param, value, key)
+    setUciValue(key, "ssh", value)
+  end,
+  Password = function(mapping, param, value, key)
+    return password.setPassword(key, value)
+  end,
+  Access = function(mapping, param, value, key)
+    if value == "ANY" then
+      setUciValue(key, "ssh", "1")
+    elseif value == "NONE" then
+      setUciValue(key, "ssh", "0")
+    else
+      setUciValue(key, "ssh_interface", optionMap[value])
+      setUciValue(key, "ssh", "")
+    end
+  end,
+  RebootPersistent = function(mapping, param, value, key)
+    setUciValue(key, "persist_ssh_on_reboot", value)
+  end
+}
+
+InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(clashBinding)
+  end
+  configChanged = false
+end
+
+InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(clashBinding)
+  end
+  configChanged = false
+end
+
+register(InternetGatewayDevice_X_000E50_AccessManagement_SSH_CliUsers_i_)

@@ -1,0 +1,613 @@
+local uci_helper = mapper("ucihelper")
+local transactions = {}
+local binding = { config = "hotspotd" }
+local wifi_binding = { config = "wireless" }
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local isBandSteerEnabledByIface = bandSteerHelper.isBandSteerEnabledByIface
+local setBandSteerPeerIfaceSSIDValue = bandSteerHelper.setBandSteerPeerIfaceSSIDValue
+local getBandSteerPeerIface = bandSteerHelper.getBandSteerPeerIface
+
+local function getAPForIface(iface)
+    local ap
+    -- iterate over the access points and take the first one that has the corresponding interface as its iface.
+    -- assumes there is only one of those
+    local binding = {config="wireless",sectionname="wifi-ap"}
+    uci_helper.foreach_on_uci(binding, function(s)
+        if(s["iface"]== iface) then
+            ap = s[".name"]
+            return false
+        end
+    end)
+    return ap
+end
+
+local function profile_commit()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.commit(binding)
+    end
+    transactions = {}
+end
+
+local function profile_revert()
+    local binding = {}
+    for config in pairs(transactions) do
+        binding.config = config
+        uci_helper.revert(binding)
+    end
+    transactions = {}
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "ProfileNumberOfEntries",
+        parameters = {
+            -- Configuration paramters
+            Key  = {
+                access = "readWrite",
+                type = "string",
+                max = "255",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_.entries = function(mapping, parentkey)
+    local entries = {}
+    entries[1] = "TLS"
+    entries[2] = "FON"
+    return entries
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_.get = {
+    Key = function(mapping, param, key)
+        -- Not to be used phase1
+        return ""
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_.set = {
+    Key = function(mapping, param, value, key)
+        -- Not to be used phase1
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_.revert = profile_revert
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.CaptivePortal.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            URL = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            IntegritySecret = {
+                access = "readWrite",
+                type = "string",
+                max = "255",
+            },
+            TemporalCredential = {
+                access = "readWrite",
+                type = "string",
+                max = "255",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_.getall = function(mapping, key)
+    local data = {
+        URL = "",
+        IntegritySecret = "",
+        TemporalCredential = "",
+    }
+    binding.sectionname = "redirect"
+    local v = uci_helper.getall_from_uci(binding)
+    data.URL = v.url or ""
+    binding.sectionname = "portal"
+    local v = uci_helper.getall_from_uci(binding)
+    data.IntegritySecret = v.secret or ""
+
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_.get = {
+    URL = function(mapping, param, key)
+        binding.sectionname = "redirect"
+        binding.option = "url"
+        return uci_helper.get_from_uci(binding)
+    end,
+    IntegritySecret = function(mapping, param, key)
+        binding.sectionname = "portal"
+        binding.option = "secret"
+        return uci_helper.get_from_uci(binding)
+    end,
+    TemporalCredential = function(mapping, param, key)
+        -- Avaliable on Sprint36
+        return ""
+    end,
+
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_.set = {
+    URL = function(mapping, param, value, key)
+        binding.sectionname = "redirect"
+        binding.option = "url"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    IntegritySecret = function(mapping, param, value, key)
+        binding.sectionname = "portal"
+        binding.option = "secret"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    TemporalCredential = function(mapping, param, value, key)
+        -- return nil, "Avaliable on Sprint36"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_CaptivePortal_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.EAP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Mode = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            Server = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            Secret = {
+                access = "readWrite",
+                type = "string",
+                max = "255",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_.getall = function(mapping, key)
+    local data = {
+        Mode = "",
+        Server = "",
+        Secret = "",
+    }
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_.get = {
+    Mode = function(mapping, param, key)
+        -- Avaliable on Sprint36
+        return ""
+    end,
+    Server = function(mapping, param, key)
+        -- Not to be used phase1
+        return ""
+    end,
+    Secret = function(mapping, param, key)
+        -- Not to be used phase1
+        return ""
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_.set = {
+    Mode = function(mapping, param, value, key)
+        return nil, "Avaliable on Sprint36"
+    end,
+    Server = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+    Secret = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_EAP_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.2G.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            SSID = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            MaxAssocUsers = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "3",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_.getall = function(mapping, key)
+    local data = {
+        Enable = "0",
+        SSID = "TELSTRA",
+        MaxAssocUsers = "3",
+    }
+        binding.sectionname = key .. "2G"
+        binding.option = "enable"
+        data.Enable = uci_helper.get_from_uci(binding)
+
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        wifi_binding.sectionname = ifname
+        wifi_binding.option = "ssid"
+        data.SSID = uci_helper.get_from_uci(wifi_binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+          wifi_binding.sectionname = ap
+          wifi_binding.option = "max_assoc"
+          data.MaxAssocUsers = uci_helper.get_from_uci(wifi_binding)
+        end
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_.get = {
+    Enable = function(mapping, param, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "enable"
+        return uci_helper.get_from_uci(binding)
+    end,
+    SSID = function(mapping, param, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        wifi_binding.sectionname = ifname
+        wifi_binding.option = "ssid"
+        return uci_helper.get_from_uci(wifi_binding)
+    end,
+    MaxAssocUsers = function(mapping, param, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+          wifi_binding.sectionname = ap
+          wifi_binding.option = "max_assoc"
+          return uci_helper.get_from_uci(wifi_binding)
+        end
+        return "3"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_.set = {
+    Enable = function(mapping, param, value, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "enable"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    SSID = function(mapping, param, value, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        wifi_binding.sectionname = ifname
+
+        --To get the bandsteer info and if the bandsteer enabled, if enabled, the ssid of 5G SSID should be modified
+        local ifname = uci_helper.get_from_uci(binding)
+        if isBandSteerEnabledByIface(ifname) then
+            local peerIface, errmsg = getBandSteerPeerIface(ifname)
+            if not peerIface then
+                return nil, errmsg
+            end
+
+            setBandSteerPeerIfaceSSIDValue(peerIface, value)
+        end
+
+        wifi_binding.option = "ssid"
+        uci_helper.set_on_uci(wifi_binding, value, commitapply)
+        transactions[wifi_binding.config] = true
+    end,
+    MaxAssocUsers = function(mapping, param, value, key)
+        binding.sectionname = key .. "2G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+            wifi_binding.sectionname = ap
+            wifi_binding.option = "max_assoc"
+            uci_helper.set_on_uci(wifi_binding, value, commitapply)
+            transactions[wifi_binding.config] = true
+        else
+            return nil, "Not supported"
+        end
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.2G.EAP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            SSID = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_.getall = function(mapping, key)
+    local data = {
+        Enable = "0",
+        SSID = "",
+    }
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_.get = {
+    Enable = function(mapping, param, key)
+        -- Not to be used phase1
+        return "0"
+    end,
+    SSID = function(mapping, param, key)
+        -- Not to be used phase1
+        return ""
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_.set = {
+    Enable = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+    SSID = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_2G_EAP_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.5G.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            SSID = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            MaxAssocUsers = {
+                access = "readWrite",
+                type = "unsignedInt",
+                default = "3",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_.getall = function(mapping, key)
+    local data = {
+        Enable = "0",
+        SSID = "",
+        MaxAssocUsers = "3",
+    }
+        binding.sectionname = key .. "5G"
+        binding.option = "enable"
+        data.Enable = uci_helper.get_from_uci(binding)
+
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        wifi_binding.sectionname = ifname
+        wifi_binding.option = "ssid"
+        data.SSID = uci_helper.get_from_uci(wifi_binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+          wifi_binding.sectionname = ap
+          wifi_binding.option = "max_assoc"
+          data.MaxAssocUsers = uci_helper.get_from_uci(wifi_binding)
+        end
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_.get = {
+    Enable = function(mapping, param, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "enable"
+        return uci_helper.get_from_uci(binding)
+    end,
+    SSID = function(mapping, param, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        wifi_binding.sectionname = ifname
+        wifi_binding.option = "ssid"
+        return uci_helper.get_from_uci(wifi_binding)
+    end,
+    MaxAssocUsers = function(mapping, param, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+          wifi_binding.sectionname = ap
+          wifi_binding.option = "max_assoc"
+          return uci_helper.get_from_uci(wifi_binding)
+        end
+        return "3"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_.set = {
+    Enable = function(mapping, param, value, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "enable"
+        uci_helper.set_on_uci(binding, value, commitapply)
+        transactions[binding.config] = true
+    end,
+    SSID = function(mapping, param, value, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "iface"
+        local ifname = uci_helper.get_from_uci(binding)
+        if isBandSteerEnabledByIface(ifname) then
+            return nil, "Can not modify the value when band steer enabled."
+        end
+
+        wifi_binding.sectionname = ifname
+        wifi_binding.option = "ssid"
+        uci_helper.set_on_uci(wifi_binding, value, commitapply)
+        transactions[wifi_binding.config] = true
+    end,
+    MaxAssocUsers = function(mapping, param, value, key)
+        binding.sectionname = key .. "5G"
+        binding.option = "iface"
+        local ifname =  uci_helper.get_from_uci(binding)
+        local ap = getAPForIface(ifname)
+        if ap then
+            wifi_binding.sectionname = ap
+            wifi_binding.option = "max_assoc"
+            uci_helper.set_on_uci(wifi_binding, value, commitapply)
+            transactions[wifi_binding.config] = true
+        else
+            return nil, "Not supported"
+        end
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.Profile.{i}.5G.EAP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Configuration paramters
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "0",
+            },
+            SSID = {
+                access = "readWrite",
+                type = "string",
+                max = "128",
+            },
+            -- End of Configuration paramters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_.getall = function(mapping, key)
+    local data = {
+        Enable = "0",
+        SSID = "",
+    }
+    return data
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_.get = {
+    Enable = function(mapping, param, key)
+        -- Not to be used phase1
+        return "0"
+    end,
+    SSID = function(mapping, param, key)
+        -- Not to be used phase1
+        return ""
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_.set = {
+    Enable = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+    SSID = function(mapping, param, value, key)
+        return nil, "Not to be used phase1"
+    end,
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_.commit = profile_commit
+Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_.revert = profile_revert
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_Profile_i_5G_EAP_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

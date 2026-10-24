@@ -1,0 +1,96 @@
+local open = io.open
+local string = string
+local register = register
+local uciHelper = mapper('ucihelper')
+
+local sys_log_ = {
+    objectType = {
+        name = "sys.log.{i}.",
+        access = "readWrite",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            devicelog = {
+                access = "readOnly",
+                type = "string"
+            },
+        },
+    }
+}
+
+local get_from_uci = uciHelper.get_from_uci
+local log_file = get_from_uci({ config = "system", sectionname = "@system[0]", option = "log_filter_file", extended = true })
+log_file = log_file ~= "" and log_file or "/var/log/filt_msg"
+
+local deviceLog = function()
+    local log = open(log_file)
+    if not log then
+        return ""
+    end
+    local logString = log:read("*a")
+    log:close()
+    return logString or ""
+end
+
+sys_log_.entries = function()
+  local entries = {}
+  local cache = {}
+  local log = open(log_file)
+  if log then
+    local counter = 1
+    while(true) do
+      local line = log:read("*line")
+      if not line then
+        break
+      end
+      if not cache[line] then
+        entries[#entries+1] = counter .."|"..line
+        cache[line] = true
+        counter = counter + 1
+      end
+    end
+    log:close()
+  end
+  return entries
+end
+
+sys_log_.add = function()
+  --do nothing
+end
+
+sys_log_.delete = function( _ , key )
+  key = key:match("|(.*)$")
+  local log = open(log_file)
+  local line = ""
+  local out = ""
+  local matched = false
+  if log then
+   while(true) do
+     line = log:read("*line")
+     if not line then
+        break
+     end
+     if line ~= key or matched then
+       out = out .. line .. "\n"
+     else
+       matched = true
+     end
+   end
+   log:close()
+  end
+
+  local log = open(log_file, "w")
+  if log then
+    log:write(out)
+    log:close()
+  end
+  return true
+end
+
+sys_log_.get = function(mapping, param, key)
+  return key
+end
+
+sys_log_.set = deleteLog
+
+register(sys_log_)

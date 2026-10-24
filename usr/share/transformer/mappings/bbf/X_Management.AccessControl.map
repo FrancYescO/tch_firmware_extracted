@@ -1,0 +1,224 @@
+local Multi_X_Management_AccessControl_ = {
+  objectType = {
+    name = "#ROOT.X_Management.AccessControl.",
+    access = "readOnly",
+    description = "AccessControl Parameters",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Status = {
+        access = "readOnly",
+        type = "string",
+        description = "Shows status of access control",
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enables/Disables access control from trust network on CPE",
+      },
+      TR069Status = {
+        access = "readOnly",
+        type = "string",
+        description = "Shows tr069 access control from trust network status",
+      },
+      TR069Mode = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "wan",
+          "lan",
+          "any",
+          "none"
+        },
+        description = "Shows tr069 access control mode",
+      },
+      ICMPStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Shows ICMP access control from trust network status",
+      },
+      ICMPMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "wan",
+          "lan",
+          "any",
+          "none"
+        },
+        description = "Shows ICMP access control mode",
+      },
+      HTTPStatus = {
+        access = "readOnly",
+        type = "string",
+        description = "Shows HTTP access control from trust network status",
+      },
+      HTTPMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "wan",
+          "lan",
+          "any",
+          "none"
+        },
+        description = "Shows HTTP access control mode",
+      },
+      SSHMode = {
+        access = "readWrite",
+        type = "string",
+         enumeration = {
+          "wan",
+          "lan",
+          "any",
+          "none"
+        },
+        description = "Shows SSH access control mode",
+      },
+    },
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local firewallBinding = { config = "firewall" }
+local commitapply = commitapply
+local cwmpdBinding = { config = "cwmpd", sectionname = "cwmpd_config" }
+local configChanged
+
+local nameMap = {
+  ["HTTPMode"] = { ["Allow-HTTP-Vodafone-lan"] = true, ["Allow-HTTP-Vodafone-wan"] = true },
+  ["ICMPMode"] = { ["Allow-Ping-Vodafone-wan"] = true, ["Allow-Ping-Vodafone-lan"] = true, ["Allow-Ping-Vodafone-wan-Trusted"] = true  },
+  ["Enable"]   = { ["Allow-SSH-Vodafone-wan"] = true, ["Allow-Ping-Vodafone-wan-Trusted"] = true, ["Allow-HTTPS-Vodafone-wan"] = true, ["Allow-HTTP-Vodafone-wan"] = true },
+  ["SSHMode"]  = { ["Allow-SSH-Vodafone-wan"] = true, ["Allow-SSH-Vodafone-lan"] = true }
+}
+
+--- Returns whether access control is enabled/disabled
+-- @function getEnable
+-- @return enable "1" if enabled or "0"
+local function getEnable()
+  local enable = "0"
+  firewallBinding.sectionname = "rule"
+  uciHelper.foreach_on_uci(firewallBinding, function(s)
+    if nameMap["Enable"][s.name] and s.ipset then
+      enable = "1"
+      return false
+    end
+  end)
+  return enable
+end
+
+--- Returns ICMPMode or HTTPMode value based on the param
+-- @function getMode
+-- @param the parameter name
+-- @return enumeration of "none,lan,wan,any"
+local function getMode(param)
+  local mode = {}
+  firewallBinding.sectionname = "rule"
+  uciHelper.foreach_on_uci(firewallBinding, function(s)
+    if s.src == "wan" or s.src == "lan" then
+      if nameMap[param][s.name] then
+        mode[s.src] = s.target == "ACCEPT" and true or false
+      end
+    end
+  end)
+  if mode.lan and mode.wan then
+    return "any"
+  elseif mode.lan and not mode.wan then
+    return "lan"
+  elseif mode.wan and not mode.lan then
+    return "wan"
+  end
+  return "none"
+end
+
+--- To enable/disable access control
+-- @function setEnable
+-- @param value the value to be set for Enable
+local function setEnable(mapping, param, value)
+  value = value == "1" and "trusted_network" or ""
+  firewallBinding.sectionname = "rule"
+  local binding = { config = "firewall", option = "ipset" }
+  uciHelper.foreach_on_uci(firewallBinding, function(s)
+    if nameMap[param][s.name] then
+      binding.sectionname = s[".name"]
+      uciHelper.set_on_uci(binding, value, commitapply)
+      configChanged = true
+    end
+  end)
+end
+
+--- To set HTTPMode or ICMPMode based on the param
+-- @function setMode
+-- @param param the parameter name
+-- @param value the value to be set for the parameter
+local function setMode(mapping, param, value)
+  firewallBinding.sectionname = "rule"
+  local binding = { config = "firewall", option = "target" }
+  uciHelper.foreach_on_uci(firewallBinding, function(s)
+    if nameMap[param][s.name] then
+      binding.sectionname = s[".name"]
+      if value == "any" or value == s.src then
+        uciHelper.set_on_uci(binding, "ACCEPT", commitapply)
+      else
+        uciHelper.set_on_uci(binding, "DROP", commitapply)
+      end
+      configChanged = true
+    end
+  end)
+end
+
+Multi_X_Management_AccessControl_.get = {
+  Enable = function(mapping, param)
+    return getEnable()
+  end,
+  Status = function(mapping, param)
+    return getEnable() == "1" and "Enabled" or "Disabled"
+  end,
+  TR069Status = function(mapping, param)
+    cwmpdBinding.option = "state"
+    local status = uciHelper.get_from_uci(cwmpdBinding)
+    return status == "1" and "On" or "Offline"
+  end,
+  TR069Mode = function(mapping, param)
+    cwmpdBinding.option = "interface"
+    return uciHelper.get_from_uci(cwmpdBinding)
+  end,
+  ICMPStatus = "On",
+  ICMPMode = function(mapping, param)
+    return getMode(param)
+  end,
+  HTTPStatus = "On",
+  HTTPMode = function(mapping, param)
+    return getMode(param)
+  end,
+  SSHMode = function(mapping, param)
+    return getMode(param)
+  end,
+}
+
+Multi_X_Management_AccessControl_.set = {
+  Enable = setEnable,
+  ICMPMode = setMode,
+  HTTPMode = setMode,
+  SSHMode = setMode
+}
+
+Multi_X_Management_AccessControl_.commit = function()
+  if configChanged then
+    uciHelper.commit(firewallBinding)
+  end
+  configChanged = false
+end
+
+Multi_X_Management_AccessControl_.revert = function()
+  if configChanged then
+    uciHelper.revert(firewallBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_Management_AccessControl_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, dupli in ipairs(duplicates) do
+  register (dupli)
+end

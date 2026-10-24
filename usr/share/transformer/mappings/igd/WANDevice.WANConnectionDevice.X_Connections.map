@@ -1,0 +1,152 @@
+-- Manually generated
+local WANDevice_WANConnectionDevice_X_Connections_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.X_Connections.",
+    access = "readOnly",
+    description = "Total number of connections for WAN Devices",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+
+register(WANDevice_WANConnectionDevice_X_Connections_)
+
+--Manually generated
+local WANDevice_WANConnectionDevice_X_Connections_ConnectionTable_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.X_Connections.ConnectionTable.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "ConnectionsNumberOfEntries",
+    description = "Parameters related to connection table entries for WAN Connected devices",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      SourceIP = {
+        access = "readOnly",
+        type = "string",
+        description = "Source IP of WAN connected devices",
+      },
+      DestIP = {
+        access = "readOnly",
+        type = "string",
+        description = "Destination IP of WAN connected devices",
+      },
+      SourcePort = {
+        access = "readOnly",
+        type = "string",
+        description = "Source Port connected to WAN connected devices",
+      },
+      DestPort = {
+        access = "readOnly",
+        type = "string",
+        description = "Destination Port connected to WAN connected devices",
+      },
+    },
+  }
+}
+
+local mapper, register = mapper, register
+local conn = mapper("ubus").connect()
+local string = string
+local networkBinding = { config = "network" }
+local common = mapper("nwcommon")
+local uciHelper = mapper("ucihelper")
+local wandevice = require("transformer.shared.models.igd.wandevice")
+
+local function getInterfaceName(parentKey)
+  local intfName = ""
+  local _, device = wandevice.getDevtypeAndName(parentKey)
+  networkBinding.sectionname = "interface"
+  uciHelper.foreach_on_uci(networkBinding, function(s)
+    if device and s.device == device then
+      intfName = s[".name"]
+      return false
+    end
+  end)
+  return intfName
+end
+
+local function getL3Device(parentKey)
+  local intfName = getInterfaceName(parentKey)
+  local intfData = conn:call("network.interface." .. intfName, "status", {}) or {}
+  return intfData.l3_device or ""
+end
+
+local function getIPv6InterfaceName(parentKey)
+  local intfName = ""
+  local l3DeviceName = getL3Device(parentKey)
+  networkBinding.sectionname = "interface"
+  uciHelper.foreach_on_uci(networkBinding, function(s)
+    if s.proto == "dhcpv6" and s.ifname == l3DeviceName then
+      intfName = s[".name"]
+      return false
+    end
+  end)
+  return intfName
+end
+
+local function getIPAddress(parentKey)
+  local interfaceName = getInterfaceName(parentKey)
+  local ipv6InterfaceName = getIPv6InterfaceName(parentKey)
+  local ubusIPv4Data = conn:call("network.interface." .. interfaceName , "status", {}) or {}
+  local ubusIPv6Data = conn:call("network.interface." .. ipv6InterfaceName , "status", {}) or {}
+  local ipv4Address = ubusIPv4Data["ipv4-address"] and ubusIPv4Data["ipv4-address"][1] and ubusIPv4Data["ipv4-address"][1]["address"]
+  local ipv6Prefix = ubusIPv6Data["ipv6-prefix"] and ubusIPv6Data["ipv6-prefix"][1] and ubusIPv6Data["ipv6-prefix"][1]["address"]
+  return ipv4Address, ipv6Prefix
+end
+
+WANDevice_WANConnectionDevice_X_Connections_ConnectionTable_.entries = function(mapping,parentKey)
+  local entries = {}
+  local wanIPv4Address = getIPAddress(parentKey)
+  local _, wanIPv6Prefix = getIPAddress(parentKey)
+  if wanIPv6Prefix then
+    wanIPv6Prefix = wanIPv6Prefix:gsub("([^%:]+)", function(value)
+      if string.len(value) < 4 then
+        value = string.rep("0", 4 - tonumber(string.len(value))) .. value
+        return value
+      end
+    end)
+    wanIPv6Prefix = wanIPv6Prefix:match("(.+):$")
+  end
+  local fd = io.open("/proc/net/nf_conntrack")
+  if fd then
+    for line in fd:lines() do
+      if line:match("^.*tcp.*ESTABLISHED") and ((wanIPv4Address and line:match(wanIPv4Address)) or (wanIPv6Prefix and line:match(wanIPv6Prefix))) then
+        local srcIP, dstIP, sPort, dPort = line:match("^.*ESTABLISHED%ssrc=(%S+)%sdst=(%S+)%ssport=(%S+)%sdport=(%S+)")
+        if srcIP and dstIP and sPort and dPort then
+          line = string.format("%s|%s|%s|%s|%s", srcIP, dstIP, sPort, dPort, parentKey)
+          entries[#entries + 1] = line
+        end
+      end
+    end
+    fd:close()
+  end
+  return entries
+end
+
+local function getConnTable(key)
+  local srcIP, dstIP, sPort, dPort = key:match("(.*)|(.*)|(.*)|(.*)|.*|.*")
+  return srcIP, dstIP, sPort, dPort
+end
+
+WANDevice_WANConnectionDevice_X_Connections_ConnectionTable_.get = {
+  SourceIP = function(mapping, param, key)
+   return getConnTable(key) or ""
+  end,
+  DestIP = function(mapping, param, key)
+   local _, dstIP = getConnTable(key)
+   return dstIP  or ""
+  end,
+  SourcePort = function(mapping, param, key)
+   local _, _, srcPort = getConnTable(key)
+   return srcPort  or ""
+  end,
+  DestPort = function(mapping, param, key)
+   local _, _, _, dstPort = getConnTable(key)
+   return dstPort or ""
+  end,
+}
+
+register(WANDevice_WANConnectionDevice_X_Connections_ConnectionTable_)

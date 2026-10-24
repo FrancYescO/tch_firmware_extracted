@@ -1,0 +1,402 @@
+---------------------------------------------------------------------
+-- InternetGatewayDevice.X_000E50_Cellular.Interface.{i}.X_000E50_Upgrade.
+-- Device.Cellular.Interface.{i}.X_000E50_Upgrade.
+---------------------------------------------------------------------
+local obj = {
+  objectType = {
+    name = "#ROOT.{i}.X_000E50_Upgrade.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Path = {
+        access = "readWrite",
+        type = "string",
+      },
+      Status = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "OnHold",
+          "Ongoing",
+          "Error",
+          "Completed",
+        },
+      },
+      ErrorCode = {
+        access = "readOnly",
+        type = "string",
+      }
+    }
+  }
+}
+
+---------------------------------------------------------------------
+-- Local Variables
+---------------------------------------------------------------------
+local posix = require("tch.posix")
+local socket = require("socket")
+local uci = require('uci')
+local logger = require("transformer.logger")
+local log = logger.new("upgrade_test", 4)
+local mapper, pairs, ipairs = mapper, pairs, ipairs
+local uci_helper = mapper("ucihelper")
+local ubus_connect = mapper("ubus").connect()
+local get_from_uci = uci_helper.get_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local commit = uci_helper.commit
+
+if not ubus_connect then
+  return
+end
+
+local statemachine
+local mobiled_upgrade = { status = "None", url = "", errortype = "", pid = 0}
+local binding = { config = "cwmp_transfer", sectionname = "upgrade", option = "Status" , default = "None"}
+
+-- get configuration
+mobiled_upgrade.status = get_from_uci(binding)
+binding.option="Path"
+mobiled_upgrade.url = get_from_uci(binding)
+if mobiled_upgrade.url == "None" then
+  mobiled_upgrade.url = ""
+end
+
+binding.option="ErrorCode"
+mobiled_upgrade.errortype = get_from_uci(binding)
+if mobiled_upgrade.errortype == "None" then
+  mobiled_upgrade.errortype = ""
+end
+
+-- possible reboot during mobiled upgrade
+if mobiled_upgrade.status == "Requested" or mobiled_upgrade.status == "Ongoing" then
+  mobiled_upgrade.status = "Error"
+  mobiled_upgrade.errortype = "upgrade interrupted"
+end
+
+---------------------------------------------------------------------
+-- Local Functions
+---------------------------------------------------------------------
+local function exec_statemachine(status, trigger)
+  local tmp = statemachine[status][trigger]
+  log:notice("exec_statemachine: status=" .. status .. ", trigger=" ..trigger)
+  if tmp ~= nil then
+    mobiled_upgrade.status = tmp.newstate
+    if tmp.newstate == "Error" and mobiled_upgrade.errortype == "" then
+      mobiled_upgrade.errortype = "internal error"
+    end
+    log:notice("exec_statemachine: newstate=" .. mobiled_upgrade.status)
+    if tmp.action == nil then
+      log:notice("exec_statemachine: action nil")
+    elseif type(tmp.action) == "function" then
+      log:notice("exec_statemachine: exec action")
+      tmp.action()
+    end
+  end
+end
+
+local function kill_process()
+  if mobiled_upgrade.pid > 0 then
+    mobiled_upgrade.pid = 0
+    os.execute("kill -9 " .. mobiled_upgrade.pid)
+    log:info("process killed " .. mobiled_upgrade.pid)
+  end
+end
+
+local function mobiled_status_save()
+  local binding = {config = "cwmp_transfer", sectionname = "upgrade"}
+
+  set_on_uci(binding, "mobiled", commitapply)
+  binding.option = "Status"
+  set_on_uci(binding, mobiled_upgrade.status, commitapply)
+  binding.option = "Path"
+  set_on_uci(binding, mobiled_upgrade.url, commitapply)
+  binding.option = "ErrorCode"
+  set_on_uci(binding, mobiled_upgrade.errortype, commitapply)
+  commit(binding)
+end
+
+local function pathexists(path)
+  local file = io.open(path, "rb")
+  if file then
+    file:close()
+    return true
+  end
+  return false
+end
+
+local function mobiled_status_requested_ready()
+  local pid = posix.fork()
+
+  if not pid then
+    mobiled_upgrade.status = "Error"
+    mobiled_upgrade.errortype = "internal error for fork"
+    mobiled_status_save()
+  elseif pid == 0 then -- pid 0 is the child process
+    local i = 0
+    local result
+
+    while true do
+      log:info("check mobiled ready : i1=" .. i)
+      if i >= 600 then -- timeout is 10m for mobiled ready
+        log:info("check mobiled ready: timeout 600s reached")
+        break
+      end
+      -- to check mobiled is ready , attentioned on latest branch
+      if pathexists("/var/state/mobiled") then
+        socket.sleep(180)
+        ubus_connect:send("mobiled_upgrade", { state = "mobiled_ready" })
+        log:info("mobiled_ready")
+	break
+      end
+      socket.sleep(5)
+      i = i + 5
+      log:info("check mobiled ready : i2=" .. i)
+    end
+    if i >= 600 then -- timeout is 10m for mobiled ready
+      ubus_connect:send("mobiled_upgrade", { state = "timeout" })
+      log:info("mobiled_ready timeout")
+    end
+    os.exit(0)
+  elseif pid > 0 then -- parent process
+    mobiled_upgrade.pid = tonumber(pid) -- get child pid in parent
+  end
+end
+
+
+local function mobiled_get_value(path)
+  local cursor = uci.cursor(nil, "/var/state")
+  local value = cursor:get(path)
+  cursor:close()
+  return value
+end
+
+local function mobiled_status_requested()
+  -- ubus call no response if upgrade is running, get uci status firstly
+  local status = mobiled_get_value("mobiled.firmware_upgrade.status")
+  if status == nil or status ~= "started" then
+    if mobiled_upgrade.url == "" then
+      mobiled_upgrade.errortype = "upgrade path null"
+      exec_statemachine(mobiled_upgrade.status, "failed")
+    else
+      --ubus call mobiled.device firmware_upgrade '{"path":"http://192.168.1.100:6666/fota_to_beta.zip"}'
+      --ubus call mobiled.device firmware_upgrade '{"path":"http://192.168.1.100:6666/to-EC25EFAR02A07M4G_BETA0529/from-<REVISION>.fw"}'
+      mobiled_upgrade.errortype = ""
+      ubus_connect:call("mobiled.device", "firmware_upgrade", {["path"]=mobiled_upgrade.url})
+    end
+  else
+    mobiled_upgrade.errortype = "upgrade already running"
+    mobiled_upgrade.status = "Error"
+  end
+  mobiled_status_save()
+end
+
+local function mobiled_status_clean()
+  kill_process()
+  mobiled_upgrade.status = "None"
+  mobiled_upgrade.url = ""
+  mobiled_upgrade.errortype = ""
+  mobiled_status_save()
+end
+
+local function mobiled_status_fwupgrade()
+  if mobiled_upgrade.url == "" then
+    mobiled_upgrade.errortype = "upgrade path null"
+    mobiled_upgrade.status = "Error"
+  else
+    mobiled_upgrade.errortype = ""
+  end
+  mobiled_status_save()
+end
+
+-- statemachine[status][trigger] = { newstate = "xx", action = yy }
+statemachine =
+{
+ -- None
+ None = {
+   fwupgrade = { newstate = "OnHold", action = mobiled_status_fwupgrade },
+   request = { newstate = "Requested", action = mobiled_status_requested },
+ },
+ -- OnHold
+ OnHold = {
+   upgrading = { newstate = "OnHold1", action = nil },
+   fw_upgrade_success = { newstate = "OnHold2", action = nil },
+   failed = { newstate = "Error", action = mobiled_status_save },
+   fw_upgrade_error = { newstate = "Error", action = mobiled_status_save },
+   clean = { newstate = "None", action = mobiled_status_clean },
+ },
+ --OnHold1
+ OnHold1 = {
+   flashing = { newstate = "OnHold1", action = nil },
+   failed = { newstate = "Error", action = mobiled_status_save },
+ },
+ --OnHold2
+ OnHold2 = {
+  inform_success = { newstate = "OnHold3", action = mobiled_status_requested_ready },
+ },
+ --OnHold3
+ OnHold3 = {
+   mobiled_ready = { newstate = "Requested", action = mobiled_status_requested },
+   timeout = { newstate = "Error", action = mobiled_status_save },
+ },
+ --Requested
+ Requested = {
+   start = { newstate = "Ongoing", action = nil },
+   failed = { newstate = "Error", action = mobiled_status_save },
+ },
+ --Ongoing
+ Ongoing = {
+   done = { newstate = "Completed", action = mobiled_status_save },
+   failed = { newstate = "Error", action = mobiled_status_save },
+ },
+ --Completed
+ Completed = {
+   request = { newstate = "Requested", action = mobiled_status_requested },
+   clean = { newstate = "None", action = mobiled_status_clean },
+   fwupgrade = { newstate = "OnHold", action = mobiled_status_fwupgrade },
+ },
+ --Error
+ Error = {
+   request = { newstate = "Requested", action = mobiled_status_requested },
+   clean = { newstate = "None", action = mobiled_status_clean },
+   fwupgrade = { newstate = "OnHold", action = mobiled_status_fwupgrade },
+ },
+}
+
+local function getall(mapping, key)
+  local result = {}
+  result.Path = mobiled_upgrade.url
+
+  if mobiled_upgrade.status == "OnHold1" or mobiled_upgrade.status == "OnHold2" or mobiled_upgrade.status == "OnHold3" then
+    result.Status = "OnHold"
+  else
+    result.Status = mobiled_upgrade.status
+  end
+  result.ErrorCode = mobiled_upgrade.errortype
+  return result
+end
+
+local function get(mapping, paramName, key)
+  return getall(mapping, key)[paramName]
+end
+
+obj.getall = getall
+obj.get = get
+
+obj.set = {
+  Path = function(mapping, paramname, paramvalue, key)
+    if mobiled_upgrade.status == "Ongoing" or mobiled_upgrade.status == "Requested" or mobiled_upgrade.status == "OnHold" then
+      return nil, "set url failed"
+    else
+      if mobiled_upgrade.url ~= paramvalue then
+        mobiled_upgrade.url = paramvalue
+        mobiled_upgrade.errortype = ""
+        mobiled_status_save()
+      end
+    end
+  end,
+  Status = function(mapping, paramname, paramvalue, key)
+    if (mobiled_upgrade.status == "None" or mobiled_upgrade.status == "Error" or mobiled_upgrade.status == "Completed") then
+      if paramvalue == "Requested" then
+        exec_statemachine(mobiled_upgrade.status, "request")
+      elseif paramvalue == "OnHold" then
+        exec_statemachine(mobiled_upgrade.status, "fwupgrade")
+      elseif paramvalue == "None" then
+        exec_statemachine(mobiled_upgrade.status, "clean")
+      end
+    elseif (mobiled_upgrade.status == "OnHold" and paramvalue == "None" ) then
+      exec_statemachine(mobiled_upgrade.status, "clean")
+    else
+      return nil, "set state failed"
+    end
+  end,
+}
+
+local function mobiled_event(mapping, event, msg)
+  local event = msg["event"]
+
+  -- firmware_upgrade_start / firmware_upgrade_failed / firmware_upgrade_done
+  if event then
+    log:info("mobiled_event: " .. event )
+    if event == "firmware_upgrade_start" then
+      exec_statemachine(mobiled_upgrade.status, "start")
+    elseif event == "firmware_upgrade_failed" then
+      -- WORKAROUND: file not cleared
+      os.execute(">/var/state/mobiled")
+      mobiled_upgrade.errortype = "firmware upgrade failed"
+      exec_statemachine(mobiled_upgrade.status, "failed")
+    elseif event == "firmware_upgrade_done" then
+      -- WORKAROUND: file not cleared
+      os.execute(">/var/state/mobiled")
+      exec_statemachine(mobiled_upgrade.status, "done")
+    end
+  end
+end
+
+local function fwupgrade_event(mapping, event, msg)
+  local state = msg["state"]
+
+  -- upgrading / flashing / failed
+  if state then
+    log:info("fwupgrade_event: " .. state)
+    if state == "upgrading" then
+      exec_statemachine(mobiled_upgrade.status, "upgrading")
+    elseif state == "failed" then
+      mobiled_upgrade.errortype = "dependancy for Remote FW upgrade"
+      exec_statemachine(mobiled_upgrade.status, "failed")
+    end
+  end
+end
+
+-- local event for internal process communication
+local function mobiled_upgrade_event(mapping, event, msg)
+  local state = msg["state"]
+
+  if state then
+    log:info("mobiled_upgrade_event: " .. state)
+    if state == "timeout" then
+      exec_statemachine(mobiled_upgrade.status, state)
+    elseif state == "mobiled_ready" then
+      exec_statemachine(mobiled_upgrade.status, state)
+    end
+  end
+end
+
+local function faultmgmt_event(mapping, event, msg)
+  local SUCCESS="Firmware upgrade success"
+  local source = msg["Source"]
+  local eventtype = msg["EventType"]
+  local cause = msg["ProbableCause"]
+
+  --"Firmware upgrade error" / "Firmware upgrade success" / "Inform success"
+  if source == "cwmpd" and eventtype == "ACS provisioning" then
+    local trigger = nil
+    log:info("faultmgmt_event: cause=" .. cause)
+    if cause == "Firmware upgrade success" then
+      trigger = "fw_upgrade_success"
+    elseif cause == "Firmware upgrade error" then
+      trigger = "fw_upgrade_error"
+    elseif cause == "Inform success" then
+      trigger = "inform_success"
+    end
+    if trigger ~= nil then
+      exec_statemachine(mobiled_upgrade.status, trigger)
+    end
+  end
+end
+
+obj.add_watchers = function(mapping)
+  local ubus_evsrc = eventsource("ubus")
+  ubus_evsrc.watch_event(mapping, mobiled_event, "mobiled")
+  ubus_evsrc.watch_event(mapping, fwupgrade_event, "fwupgrade")
+  ubus_evsrc.watch_event(mapping, faultmgmt_event, "FaultMgmt.Event")
+  ubus_evsrc.watch_event(mapping, mobiled_upgrade_event, "mobiled_upgrade")
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(obj, "#ROOT", {"InternetGatewayDevice.X_000E50_Cellular.Interface", "Device.Cellular.Interface"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

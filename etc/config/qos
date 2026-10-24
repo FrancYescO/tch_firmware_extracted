@@ -1,0 +1,361 @@
+#Vodafone label
+config label 'LOW_PRI'
+	option trafficid '3'
+
+config label 'MEDIUM_PRI_2'
+	option trafficid '7'
+
+config label 'MEDIUM_PRI_1'
+	option trafficid '9'
+
+config label 'Multicast'
+	option trafficid '9'
+
+config label 'MEDIUM_PRI_0'
+	option trafficid '11'
+
+config label 'HIGH_PRI'
+	option trafficid '15'
+
+config label 'IPTV'
+    option trafficid '11'
+    option dscp 'CS6'
+    option pcp '4'
+
+config label 'VoIP_traffic'
+    option dscp 'EF'
+    option trafficid '15'
+    option pcp '5'
+
+config rule 'rule_1'
+	option target 'VoIP_traffic'
+	list dscp 'EF'
+
+config rule 'rule_2'
+	option target 'IPTV'
+	option proto 'igmp'
+
+#Qos Class Definition (queue's)
+#TO_WAN
+config class 'W_Q0'
+	list trafficid '0'
+	list trafficid '1'
+	option priority '0'
+	option weight '3'
+
+config class 'W_Q1'
+	list trafficid '2'
+	list trafficid '3'
+	list trafficid '4'
+	option priority '1'
+	option weight '6'
+
+config class 'W_Q2'
+	list trafficid '5'
+	list trafficid '6'
+	option priority '2'
+	option weight '6'
+
+config class 'W_Q3'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '3'
+	option weight '10'
+
+config class 'W_Q4'
+	list trafficid '9'
+	list trafficid '10'
+	option priority '4'
+	option weight '10'
+
+config class 'W_Q5'
+	list trafficid '11'
+	list trafficid '12'
+	option priority '5'
+	option weight '15'
+
+config class 'W_Q6'
+	list trafficid '13'
+	list trafficid '14'
+	option priority '6'
+	option weight '20'
+
+config class 'W_Q7'
+	list trafficid '15'
+	option priority '7'
+	option weight '30'
+
+#TO_LAN
+config class 'L_Q0'
+	list trafficid '0'
+	list trafficid '1'
+	list trafficid '2'
+	list trafficid '3'
+	list trafficid '4'
+	option priority '0'
+
+config class 'L_Q1'
+	list trafficid '5'
+	list trafficid '6'
+	list trafficid '7'
+	list trafficid '8'
+	option priority '1'
+
+config class 'L_Q2'
+	list trafficid '9'
+	list trafficid '10'
+	list trafficid '11'
+	list trafficid '12'
+	option priority '2'
+
+config class 'L_Q3'
+	list trafficid '13'
+	list trafficid '14'
+	list trafficid '15'
+	option priority '3'
+
+#TO_WLAN
+config class 'WMM_BK_Q0'
+	list trafficid '3'
+	option priority '0'
+
+config class 'WMM_BK_Q1'
+	option priority '1'
+
+config class 'WMM_BE_Q0'
+	option priority '2'
+
+config class 'WMM_BE_Q1'
+	list trafficid '4'
+	list trafficid '9'
+	option priority '3'
+
+config class 'WMM_VI_Q0'
+	list trafficid '5'
+	option priority '4'
+
+config class 'WMM_VI_Q1'
+	list trafficid '6'
+	option priority '5'
+
+config class 'WMM_VO_Q0'
+	list trafficid '7'
+	option priority '6'
+
+config class 'WMM_VO_Q1'
+	list trafficid '8'
+	option priority '7'
+
+#Qos Classgroup Definition
+config classgroup 'TO_WAN'
+	option classes 'W_Q0 W_Q1 W_Q2 W_Q3 W_Q4 W_Q5 W_Q6 W_Q7'
+	option default 'W_Q0'
+	option policy 'sp_wrr'
+
+config classgroup 'TO_LAN'
+	option classes 'L_Q0 L_Q1 L_Q2 L_Q3'
+	option default 'L_Q0'
+	option policy 'sp'
+
+config classgroup 'TO_WLAN'
+	option classes 'WMM_BE_Q0 WMM_BK_Q0 WMM_BK_Q1 WMM_BE_Q1 WMM_VI_Q0 WMM_VI_Q1 WMM_VO_Q0 WMM_VO_Q1'
+	option default 'WMM_BE_Q0'
+	option policy 'sp'
+
+config interface 'lan'
+	option classgroup 'TO_LAN'
+
+config device 'wl0'
+	option classgroup 'TO_WLAN'
+
+config device 'eth5'
+	option classgroup 'TO_WLAN'
+
+config device 'atm_wan'
+    option classgroup 'TO_WAN'
+    option enable '1'
+
+config device 'vlanwan'
+    option enable '1'
+    option classgroup 'TO_WAN'
+    option pcp '0'
+    option force_pcp '0'
+
+config device 'vlanptm0'
+    option enable '1'
+    option classgroup 'TO_WAN'
+    option pcp '0'
+    option force_pcp '0'
+
+#ptm0 and eth4 share the same queueing configuration, 8 queues
+config device 'ptm0'
+    option classgroup 'TO_WAN'
+    option enable '1'
+
+config device 'eth4'
+    option classgroup 'TO_WAN'
+    option enable '1'
+
+#QoS classification rules ( IPv4 only)
+#IMPORTANT NOTE: Make sure that the order in which the rules are defined is from Lowest Priority to Highest Priority!
+
+#Vodafone specify QoS settings
+#WAN to WAN
+config rule 'rule_20'
+    option target 'MEDIUM_PRI_1'
+    option dstports '22'
+    option proto 'tcp'
+    list srcif 'loopback'
+
+config rule 'rule_21'
+    option target 'MEDIUM_PRI_1'
+    option dstports '80'
+    option proto 'tcp'
+    list srcif 'loopback'
+
+config rule 'rule_22'
+    option target 'MEDIUM_PRI_1'
+    option dstports '161'
+    option proto 'tcp'
+    list srcif 'loopback'
+
+config rule 'rule_23'
+    option target 'MEDIUM_PRI_1'
+    option dstports '443'
+    option proto 'tcp'
+    list srcif 'loopback'
+
+config rule 'rule_24'
+	option target 'MEDIUM_PRI_1'
+	option proto 'icmp'
+	list srcif 'loopback'
+
+config rule 'rule_25'
+	option target 'MEDIUM_PRI_1'
+	option dstports '53'
+	option proto 'udp'
+	list srcif 'loopback'
+
+config rule 'rule_26'
+	option target 'MEDIUM_PRI_0'
+	option proto 'igmp'
+
+config rule 'rule_27'
+	option target 'MEDIUM_PRI_0'
+	option dstports '8081'
+	option proto 'tcp'
+	list srcif 'loopback'
+
+config rule 'rule_28'
+	option target 'HIGH_PRI'
+	option dstports '5095'
+	option proto 'udp'
+	list srcif 'loopback'
+
+#LAN to WAN traffic
+config rule 'rule_29'
+	option target 'MEDIUM_PRI_1'
+	option dstports '53'
+	option proto 'udp'
+	list srcif 'lan'
+
+config rule 'rule_30'
+    option target 'MEDIUM_PRI_1'
+    option dstports '80'
+    option proto 'tcp'
+    list srcif 'lan'
+
+config rule 'rule_31'
+    option target 'MEDIUM_PRI_1'
+    option dstports '443'
+    option proto 'tcp'
+    list srcif 'lan'
+
+config rule 'rule_32'
+	option target 'MEDIUM_PRI_1'
+	option proto 'icmp'
+	list srcif 'lan'
+
+config rule 'rule_33'
+    option target 'MEDIUM_PRI_2'
+    option dstports '20'
+    option proto 'tcp'
+
+config rule 'rule_34'
+    option target 'MEDIUM_PRI_2'
+    option dstports '21'
+    option proto 'tcp'
+
+config rule 'rule_35'
+    option target 'MEDIUM_PRI_2'
+    option dstports '25'
+    option proto 'tcp'
+
+config rule 'rule_36'
+    option target 'MEDIUM_PRI_2'
+    option dstports '109'
+    option proto 'tcp'
+
+config rule 'rule_37'
+    option target 'MEDIUM_PRI_2'
+    option dstports '110'
+    option proto 'tcp'
+
+config rule 'rule_38'
+    option target 'MEDIUM_PRI_2'
+    option dstports '143'
+    option proto 'tcp'
+
+config rule 'rule_39'
+    option target 'MEDIUM_PRI_2'
+    option dstports '220'
+    option proto 'tcp'
+
+config rule 'rule_40'
+	option target 'MEDIUM_PRI_1'
+	option dstports '161'
+	option proto 'udp'
+
+
+config rule 'rule_41'
+	option target 'MEDIUM_PRI_2'
+	option proto 'esp'
+
+config rule 'rule_42'
+	option target 'MEDIUM_PRI_2'
+	option proto 'ah'
+
+#VPN's
+config rule 'rule_43'
+	option target 'MEDIUM_PRI_1'
+	option proto 'gre'
+
+# helper match requires reclassify
+config rule 'rule_44'
+	option target 'MEDIUM_PRI_1'
+	option helper 'rtsp'
+
+config rule 'rule_45'
+	option target 'MEDIUM_PRI_1'
+	option dstports '554'
+	option proto 'tcp'
+
+# helper match requires reclassify
+config rule 'rule_46'
+	option target 'HIGH_PRI'
+	option helper 'sip'
+
+config rule 'rule_47'
+	option target 'Multicast'
+	option dsthost '224.0.0.0/4'
+	option family 'ipv4'
+
+config rule 'rule_48'
+	option target 'Multicast'
+	option dsthost 'ff00::/8'
+    option family 'ipv6'
+
+config l2classify 'l2classify_1'
+    option target 'Multicast'
+    option dsthost 'ff00::/8'
+    option proto 'IPv6'

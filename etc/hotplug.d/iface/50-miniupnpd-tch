@@ -1,0 +1,69 @@
+#!/bin/sh
+
+/etc/init.d/miniupnpd-tch enabled || exit 0
+
+. /lib/functions/service.sh
+
+# If miniupnpd-tch is not running:
+# - check on _any_ event (even updates may contribute to network_find_wan*)
+
+# If miniupnpd-tch _is_ running:
+# - check only on ifup (otherwise lease updates etc would cause
+#   miniupnpd-tch state loss)
+
+[ ! "$ACTION" = "ifup" ] && (service_check /usr/sbin/miniupnpd-igdv1 || service_check /usr/sbin/miniupnpd-igdv2) && exit 0
+
+local RESTART
+local iface
+local ifname
+local tmpconf="/var/etc/miniupnpd-tch.conf"
+local extiface=$(uci get upnpd.config.external_iface)
+local extzone=$(uci get upnpd.config.external_zone)
+
+. /lib/functions/network.sh
+
+for iface in $(uci get upnpd.config.internal_iface); do
+    network_get_device device $iface
+    [ "$DEVICE" = "$device" ] && /etc/init.d/miniupnpd-tch restart && exit 0
+done
+
+
+if [ -z "$extiface" ] ; then
+  # manual external zone (if dynamically find interfaces
+  # belonging to it) overrides network_find_wan*
+  if [ -n "$extzone" ] ; then
+    ifname=$(fw3 -q zone $extzone | head -1)
+  fi
+  [ -n "$extiface" ] || network_find_wan extiface
+  [ -n "$extiface" ] || network_find_wan6 extiface
+fi
+
+[ -n "$ifname" ] || network_get_device ifname ${extiface}
+grep -q "ext_ifname=$ifname" $tmpconf || RESTART=1
+
+if [ "$RESTART" = 1 ] ; then
+  /etc/init.d/miniupnpd-tch restart
+  exit 0
+fi
+
+check_extiface() {
+    local cfg="$1"
+    local tmpconf="$2"
+    local extintf
+
+    config_get extintf "$cfg" external_iface
+    local extifname
+    network_get_device extifname ${extintf}
+
+    [ -z $extifname ] && return
+
+    grep "ext_iface_rule" $tmpconf | grep -q $extifname || RESTART=1
+
+    if [ "$RESTART" = 1 ] ; then
+        /etc/init.d/miniupnpd-tch restart
+        exit 0
+    fi
+}
+
+config_load "upnpd"
+config_foreach check_extiface extiface_rule "$tmpconf"
