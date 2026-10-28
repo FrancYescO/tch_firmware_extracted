@@ -1,0 +1,176 @@
+-- Manually generated
+local Multi_Services_X_000E50_MqttJson_ = {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_MqttJson.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "MQTT Client and Server Details",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Status of the MQTT Server",
+      },
+      TLS_Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "TLS Engine's Status of the MQTT Server",
+      },
+      Connection_URL = {
+        access = "readWrite",
+        type = "string",
+        description = "MQTT Client's Connection URL",
+      },
+      Connection_Port = {
+        access = "readWrite",
+        type = "string",
+        description = "MQTT Client's Connection Port",
+      },
+      UI_Version = {
+        access = "readWrite",
+        type = "string",
+        description = "MQTT Server's UI Version",
+      },
+      CustomerName = {
+        access = "readWrite",
+        type = "string",
+        description = "MQTT Server's Customer Name",
+      },
+      Backoff_MinWait_Value = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Minimum wait interval time used for the exponential backoff mechanism for retrying the Registration",
+      },
+      Backoff_Multiplier = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Multiplier value used for the exponential backoff mechanism for retrying the Registration",
+      },
+      Register = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Registration status of the Gateway with MQTT Client",
+      },
+    }
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper('ucihelper')
+local duplicator = mapper("multiroot").duplicate
+local mqttBinding = { config = "mqttjson_services" }
+local isConfigChanged = false
+
+local function getFromUci(section, option, default)
+  mqttBinding.sectionname = section
+  mqttBinding.option = option
+  mqttBinding.default = default
+  return uciHelper.get_from_uci(mqttBinding)
+end
+
+local function setOnUci(section, option, value)
+  mqttBinding.sectionname = section
+  mqttBinding.option = option
+  uciHelper.set_on_uci(mqttBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+Multi_Services_X_000E50_MqttJson_.get = {
+  Enabled = function()
+    return getFromUci("config", "enabled", "0")
+  end,
+
+  TLS_Enabled = function()
+    return getFromUci("config", "tls_enabled", "0")
+  end,
+
+  Connection_URL = function()
+    return getFromUci("config", "connection_url", "")
+  end,
+
+  Connection_Port = function()
+    return getFromUci("config", "connection_port", "")
+  end,
+
+  UI_Version = function()
+    return getFromUci("config", "ui_version", "")
+  end,
+
+  CustomerName = function()
+    return getFromUci("config", "customer_name", "")
+  end,
+
+  Backoff_MinWait_Value = function()
+    return getFromUci("config", "backoff_minwait", "5")
+  end,
+
+  Backoff_Multiplier = function()
+    return getFromUci("config", "backoff_multiplier", "2000")
+  end,
+
+  Register = function()
+    return getFromUci("config", "register", "0")
+  end
+}
+
+Multi_Services_X_000E50_MqttJson_.set = {
+  Enabled = function(mapping, param, value)
+    setOnUci("config", "enabled", value)
+  end,
+
+  TLS_Enabled = function(mapping, param, value)
+    setOnUci("config", "tls_enabled", value)
+  end,
+
+  Connection_URL = function(mapping, param, value)
+    setOnUci("config", "connection_url", value)
+  end,
+
+  Connection_Port = function(mapping, param, value)
+    setOnUci("config", "connection_port", value)
+  end,
+
+  UI_Version = function(mapping, param, value)
+    setOnUci("config", "ui_version", value)
+  end,
+
+  CustomerName = function(mapping, param, value)
+    setOnUci("config", "customer_name", value)
+  end,
+
+  Backoff_MinWait_Value = function(mapping, param, value)
+    if tonumber(value) > 0 then
+      setOnUci("config", "backoff_minwait", value)
+    else
+      return nil, "Invalid value"
+    end
+  end,
+
+  Backoff_Multiplier = function(mapping, param, value)
+    if tonumber(value) > 0 then
+      setOnUci("config", "backoff_multiplier", value)
+    else
+      return nil, "Invalid value"
+    end
+  end
+}
+
+Multi_Services_X_000E50_MqttJson_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(mqttBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_Services_X_000E50_MqttJson_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(mqttBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicates = duplicator(Multi_Services_X_000E50_MqttJson_, "#ROOT", { "InternetGatewayDevice", "Device" })
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

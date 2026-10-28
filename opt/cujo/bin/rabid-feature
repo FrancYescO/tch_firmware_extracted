@@ -1,0 +1,145 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+VERBOSE=${VERBOSE:-}
+if [ -n "$VERBOSE" ]; then
+    set -x
+fi
+
+CUJO_HOME=${CUJO_HOME:-}
+if [ -z "$CUJO_HOME" ]; then
+    # Emulate dirname with sed because not all platforms have dirname.
+    CUJO_HOME_BIN=$(echo "$0" | sed '
+    /\//! {
+            c .
+            p
+            q
+    }
+    s ^\(.*\)/[^/]\+$ \1 ')
+
+    CUJO_HOME="$(cd "$CUJO_HOME_BIN"/..; pwd)"
+fi
+export CUJO_HOME
+
+# shellcheck source=/dev/null
+. "$CUJO_HOME/bin/rabid-sh-env"
+
+FEATURES=" fingerprint safebro trackerblock traffic appblock "
+
+USAGE="Utility for controlling rabid features
+
+Usage:
+
+    ${0##*/} status
+        Show status of rabid and all of the supported features
+
+    ${0##*/} status <feature>
+        Show status of selected <feature>
+
+    ${0##*/} on <feature>
+    ${0##*/} off <feature>
+        Turn rabid <feature> on or off
+
+    Supported features are $FEATURES
+
+    ${0##*/} set <runtime-configs>
+        Restart Rabid with a new runtime configuration defined
+        by a comma-delimited list of keys or key=value pairs
+"
+
+usage_error_exit() {
+    error_message=$1
+    error_code=$2
+
+    echo "ERROR: $error_message"
+    echo
+    echo "$USAGE"
+
+    exit "$error_code"
+} >&2
+
+feature_state() {
+    feature=$1
+    "$CUJO_HOME/bin/rabidsh" -e "if (cujo.$feature.enable:get()) then return 'ON' else return 'OFF' end"
+}
+
+status() {
+    if [ "$#" -eq 0 ]; then
+        for feature in $FEATURES; do
+            state=$(feature_state "$feature")
+            echo "$feature is $state"
+        done
+    else
+        if [ "$#" -gt 1 ]; then
+            usage_error_exit "Too many arguments" 105
+        fi
+
+        feature=$1
+        if [ -n "${FEATURES##* $feature *}" ]; then
+            usage_error_exit "Unsupported feature" 104
+        fi
+
+        state=$(feature_state "$feature")
+        echo "$feature is $state"
+    fi
+}
+
+feature_onoff() {
+    if [ "$#" -lt 2 ]; then
+        usage_error_exit "Missing feature" 103
+    fi
+
+    if [ "$#" -gt 2 ]; then
+        usage_error_exit "Too many arguments" 105
+    fi
+
+    feature=$2
+    if [ -n "${FEATURES##* $feature *}" ]; then
+        usage_error_exit "Unsupported feature" 104
+    fi
+
+    turn_on="true"
+    if [ "$1" = "off" ]; then
+        turn_on="false"
+    fi
+
+    if "$CUJO_HOME/bin/rabidsh" -e "cujo.$feature.enable:set($turn_on)"; then
+        status "$feature"
+    else
+        exit 201
+    fi
+}
+
+runtime_settings() {
+    export CUJO_RUNTIME_SETTINGS="$*"
+    /etc/init.d/rabid restart
+}
+
+if [ "$#" -lt 1 ]; then
+    usage_error_exit "Command is missing" 101
+fi
+
+case $1 in
+    status)
+        shift
+        status "$@"
+        ;;
+
+    on|off)
+        feature_onoff "$@"
+        ;;
+
+    set)
+        shift
+        runtime_settings "$@"
+        ;;
+
+    *)
+        usage_error_exit "Invalid command" 102
+        ;;
+esac

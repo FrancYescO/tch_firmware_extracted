@@ -1,0 +1,165 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local transactions = {}
+local conn = mapper("ubus").connect()
+local voiceUplinkRateLimit
+local fxoBinding = { config = "mmpbxbrcmfxonet", sectionname = "fxo_profile", option = "enabled" }
+local deviceBinding = { config = "mmpbxbrcmfxsdev"}
+local sipnetBinding = { config = "mmpbxrvsipnet" }
+local tr104Helper = require("transformer.shared.tr104helper")
+
+local Multi_Services_VoiceService_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "VoiceServiceNumberOfEntries",
+        parameters = {
+            --[[Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            X_000E50_FXOState = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or Disable the FXO",
+            },
+            X_000E50_FXSState = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or Disable the FXS",
+            },
+            X_000E50_VoiceUplinkRateLimit = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            X_FASTWEB_BoundIfName = {
+                access = "readOnly",
+                type = "string",
+                description = "Used to identify the interface used for outgoing voice packet, return the interface name, if available.",
+            },
+            X_TELSTRA_ActiveCall = {
+                access = "readOnly",
+                type = "boolean",
+                default = "0",
+            },
+            -- VoiceProfileNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.VoiceProfile.{i}. is loaded
+            -- VoIPProfileNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.VoIPProfile.{i}. is loaded
+            -- CodecProfileNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.CodecProfile.{i}. is loaded
+            -- InterworkNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.Interwork.{i}. is loaded
+            -- TrunkNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.Trunk.{i}. is loaded
+            -- CallLogNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.CallLog.{i}. is loaded
+            -- TerminalNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.Terminal.{i}. is loaded
+            -- X_BELGACOM_PhyInterfaceNumberOfEntries
+            -- automatically created when Multi.Services.VoiceService.{i}.PhyInterface.{i}. is loaded
+        }
+    }
+}
+
+Multi_Services_VoiceService_i_.entries = function(mapping, parentKey)
+    return tr104Helper.getVoiceServiceEntries()
+end
+
+Multi_Services_VoiceService_i_.get = {
+    X_000E50_FXOState = function (mapping, paramname, key)
+        fxoBinding.default = "0"
+        return uciHelper.get_from_uci(fxoBinding)
+    end,
+    X_000E50_FXSState = function (mapping, paramname, key)
+        deviceBinding.sectionname = "fxs_dev_0"
+        deviceBinding.option = "relay_state"
+        deviceBinding.default = "0"
+        return uciHelper.get_from_uci(deviceBinding)
+    end,
+    X_000E50_VoiceUplinkRateLimit = function (mapping, paramname, key)
+        sipnetBinding.sectionname = "global"
+        sipnetBinding.option = "voice_uplink_rate_limit"
+        sipnetBinding.default = "0"
+        return uciHelper.get_from_uci(sipnetBinding)
+    end,
+    X_FASTWEB_BoundIfName = function ()
+        sipnetBinding.sectionname = "sip_net"
+        sipnetBinding.option = "interface"
+        sipnetBinding.default = ""
+        return uciHelper.get_from_uci(sipnetBinding)
+    end,
+    X_TELSTRA_ActiveCall = function(config, name)
+        local calls = conn:call("mmpbx.call", "get", {}) or {}
+        if type(calls) == "table" then
+            for _,v in pairs(calls) do
+                if v.callState ~= nil then
+                    return "1"
+                end
+            end
+        end
+        return "0"
+    end,
+}
+
+Multi_Services_VoiceService_i_.set = {
+    X_000E50_FXOState = function (mapping, paramname, paramvalue, key)
+        if paramvalue ~= uciHelper.get_from_uci(fxoBinding) then
+            uciHelper.set_on_uci(fxoBinding, paramvalue, commitapply)
+            transactions[fxoBinding.config] = true
+        end
+        local binding={config="mmpbxdectdev", sectionname="global", option="dect_audio_format_change"}
+        if paramvalue ~= uciHelper.get_from_uci(binding) then
+            uciHelper.set_on_uci(binding, paramvalue, commitapply)
+            transactions[binding.config] = true
+        end
+    end,
+    X_000E50_FXSState = function (mapping, paramname, paramvalue, key)
+        deviceBinding.sectionname = "device"
+        deviceBinding.option = nil
+        uciHelper.foreach_on_uci(deviceBinding, function(s)
+            if paramvalue ~= s["relay_state"] then
+                local deviceBindingLocal = { config = "mmpbxbrcmfxsdev", sectionname = s[".name"], option = "relay_state" }
+                uciHelper.set_on_uci(deviceBindingLocal, paramvalue, commitapply)
+                transactions[deviceBinding.config] = true
+            end
+        end)
+    end,
+    X_000E50_VoiceUplinkRateLimit = function (mapping, paramname, paramvalue, key)
+        sipnetBinding.sectionname = "global"
+        sipnetBinding.option = "voice_uplink_rate_limit"
+        sipnetBinding.default = "0"
+        if paramvalue ~= uciHelper.get_from_uci(sipnetBinding) then
+            voiceUplinkRateLimit = paramvalue
+        end
+    end,
+}
+
+Multi_Services_VoiceService_i_.commit = function()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+    if voiceUplinkRateLimit ~= nil then
+        conn:call("mmpbxrvsipnet.voiceuplinkratelimit","set",{["voiceuplinkratelimit"] = voiceUplinkRateLimit})
+        voiceUplinkRateLimit = nil
+    end
+end
+
+Multi_Services_VoiceService_i_.revert = function()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+    voiceUplinkRateLimit = nil
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_", Multi_Services_VoiceService_i_, register)

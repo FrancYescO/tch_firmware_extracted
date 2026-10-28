@@ -1,0 +1,152 @@
+local sys_qos_ = {
+    objectType = {
+        name = 'sys.qos.',
+        access = 'readOnly',
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {}
+    }
+}
+
+register(sys_qos_)
+
+local sys_qos_queues_ = {
+    objectType = {
+        name = "sys.qos.queues.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            ETHWAN = {
+                access = "readOnly",
+                type = "string"
+            },
+            xDSL = {
+                access = "readOnly",
+                type = "string"
+            },
+            WiFi_2G = {
+                access = "readOnly",
+                type = "string"
+            },
+            WiFi_5G = {
+                access = "readOnly",
+                type = "string"
+            },
+        },
+    }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local qosBinding = { config = "qos", sectionname = "class" }
+local popen, register, match, format = io.popen, register, string.match, string.format
+local ubus = require("ubus")
+local conn = ubus.connect()
+if not conn then
+  error("Failed to connect to ubusd")
+end
+
+
+
+local function getqueue(mapping, paramName, key)
+  local returnvar = "This output is only available on ARM"
+  local count = 0
+  local command = 'bs /B e egress_tm  class:stat |grep "channel={xtmchannel/index=" -A 1| grep "queue_stat" 2>&1'
+  local checkARM = popen('cat /proc/cpuinfo |grep -c "ARM" 2>&1')
+  local ARM = checkARM:read('*all')
+  checkARM:close()
+  local classCount = 0
+    if tonumber(ARM) > 0 then
+      forEachOnUci(qosBinding, function(s)
+        if match(s[".name"], "W_Q") then classCount = classCount + 1 end
+      end)
+      if paramName == "ETHWAN" then
+        command = format('bs /B e egress_tm  class:stat |grep "by: port/index=wan0" -A %d | grep "queue_stat.*channel={port/index=wan0" 2>&1', classCount + 1 )
+      end
+      local linetable, queueid, pass_pack, pass_bytes, drop_pack, drop_byte = {}, "", "", "", "", ""
+      local getqueues = popen(command)
+      for line in getqueues:lines() do
+          if line ~= "" then
+            queueid = match(line,"queue_id=(%d)")
+            pass_pack, pass_bytes, drop_pack, drop_byte = match(line,"passed={packets=(%d+),bytes=(%d+)},discarded={packets=(%d+),bytes=(%d+)")
+              linetable[#linetable + 1 ] = format("Queue %s: Passed: (Packets: %s, Bytes: %s) Dropped: (Packets: %s, Bytes: %s)", queueid, pass_pack, pass_bytes, drop_pack, drop_byte)
+          end
+      end
+      table.sort(linetable, function(a,b) return a<b end)
+      returnvar = "\r\n"
+      for k,v in pairs(linetable) do
+        returnvar = format("%s%s\r\n", returnvar, linetable[k])
+      end
+      getqueues:close()
+    else
+      local linetable, queueid, pass_pack = {}, "", ""
+      if paramName ~= "ETHWAN" then
+         command = 'cat /proc/driver/xtm/txdmainfo |grep Ch 2>&1'
+
+      local getqueues = popen(command)
+
+      for line in getqueues:lines() do
+          if line ~= "" then
+              queueid = match(line,"Ch (%d)")
+              pass_pack = match(line,"HeadIdx: (%d+)")
+              linetable[#linetable + 1 ] = format("Queue %s: Passed: (Packets: %s)", queueid, pass_pack)
+          end
+      end
+      returnvar = "\r\n"
+      for k,v in pairs(linetable) do
+        returnvar = format("%s%s\r\n", returnvar, linetable[k])
+      end
+      getqueues:close()
+      end
+    end
+  return returnvar
+end
+
+local function getwl(wl)
+  local returnvar = "Radio Not Valid"
+  local radio = "radio_5G"
+  if wl == "wl0" then
+    radio = "radio_2G"
+  end
+  local ubusinfo = conn:call("wireless.radio", "get", { name = radio } )
+  if ubusinfo then
+    local command = format('wl -i %s wme_counters; wl -i %s pktq_stats 2>&1', wl, wl)
+
+    local linetable, queueid, pass_pack = {}, "", ""
+
+    local getwlinfo = popen(command)
+
+    for line in getwlinfo:lines() do
+        if line ~= "" then
+            linetable[#linetable + 1 ] = line
+        end
+    end
+    returnvar = "\r\n"
+    for k,v in pairs(linetable) do
+      returnvar = format("%s%s\r\n", returnvar, linetable[k])
+    end
+    getwlinfo:close()
+  end
+  return returnvar
+end
+
+sys_qos_queues_.get = {
+    ETHWAN = function(mapping, paramName, key)
+      return getqueue(mapping, paramName, key)
+    end,
+    xDSL = function(mapping, paramName, key)
+      return getqueue(mapping, paramName, key)
+    end,
+    WiFi_2G = function(mapping, paramName, key)
+      local intf = "wl0"
+      return getwl(intf)
+    end,
+    WiFi_5G = function(mapping, paramName, key)
+      local intf = "wl1"
+      return getwl(intf)
+    end,
+}
+
+register(sys_qos_queues_)

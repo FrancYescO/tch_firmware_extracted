@@ -1,0 +1,138 @@
+-- Manually generated
+local Multi_X_000E50_AccessControl_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Configuration of internet access control for specific hosts",
+    parameters = {
+      BlockInternet = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Allow/ Block the internet traffic for the entire house hold",
+        default = "0"
+      },
+      WhiteListHosts = {
+        access = "readWrite",
+        type = "string",
+        description = "A list of hosts that can access the internet even when internet is blocked for the entire home."
+      },
+    }
+    -- HostNumberOfEntries
+    -- automatically created when #ROOT is loaded
+  }
+}
+
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local forEachOnUci = uciHelper.foreach_on_uci
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local firewallBinding = { config = "firewall" }
+local network = require("transformer.shared.common.network")
+local common = mapper("nwcommon")
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local isConfigChanged = false
+
+local function setUciValue(sectionName, paramName, value)
+  firewallBinding.sectionname = sectionName
+  firewallBinding.option = paramName
+  setOnUci(firewallBinding, value, commitapply)
+  isConfigChanged = true
+end
+
+local function getFWSection(secName)
+  firewallBinding.sectionname = "rule"
+  local getSecName
+  forEachOnUci(firewallBinding, function(s)
+    if s["name"] and s["name"] == secName then
+      if secName == "Restrict-Internet" then
+        getSecName = s[".name"]
+      elseif secName == "Allow-Internet" then
+        getSecName = s[".name"]
+      end
+    end
+  end)
+  return getSecName
+end
+
+local function setWhiteListHosts(value)
+  local getSection = getFWSection("Allow-Internet")
+  firewallBinding.sectionname = getSection
+  firewallBinding.option = "enabled"
+  local getEnabled = getFromUci(firewallBinding)
+  firewallBinding.option = "src_mac"
+  local getSrcMAC = getFromUci(firewallBinding) or ""
+  if value and value ~= "" then
+    if getSrcMAC:match(value) then
+      return nil, "MAC address already exists"
+    end
+    getSrcMAC = (getSrcMAC ~= "") and getSrcMAC..", "..value or value
+    setUciValue(getSection, "src_mac", getSrcMAC)
+    setUciValue(getSection, "enabled", "1")
+  else
+    setUciValue(getSection, "enabled", "0")
+    setUciValue(getSection, "src_mac", "")
+  end
+  isConfigChanged = true
+end
+
+Multi_X_000E50_AccessControl_.get = {
+  BlockInternet = function(mapping, param, key)
+    local getSection = getFWSection("Restrict-Internet")
+    firewallBinding.sectionname = getSection
+    firewallBinding.option = "enabled"
+    return getFromUci(firewallBinding)
+  end,
+  WhiteListHosts = function(mapping, param, key)
+    local getSection = getFWSection("Allow-Internet")
+    firewallBinding.sectionname = getSection
+    firewallBinding.option = "src_mac"
+    return getFromUci(firewallBinding) or ""
+  end,
+}
+
+Multi_X_000E50_AccessControl_.set = {
+  BlockInternet = function(mapping, param, value)
+    local getSection = getFWSection("Restrict-Internet")
+    firewallBinding.sectionname = getSection
+    setUciValue(getSection, "enabled", value)
+    if value == "1" then
+      commitapply:newset("guiaccessonly")
+    end
+    isConfigChanged = true
+  end,
+  WhiteListHosts = function(mapping, param, value)
+    if not common.isMAC(value) and  value ~= "" then
+      return nil, "Invalid MAC address"
+    else
+      return setWhiteListHosts(value)
+    end
+  end,
+}
+
+Multi_X_000E50_AccessControl_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_X_000E50_AccessControl_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(firewallBinding)
+    isConfigChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_X_000E50_AccessControl_, "#ROOT", {"InternetGatewayDevice.X_000E50_AccessControl.", "Device.X_000E50_AccessControl.", "Device.Hosts.X_DT_AccessControl."})
+for _, dupli in ipairs(duplicates) do
+  if not dupli.objectType.name:match('Device.Hosts.X_DT_AccessControl.') then
+    dupli.objectType.parameters.BlockInternet = nil
+    dupli.objectType.parameters.WhiteListHosts = nil
+  end
+  register(dupli)
+end

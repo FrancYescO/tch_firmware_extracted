@@ -1,0 +1,98 @@
+#!/bin/sh
+
+touch /etc/slicstate
+
+/usr/bin/mmdetectslic || true
+
+cat /etc/slicstate  | grep "isVoiceOn:"
+if [ "$?" = 0 ]         #/etc/slicstate is not empty
+then
+  cat /etc/slicstate  | grep "isVoiceOn:1"
+  if [ "$?" = 0 ]
+  then
+    echo "This is a voice platform...."
+    fxoEpNumber=$(cat /etc/slicstate  | grep "fxoEpNumber"|awk '{print $3}')
+    dectEpNumber=$(cat /etc/slicstate  | grep "dectEpNumber"|awk '{print $3}')
+    if [ "$fxoEpNumber" = 0 ]
+    then
+      rm $(find /usr/share/transformer -name '*fxo*')
+      rm $(find /etc/config -name '*fxo*')
+    fi
+    if [ -f /usr/lib/mmpbx/libmmpbxdspgdect.so ]
+    then
+      echo "DSPG DECT supported on this platform"
+      # Workaround for now: setting number of DECT endpoints to 1 (we never check on number, only on 0 or not)
+      dectEpNumber=1
+    fi
+    if [ "$dectEpNumber" = 0 ]
+    then
+      rm $(find /usr/share/transformer -name '*dect*')
+      rm $(find /etc/config -name '*dect*')
+      rm $(find /usr/lib/lua/tch -name 'mmpbxdect_backup.lua')
+      rm $(find /etc/parameter_conversion -name 'conversion_dectemission')
+      rm $(find /usr/lib/parameter_conversion -name 'mmpbx_dectemission.sh')
+      rm $(find /www/docroot/modals -name 'mmpbx-dect-modal.lp')
+    fi
+    if [ -f /usr/lib/mmpbx/libmmpbxrvsipdev.so ]
+    then
+      echo "sipDev supported in this platform...."
+      sipDevSupported=1
+    else
+      echo "sipDev not supported in this platform...."
+      sipDevSupported=0
+      rm $(find /usr/share/transformer -name '*sipdev*')
+      rm $(find /etc/config -name '*sipdev*')
+    fi
+    if [ -f /usr/lib/mmpbx/libmmpbxrefdev.so ]
+    then
+      echo "refDev supported in this platform...."
+    else
+      echo "refDev not supported in this platform...."
+      rm $(find /etc/config -name '*refdev*')
+    fi
+    if [ "$dectEpNumber" = 0 ] || [ "$fxoEpNumber" = 0 ] || [ "$sipDevSupported" = 0 ]
+    then
+      #call lua script for cleaning mmpbx file.
+      echo "dectEpNumber=$dectEpNumber fxoEpNumber=$fxoEpNumber sipDevSupported=$sipDevSupported"
+      /usr/bin/lua /usr/lib/lua/tch/mmpbxcustocleanup.lua "$dectEpNumber" "$fxoEpNumber" "$sipDevSupported"
+    fi
+    if [ ! "$dectEpNumber" = 0 ]
+    then
+      emission=$(uci get mmpbx.dectemission.state)
+      if [ "$emission" = 0 ] && [ -f "/etc/config/mmpbxdectdev" ];
+      then
+        mkdir -p /etc/config/emission_bkup/etc/config
+        cp /etc/config/mmpbxdectdev /etc/config/emission_bkup/etc/config/mmpbxdectdev
+        cp /etc/config/mmpbx /etc/config/emission_bkup/etc/config/mmpbx
+        rm /etc/config/mmpbxdectdev
+        if [ -f /usr/lib/lua/tch/mmpbxdect_backup.lua ]
+        then
+          /usr/bin/lua /usr/lib/lua/tch/mmpbxdect_backup.lua $emission
+        fi
+      fi
+    fi
+  else
+    echo "This is not a voice platform, do the clean up ..."
+    opkg remove --force-removal-of-dependent mmpbx
+    opkg remove mmpbxfwctl
+    opkg remove mmpbxipv6fwctl
+    opkg remove --force-depends mappings-mmpbxd
+    rm $(find /etc/config -name '*mmpbx*')
+    rm $(find /etc/config -name mmdbd)
+  fi
+fi
+
+tr104_issue=$(uci get mmpbx.global.tr104_issue)
+if [ "$tr104_issue" = 2 ]
+then
+    rm $(find /usr/share/transformer/mappings/bbf/ -maxdepth 1 -name 'VoiceService*')
+    rm $(find /usr/share/transformer/mappings/commitapply/ -name 'VoiceService*')
+    mv /usr/lib/lua/transformer/shared/tr104i2helper.lua /usr/lib/lua/transformer/shared/tr104helper.lua
+    rm /usr/lib/lua/transformer/shared/tr104i1helper.lua
+else
+    rm -rf /usr/share/transformer/mappings/bbf/tr104i2
+    mv /usr/lib/lua/transformer/shared/tr104i1helper.lua /usr/lib/lua/transformer/shared/tr104helper.lua
+    rm /usr/lib/lua/transformer/shared/tr104i2helper.lua
+fi
+uci set mmpbx.global.tr104_issue=''
+uci commit

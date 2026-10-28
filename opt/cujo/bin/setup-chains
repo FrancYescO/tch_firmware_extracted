@@ -1,0 +1,31 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2018-2019 CUJO LLC. All rights reserved.
+
+# shellcheck source=nf-chains.sh
+. "$CUJO_HOME"/bin/nf-chains
+
+platform_input_chain=INPUT
+platform_output_chain=OUTPUT
+platform_forward_chain=FORWARD
+
+set -e
+for ipt in "$iptables" "$ip6tables"; do
+	for chain in ${INPUT_CHAIN} ${OUTPUT_CHAIN} ${FORWARD_CHAIN}; do
+		"$ipt" -F "$chain" || :
+	done
+	echo "\
+${INPUT_CHAIN} $platform_input_chain
+${OUTPUT_CHAIN} $platform_output_chain
+${FORWARD_CHAIN} $platform_forward_chain" | while read -r our def; do
+		"$ipt" -N "$our" || :
+		"$ipt" -D "$def" -j "$our" || :
+		"$ipt" -I "$def" -j "$our"
+		"$ipt" -D "$def" -p tcp -m conntrack --ctstate INVALID \
+			-j REJECT --reject-with tcp-reset || :
+		"$ipt" -I "$def" -p tcp -m conntrack --ctstate INVALID \
+			-j REJECT --reject-with tcp-reset
+	done
+	"$ipt" -D $platform_output_chain -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK RST -m conntrack --ctstate INVALID -j ACCEPT || :
+	"$ipt" -I $platform_output_chain -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK RST -m conntrack --ctstate INVALID -j ACCEPT
+done

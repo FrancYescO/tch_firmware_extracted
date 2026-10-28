@@ -1,0 +1,173 @@
+#!/usr/bin/env lua
+
+local tonumber, assert, io, math, string =
+      tonumber, assert, io, math, string
+local format, match, open, lower = string.format, string.match, io.open, string.lower
+local logger = require 'transformer.logger'
+local cursor = require("uci").cursor()
+local common = require 'transformer.mapper.nwcommon'
+local ubus = require("ubus")
+local posix = require("tch.posix")
+local traceRouteHelper = require 'transformer.shared.traceroutehelper'
+local ipdiag_helper = require 'transformer.shared.ipdiagnosticshelper'
+local process = require("tch.process")
+-- UBUS connection
+local ubus_conn
+local output
+
+local log_config = {
+    level = 3,
+    stderr = false
+}
+
+-- command line argument = user name
+local user=arg[1]
+-- interface cannot be nil
+if user==nil then
+  logger:critical("You need to specify an user (igd,wwwconn,wwwping,...)")
+  return
+end
+
+
+-- get traceroute configuration from UCI
+local config = "traceroute"
+
+local state = "Complete"
+local event_msg = {}
+
+local function traceroute(user)
+  -- get traceroute configuration from UCI
+  local host = cursor:get(config, user, "host")
+  local tries = cursor:get(config, user, "tries")
+  -- IGD timeout is in milliseconds, traceroute uses seconds
+  local timeout = cursor:get(config, user, "timeout")
+  local size = cursor:get(config, user, "size")
+  local hopcount = cursor:get(config, user, "hopcount")
+  local dscp = cursor:get(config, user, "dscp")
+  local type = cursor:get(config, user, "type")
+  -- check if all required parameters are present
+  if not (host and tries and timeout and size and hopcount and dscp) then
+    state = "Error_Other"
+    return
+  end
+  tries = tonumber(tries)
+  timeout = math.floor(tonumber(timeout) / 1000)
+  size = tonumber(size)
+  hopcount = tonumber(hopcount)
+  type = type and lower(type) == "ipv6" and "-6" or "-4"
+
+  -- get logical interface and convert to physical
+  local iface = cursor:get(config, user, "interface")
+  local ipaddr_used
+  iface, ipaddr_used = ipdiag_helper.get_physical_interface(iface, host)
+
+  if not iface then
+      state = "Error_Other"
+      return
+  end
+
+  if timeout < 1 then timeout = 1 end
+
+  -- do traceroute and capture output
+  local cmdline
+  if iface ~= "" then
+    logger:debug("resolved logical name to physical device: " .. iface)
+    cmdline = {type, "-q", tries, "-w", timeout, "-m", hopcount, "-i", iface, "-t", dscp * 4, host, size}
+  else
+    cmdline = {type, "-q", tries, "-w", timeout, "-m", hopcount, "-t", dscp * 4, host, size}
+  end
+  local sec, nsec = posix.clock_gettime(posix.CLOCK_MONOTONIC)
+
+  local p = process.popen("traceroute", cmdline, "re")
+  if not p then
+    return
+  end
+  output = ipdiag_helper.copy_ping_or_traceroute_result(user, p, "/tmp/trace_"..user) or ""
+  p:close()
+
+  local elapsed = posix.clock_elapsed(posix.CLOCK_MONOTONIC, sec, nsec)
+  elapsed = math.ceil(elapsed / 1000)  -- convert to milliseconds
+  -- parse output
+  -- typical output of successful traceroute:
+  --   traceroute to www.google.be (74.125.136.94), 30 hops max, 38 byte packets
+  --    1  172.18.16.1 (172.18.16.1)  5.564 ms  5.211 ms  5.362 ms
+  --    2  10.50.1.1 (10.50.1.1)  8.151 ms  6.409 ms  6.416 ms
+  --    3  10.50.3.3 (10.50.3.3)  4.937 ms  5.101 ms  4.864 ms
+  --    4  9.125.146.82.ipv4.evonet.be (82.146.125.9)  5.199 ms  5.180 ms  5.160 ms
+  --    5  1.125.146.82.ipv4.evonet.be (82.146.125.1)  10.411 ms  6.030 ms  11.983 ms
+  --    6  xe-1-2-00-0602.bru-lc-c02.ipv4.evonet.be (82.146.120.78)  6.049 ms  6.201 ms  6.066s
+  --    7  ge-10-0-3-0.bru-leu-score-1-re0.interoute.net (89.202.217.57)  21.387 ms  5.715 ms s
+  --    8  ae3-0.lon-004-score-1-re0.interoute.net (212.23.41.86)  11.356 ms  11.526 ms  11.78s
+  --    9  ae2-0.lon-001-score-2-re1.interoute.net (84.233.218.185)  12.131 ms  11.624 ms  11.s
+  --   10  ae0-0.lon-001-score-1-re0.interoute.net (84.233.218.189)  11.221 ms  11.299 ms  11.s
+  --   11  74.125.50.65 (74.125.50.65)  11.269 ms  11.120 ms  11.559 ms
+  --   12  209.85.240.61 (209.85.240.61)  11.591 ms  11.053 ms  11.249 ms
+  --   13  209.85.253.92 (209.85.253.92)  12.384 ms  209.85.253.196 (209.85.253.196)  11.790 ms
+  --   14  209.85.243.33 (209.85.243.33)  13.670 ms  14.223 ms  209.85.240.28 (209.85.240.28) s
+  --   15  216.239.49.38 (216.239.49.38)  19.956 ms  216.239.49.28 (216.239.49.28)  17.285 ms s
+  --   16  *  *  *
+  --   17  ea-in-f94.1e100.net (74.125.136.94)  17.073 ms  17.270 ms  17.453 ms
+  --
+  -- typical output if the hostname could not be resolved:
+  --    traceroute: bad address 'foo.bar'
+  if match(output, "^traceroute: bad address") then
+    state = "Error_CannotResolveHostName"
+  elseif match(output, "traceroute: can't connect to remote host") then
+    state = user == "igd" and "Error_Other" or "Error_NoRouteToHost"
+  else
+    local fh, msg = open("/tmp/traceroute_"..user, "w")
+    assert(fh, msg)
+    fh:write(format('%d\n', elapsed))
+    fh:write(format('%s\n', ipaddr_used or ""))
+    local startIp, endIp
+    for line in output:gmatch("[^\r\n]+") do
+      local lasthost, lastip, times
+      line = string.gsub(line, "(%S%sms)", "%1*")
+      if ( match(line, "traceroute to")) then
+        startIp = line:match("%((.*)%)")
+      else
+        lasthost, lastip, times = traceRouteHelper.parseLine(line)
+
+        if (lasthost and lastip) then
+          fh:write(format('%s %s %s\n', lasthost, lastip, times))
+          endIp = lastip
+        else
+          fh:write(format('\n'))
+        end
+      end
+    end
+    fh:close()
+
+    if (startIp ~= endIp) then
+      state = "Error_NoRouteToHost"
+      -- delete file content !
+      fh, msg = open("/tmp/traceroute_"..user, "w")
+      fh:close()
+    end
+
+  end
+  local info ={}
+  info["host"] = host
+  event_msg[user] = info
+  -- Publish the traceroute result on ubus
+  ubus_conn:send('traceroute.traceroute_'.. user, info)
+
+end
+
+logger.init(log_config.level, log_config.stderr)
+logger = logger.new("TraceRoute", log_config.level)
+
+--publish results in ubus
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end
+
+local err, msg = pcall(traceroute, user)
+if not err then
+  state = "Error_Internal"
+  logger:critical(msg)
+end
+
+-- write results to UCI
+cursor:set(config, user, "state",   state)
+cursor:commit("traceroute")
