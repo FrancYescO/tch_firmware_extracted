@@ -1,0 +1,258 @@
+-- Manually generated
+local Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_= {
+  objectType = {
+    name = "#ROOT.Services.X_000E50_AccessManagement.SSH.ServerAccess.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Parameters to configure server access via ACS",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable/disable server access",
+      },
+      Interface = {
+        access = "readOnly",
+        type = "string",
+        pathRef = true,
+        description = "Specifies via which interface server access will be allowed. Empty value indicates any interface",
+      },
+      RevertTime = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "24"
+          },
+        },
+        description = "Disables SSH server after specified hours. If it is set to '0', SSH will be allowed for infinite time, until Enable is explicitly set to 0",
+      },
+      Loginfo = {
+        access = "readOnly",
+        type = "string",
+        description = "Log the last method enabling SSHv2 with the source"
+      },
+    },
+  },
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local wanconn = require("transformer.shared.wanconnection")
+local network = require("transformer.shared.common.network")
+local dropbearBinding = { config = "dropbear" }
+local configChanged = false
+local enabled_intf = ""
+local url = require("socket.url")
+local NF_CONNTRACK = "/proc/net/nf_conntrack"
+local sshinfopath = "/etc/"
+local common = mapper("nwcommon")
+local get_ubus_interface_status = common.get_ubus_interface_status
+
+local function getUciValue(section, option, default)
+  dropbearBinding.sectionname = section
+  dropbearBinding.option = option
+  dropbearBinding.default = default
+  return getFromUci(dropbearBinding)
+end
+
+local function setUciValue(section, option, value)
+  dropbearBinding.sectionname = section
+  dropbearBinding.option = option
+  setOnUci(dropbearBinding, value, commitapply)
+  configChanged = true
+end
+
+local function write_loginfo(fileName, TR69_info)
+  local f = io.open(fileName, "w")
+  if f then
+    f:write(TR69_info)
+    f:close()
+  end
+end
+
+local function read_loginfo(fileName)
+  local result = ""
+  local fd = io.open(fileName)
+  if fd then
+    result = fd:read("*a") or ""
+    fd:close()
+  end
+  return result
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_.entries = function()
+  local entries = {}
+  dropbearBinding.sectionname = "dropbear"
+  forEachOnUci(dropbearBinding, function(s)
+    entries[#entries + 1] = s['.name']
+  end)
+  return entries
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_.get = {
+  Enable = function(mapping, param, key)
+    return getUciValue(key, "enable", "0")
+  end,
+  Interface = function(mapping, param, key)
+    local path
+    local interface = getUciValue(key, "Interface")
+    if interface ~= "" then
+      local lanInterfaces = network.getLanInterfaces()
+      if lanInterfaces[interface] then
+        path = resolve('InternetGatewayDevice.LANDevice.{i}.', interface)
+      else
+        local intf, status = wanconn.get_connection_key(interface)
+        if intf and status then
+          if status.proto == "pppoe" or status.proto == "pppoa" then
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}.", intf)
+          else
+            path = resolve("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.", intf)
+          end
+        end
+      end
+    end
+    return path or ""
+  end,
+  RevertTime = function(mapping, param, key)
+    return getUciValue(key, "revert_time", "0")
+  end,
+  Loginfo = function(mapping, param, key)
+    local loginfo = read_loginfo(sshinfopath..key)
+    return loginfo and loginfo or ""
+  end,
+}
+
+local function getDateFormat(hours)
+  local num = os.time() + (hours * 60 * 60)
+  return os.date("%Y-%m-%dT%H:%M:%SZ", num)
+end
+
+local function setRevertTime(intf, revertTime)
+  local fileHandler = io.open("/tmp/.sshintf_"..intf, "w")
+  if fileHandler then
+    local revertDate = getDateFormat(tonumber(revertTime))
+    fileHandler:write(revertDate)
+    fileHandler:close()
+  end
+end
+
+local function get_acs_port()
+  local acs_url = uciHelper.get_from_uci({ config = "cwmpd", sectionname = "cwmpd_config", option = "acs_url", extended = true})
+  local parsed_url = url.parse(acs_url)
+  local scheme = parsed_url.scheme
+  local port = parsed_url.port
+
+  if port == nil then
+    if scheme == "https" then
+      port = "443"
+    elseif scheme == "http" then
+      port = "80"
+    end
+  end
+  return port
+end
+
+local function get_wan_ip()
+  local interface = uciHelper.get_from_uci({ config = "cwmpd", sectionname = "cwmpd_config", option = "interface", extended = true})
+  local wan_ip = get_ubus_interface_status(interface)
+  wan_ip = wan_ip and wan_ip['ipv4-address']
+  wan_ip = wan_ip and wan_ip[1]
+  return (wan_ip and wan_ip['address']) or ""
+end
+
+local function get_acs_ip()
+  local PARSE_COUNT = 10
+  local nf_conntrack_maps = {"c1", "c2", "proto3", "c4", "timeout5", "status6", "src7", "dst8", "sport9", "dport10"}
+  local nf_conntrack_columns = {}
+  local acs_ip = "unknown"
+  local timeout = 0
+  local new_timeout
+  local acs_port = get_acs_port()
+  local wan_ip = get_wan_ip()
+
+  local f = io.open(NF_CONNTRACK, "r")
+  for l in f:lines() do
+    -- parse columns
+    local count = 1
+    for w in string.gmatch(l, "%S+") do
+      if count >= 7 and count <= PARSE_COUNT then --src, dst, sport, dport
+        w = w:match("%d+.*")
+      elseif count > PARSE_COUNT  then
+        break
+      end
+      nf_conntrack_columns[nf_conntrack_maps[count]] = w
+      count = count + 1
+    end
+
+    -- check ACS ipaddress
+    new_timeout = tonumber(nf_conntrack_columns["timeout5"])
+    if nf_conntrack_columns["proto3"] == "tcp" and new_timeout > timeout then
+      if nf_conntrack_columns["sport9"] == acs_port and nf_conntrack_columns["dst8"] == wan_ip then
+        timeout = new_timeout
+        acs_ip = nf_conntrack_columns["src7"]
+      elseif nf_conntrack_columns["dport10"] == acs_port and nf_conntrack_columns["src7"] == wan_ip then
+        timeout = new_timeout
+        acs_ip = nf_conntrack_columns["dst8"]
+      end
+    end
+  end
+  f:close()
+  return acs_ip
+end
+
+
+Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_.set = {
+  Enable = function(mapping, param, value, key)
+    local revertTime = getUciValue(key, "revert_time", "0")
+    setUciValue(key, "enable", value)
+    if value == "1" then
+      enabled_intf = key
+    end
+    if value ~= "0" and revertTime ~= "0" then
+      setRevertTime(key, revertTime)
+    end
+    commitapply:newset("RevertTime")
+  end,
+  RevertTime = function(mapping, param, value, key)
+    local enable = getUciValue(key, "enable", "0")
+    setUciValue(key, "revert_time", value)
+    if value ~= "0" and enable ~= "0" then
+      setRevertTime(key, value)
+    end
+    commitapply:newset("RevertTime")
+  end,
+}
+
+Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_.commit = function()
+  -- log enabling method: source(GUI,TR-069), IP, timestamp
+  if enabled_intf ~= "" then
+    local source = "TR-069"
+    local ip = get_acs_ip()
+    local timestamp = os.date("%d.%m.%Y %H:%M:%S")
+    local TR69_info = source .. "_" .. ip .. "_" .. timestamp
+    write_loginfo(sshinfopath..enabled_intf, TR69_info)
+    enabled_intf = ""
+  end
+  if configChanged then
+    uciHelper.commit(dropbearBinding)
+  end
+  configChanged = false
+end
+
+Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(dropbearBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_AccessManagement_SSH_ServerAccess_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+    register(dupli)
+end

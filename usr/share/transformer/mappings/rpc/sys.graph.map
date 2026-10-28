@@ -1,0 +1,149 @@
+local process = require("tch.process")
+local popen = process.popen
+local register = register
+local cpuCount = 0
+local result
+local sys_graph_ = {
+    objectType = {
+        name = "sys.graph.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            mem = {
+                access = "readOnly",
+                type = "string"
+            },
+            ifstat = {
+                access = "readOnly",
+                type = "string"
+            }
+        }
+    }
+}
+
+local sys_graph_cpu_i_ = {
+    objectType = {
+       name = "sys.graph.cpu.{i}.",
+       access = "readOnly",
+       minEntries = 1,
+       maxEntries = math.huge,
+       parameters = {
+           cpu = {
+                access = "readOnly",
+                type = "string"
+           }
+       }
+    }
+}
+
+local function get_stats()
+    local iflist = "atm0,ptm0,eth4,eth0,eth1,eth2,eth3,wl0,wl1,wl0_1,wl1_1"
+    local getData = popen("ifstat", {"-i", iflist, "-T", "-w", "-b", "-q", "1", "1"})
+    local count, data = 0, ""
+    if getData then
+        for line in getData:lines() do
+            count = count + 1
+            if count == 3 then
+                data = line
+                break
+            end
+        end
+        getData:close()
+    end
+    return data or ""
+end
+
+local function topinfo()
+    local getData = popen("top", {"-b", "-n1"})
+    local returnvars = {cpu = "", mem = "" }
+    if getData then
+        for line in getData:lines() do
+            if line:match("^Mem:") then
+                returnvars.mem = line
+            end
+        end
+        getData:close()
+    end
+    return returnvars
+end
+
+local function getCommandValue()
+  local cpuData = io.popen("mpstat -P ALL 1 1 | tr -s ' ' | tail -" .. cpuCount + 1)
+  local output = {}
+  if cpuData then
+    for line in cpuData:lines() do
+      output[#output + 1] = line
+    end
+    cpuData:close()
+  end
+  return output
+end
+
+local function getCPUData(mapping, param, key)
+   local data = ""
+   local incr = 1
+   local newData = ""
+   local title = {" CPU ", " usr ", " nice ", " sys ", " iowait ", " irq ", " soft ", " steal ", " guest ", " idle "}
+
+   -- Match obtained value with the appropriate field name
+   for index, line in pairs(result) do
+     if line:match("%w+:%s" .. key .. "(.*)") then
+       data = line:match("%w+:%s(" .. key .. ".*)")
+     end
+   end
+
+   data = data:gsub("[%w.]+", function(s)
+     return s ~= key and s .. "%"
+   end)
+   for value in string.gmatch(data, '([%w.%%]+)') do
+      newData = newData .. value .. title[incr]
+      incr = incr + 1
+   end
+   return newData or ""
+end
+
+local function getParameterValue(key, paramName, value, radioData)
+    if paramName == "mem" then
+        value = topinfo().mem
+    end
+    if paramName == "ifstat" then
+        value = get_stats()
+    end
+    return value and tostring(value) or ""
+end
+
+local function get(mapping, paramName, key)
+    return getParameterValue(key, paramName)
+end
+
+sys_graph_cpu_i_.entries = function(mapping)
+  local entries = {}
+  local fp = popen("mpstat", {"-P" , "ALL"})
+  if fp then
+     for line in fp:lines() do
+        if line:match("(%d+) CPU") then
+           -- Get the count of the CPUs
+           cpuCount = line:match("(%d+) CPU")
+           break
+        end
+     end
+     fp:close()
+  end
+  local cpuQuery = "mpstat -P ALL | tr -s ' ' | cut -d ' ' -f 2 | tail -" .. cpuCount + 1
+  local cpuList = io.popen(cpuQuery)
+  if cpuList then
+    for i in cpuList:lines() do
+      entries[#entries + 1] = i
+    end
+    cpuList:close()
+  end
+  result = getCommandValue()
+  return entries
+end
+
+sys_graph_.get = get
+sys_graph_cpu_i_.get = getCPUData
+
+register(sys_graph_)
+register(sys_graph_cpu_i_)

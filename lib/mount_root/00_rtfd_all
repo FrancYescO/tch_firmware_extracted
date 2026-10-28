@@ -1,0 +1,34 @@
+#!/bin/sh
+
+mount_point="/overlay"
+loop_detect="${mount_point}/mount_check_reboot"
+
+do_reboot() {
+	touch $loop_detect
+	/sbin/reboot -f
+
+	while true; do : ; done
+}
+
+check_loop() {
+	if [ -f "$loop_detect" ]; then
+		#reboot because of mount check failures
+		#do not check again, to prevent reboot loops
+		rm $loop_detect
+		exit
+	fi
+}
+
+finish_rtfd() {
+	if [ -f "${mount_point}/.rtfd_all_in_progress" ]; then
+		logger -t RTFD -s "rtfd failed, completing it now"
+		for f in $(ls -A ${mount_point}); do
+			rm -rf ${mount_point}/$f
+		done
+
+		do_reboot
+	fi
+}
+
+check_loop
+finish_rtfd

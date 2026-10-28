@@ -1,0 +1,59 @@
+local tod_ = {
+  objectType = {
+    name = 'rpc.tod.',
+    access = 'readOnly',
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      macfilter_enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local firewall_binding = { config = "firewall" }
+local commitapply = commitapply
+local configChanged = configChanged
+
+tod_.get = {
+  macfilter_enable = function()
+    firewall_binding.sectionname = "tod"
+    firewall_binding.option = "reload"
+    firewall_binding.default = "1"
+    return uci_helper.get_from_uci(firewall_binding)
+  end
+}
+
+tod_.set = {
+  macfilter_enable = function(mapping, param, value)
+    firewall_binding.sectionname = "tod"
+    firewall_binding.option = "reload"
+    uci_helper.set_on_uci(firewall_binding, value, commitapply)
+    if value == "1" then
+      firewall_binding.sectionname = "Secure_DNS"
+      firewall_binding.option = "enabled"
+      uci_helper.set_on_uci(firewall_binding, "0", commitapply)
+    end
+    commitapply:newset("tod.macfilter_enable")
+    configChanged = true
+  end,
+}
+
+tod_.commit = function()
+  if configChanged then
+    uci_helper.commit(firewall_binding)
+  end
+  configChanged = false
+end
+
+tod_.revert = function()
+  if configChanged then
+    uci_helper.revert(firewall_binding)
+  end
+  configChanged = false
+end
+
+register(tod_)

@@ -1,0 +1,139 @@
+#!/bin/sh /etc/rc.common
+
+#Start before network (interfaces need to be created)
+START=19
+
+PID_FILE=/var/run/hostapd.pid
+RUNNING_FILE=/var/run/hostapd_running
+CONFIG_LOADED_FILE=/var/run/hostapd_config_loaded
+INIT_ONCE_FILE=/tmp/hostapd_init_once
+ENV_FILE=/tmp/hostapd.env
+
+do_only_once() 
+{
+  if [ ! -e "$INIT_ONCE_FILE" ] ; then
+
+    /lib/wireless/fix_uci_config.sh
+
+    RADIO_TYPE=`wireless_get_radio_type.sh radio_2G`
+    
+    #BROADCOM
+    if [ "$RADIO_TYPE" = "broadcom" ] ; then
+        /lib/wireless/init_broadcom.sh
+        #This can fail
+        if [ "$?" != "0" ] ; then
+          exit 1
+        fi
+    fi        
+
+    #ATHEROS
+    if [ "$RADIO_TYPE" = "atheros" ] ; then
+        /lib/wireless/init_atheros.sh
+    fi
+
+    #QCACLD (MWA1100)
+    if [ "$RADIO_TYPE" = "qcacld" ] ; then
+        /lib/wireless/init_qcacld.sh
+    fi
+
+    #LANTIQ (MWA1100)
+    if [ "$RADIO_TYPE" = "lantiq" ] ; then
+        /lib/wireless/init_lantiq.sh
+    fi
+
+  fi   
+   
+  touch $INIT_ONCE_FILE
+}
+
+start() {
+  up=$(ps|grep /var/run/hostapd|grep -v grep)
+  if [ "$up" != "" ] ; then
+    echo "Hostapd already running"
+    exit 0
+  fi
+  
+  echo "Starting hostapd"
+
+  if [ -e "$RUNNING_FILE" ] ; then
+    rm $RUNNING_FILE
+  fi
+
+  if [ -e "$CONFIG_LOADED_FILE" ] ; then
+    rm $CONFIG_LOADED_FILE
+  fi
+
+  do_only_once
+  
+  hostapd_env.sh $ENV_FILE
+
+  hostapd -bund -p $PID_FILE -e $ENV_FILE
+
+  #Now wait until config is loaded (otherwise, the interfaces
+  #are not created)
+  
+  count="0"
+  while [ $count -lt 20 ]
+  do
+    if [ -e $RUNNING_FILE ] ; then
+      break
+    fi
+    sleep 1
+    count=$(( $count + 1 ))
+    echo "Hostapd starting... ($count)" > /dev/console
+  done
+
+  #Used in LIT tests
+  if [ "$HOSTAPD_WAIT_FOR_CONFIG_LOAD" = "1" ] ; then
+    count="0"
+    while [ $count -lt 20 ]
+    do
+      if [ -e $CONFIG_LOADED_FILE ] ; then
+        break
+      fi
+      sleep 1
+      count=$(( $count + 1 ))
+      echo "Hostapd config loading... ($count)" > /dev/console
+    done
+  fi
+}
+
+stop() {
+  if [ ! -e "$PID_FILE" ] ; then
+    echo Hostapd not running
+  else
+    echo Stopping hostapd
+
+    PID=$(cat $PID_FILE)
+    rm $PID_FILE
+    rm $RUNNING_FILE
+    kill $PID
+
+    count="0"
+    while [ $count -lt 20 ]
+    do
+      up=$(ps|grep /var/run/hostapd|grep -v grep)
+      if [ "$up" == "" ] ; then
+        break
+      else
+        echo "Hostapd stopping... ($count)" > /dev/console
+      fi
+      sleep 1
+      count=$(($count + 1))
+    done
+
+    if [ "$up" != "" ] ; then
+      kill -9 $PID
+    fi
+  fi
+}
+
+reload() {
+  #If called from shell (no better way to check??)
+  #then print output by omitting -s option
+  if [ "`cat /proc/$PPID/cmdline`" = "-ash" ] ; then
+    hostapd_cli uci_reload
+  else
+    hostapd_cli -s uci_reload
+  fi
+}

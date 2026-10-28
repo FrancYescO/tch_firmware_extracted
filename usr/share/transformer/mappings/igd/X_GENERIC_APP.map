@@ -1,0 +1,290 @@
+
+local AppMap = {
+  objectType = {
+    name = "InternetGatewayDevice.DeviceInfo.X_GENERIC_APP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Root object for Generic app integration",
+    parameters = {
+      TOC = {
+        access = "readOnly",
+        type = "string",
+        description = "Generic TOC object (json object)",
+      },
+    },
+  },
+}
+
+local dkjson = require 'dkjson'
+
+local network = require 'transformer.shared.common.network'
+local nwcommon = require 'transformer.mapper.nwcommon'
+local wanconnection = require 'transformer.shared.wanconnection'
+local landev = require 'transformer.shared.mappings.lan.landevice'
+local wlanconfig = require 'transformer.shared.mappings.lan.wlanconfig'
+local wandevice = require 'transformer.shared.mappings.wan.wandevice'
+local wanconnectiondevice = require 'transformer.shared.mappings.wan.wanconnectiondevice'
+local wanpppconnection = wanconnection.Connection('ppp', commitapply)
+local wanipconnection = wanconnection.Connection('ip', commitapply)
+
+local ucihelper = mapper 'ucihelper'
+local ubusConnection = mapper("ubus").connect()
+local get_from_uci = ucihelper.get_from_uci
+local firewallZoneForInterface = network.firewallZoneForInterface
+local getAPForIface = network.getAPForIface
+
+local firewallTodBinding = { config = "firewall", sectionname = "tod", option = "reload", default = "1" }
+local firewallDmzBinding = { config = "firewall", sectionname = "dmzredirects", option = "enabled" }
+local wansensingBinding = { config = "wansensing" }
+local envvar = {config="env", sectionname="var"}
+
+local function modelInfo()
+  local vars = ucihelper.getall_from_uci(envvar)
+  local info = {}
+  if vars.vodafone_variant then
+    info.opco = "VF_" .. vars.vodafone_variant:gsub("^VF[-_]", "")
+  end
+  if vars.prod_name then
+    info.model = vars.prod_name:gsub(" ", "_")
+  end
+  return info
+end
+
+local function retrieve_gw_info()
+  local info = modelInfo()
+  return {
+    edition = "xDSL",
+    model = info.model,
+    opco =  info.opco,
+  }
+end
+
+local function wlan_frequency_band(wlan, ubus_wireless)
+  local ssid = ubus_wireless.ssid[wlan]
+  if not ssid then
+    return
+  end
+  local radio = ubus_wireless.radio[ssid.radio]
+  return radio and radio.band
+end
+
+local function cachedFirewallZones(firewallZones)
+  local cache = firewallZones or {}
+  if not cache.zones then
+    cache.zones = network.firewallZones()
+  end
+  return cache.zones
+end
+
+local wireless_network = {config="wireless", option="network"}
+local function networkInterfaceForWLan(wlan)
+  wireless_network.sectionname = wlan
+  return get_from_uci(wireless_network)
+end
+
+local function wifiType(wlan, firewallZones)
+  local zones = cachedFirewallZones(firewallZones)
+  local intf = networkInterfaceForWLan(wlan)
+  local zone = firewallZoneForInterface(intf, zones) or {}
+  return zone.gen_type
+end
+
+local function retrieve_wlan()
+  local wlans = {}
+  local ubus_wireless = {}
+  for _, intf in ipairs(landev.entries()) do
+    for _, wlan in ipairs(wlanconfig.entries(intf, ubus_wireless)) do
+      local igd = resolve("InternetGatewayDevice.LANDevice.{i}.WLANConfiguration.{i}.", wlan)
+      local lan_idx, wlan_idx = (igd or ""):match("%.(%d+)%..*%.(%d+)$")
+      if lan_idx and wlan_idx then
+        wlans[#wlans+1] = {
+          lan_dev_idx = tonumber(lan_idx),
+          wlan_idx = tonumber(wlan_idx),
+          type = wifiType(wlan),
+          frequency_band = wlan_frequency_band(wlan, ubus_wireless),
+          rpc_idx = getAPForIface(wlan),
+        }
+      end
+    end
+  end
+  return wlans
+end
+
+local function retrieve_internet()
+  return {
+    parental_control = get_from_uci(firewallTodBinding),
+    routed_lan = get_from_uci(firewallDmzBinding)
+  }
+end
+
+local function retrieve_phone()
+  --FIXME: these are dummy value, replace with correct data
+  return {
+    dynamic_trunk_phone_map = false,
+    voicemail = "no",
+    call_forwarding = "no",
+    sip_proxy = false,
+    fax_to_email = false,
+    ringing_schedule = false,
+    wakeup_call = false,
+    number_of_unheard_voicemail_msgs = 99999999,
+    trunks = {},
+    extensions = {},
+  }
+end
+
+local function list_iptvInterfaces()
+  local zone = firewallZoneForInterface("iptv") or {}
+  local iptv = {}
+  if zone and zone.network then
+    for _, intf in ipairs(zone.network) do
+      iptv[intf] = true
+    end
+  end
+  return iptv
+end
+
+local function retrieve_tv()
+  local isIptv = false
+  local intfDump = ubusConnection:call("network.interface", "dump", {})
+  local tvIntf = list_iptvInterfaces()
+  for _, intf in ipairs(intfDump.interface) do
+    local ifname = intf and intf.interface
+    if tvIntf[ifname]  then
+      isIptv = isIptv or intf.up
+    end
+  end
+  return {
+    is_iptv = isIptv
+  }
+end
+
+local function retrieve_service()
+  return {
+    internet = retrieve_internet(),
+    phone = retrieve_phone(),
+    tv = retrieve_tv(),
+  }
+end
+
+local function getConnectionStatus(conn, key)
+  local status = conn:getInterfaceStatus(key)
+  if conn.connType == "ip"  and status then
+    return status.up and "Connected" or "Connecting"
+  end
+  if status and status.data and status.data.pppinfo then
+    local pppstate = status.data.pppinfo.pppstate
+    if pppstate then
+      return pppstate:gsub("^%l", string.upper)
+    end
+  end
+  return "Disconnected"
+end
+
+local function getNetworkType(key)
+  local ifname = nwcommon.split_key(key)
+  local data = firewallZoneForInterface(ifname)
+  return data and data.vdf_type
+end
+
+local function getObjectInstance(path, key)
+  local resolvedPath = resolve(path, key)
+  return resolvedPath and string.match(resolvedPath, '%.(%d+)$') or ""
+end
+
+local connType = {
+  ip = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}.",
+  ppp = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}."
+}
+
+local radioIntfMap = {
+  lte = "lte",
+  umts = "3g",
+  gsm = "",
+}
+
+local function getMobileDevice()
+  local mobileRadioInfo = ubusConnection:call("mobiled.radio", "signal_quality", {}) or {}
+  local radioIntf = mobileRadioInfo.radio_interface
+  return radioIntf and radioIntfMap[radioIntf] or ""
+end
+
+local function getUnderlyingProtocol()
+  local l2Protocol = ""
+  wansensingBinding.sectionname = "state"
+  wansensingBinding.option = "backupStatus"
+  local backupStatus = get_from_uci(wansensingBinding)
+  if backupStatus == "BackUpActive" then
+    return getMobileDevice()
+  end
+  wansensingBinding.sectionname = "global"
+  wansensingBinding.option = "l2type"
+  local underlyingDevice = get_from_uci(wansensingBinding)
+  if underlyingDevice == "ETH" then
+    l2Protocol = "eth"
+  elseif underlyingDevice == "ADSL" then
+    l2Protocol = "atm"
+  elseif underlyingDevice == "VDSL" then
+    l2Protocol = "ptm"
+  elseif underlyingDevice == "MOBILE" then
+    l2Protocol = getMobileDevice()
+  elseif underlyingDevice == "GFAST" then
+    l2Protocol = "G.fast"
+  end
+  return l2Protocol
+end
+
+local function getWANConnectionDeviceList(wandevconn)
+  local devlist = {}
+  local WANDeviceKeys = wandevice.entries()
+  for _, grandkey in ipairs(WANDeviceKeys) do
+    for _, parentkey in ipairs(wanconnectiondevice.entries(grandkey)) do
+      local connection, keys = wandevconn:load(parentkey)
+      for _, key in ipairs(keys) do
+        devlist[#devlist + 1] = {
+          wan_dev_idx = tonumber(getObjectInstance("InternetGatewayDevice.WANDevice.{i}.", grandkey)),
+          conn_dev_idx = tonumber(getObjectInstance("InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.", parentkey)),
+          conn_idx = tonumber(getObjectInstance(connType[wandevconn.connType], key)),
+          enable = connection:getInterfaceOption(key, 'auto', '1', '0') == "1",
+          connection_status = getConnectionStatus(connection, key),
+          network_types = {getNetworkType(key)},
+          underlying_protocol = getUnderlyingProtocol()
+        }
+      end
+    end
+  end
+
+  return devlist
+end
+
+local function retrieve_wanip_connections()
+  return getWANConnectionDeviceList(wanipconnection)
+end
+
+local function retrieve_wanppp_connections()
+  return getWANConnectionDeviceList(wanpppconnection)
+end
+
+local function retrieve_toc()
+  return {
+    gen_contents = {
+      gw_info = retrieve_gw_info(),
+      services = retrieve_service(),
+      wan_ip_conns = retrieve_wanip_connections(),
+      wan_ppp_conns = retrieve_wanppp_connections(),
+      wlans = retrieve_wlan(),
+    }
+  }
+end
+
+local function retrieve_toc_as_json()
+  local toc = retrieve_toc()
+  return dkjson.encode(toc, {indent=true})
+end
+
+AppMap.get = {
+  TOC = retrieve_toc_as_json,
+}
+
+register(AppMap)
