@@ -1,0 +1,114 @@
+#!/usr/bin/env lua
+
+local ubus = require("ubus")
+local uci = require("uci")
+local uloop = require("uloop")
+
+local cursor = uci.cursor()
+local config_name = "mobiled"
+local section_name = "firmware_upgrade"
+
+local function get_numeric_option(option_name, default_value)
+	local string_value = cursor:get(config_name, section_name, option_name)
+	if not string_value then
+		return default_value
+	end
+
+	local numeric_value = tonumber(string_value)
+	if not numeric_value then
+		return default_value
+	end
+
+	return numeric_value
+end
+
+local device_index = get_numeric_option("dev_idx", 1)
+local max_start_attempts = get_numeric_option("max_start_attempts", 1)
+local max_start_duration = get_numeric_option("max_start_duration", 30) * 1000
+local max_upgrade_duration = get_numeric_option("max_upgrade_duration", 30 * 60) * 1000
+
+local success_message = cursor:get(config_name, section_name, "success_message")
+local default_error_message = cursor:get(config_name, section_name, "default_error_message")
+local failed_to_start_message = cursor:get(config_name, section_name, "failed_to_start_message")
+local invalid_parameters_message = cursor:get(config_name, section_name, "invalid_parameters_message")
+local timeout_message = cursor:get(config_name, section_name, "timeout_message")
+local error_code_messages = {
+	[1] = cursor:get(config_name, section_name, "unknown_error_message"),
+	[2] = cursor:get(config_name, section_name, "not_supported_message"),
+	[3] = cursor:get(config_name, section_name, "invalid_state_message"),
+	[4] = cursor:get(config_name, section_name, "download_failed_message"),
+	[5] = cursor:get(config_name, section_name, "invalid_image_message"),
+	[6] = cursor:get(config_name, section_name, "flashing_failed_message")
+}
+
+local upgrade_url = arg[1]
+if not upgrade_url then
+	error("No upgrade URL specified")
+end
+
+uloop.init()
+
+local connection = ubus.connect()
+if not connection then
+	error("Failed to connect to ubus")
+end
+
+local exit_status = 1
+local error_message = default_error_message
+
+local start_attempts = 1
+local start_timer
+start_timer = uloop.timer(function()
+	if start_attempts >= max_start_attempts then
+		exit_status = 1
+		error_message = failed_to_start_message or default_error_message
+		uloop.cancel()
+	else
+		start_attempts = start_attempts + 1
+		connection:call("mobiled.device", "firmware_upgrade", {dev_idx = device_index, path = upgrade_url})
+		start_timer:set(max_start_duration)
+	end
+end, max_start_duration)
+
+local upgrade_timer = uloop.timer(function()
+	exit_status = 1
+	error_message = timeout_message or default_error_message
+	uloop.cancel()
+end, max_upgrade_duration)
+
+connection:listen({
+	["mobiled.firmware_upgrade"] = function(message)
+		if message.dev_idx == device_index then
+			if message.status == "started" then
+				if start_timer then
+					start_timer:cancel()
+					start_timer = nil
+				end
+			elseif message.status == "done" then
+				exit_status = 0
+				error_message = success_message
+				uloop.cancel()
+			elseif message.status == "timeout" then
+				exit_status = 1
+				error_message = timeout_message or default_error_message
+				uloop.cancel()
+			elseif message.status == "invalid_parameters" then
+				exit_status = 1
+				error_message = invalid_parameters_message or default_error_message
+				uloop.cancel()
+			elseif message.status == "failed" then
+				exit_status = 1
+				error_message = error_code_messages[message.error_code] or default_error_message
+				uloop.cancel()
+			end
+		end
+	end
+})
+
+connection:call("mobiled.device", "firmware_upgrade", {dev_idx = device_index, path = upgrade_url})
+uloop.run()
+
+if error_message then
+	print(error_message)
+end
+os.exit(exit_status)

@@ -1,0 +1,478 @@
+#!/usr/bin/lua
+
+local ubus, uloop, uci = require('ubus'), require('uloop'), require('uci')
+local logger = require('tch.logger')
+local posix = require("tch.posix")
+local log
+
+local datausage_units = {
+	["MB"] = (1024*1024),
+	["GB"] = (1024*1024*1024)
+}
+
+local Interface = {}
+Interface.__index = Interface
+
+function Interface:check_alarms(ubus_conn)
+	for alarm_name, alarm in pairs(self.alarms) do
+		if alarm.enabled then
+			alarm.level = ((self.tx_bytes.total+self.rx_bytes.total)/alarm.bytes) * 100
+			if alarm.bytes and self.tx_bytes.total+self.rx_bytes.total > alarm.bytes and not alarm.reached then
+				alarm.reached = true
+				ubus_conn:send("datausage." .. alarm_name .. "_reached", {interface = self.interface, interface = self['.name']})
+			end
+		end
+	end
+end
+
+local function get_boolean(config_item)
+	return config_item == '1' or config_item == 'true'
+end
+
+function Interface:configure_alarms(interface_config)
+	for alarm_name, alarm in pairs(self.alarms) do
+		alarm.enabled = get_boolean(interface_config['usage_' .. alarm_name .. '_enabled'])
+		if alarm.enabled then
+			log:info("Configuring data usage " .. alarm_name .. " on " .. self.interface)
+			local old_alarm_value = alarm.value
+			local old_alarm_unit = alarm.unit
+			alarm.value = tonumber(interface_config['usage_' .. alarm_name])
+			alarm.unit = interface_config['usage_' .. alarm_name .. '_unit'] or "MB"
+			if old_alarm_value ~= alarm.value or old_alarm_unit ~= alarm.unit then
+				alarm.reached = false
+			end
+			if alarm.value then
+				alarm.bytes = alarm.value * datausage_units[alarm.unit]
+			end
+		end
+	end
+end
+
+local monitor = {
+	config_file = "datausage",
+	ntp_synced = false,
+	interfaces = {},
+	config = {
+		persist = true,
+		usage_cycle_update_interval = (60*1000)
+	}
+}
+
+function monitor:cleanup()
+	log:info("Stopping...")
+	self.ifstat_timer:cancel()
+	self.usage_cycle_timer:cancel()
+	self.ubus:close()
+	-- Store all counters at exit
+	for _, interface in pairs(self.interfaces) do
+		interface.has_changes = true
+	end
+	self:persist()
+	uloop.cancel()
+end
+
+function monitor:reloadconfig()
+	log:info("Reloading config")
+	self:load_config()
+end
+
+function monitor:get_next_usage_cycle_enddate(usage_cycle_reset_day)
+	local month = tonumber(os.date("%m"))+1
+	local year = os.date("%Y")
+	local ret = string.format("%s-%02d-%02d", year, month, usage_cycle_reset_day)
+	log:info("New data usage cycle ends on %s", ret)
+	return ret
+end
+
+local function validate_datausage_unit(config_item)
+	if config_item and not datausage_units[config_item] then
+		return nil, "Invalid data usage limit unit"
+	end
+	return true
+end
+
+function monitor:validate_interface_config(interface_config)
+	if not interface_config.interface then
+		return nil, "No interface specified"
+	end
+	local ret, errMsg = validate_datausage_unit(interface_config.usage_limit_unit)
+	if not ret then
+		return nil, errMsg
+	end
+	ret, errMsg = validate_datausage_unit(interface_config.usage_threshold_unit)
+	if not ret then
+		return nil, errMsg
+	end
+
+	return true
+end
+
+function monitor:update_interface_config(interface, interface_config)
+	-- Exponentially smoothed average with default alpha of 0.9
+	interface.alpha = tonumber(interface_config.alpha) or 0.9
+	-- By default write the counters to flash every megabyte
+	interface.persist_threshold = tonumber(interface_config.persist_threshold) or (1024*1024)
+	if not interface.tx_bytes.total then
+		interface.tx_bytes.total = tonumber(interface_config.tx_bytes_total) or 0
+	end
+	if not interface.rx_bytes.total then
+		interface.rx_bytes.total = tonumber(interface_config.rx_bytes_total) or 0
+	end
+
+	interface['.name'] = interface_config['.name']
+	interface:configure_alarms(interface_config)
+
+	local alias = interface.interface_alias
+	interface.interface_alias = self:get_interface_alias(interface.interface)
+
+	-- Check if lower layer interface changed
+	if alias and interface.interface_alias and interface.interface_alias ~= alias then
+		log:info("Lower layer interface changed. Reset counters")
+		self:reset_interface(interface)
+	end
+
+	-- Generate a new end date in case we don't have one yet or the reset day has changed
+	local usage_cycle_reset_day = tonumber(interface_config.usage_cycle_reset_day) or 1
+
+	local config_out_of_sync = false
+	if interface_config.usage_cycle_enddate and
+		tonumber(string.match(interface_config.usage_cycle_enddate, "%d+-%d+-(%d+)")) ~= usage_cycle_reset_day then
+		config_out_of_sync = true
+	end
+
+	if not interface_config.usage_cycle_enddate or config_out_of_sync or
+			(interface.usage_cycle_reset_day and (interface.usage_cycle_reset_day ~= usage_cycle_reset_day)) then
+		log:info("Data usage reset day changed")
+		interface_config.usage_cycle_enddate = self:get_next_usage_cycle_enddate(usage_cycle_reset_day)
+		interface.has_changes = true
+	end
+
+	interface.usage_cycle_reset_day = usage_cycle_reset_day
+	interface.usage_cycle_enddate = interface_config.usage_cycle_enddate
+end
+
+function monitor:load_config()
+	local cursor = uci.cursor()
+	local c = cursor:get(self.config_file, "global", "tracelevel")
+	self.config.tracelevel = tonumber(c) or 6
+
+	if not log then
+		logger.init("datausage", tonumber(self.config.tracelevel), posix.LOG_PID)
+		log = logger.new("datausage")
+	else
+		log:set_log_level(self.config.tracelevel)
+	end
+
+	c = cursor:get(self.config_file, "global", "persist")
+	self.config.persist = c ~= '0' and c ~= 'false'
+
+	for _, interface in pairs(self.interfaces) do
+		interface.remove = true
+	end
+	cursor:foreach(self.config_file, "interface", function(interface_config)
+		if interface_config.enabled ~= '0' and interface_config.enabled ~= 'false' then
+			local ret, errMsg = self:validate_interface_config(interface_config)
+			if ret then
+				if not self.interfaces[interface_config.interface] then
+					log:info("Start data usage monitoring on %s", interface_config.interface)
+					local interface = {
+						interface = interface_config.interface,
+						tx_bytes = {
+							average = 0,
+							per_second = 0
+						},
+						rx_bytes = {
+							average = 0,
+							per_second = 0
+						},
+						alarms = {
+							limit = {
+								reached = false
+							},
+							threshold = {
+								reached = false
+							}
+						}
+					}
+					setmetatable(interface, Interface)
+					self.interfaces[interface_config.interface] = interface
+				end
+				self:update_interface_config(self.interfaces[interface_config.interface], interface_config)
+				self.interfaces[interface_config.interface].remove = nil
+			else
+				log:error("[%s] Invalid interface configuration (%s)", interface_config['.name'], errMsg)
+			end
+		end
+	end)
+	cursor:close()
+
+	for _, interface in pairs(self.interfaces) do
+		if interface.remove then
+			self.interfaces[interface.interface] = nil
+		end
+	end
+	-- Write new usage cycle end date to UCI
+	self:persist()
+end
+
+function monitor:persist()
+	local changes = false
+	local cursor = uci.cursor()
+	for _, interface in pairs(self.interfaces) do
+		if interface.has_changes then
+			if self.config.persist then
+				cursor:set(self.config_file, interface['.name'], "tx_bytes_total", interface.tx_bytes.total)
+				cursor:set(self.config_file, interface['.name'], "rx_bytes_total", interface.rx_bytes.total)
+				cursor:set(self.config_file, interface['.name'], "usage_cycle_enddate", interface.usage_cycle_enddate)
+			end
+			interface.tx_bytes.last_total = interface.tx_bytes.total
+			interface.rx_bytes.last_total = interface.rx_bytes.total
+			interface.has_changes = nil
+			changes = true
+		end
+	end
+	if changes and self.config.persist then
+		log:debug("Writing data usage config")
+		cursor:commit(self.config_file)
+	end
+	cursor:close()
+end
+
+function monitor:usage_cycle_update()
+	if not self.ntp_synced then
+		log:info("NTP not synced. Skipping usage cycle update")
+		return
+	end
+
+	for _, interface in pairs(self.interfaces) do
+		local end_year, end_month, end_day = string.match(interface.usage_cycle_enddate, "(%d+)-(%d+)-(%d+)")
+		local end_time = math.min(os.time({day = 1, year = end_year, month = end_month + 1}), os.time({day = end_day, year = end_year, month = end_month}))
+		local diff_time = os.difftime(os.time(), end_time)
+		if diff_time > 0 then
+			self:reset_interface_usage_cycle(interface)
+		end
+	end
+	self:persist()
+	self.usage_cycle_timer:set(self.config.usage_cycle_update_interval)
+end
+
+function monitor:read_file(file)
+	local f = io.open(file, "rb")
+	if f then
+		local content = f:read("*all")
+		f:close()
+		return content
+	end
+	return nil
+end
+
+function monitor:update_stats(byte_stats, bytes, alpha)
+	if bytes then
+		if byte_stats.last and byte_stats.last <= bytes then
+			byte_stats.per_second = (bytes - byte_stats.last)
+			byte_stats.average = (alpha * byte_stats.per_second) + (1.0 - alpha) * byte_stats.average;
+			byte_stats.total = byte_stats.total + byte_stats.per_second
+		else
+			byte_stats.per_second = 0
+		end
+		byte_stats.last = bytes
+	end
+	if not byte_stats.last_total then
+		 byte_stats.last_total = byte_stats.total
+	end
+end
+
+function monitor:get_stats(interface)
+	local path = string.format("/sys/class/net/%s/statistics/tx_bytes", interface)
+	local tx_bytes = tonumber(self:read_file(path))
+	path = string.format("/sys/class/net/%s/statistics/rx_bytes", interface)
+	local rx_bytes = tonumber(self:read_file(path))
+	return { tx_bytes = tx_bytes, rx_bytes = rx_bytes }
+end
+
+function monitor:ifstat_update()
+	for _, interface in pairs(self.interfaces) do
+		local ifname = interface.interface_alias or interface.interface
+		if ifname then
+			local stats = self:get_stats(ifname)
+			self:update_stats(interface.tx_bytes, stats.tx_bytes, interface.alpha)
+			self:update_stats(interface.rx_bytes, stats.rx_bytes, interface.alpha)
+			if interface.tx_bytes.total - interface.tx_bytes.last_total > interface.persist_threshold or
+				interface.rx_bytes.total - interface.rx_bytes.last_total > interface.persist_threshold then
+				log:debug("Counter threshold exeeded")
+				interface.has_changes = true
+			end
+			interface:check_alarms(self.ubus)
+		end
+	end
+	self:persist()
+	self.ifstat_timer:set(1000)
+end
+
+function monitor:get_data(interface)
+	local data = {
+		rx_bytes_per_second = tostring(interface.rx_bytes.per_second),
+		tx_bytes_per_second = tostring(interface.tx_bytes.per_second),
+		rx_bytes_average = tostring(math.floor(interface.rx_bytes.average)),
+		tx_bytes_average = tostring(math.floor(interface.tx_bytes.average)),
+		rx_bytes_total = tostring(interface.rx_bytes.total),
+		tx_bytes_total = tostring(interface.tx_bytes.total),
+		interface_alias = interface.interface_alias,
+		interface = interface.interface
+	}
+	for alarm_name, alarm in pairs(interface.alarms) do
+		data["usage_" .. alarm_name .. "_reached"] = alarm.reached
+		data["usage_" .. alarm_name .. "_level"] = alarm.level
+	end
+	return data
+end
+
+function monitor:get_ifstat(req, msg)
+	if msg.interface and self.interfaces[msg.interface] then
+		self.ubus:reply(req, self:get_data(self.interfaces[msg.interface]))
+		return
+	end
+
+	local data = { interfaces = {} }
+	for _, interface in pairs(self.interfaces) do
+		local ifdata = self:get_data(interface)
+		ifdata.interface = interface.interface
+		table.insert(data.interfaces, ifdata)
+	end
+	self.ubus:reply(req, data)
+end
+
+function monitor:reset_interface(interface)
+	log:debug("Reset data usage for %s", interface.interface)
+	interface.tx_bytes.total = 0
+	interface.rx_bytes.total = 0
+	for _, alarm in pairs(interface.alarms) do
+		alarm.reached = false
+	end
+	interface.has_changes = true
+	self.ubus:send("datausage.reset", {interface = interface.interface, interface = interface['.name']})
+end
+
+function monitor:reset_interface_usage_cycle(interface)
+	self:reset_interface(interface)
+	interface.usage_cycle_enddate = self:get_next_usage_cycle_enddate(interface.usage_cycle_reset_day)
+end
+
+function monitor:reset_ifstat(_, msg)
+	if msg.interface and self.interfaces[msg.interface] then
+		self:reset_interface_usage_cycle(self.interfaces[msg.interface])
+	else
+		for _, interface in pairs(self.interfaces) do
+			self:reset_interface_usage_cycle(interface)
+		end
+	end
+	self:persist()
+end
+
+function monitor:ntp_update()
+	log:info("Checking NTP sync")
+	local ret = uci.cursor(nil, "/var/state"):get("system", "ntp", "synced")
+	self.ntp_synced = ret == '1' or ret == 'true'
+end
+
+function monitor:get_interface_alias(interface)
+	local data = self.ubus:call("network.interface." .. interface, "status", {})
+	if data then
+		return data.l3_device or data.device
+	end
+end
+
+function monitor:ifupdate(event)
+	if event.action == "ifup" and event.interface then
+		for _, interface in pairs(self.interfaces) do
+			if interface.interface == event.interface or interface.interface_alias == event.interface then
+				local alias = interface.interface_alias
+				interface.interface_alias = self:get_interface_alias(event.interface)
+				-- Check if lower layer interface changed
+				if alias and interface.interface_alias and interface.interface_alias ~= alias then
+					log:info("Lower layer interface changed. Reset counters")
+					self:reset_interface(interface)
+				end
+				break
+			end
+		end
+		self:persist()
+	end
+end
+
+local UbusConn = {}
+UbusConn.__index = UbusConn
+
+function UbusConn:reply(req, data)
+	if self._ubus then
+		self._ubus:reply(req, data)
+	end
+end
+
+function UbusConn:add(method)
+	if self._ubus then
+		self._ubus:add(method)
+	end
+end
+
+function UbusConn:call(facility, func, params)
+	if self._ubus then
+		return self._ubus:call(facility, func, params)
+	end
+end
+
+function UbusConn:send(facility, data)
+	if self._ubus then
+		self._ubus:send(facility, data)
+	end
+end
+
+function UbusConn:listen(events)
+	if self._ubus then
+		self._ubus:listen(events)
+	end
+end
+
+function UbusConn:close()
+	self._ubus = nil
+end
+
+function monitor:init()
+	self.ubus = {}
+	self.ubus._ubus = ubus.connect()
+	if not self.ubus._ubus then
+		return nil, "Failed to connect to UBUS"
+	end
+	setmetatable(self.ubus, UbusConn)
+
+	self:load_config()
+
+	local events = {}
+	events['ntp.connected'] = function(...) self:ntp_update(...) end
+	events['network.interface'] = function(...) self:ifupdate(...) end
+	self.ubus:listen(events)
+
+	local ubus_methods = {
+		['datausage'] = {
+			get = {
+				function(...) self:get_ifstat(...) end, {interface = ubus.STRING}
+			},
+			reset = {
+				function(...) self:reset_ifstat(...) end, {interface = ubus.STRING}
+			},
+			reload = {
+				function(...) self:reloadconfig(...) end, {}
+			}
+		}
+	}
+	self.ubus:add(ubus_methods)
+
+	self.ifstat_timer = uloop.timer(function() self:ifstat_update() end, 1000)
+	self.usage_cycle_timer = uloop.timer(function() self:usage_cycle_update() end, self.config.usage_cycle_update_interval)
+	uloop.init()
+end
+
+monitor:init()
+monitor:ntp_update()
+uloop.run()
+monitor:cleanup()

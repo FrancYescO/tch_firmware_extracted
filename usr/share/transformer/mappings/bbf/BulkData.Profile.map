@@ -1,0 +1,209 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_BulkData_Profile_i_ = {
+  objectType = {
+    name = "#ROOT.BulkData.Profile.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ProfileNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    --aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Alias = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readWrite",
+        type = "string",
+        max = "255",
+      },
+      NumberOfRetainedFailedReports = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+        default = "0",
+      },
+      Protocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          --"Streaming",
+          --"File",
+          "HTTP", --Currently only support HTTP
+        },
+      },
+      EncodingType = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+         -- "XML",
+         -- "XDR",
+         -- "CSV",
+          "JSON", --Currently only support JSON
+        },
+      },
+      ReportingInterval = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+        default = "86400",
+      },
+      TimeReference = {
+        access = "readWrite",
+        type = "dateTime",
+        default = "0001-01-01T00:00:00Z",
+      },
+--[[ Removed temperately due to currently not supported
+      StreamingHost = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      StreamingPort = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        default = "4737",
+      },
+      StreamingSessionID = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "48",
+            max = "57",
+          },
+          {
+            min = "65",
+            max = "90",
+          },
+        },
+      },
+      FileTransferURL = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      FileTransferUsername = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      FileTransferPassword = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+        max = "64",
+      },
+      ControlFileFormat = {
+        access = "readWrite",
+        type = "string",
+        max = "128",
+      },
+--]]
+      -- ParameterNumberOfEntries
+      -- automatically created when #ROOT.BulkData.Profile.{i}.Parameter.{i}. is loaded
+    }
+  }
+}
+
+local bulk_helper = require "transformer.shared.bulkhelper"
+local commitapply = commitapply
+local register = register
+local match = string.match
+local uci = mapper("ucihelper")
+
+local calendar = {
+  ["01"] = 31,
+  ["02"] = 29,
+  ["03"] = 31,
+  ["04"] = 30,
+  ["05"] = 31,
+  ["06"] = 30,
+  ["07"] = 31,
+  ["08"] = 31,
+  ["09"] = 30,
+  ["10"] = 31,
+  ["11"] = 30,
+  ["12"] = 31,
+}
+setmetatable(calendar, { __index = function() return 0 end })
+
+local get_map = {
+  Enable = function(object)
+    return bulk_helper.convert_boolean(object.enabled) or "false"
+  end,
+  Alias = "alias",
+  Name = "name",
+  NumberOfRetainedFailedReports = "retain_failed_reports",
+  Protocol = "protocol",
+  EncodingType = "encode_type",
+  ReportingInterval = "report_interval",
+  TimeReference = "time_reference"
+}
+
+local set_map = {
+  Enable = "enabled",
+  Alias = "alias",
+  Name = "name",
+  NumberOfRetainedFailedReports = "retain_failed_reports",
+  Protocol = "protocol",
+  EncodingType = "encode_type",
+  ReportingInterval = "report_interval",
+  TimeReference = function(binding, value)
+    local year, month, day, hour = value:match("^(%d%d%d%d)%-([01]%d)%-([0123]%d)T([012]%d):[012345]%d:[012345]%dZ$")
+    if year and calendar[month] >= tonumber(day) and tonumber(hour) < 24
+      and not (tonumber(year)%4 ~= 0 and month == "02" and day == "29") then
+      binding.option = "time_reference"
+      uci.set_on_uci(binding, value, commitapply)
+      return true
+    else
+      return nil, "The date value or format is invalid! The format should be 0001-01-01T00:00:00Z"
+    end
+  end
+}
+
+bulk_helper.SetProfileMap(Multi_BulkData_Profile_i_, {get=get_map, set=set_map}, commitapply)
+
+Multi_BulkData_Profile_i_.entries = function(mapping)
+  return mapping._profile:getProfileKeys("profile")
+end
+
+Multi_BulkData_Profile_i_.getall = bulk_helper.getall
+
+Multi_BulkData_Profile_i_.get = bulk_helper.get
+
+Multi_BulkData_Profile_i_.set = bulk_helper.set
+
+Multi_BulkData_Profile_i_.add = function(mapping)
+  return bulk_helper.add_profile(mapping, "profile")
+end
+
+Multi_BulkData_Profile_i_.delete = bulk_helper.delete_profile
+
+
+Multi_BulkData_Profile_i_.commit = bulk_helper.commit
+Multi_BulkData_Profile_i_.revert = bulk_helper.revert
+
+bulk_helper.register(Multi_BulkData_Profile_i_, register)

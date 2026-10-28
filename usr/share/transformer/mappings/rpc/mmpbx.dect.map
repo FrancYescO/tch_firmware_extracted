@@ -1,0 +1,151 @@
+local logger = require("transformer.logger")
+local log = logger.new("mmpbxdect", 2)
+
+
+local mmpbxdect_ = {
+  objectType = {
+    name = "rpc.mmpbx.dect.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        paging = {
+            access = "readWrite",
+            type = "string",
+        },
+        registration = {
+            access = "readWrite",
+            type = "string",
+        },
+    },
+  }
+}
+
+local mmpbxdect_reg_ = {
+  objectType = {
+    name = "rpc.mmpbx.dect.registration.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        open = {
+            access = "readOnly",
+            type = "string",
+        },
+    	clear = {
+    	    access = "readWrite",
+	    type = "string",
+    	},
+    },
+  }
+}
+
+local mmpbxdect_paging_ = {
+  objectType = {
+    name = "rpc.mmpbx.dect.paging.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+        alerting = {
+            access = "readOnly",
+            type = "string",
+        },
+    },
+  }
+}
+
+local conn = mapper("ubus").connect()
+
+local function nilToEmptyString(st)
+    if st == nil then
+       return ""
+    else
+       return tostring(st)
+    end
+end
+
+
+local function set(mapping, paramName, paramValue, key)
+    local result
+
+    --log:error ("[mmpbx.dect.map] Check set function ParamName: " .. paramName .. " Value: " .. paramValue)
+
+    if paramName == "registration" then
+        result = conn:call("mmpbx.dect.registration", paramValue, {})
+    end
+    if paramName == "paging" then
+        result = conn:call("mmpbx.dect.paging", paramValue, {})
+    end
+    return result or ""
+end
+
+local function get(mapping, paramName, key)
+    local result = "0"
+    local state = nil
+
+    if paramName == "registration" then
+	state = conn:call("mmpbx.dect.registration", "state", { })
+    end
+    if paramName == "paging" then
+        state = conn:call("mmpbx.dect.paging", "state", { })
+    end
+
+    if state ~= nil then
+	if nilToEmptyString(state[paramName]) == "true" then
+	    result = "1"
+	end
+    end
+    return result or ""
+end
+
+local function get_dect_status(mapping, paramName, key)
+    local result = "0"
+    local state = nil
+
+    --log:error ("[mmpbx.dect.map] Check get_dect_status function ParamName: " .. paramName )
+
+    if paramName == "open" then -- Retrieve the registration status
+	state = conn:call("mmpbx.dect.registration", "state", { })
+	--log:error ("[mmpbx.dect.map]] Check get_dect_status open result value : " .. nilToEmptyString(state[paramName])
+    end
+    if paramName == "alerting" then -- Retrieve the paging status
+	state = conn:call("mmpbx.dect.paging", "state", { })
+	--log:error ("[mmpbx.dect.map] Check get_dect_status paging result value : " .. nilToEmptyString(state[paramName])
+    end
+
+    if state ~= nil then
+	if nilToEmptyString(state[paramName]) == "true" then
+	    result = "1"
+	end
+    end
+    return result
+end
+
+local function set_handset(mapping, paramName, paramValue, key)
+    local result
+
+    --log:error ("[mmpbx.dect.map] Check set_handset function ParamName: " .. paramName .. " Value: " .. paramValue)
+
+    if paramName == "clear" then -- Retrieve the registration status
+        if paramValue ~= "all" then 
+	    result = conn:call("mmpbx.dect.registration", "clear", { device = paramValue })
+	else
+	    result = conn:call("mmpbx.dect.registration", "clear", { })
+	end
+    end
+    return result or ""
+end
+
+
+mmpbxdect_.set = set
+mmpbxdect_.get = get
+mmpbxdect_reg_.set = set_handset
+mmpbxdect_reg_.get = get_dect_status
+mmpbxdect_paging_.get = get_dect_status
+
+register(mmpbxdect_)
+register(mmpbxdect_reg_)
+register(mmpbxdect_paging_)
+
+

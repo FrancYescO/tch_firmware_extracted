@@ -1,0 +1,46 @@
+-- Automatically generated from Device:2.2
+-- using generator version 2.1
+local Device_Hosts_Host_i_IPv6Address_i_ = {
+  objectType = {
+    name = "Device.Hosts.Host.{i}.IPv6Address.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "IPv6AddressNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      IPAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local network = require("transformer.shared.common.network")
+
+local ipcache = {}
+
+function Device_Hosts_Host_i_IPv6Address_i_.entries(_, parentMAC)
+  local data = network.getHostDataByMAC(parentMAC)
+  local keys = {}
+  local ips = {}
+  for _, ip in pairs(data.ipv6 or {}) do
+    if ip.state == "connected" then
+      local idx = #keys+1
+      local key = parentMAC .. "|" .. idx
+      keys[idx] = key
+      ips[key] = ip.address
+    end
+  end
+  ipcache[parentMAC] = ips
+  return keys
+end
+
+Device_Hosts_Host_i_IPv6Address_i_.get = {
+  IPAddress = function(_, _, key, parentMAC)
+    local ips = ipcache[parentMAC] or {}
+    return ips[key] or ""
+  end,
+}
+
+register(Device_Hosts_Host_i_IPv6Address_i_)

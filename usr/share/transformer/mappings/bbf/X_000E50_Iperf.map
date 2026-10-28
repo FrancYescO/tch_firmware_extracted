@@ -1,0 +1,140 @@
+local Multi_X_000E50_Iperf_ = {
+  objectType = {
+    name = "#ROOT",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Enabled",
+          "Disabled",
+          "Error",
+        },
+      },
+      Protocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "TCP",
+          "UDP",
+        },
+      },
+      Port = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1024",
+            max = "65535",
+          },
+        },
+      },
+    }
+  }
+}
+
+local uci = require("transformer.mapper.ucihelper")
+local iperfBinding = { config = "iperf" }
+local firewallBinding = { config = "firewall" }
+local transactions = {}
+
+local paramMap = {
+  Enable = "enabled",
+  Protocol = "proto",
+  Port = "dest_port",
+  Status = "status"
+}
+
+local function getUciValue(binding, section, option, default, state)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  binding.state = state
+  return uci.get_from_uci(binding)
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  uci.set_on_uci(binding, value, commitapply)
+  transactions[binding] = true
+end
+
+local function setFirewallDefault()
+  firewallBinding.sectionname = "rule"
+  local section = uci.add_on_uci(firewallBinding)
+  setUciValue(firewallBinding, section, "target", "DROP")
+  setUciValue(firewallBinding, section, "name", "iperf")
+  for param, value in pairs(paramMap) do
+    if param ~= "Status" then
+      local iperfValue = getUciValue(iperfBinding, "iperf", value)
+      setUciValue(firewallBinding, section, value, iperfValue)
+    end
+  end
+end
+
+Multi_X_000E50_Iperf_.get = function(mapping, param, value)
+  if param == "Status" then
+    return getUciValue(iperfBinding, "iperf", paramMap[param], nil, true)
+  end
+  return getUciValue(iperfBinding, "iperf", paramMap[param])
+end
+
+Multi_X_000E50_Iperf_.set = function(mapping, param, value)
+  local iperfEnabled = getUciValue(iperfBinding, "iperf", "enabled")
+  if param == "Enable" then
+    if value ~= iperfEnabled then
+      setUciValue(iperfBinding, "iperf", "enabled", value)
+      if value == "0" then
+        firewallBinding.sectionname = "rule"
+        firewallBinding.option = nil
+        uci.foreach_on_uci(firewallBinding, function(s)
+          if s.name == "iperf" then
+            firewallBinding.sectionname = s[".name"]
+            return false
+          end
+        end)
+        uci.delete_on_uci(firewallBinding,commitapply)
+        transactions[firewallBinding] = true
+      else
+        setFirewallDefault()
+      end
+    end
+  else
+    if iperfEnabled == "1" then
+      return nil, "Value cannot be set when iperf server is enabled"
+    end
+    setUciValue(iperfBinding, "iperf", paramMap[param], value)
+  end
+  return true
+end
+
+
+Multi_X_000E50_Iperf_.commit = function()
+  for binding in pairs(transactions) do
+    uci.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_X_000E50_Iperf_.revert = function()
+  for binding in pairs(transactions) do
+    uci.revert(binding)
+  end
+  transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicate = duplicator(Multi_X_000E50_Iperf_, "#ROOT", {"InternetGatewayDevice.X_000E50_Iperf.", "Device.X_000E50_Iperf.", "rpc.Iperf."})
+for _, dupli in ipairs(duplicate) do
+  register(dupli)
+end

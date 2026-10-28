@@ -1,0 +1,48 @@
+#!/usr/bin/env lua
+
+local require = require
+local io = io
+local table = table
+local exit = os.exit
+
+local posix = require 'tch.posix'
+
+local function exit_error(fmt, ...)
+  io.stderr:write(fmt:format(...), "\n")
+  exit(1)
+end
+
+local function make_process_group()
+  local ok, err = posix.setpgid(0, 0);
+  if not ok then
+    exit_error("setpgid failed: %s", err)
+  end
+end
+
+local function write_pidfile(pidfile)
+  if not pidfile then
+    exit_error("pidfile destination missing...");
+  end
+  local f, err = io.open(pidfile, "w")
+  if not f then
+    exit_error("Failed to open pidfile %s: %s\n", pidfile, err)
+  end
+  f:write(tostring(posix.getpid()))
+  f:close()
+end
+
+local function launch_process(exe, args)
+  if not exe then
+    exit_error("No executable file given")
+  end
+  local _, err = posix.execv(exe, args)
+  exit_error("exec failed: %s", err)
+end
+
+local function main(exe, pidfile, ...)
+  make_process_group()
+  write_pidfile(pidfile)
+  launch_process(exe, {...})
+end
+
+main(...)
