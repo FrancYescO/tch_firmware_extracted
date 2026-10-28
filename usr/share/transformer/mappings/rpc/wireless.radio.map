@@ -1,0 +1,335 @@
+local register = register;
+local pairs = pairs
+local wireless_radio_ = {
+  objectType = {
+    name = "rpc.wireless.radio.@.",
+    access = "readOnly",
+    numEntriesParameter = "RadiosNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+		admin_state = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		oper_state = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		max_phy_rate = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		phy_rate = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_frequency_bands = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_standards = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		standard = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		band = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		supported_countries = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		country = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		allowed_channels = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		used_channels = {
+	        access = "readOnly",
+	        type = "string",
+        },
+        requested_channel = {
+            access = "readWrite",
+            type = "string",
+        },
+		channel = {
+	        access = "readOnly",
+	        type = "string",
+        },
+        requested_channel_width = {
+            access = "readWrite",
+            type = "string",
+        },
+		channel_width = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		ext_channel_location = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		beacon_period = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		dtim_interval = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		rts_threshold = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection_mode = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		protection_trigger = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		short_slot = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		rateset = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		frame_bursting = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		sgi = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		cdd = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		stbc = {
+	        access = "readWrite",
+	        type = "string",
+        },
+		ampdu = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		amsdu = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		interference_mode = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		interference_channel_list = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		ht_security_restriction = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		remotely_managed = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		integrated_ap = {
+	        access = "readOnly",
+	        type = "string",
+        },
+		transmit_power = {
+	        access = "readWrite",
+		type = "int",
+	        range = {
+		{
+		  min = "-1",
+		  max = "100",
+		},
+		},
+	},
+		transmit_power_supported = {
+		access = "readOnly",
+		list = true,
+		type = "int",
+		max = "64",
+		range = {
+		{
+		  min = "-1",
+		  max = "100",
+		},
+		},
+	},
+
+	        tx_power_overrule_reg = {
+                access = "readOnly",
+                type = "string",
+        },
+                tx_power_adjust = {
+                access = "readWrite",
+                type = "string",
+        },
+               driver_version = {
+               access = "readOnly",
+               type = "string",
+        },
+               capabilities = {
+	       access = "readOnly",
+	       type = "string",
+        },
+    },
+  }
+}
+
+local mapper = mapper
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local wirelessBinding = { config = "wireless" }
+local network = require("transformer.shared.common.network")
+local radioDataCache
+local ubus = {}
+local nwWifi = require("transformer.shared.wifi")
+local match = string.match
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function entriesWirelessRadio(mapping)
+    local entries = {}
+    radioDataCache = conn:call("wireless.radio", "get", { })
+    if radioDataCache then
+        for key in pairs(radioDataCache) do
+            entries[#entries+1] = key
+        end
+    end
+    return entries
+end
+
+local function getRequestedChannel(key, radioData)
+	wirelessBinding.sectionname = key
+	wirelessBinding.option = "channel"
+	return uci_helper.get_from_uci(wirelessBinding)
+end
+
+local function getChannel(key, radioData)
+        return radioData and radioData.channel or ""
+end
+
+local function getTargetPower(key, option)
+	for k, info in pairs(conn:call("wireless.radio", "get", {}) or {}) do
+		ubus[k] = info
+	end
+	local data = ubus[key] or {}
+	return data[option] and tostring(data[option])
+end
+
+local function getParameterValue(key, paramName, value, radioData)
+	radioData = radioData or network.getRadioInfo(key)
+	value = value or radioData[paramName]
+	if paramName == "requested_channel" then
+		value = getRequestedChannel(key, radioData)
+	elseif paramName == "channel" then
+		value = getChannel(key, radioData)
+	elseif paramName == "transmit_power" then
+		local max_target_power = getTargetPower(key, "max_target_power")
+		local max_target_power_adjusted = getTargetPower(key, "max_target_power_adjusted")
+		local power = nwWifi.getTxPower(max_target_power, max_target_power_adjusted)
+		value = power == "" and "100" or tostring(power)
+	elseif paramName == "transmit_power_supported" then
+		value  = "10,20,30,40,50,60,70,80,90,100"
+	elseif paramName == "standard" then
+          local sta_min_mode = nilToEmptyString(radioData.sta_minimum_mode)
+          sta_min_mode = sta_min_mode ~= "none" and sta_min_mode:match("11(%a+)") or ""
+          local standard = nilToEmptyString(radioData.standard)
+          if standard == "bgnax" or standard == "anacax" or standard == "anac" then
+            value = sta_min_mode ~= "" and standard:match(sta_min_mode..".*") or standard
+          end
+        end
+        return nilToEmptyString(value)
+end
+
+local function getall(mapping, key)
+        local radioData = network.getRadioInfo(key)
+        local sanitizedData = {}
+        for option, value in pairs(radioData) do
+            sanitizedData[option] = getParameterValue(key, option, value, radioData)
+        end
+        return sanitizedData
+end
+
+local function get(mapping, paramName, key)
+        return getParameterValue(key, paramName)
+end
+
+local staModeMap = { gnax = "11g", nax = "11n", acax = "11ac", nacax = "11n" , nac = "11n" }
+
+local namemap = {   admin_state="state",
+                    requested_channel = "channel",
+                    requested_channel_width = "channelwidth",
+                    allowed_channels = "allowed_channels",
+                }
+local set = function(mapping, param, value, key)
+    -- Allow comma-separated channel inputs
+	if param == "allowed_channels" then
+		value = value:gsub(","," ")
+	end
+	if param == "transmit_power" then
+		local maxPower = getTargetPower(key,"max_target_power")
+		local power = nwWifi.setTxPower(maxPower, value)
+		if power then
+			param = "tx_power_adjust"
+			value =  power
+		end
+	end
+        if param == "standard" then
+           local modevalue = "none"
+           local radioData = radioData or network.getRadioInfo(key)
+           local standard = nilToEmptyString(radioData.supported_standards)
+           if staModeMap[value] and (standard == "bgnax" or standard == "anacax") then
+             modevalue = staModeMap[value]
+             value = value ~= "nac" and standard or "anac"
+           end
+             wirelessBinding.sectionname = key
+             wirelessBinding.option = "sta_minimum_mode"
+             uci_helper.set_on_uci(wirelessBinding, modevalue, commitapply)
+        end
+    wirelessBinding.sectionname = key
+    wirelessBinding.option = namemap[param] or param
+    uci_helper.set_on_uci(wirelessBinding, value, commitapply)
+    if param == "requested_channel_width" and value == "auto" then
+       commitapply:newset("ACSRescan." .. key)
+    end
+end
+
+wireless_radio_.entries = entriesWirelessRadio
+wireless_radio_.getall = getall
+wireless_radio_.get = get
+wireless_radio_.set = set
+wireless_radio_.commit = function()
+    uci_helper.commit({config = "wireless"})
+end
+wireless_radio_.revert = function()
+    uci_helper.revert({config = "wireless"})
+end
+
+register(wireless_radio_)
+

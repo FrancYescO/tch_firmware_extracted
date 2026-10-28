@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+
+start() {
+	BOOTLOADER_VERSION="unknown"
+	BOOTLOADER_OID="unknown"
+
+	if [ -e /proc/bootloader/version ] && [ $(cat /proc/bootloader/version) != 0.0.0 ]; then
+		BOOTLOADER_VERSION=$(cat /proc/bootloader/version)
+	else
+		# Parse command line parameters in case someone thinks this is useful and take along the bootloader version and oid
+		for i in $(cat /proc/cmdline)
+		do
+			( echo $i | grep -q '^bl_version=' ) && BOOTLOADER_VERSION=$(echo $i | cut -d= -f2)
+			( echo $i | grep -q '^bl_oid=' ) && BOOTLOADER_OID=$(echo $i | cut -d= -f2)
+		done
+	fi
+	uci set env.var.bootloader_version=${BOOTLOADER_VERSION}
+	uci set env.var.bootloader_oid=${BOOTLOADER_OID}
+	uci -q get versioncusto.override.fwversion_prefix
+	if [ "$?" -eq 1 ]; then
+	  uci set env.var.friendly_sw_version_activebank=$(cat /proc/banktable/activeversion)
+	  uci set env.var.friendly_sw_version_passivebank=$(cat /proc/banktable/passiveversion)
+        fi
+	uci commit env
+}

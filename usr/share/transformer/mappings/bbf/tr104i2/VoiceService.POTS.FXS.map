@@ -1,0 +1,464 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local mapper, commitApply, table, resolve, tostring, pairs = mapper, commitapply, table, resolve, tostring, pairs
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local foreachOnUci = uciHelper.foreach_on_uci
+local addOnUci = uciHelper.add_on_uci
+local tr104Helper = require("transformer.shared.tr104helper")
+local faxHelper = require("transformer.shared.fax_helper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local process = require("tch.process")
+local serviceDefault = require("transformer.shared.servicedefault")
+local addService = serviceDefault.services.add
+local namedParameter = serviceDefault.services.named_service_section
+local fxsBinding = { config = "mmpbxbrcmfxsdev", sectionname = "device" }
+local incomingBinding = { config = "mmpbx", sectionname = "incoming_map" }
+local transactions = {}
+local tmpBinding = {}
+local addBinding = {}
+local binding = {}
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_POTS_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.POTS.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- FXONumberOfEntries
+            -- automatically created when VoiceService.{i}.POTS.FXO.{i}. is loaded
+            -- FXSNumberOfEntries
+            -- automatically created when VoiceService.{i}.POTS.FXS.{i}. is loaded
+            --[[Region = {
+                access = "readWrite",
+                type = "string",
+                max = "2",
+            },]]--
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_POTS_", Multi_Services_VoiceService_i_POTS_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_POTS_FXS_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.POTS.FXS.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "FXSNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        aliasParameter = "Alias",
+        parameters = {
+            Enable = {
+                access = "readOnly",
+                type = "boolean",
+                description = "Enables or disables the FXS interface",
+            },
+            Status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Up",
+                    "Disabled",
+                },
+                description = "Indicates the status of the physical interface",
+            },
+            --[[ NOT IMPLEMENTED
+            Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            Name = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+                descritpion = "The textual name of the interface as assigned by the CPE",
+            },
+            ToneEventProfile = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.Tone.EventProfile.{i}.",
+                description = "The value MUST be the Path Name of a row in the Tone.EventProfile table",
+            },
+            FaxPassThrough = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "Disable",
+                    "Auto",
+                    "Force",
+                },
+                description = "Indicates the support for pass-through of fax data of the interface",
+            },
+            ModemPassThrough = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Disable",
+                    "Auto",
+                    "Force",
+                },
+                description = "Indicates the support for pass-through of modem data of the interface",
+            },
+            DialType = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Tone",
+                    "Pulse",
+                },
+                description = "Indicated the Dial type used on the line",
+            },
+            ClipGeneration = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Indicates whether the Calling Line identification (CLIP) is enabled",
+            },
+            --[[ NOT IMPLEMENTED
+            ChargingPulse = {
+                access = "readWrite",
+                type = "boolean",
+            },]]--
+            Active = {
+                access = "readOnly",
+                type = "boolean",
+                description = "Indicates whether a terminal is plugged on the physical interface",
+            },
+            --[[ NOT IMPLEMENTED
+            TerminalType = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                    "Audio",
+                    "Fax",
+                    "Modem",
+                    "Any",
+                },
+            },]]--
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function commit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+Multi_Services_VoiceService_i_POTS_FXS_i_.entries = function(mapping, parentKey)
+    fxsBinding.sectionname = "device"
+    local entries = {}
+    foreachOnUci(fxsBinding, function(s)
+        if s['.name']:match("fxs") then
+            entries[#entries + 1] = s['.name']
+        end
+    end)
+    return entries
+end
+
+local function getPhoneConnectivityState(port)
+    local deviceState = false
+    local portNumber
+    local fxsStateConnection = process.popen("clash-fxs_state-wrapper")
+    if fxsStateConnection then
+        for line in fxsStateConnection:lines() do
+            local fxsPort = line:match("(%d+):")
+            if fxsPort then
+                portNumber = fxsPort
+            end
+            if portNumber == port then
+                local devState = line:match("Phone:%s(.*)")
+                if devState and devState == "Connected" then
+                    deviceState = true
+                    break
+                end
+            end
+        end
+        fxsStateConnection:close()
+    end
+    return deviceState
+end
+
+Multi_Services_VoiceService_i_POTS_FXS_i_.get = {
+    Enable = "1",
+    Status = function(mapping, param, key)
+        local deviceStatus = conn:call("mmpbx.device", "get", {}) or {}
+        if deviceStatus[key] and deviceStatus[key]["deviceUsable"] then
+            return "Up"
+        end
+        return "Disabled"
+    end,
+    Name = function(mapping, param, key)
+        fxsBinding.sectionname = key
+        fxsBinding.option = "user_friendly_name"
+        return getFromUci(fxsBinding)
+    end,
+    FaxPassThrough = faxHelper.getFaxPassThrough,
+    ModemPassThrough = "Auto",
+    DialType = "Tone",
+    ToneEventProfile = function(mapping, param, key)
+        return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.Tone.EventProfile.{i}.', key) or ""  -- TODO: key value should be based on VoiceService.Tone.EventProfile.{i}. creation
+    end,
+    ClipGeneration = function(mapping, param, key)
+        local incomingProfileList = {}
+        local enableValue = "0"
+        local profileMatch = 0
+        foreachOnUci(incomingBinding, function(m)
+            if m.device and table.concat(m.device, " "):match(key) and m.profile:match("sip") then
+                incomingProfileList[#incomingProfileList+1] = m.profile
+            end
+        end)
+        if #incomingProfileList > 0 then
+            local serviceBinding = { config = "mmpbx", sectionname = "service" }
+            foreachOnUci(serviceBinding, function(s)
+                if s["type"] == "CLIP" then
+                    incomingProfileList = {}
+                    foreachOnUci(incomingBinding, function(m)
+                        if m.device and table.concat(m.device, " "):match(key) and m.profile:match("sip") then
+                           incomingProfileList[#incomingProfileList+1] = m.profile
+                        end
+                    end)
+                    for _, profileName in pairs(s.profile) do
+                        for _, incomingProfile in pairs(incomingProfileList) do
+                            if profileName == incomingProfile then
+                                enableValue = s["activated"] or "0"
+                                if enableValue == "0" then
+                                    return "0"
+                                end
+                                profileMatch = profileMatch + 1
+                                break
+                            end
+                        end
+                    end
+                end
+            end)
+            if #incomingProfileList ~= profileMatch then
+                enableValue = "0"
+            end
+        end
+        return enableValue
+    end,
+    Active = function(mapping, param, key)
+        if getPhoneConnectivityState(tostring(key:match("%d+") + 1)) then
+            return "1"
+        end
+        return "0"
+    end
+}
+
+local function addClipService(incomingProfileList, value)
+    addBinding.config = "mmpbx"
+    for _, incomingProfile in pairs(incomingProfileList) do
+        if namedParameter then
+            addBinding.sectionname = "service_clip_"..incomingProfile
+            addBinding.option = nil
+            setOnUci(addBinding, "service", commitApply)
+        else
+            addBinding.sectionname = "service"
+            addBinding.sectionname = addOnUci(addBinding)
+        end
+        addBinding.option = "type"
+        setOnUci(addBinding, "CLIP", commitApply)
+        addBinding.option = "profile"
+        local profileList = {incomingProfile}
+        setOnUci(addBinding, profileList, commitApply)
+        for parameter, oldValue in pairs(addService["CLIP"]) do
+            addBinding.option = parameter
+            if parameter ~= "servicetype" then
+                setOnUci(addBinding, oldValue, commitApply)
+            end
+        end
+        addBinding.option = "activated"
+        setOnUci(addBinding, value, commitApply)
+        transactions[addBinding.config] = true
+    end
+end
+
+Multi_Services_VoiceService_i_POTS_FXS_i_.set = {
+    FaxPassThrough = function(mapping, param, value, key)
+        return faxHelper.setFaxPassThrough(value, transactions, commitApply)
+    end,
+    ClipGeneration = function(mapping, param, value, key)
+        local incomingProfileList = {}
+        local clipProfile = {}
+        local profileMatch = 0
+        foreachOnUci(incomingBinding, function(m)
+            if m.device and table.concat(m.device, " "):match(key) and m.profile:match("sip") then
+                incomingProfileList[#incomingProfileList+1] = m.profile
+            end
+        end)
+        if #incomingProfileList > 0 then
+            local serviceBinding = { config = "mmpbx", sectionname = "service" }
+            foreachOnUci(serviceBinding, function(s)
+                if s["type"] == "CLIP" then
+                    if addService["CLIP"] and s.profile then
+                        if (#s.profile > 1) then
+                            tmpBinding.config = "mmpbx"
+                            tmpBinding.sectionname = s['.name']
+                            tmpBinding.option = "profile"
+                            local newProfileList = {}
+                            for _, profileName in pairs(s.profile) do
+                                local similarProfile = false
+                                for _, incomingProfile in pairs(incomingProfileList) do
+                                    if profileName == incomingProfile then
+                                        profileMatch = profileMatch + 1
+                                        similarProfile = true
+                                        break
+                                    end
+                                end
+                                if not similarProfile then
+                                    newProfileList[#newProfileList+1] = profileName
+                                end
+                            end
+                            if #incomingProfileList == profileMatch and #newProfileList == 0 then
+                                setOnUci(tmpBinding, s.profile, commitApply)
+                                tmpBinding.option = "activated"
+                                setOnUci(tmpBinding, value, commitApply)
+                                transactions[tmpBinding.config] = true
+                                incomingProfileList = {}
+                            elseif #newProfileList > 0 and profileMatch > 0 then
+                                setOnUci(tmpBinding, newProfileList, commitApply)
+                                transactions[tmpBinding.config] = true
+                                addClipService(incomingProfileList, value)
+                                incomingProfileList = {}
+                            end
+                        else
+                            for index, profileName in pairs(incomingProfileList) do
+                                if s.profile and table.concat(s.profile, " "):match(profileName) then
+                                    binding.config = "mmpbx"
+                                    binding.sectionname = s['.name']
+                                    binding.option = "activated"
+                                    setOnUci(binding, value, commitApply)
+                                    transactions[binding.config] = true
+                                    table.remove(incomingProfileList, index)
+                                end
+                            end
+                        end
+                    else
+                        clipProfile = s.profile
+                        for _, profileName in pairs(incomingProfileList) do
+                            if s.profile and not table.concat(s.profile, " "):match(profileName) then
+                                clipProfile[#clipProfile+1] = profileName
+                            end
+                        end
+                        binding.config = "mmpbx"
+                        binding.sectionname = s['.name']
+                        binding.option = "profile"
+                        setOnUci(binding, clipProfile, commitApply)
+                        binding.option = "activated"
+                        setOnUci(binding, value, commitApply)
+                        transactions[binding.config] = true
+                        incomingProfileList = {}
+                    end
+                end
+            end)
+            if #incomingProfileList ~= 0  then
+                addClipService(incomingProfileList, value)
+            end
+        else
+            return nil, "No profiles mapped to the device"
+        end
+    end
+}
+
+Multi_Services_VoiceService_i_POTS_FXS_i_.commit = commit
+Multi_Services_VoiceService_i_POTS_FXS_i_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_POTS_FXS_i_", Multi_Services_VoiceService_i_POTS_FXS_i_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.POTS.FXS.{i}.VoiceProcessing.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            TransmitGain = {
+                access = "readWrite",
+                type = "int",
+                description = "Gain in 0.1 dB to apply to the transmitted voice signal prior to encoding",
+            },
+            ReceiveGain = {
+                access = "readWrite",
+                type = "int",
+                description = "Gain in 0.1 dB to apply to the received voice signal after decoding",
+            },
+            EchoCancellationEnable = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or disable echo cancellation for the line",
+            },
+            EchoCancellationInUse = {
+                access = "readOnly",
+                type = "boolean",
+                description = "Indication of whether or not echo cancellation is currently in use for the line",
+            },
+            EchoCancellationTail = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Tail length in milliseconds of the echo canceller associated with the line",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getEchoCancellation(mapping, param, sectionName)
+    fxsBinding.sectionname = sectionName
+    fxsBinding.option = "echo_cancellation"
+    return getFromUci(fxsBinding)
+end
+
+local function setEchoCancellation(mapping, param, value, sectionName)
+    fxsBinding.sectionname = sectionName
+    fxsBinding.option = "echo_cancellation"
+    setOnUci(fxsBinding, value, commitApply)
+    transactions[fxsBinding.config] = true
+end
+
+Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_.get = {
+    TransmitGain = voiceHelper.getTxGain,
+    ReceiveGain = voiceHelper.getRxGain,
+    EchoCancellationEnable = getEchoCancellation,
+    EchoCancellationInUse = getEchoCancellation,
+    EchoCancellationTail = "32"
+}
+
+Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_.set = {
+    TransmitGain = function(mapping, paramName, paramValue, key)
+        return voiceHelper.setTxGain(paramName, paramValue, transactions, commitApply)
+    end,
+    ReceiveGain = function(mapping, paramName, paramValue, key)
+        return voiceHelper.setRxGain(paramName, paramValue, transactions, commitApply)
+    end,
+    EchoCancellationEnable = setEchoCancellation
+}
+
+Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_.commit = commit
+Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_", Multi_Services_VoiceService_i_POTS_FXS_i_VoiceProcessing_, register)
+

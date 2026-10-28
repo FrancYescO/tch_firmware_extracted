@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+USE_PROCD=1
+APP="datausage_notifier"
+
+start_service() {
+	local SERVICE_ENABLED=$(uci_get "$APP" global enabled "1")
+	if [ "$SERVICE_ENABLED" = "1" ]; then
+		procd_open_instance
+		procd_set_param command "/usr/bin/$APP"
+		procd_set_param respawn
+		procd_close_instance
+	else
+		logger -t "$APP" "Data usage notifier disabled"
+	fi
+}
+
+service_triggers() {
+	procd_add_reload_trigger "$APP"
+}
+
+reload_service() {
+	local SERVICE_ENABLED=$(uci_get "$APP" global enabled "1")
+	if [ "$SERVICE_ENABLED" = "1" ]; then
+		ubus -t 2 call "$APP" reload
+	fi
+}

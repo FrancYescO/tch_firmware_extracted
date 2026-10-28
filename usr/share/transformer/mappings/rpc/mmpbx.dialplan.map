@@ -1,0 +1,128 @@
+local mmpbx_dialplan =  {
+  objectType = {
+    name = "rpc.mmpbx.dial_plan_entry.@.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      enabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      pattern = {
+        access = "readWrite",
+        type = "string",
+      },
+      include_eon = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      max_length = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "40",
+          },
+        },
+      },
+      min_length = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+            max = "40",
+          },
+        },
+      },
+    }
+  }
+}
+
+local format, match, find  = string.format, string.match, string.find
+local mmpbx_binding = { config="mmpbx" }
+local uci_helper = mapper("ucihelper")
+local configChanged = false
+local profile_default = require("transformer.shared.servicedefault")
+local dial_plan_entry_table = profile_default.dial_plan_entry_table
+
+--function to find latest dial_plan_entry and returns plus one for new entry
+local function getNextDialID()
+  local highest = 0
+  mmpbx_binding.sectionname = "dial_plan_entry"
+  uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+    local id = tonumber(s['.name']:match("(%d+)$"))
+    if (highest < id) then
+      highest = id
+    end
+  end)
+  return highest + 1
+end
+
+--function to add new dial_plan_entry section in config
+local function addDial()
+  local id = getNextDialID()
+  local dial_name = format("dial_plan_entry_generic_%s", id)
+  mmpbx_binding.sectionname = dial_name
+  mmpbx_binding.option = nil
+  uci_helper.set_on_uci(mmpbx_binding, "dial_plan_entry", commitapply)
+  mmpbx_binding.option = "dial_plan"
+  uci_helper.set_on_uci(mmpbx_binding, "dial_plan_generic", commitapply)
+  -- to add default dial_plan params in newly added section
+  for k, v in pairs(dial_plan_entry_table) do
+    mmpbx_binding.option = k
+    uci_helper.set_on_uci(mmpbx_binding, v, commitapply)
+  end
+  configChanged = true
+  return dial_name
+end
+
+mmpbx_dialplan.entries = function()
+  local entries = {}
+  mmpbx_binding.sectionname = "dial_plan_entry"
+  uci_helper.foreach_on_uci(mmpbx_binding, function(s)
+    entries[#entries+1] = s['.name']
+  end)
+  return entries
+end
+
+mmpbx_dialplan.get = function(mapping, param, key)
+  mmpbx_binding.sectionname = key
+  mmpbx_binding.option = param
+  return uci_helper.get_from_uci(mmpbx_binding)
+end
+
+mmpbx_dialplan.set = function(mapping, param, value, key)
+  mmpbx_binding.sectionname = key
+  mmpbx_binding.option = param
+  uci_helper.set_on_uci(mmpbx_binding, value, commitapply)
+  configChanged = true
+end
+
+mmpbx_dialplan.add = addDial
+
+mmpbx_dialplan.delete = function(mapping, key)
+  mmpbx_binding.sectionname = key
+  mmpbx_binding.option = nil
+  uci_helper.delete_on_uci(mmpbx_binding, commitapply)
+  configChanged = true
+  return true
+end
+
+mmpbx_dialplan.commit = function()
+  if configChanged then
+    uci_helper.commit(mmpbx_binding)
+    configChanged = false
+  end
+end
+
+mmpbx_dialplan.revert = function()
+  if configChanged then
+    uci_helper.revert(mmpbx_binding)
+    configChanged = false
+  end
+end
+
+register(mmpbx_dialplan)

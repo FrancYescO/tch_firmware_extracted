@@ -1,0 +1,77 @@
+local optical = require("transformer.shared.optical")
+local flag = optical.getBoardtype()
+if flag ~= "gpon" and flag ~= "gpon_sfp" then
+  return
+end
+
+local Device_DeviceInfo_TemperatureStatus_ = {
+  objectType = {
+    name = "Device.DeviceInfo.TemperatureStatus.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+     -- TemperatureSensorNumberOfEntries
+     -- automatically created when Device.DeviceInfo.TemperatureStatus.Temperature.{i}. is loaded
+    },
+  }
+}
+
+register (Device_DeviceInfo_TemperatureStatus_)
+
+local Device_DeviceInfo_TemperatureStatus_TemperatureSensor_i_ = {
+  objectType = {
+    name = "Device.DeviceInfo.TemperatureStatus.TemperatureSensor.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "TemperatureSensorNumberOfEntries",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Value = {
+        access = "readOnly",
+        type = "int",
+      },
+    },
+  }
+}
+
+local mapper = mapper
+local ubusConnection = mapper("ubus").connect()
+local match = string.match
+
+local function getGponData()
+  local gponStatus = ubusConnection:call("gpon.trsv", "get_info", { info = "status" }) or {}
+  local paramName, result = "", ""
+  if next(gponStatus) then
+    local data = gponStatus["status"]
+    for key, val in pairs (data) do
+      paramName = key:match ("[%S]+")
+      if paramName == "Temperature" then
+        result = tostring(math.floor(tonumber(val) or 0))
+        return paramName, result
+      end
+    end
+  end
+  return paramName, result
+end
+
+Device_DeviceInfo_TemperatureStatus_TemperatureSensor_i_.entries = function()
+  local entries = {}
+  local key, _ = getGponData()
+  if key ~= "" then
+    entries[#entries + 1] = key
+  end
+  return entries
+end
+
+Device_DeviceInfo_TemperatureStatus_TemperatureSensor_i_.get = {
+  Value = function()
+    local key, value = getGponData()
+    if key == "Temperature" and value ~= "" then
+      return value
+    end
+    return "0"
+  end
+}
+
+register (Device_DeviceInfo_TemperatureStatus_TemperatureSensor_i_)

@@ -1,0 +1,62 @@
+local wireless_endpoint_ = {
+  objectType = {
+    name = "rpc.wireless.station.@.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      state = {
+          access = "readOnly",
+          type = "string",
+      },
+      status = {
+          access = "readOnly",
+          type = "string",
+      },
+      rssi = {
+          access = "readOnly",
+          type = "string",
+      }
+    }
+  }
+}
+
+local mapper = mapper
+local conn = mapper("ubus").connect()
+
+local function entriesWirelessEndPoint(mapping)
+    local entries = {}
+    local wirelessDataCache = conn:call("wireless.endpoint", "get", { })
+    if wirelessDataCache then
+        for key in pairs(wirelessDataCache) do
+            entries[#entries+1] = key
+        end
+    end
+    return entries
+end
+
+local function getEndPoints(key, option)
+    for k, info in pairs(conn:call("wireless.endpoint", "get", {}) or {}) do
+        ubus[k] = info
+    end
+    local data = ubus[key] or {}
+    return data[option] and tostring(data[option]) or ""
+end
+
+local get = {
+     state = function(mapping, param, key)
+         return getEndPoints(key, "admin_state")
+     end,
+     status = function(mapping, param, key)
+         return getEndPoints(key, "connected_state")
+     end,
+     rssi = function(mapping, param, key)
+         return getEndPoints(key, "rssi")
+     end
+}
+
+wireless_endpoint_.entries = entriesWirelessEndPoint
+wireless_endpoint_.get = get
+
+register(wireless_endpoint_)
+

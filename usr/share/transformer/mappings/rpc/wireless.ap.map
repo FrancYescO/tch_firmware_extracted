@@ -1,0 +1,137 @@
+local register, pairs = register, pairs
+
+local wireless_ap_ = {
+  objectType = {
+    name = "rpc.wireless.ap.@.",
+    access = "readOnly",
+    numEntriesParameter = "APsNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+        ssid = {
+            access = "readOnly",
+            type = "string",
+        },
+        admin_state = {
+            access = "readWrite",
+            type = "boolean",
+        },
+        oper_state = {
+            access = "readOnly",
+            type = "boolean",
+        },
+        config_state = {
+            access = "readOnly",
+            type = "boolean",
+        },
+        ap_isolation = {
+            access = "readOnly",
+            type = "boolean",
+        },
+        public = {
+            access = "readWrite",
+            type = "boolean",
+        },
+        station_history = {
+            access = "readOnly",
+            type = "boolean",
+        },
+        max_assoc = {
+            access = "readWrite",
+            type = "string",
+        },
+        trace_modules = {
+            access = "readOnly",
+            type = "string",
+        },
+        trace_level = {
+            access = "readOnly",
+            type = "string",
+        },
+	bs_oper_state = {
+            access = "readOnly",
+            type = "string",
+        },
+    },
+  }
+}
+
+local require, mapper = require, mapper
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+local network = require("transformer.shared.common.network")
+
+local function nilToEmptyString(st)
+    if st == nil then
+        return ""
+    else
+        return tostring(st)
+    end
+end
+
+local function entriesWirelessAP(mapping)
+    local entries = {}
+    local result = conn:call("wireless.accesspoint", "get", { })
+    if result ~= nil then
+        for k,_ in pairs(result) do
+            entries[#entries+1] = k
+        end
+    end
+    return entries
+end
+
+local function bs_state(key)
+    local bandsteer_state = conn:call("wireless.bandsteer", "get", {}) or {}
+    local bsid = uci_helper.get_from_uci({ config = "wireless", sectionname = key, option = "bandsteer_id"})
+    if bsid and bsid ~= "" then
+      return bandsteer_state[bsid] and tostring(bandsteer_state[bsid]["oper_state"] or "0") or "0"
+    end
+    return "0"
+end
+
+local function getall(mapping, key)
+    local apData = network.getAccessPointInfo(key)
+    local sanitizedData = {}
+    for k,v in pairs(apData) do
+        sanitizedData[k] = nilToEmptyString(v)
+    end
+    sanitizedData["bs_oper_state"] = bs_state(key)
+    return sanitizedData
+end
+
+local function get(mapping, paramName, key)
+      local apData =  network.getAccessPointInfo(key)
+      if paramName == "bs_oper_state" then
+        return bs_state(key)
+      end
+      return nilToEmptyString(apData[paramName]);
+end
+
+local namemap = {admin_state="state"}
+local set = function(mapping, param, value, key)
+    if param == "admin_state" then
+      local SSIDwl = uci_helper.get_from_uci({ config = "wireless", sectionname = key, option = "iface"})
+      uci_helper.set_on_uci({ config = "wireless", sectionname = SSIDwl , option = "state"}, value, commitapply)
+      uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = "state"}, value, commitapply)
+      if key == "ap0" or key == "ap1" then
+        local radioState =  uci_helper.get_from_uci({ config = "wireless", sectionname = SSIDwl , option = "device"})
+        uci_helper.set_on_uci({ config = "wireless", sectionname = radioState, option = "state"}, value, commitapply)
+      end
+    else
+      uci_helper.set_on_uci({ config = "wireless", sectionname = key , option = namemap[param] or param}, value, commitapply)
+    end
+end
+
+wireless_ap_.entries = entriesWirelessAP
+wireless_ap_.getall = getall
+wireless_ap_.get = get
+wireless_ap_.set = set
+wireless_ap_.commit = function()
+    uci_helper.commit({config = "wireless"})
+end
+wireless_ap_.revert = function()
+    uci_helper.revert({config = "wireless"})
+end
+
+register(wireless_ap_)
+

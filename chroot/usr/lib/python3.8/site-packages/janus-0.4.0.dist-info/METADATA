@@ -1,0 +1,171 @@
+Metadata-Version: 2.1
+Name: janus
+Version: 0.4.0
+Summary: Mixed sync-async queue to interoperate between asyncio tasks and classic threads
+Home-page: https://github.com/aio-libs/janus/
+Author: Andrew Svetlov
+Author-email: andrew.svetlov@gmail.com
+License: Apache 2
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Framework :: AsyncIO
+Requires-Python: >=3.5.3
+
+=======
+ janus
+=======
+.. image:: https://travis-ci.com/aio-libs/janus.svg?branch=master
+    :target: https://travis-ci.com/aio-libs/janus
+.. image:: https://codecov.io/gh/aio-libs/janus/branch/master/graph/badge.svg
+    :target: https://codecov.io/gh/aio-libs/janus
+.. image:: https://img.shields.io/pypi/v/janus.svg
+    :target: https://pypi.python.org/pypi/janus
+.. image:: https://badges.gitter.im/Join%20Chat.svg
+    :target: https://gitter.im/aio-libs/Lobby
+    :alt: Chat on Gitter
+
+
+
+Mixed sync-async queue, supposed to be used for communicating between
+classic synchronous (threaded) code and asynchronous (in terms of
+asyncio_) one.
+
+Like `Janus god <https://en.wikipedia.org/wiki/Janus>`_ the queue
+object from the library has two faces: synchronous and asynchronous
+interface.
+
+Synchronous is fully compatible with `standard queue
+<https://docs.python.org/3/library/queue.html>`_, asynchronous one
+follows `asyncio queue design
+<https://docs.python.org/3/library/asyncio-queue.html>`_.
+
+Usage example
+=============
+
+.. code:: python
+
+    import asyncio
+    import janus
+
+    loop = asyncio.get_event_loop()
+    queue = janus.Queue(loop=loop)
+
+
+    def threaded(sync_q):
+        for i in range(100):
+            sync_q.put(i)
+        sync_q.join()
+
+
+    async def async_coro(async_q):
+        for i in range(100):
+            val = await async_q.get()
+            assert val == i
+            async_q.task_done()
+
+
+    fut = loop.run_in_executor(None, threaded, queue.sync_q)
+    loop.run_until_complete(async_coro(queue.async_q))
+    loop.run_until_complete(fut)
+
+
+Communication channels
+======================
+
+*aio-libs* google group: https://groups.google.com/forum/#!forum/aio-libs
+
+Feel free to post your questions and ideas here.
+
+*gitter chat* https://gitter.im/aio-libs/Lobby
+
+
+License
+=======
+
+``janus`` library is offered under Apache 2 license.
+
+Thanks
+======
+
+The library development is sponsored by DataRobot (https://datarobot.com)
+
+.. _asyncio: https://docs.python.org/3/library/asyncio.html
+
+Changes
+=======
+
+0.4.0 (2018-07-28)
+------------------
+
+- Add ``py.typed`` macro #89
+
+- Drop python 3.4 support and fix minimal version python3.5.3 #88
+
+- Add property with that indicates if queue is closed #86
+
+0.3.2 (2018-07-06)
+------------------
+
+- Fixed python 3.7 support #97
+
+0.3.1 (2018-01-30)
+------------------
+
+- Fixed bug with join() in case tasks are added by sync_q.put() #75
+
+0.3.0 (2017-02-21)
+------------------
+
+- Expose `unfinished_tasks` property #34
+
+0.2.4 (2016-12-05)
+------------------
+
+- Restore tarball deploying
+
+0.2.3 (2016-07-12)
+------------------
+
+- Fix exception type
+
+0.2.2 (2016-07-11)
+------------------
+
+- Update asyncio.async() to use asyncio.ensure_future() #6
+
+0.2.1 (2016-03-24)
+------------------
+
+- Fix `python setup.py test` command #4
+
+0.2.0 (2015-09-20)
+------------------
+
+- Support Python 3.5
+
+0.1.5 (2015-07-24)
+------------------
+
+- Use loop.time() instead of time.monotonic()
+
+0.1.1 (2015-06-12)
+------------------
+
+- Fix some typos in README and setup.py
+
+- Add addtional checks for loop closing
+
+- Mention DataRobot
+
+0.1.0 (2015-06-11)
+------------------
+
+- Initial release
+

@@ -1,0 +1,217 @@
+#!/usr/bin/env lua
+
+local string, tonumber, assert =  string, tonumber, assert
+local format, match, io = string.format, string.match, io
+local logger = require("transformer.logger")
+local cursor = require("uci").cursor()
+local proxy = require("datamodel")
+local ubus = require("ubus")
+local process = require("tch.process")
+local popen = process.popen
+
+local ubus_conn = ubus.connect()
+if not ubus_conn then
+    error("Failed to connect to ubusd")
+end
+
+local log_config = {
+  level = 3,
+  stderr = false,
+}
+logger.init(log_config.level, log_config.stderr)
+local log = logger.new("nslookupdiag", log_config.level)
+-- get nslookupdiag configuration from UCI
+local config = "nslookupdiag"
+
+local state , results_status= "Complete", "Error_Other"
+local answertype, HostNameReturned ,dnsserverIP ,responseTime= "", "", "", 0
+
+local usr=arg[1]
+-- user cannot be nil
+if usr==nil then
+  log:critical("You need to specify an user (igd ...)")
+  return
+end
+
+--[[
+-- typical output of dnsquery
+-- typical output of successful dnsquery:
+Resolving host www.yahoo.com
+dnserver is 127.0.1.1
+
+Sending Packet...Done
+Receiving answer...Done
+The response contains :
+1 Questions.
+3 Answers.
+0 Authoritative Servers.
+0 Additional records.
+Query time: 316 mesc
+
+
+Answer Records : 3
+Name : www.yahoo.com Type : A alias name : fd-fp3.wg1.b.yahoo.com
+Name : fd-fp3.wg1.b.yahoo.com Type : A IPv4 address : 46.228.47.115
+Name : fd-fp3.wg1.b.yahoo.com Type : A IPv4 address : 46.228.47.114
+
+Authoritive Records : 0
+
+Additional Records : 0
+
+
+-- typical output if the address is not valid on the device
+
+test@test-VirtualBox:~$ ./dnsquery -b 2.2.2.2  www.163.com
+2.2.2.2 is ip address
+Resolving host www.163.com
+dnserver is 127.0.1.1
+
+send from client 2.2.2.2
+bind failed..: Cannot assign requested address
+
+-- typical output if the hostname could not be reached
+test@test-VirtualBox:~$ ./dnsquery  www.1633233.com
+Resolving host www.1633233.com
+dnserver is 127.0.1.1
+
+
+Sending Packet...Done
+Receiving answer...Done
+The response contains :
+ 1 Questions.
+ 0 Answers.
+ 1 Authoritative Servers.
+ 0 Additional records.
+Query time: 444 mesc
+
+
+Answer Records : 0
+
+Authoritive Records : 1
+Name : com
+
+Additional Records : 0
+test@test-VirtualBox:~$
+
+]]
+
+local function dnsquery(user)
+  local hostname = cursor:get(config, user, "hostname")
+  local timeout = cursor:get(config, user, "timeout")
+  local repetitions = cursor:get(config, user, "repetitions")
+  local dnsserver = cursor:get(config, user, "dnsserver")
+  local dnsargs = {}
+  if not (hostname and repetitions and timeout) then
+    state = "Error_Other"
+    return
+  end
+  repetitions = tonumber(repetitions)
+  if dnsserver then
+    dnsargs[#dnsargs+1] = "-s"
+    dnsargs[#dnsargs+1] = dnsserver
+  end
+  local interface = cursor:get(config, user, "interface")
+  if interface ~= nil then
+    if interface == "Any" or interface == nil then
+      log:info("dnsquery without interface")
+    else
+      local address = proxy.get('rpc.network.interface.@' .. interface .. '.ipaddr')[1].value
+      if (address == "") then
+        log:error("Can not retrieve IP address for interface " .. interface)
+        state = "Error_Other"
+        return
+      end
+        dnsargs[#dnsargs+1] = "-b"
+        dnsargs[#dnsargs+1] = address
+    end
+  end
+
+  -- check if all required parameters are present
+  if timeout ~= "" then
+    dnsargs[#dnsargs+1] = "-m"
+    dnsargs[#dnsargs+1] = timeout
+  end
+
+  dnsargs[#dnsargs+1] = hostname
+
+  -- according to the repetitions value , do the dnsquery repetitions times and then summarize the results
+  local dnsquery_results = {}
+  local successcount = 0
+  for i=1, repetitions do
+    local p = process.popen("dnsquery", dnsargs)
+    if not p then
+      return nil,"Invalid command or arguments"
+    end
+    local output = p:read("*a")
+    p:close()
+    dnsserverIP = output and match(output, "dnserver is (%d+%.%d+%.%d+%.%d+)") or ""
+    local ipadd_list = {}
+    if output and match(output, "please correct the input") then
+      state = "Error_DNSServerNotResolved"
+      results_status = "Error_DNSServerNotAvailable"
+    elseif output and match(output, "bind failed") then
+      state = "Error_Internal"
+      results_status = "Error_Other"
+    elseif output and match(output, "recvfrom failed") then
+      if match(output, "defined dns server") then
+        state = "Error_Other"
+        results_status = "Error_DNSServerNotAvailable"
+      else
+        state = "Error_Other"
+        results_status = "Error_Timeout"
+      end
+    elseif output and (match(output, "1 Authoritative Servers") or match(output, "0 Answers") and match(output, "0 mesc")) then
+      state = "Error_Other"
+      results_status = "Error_HostNameNotResolved"
+    else
+      responseTime = output and match(output, "Query time: (%d*) mesc")
+	  if tonumber(responseTime) == 0  then responseTime = 1 end
+      local spoofip = proxy.get('uci.intercept.dns.spoofip')[1].value
+      local matchPattern = 'Name : (%S+) Type : (%S+) IPv4 address : (%d+%.%d+%.%d+%.%d+)'
+      if output then
+        for hostnamereturned,authoritystate,IPAddresses in output:gmatch(matchPattern) do
+            if (IPAddresses and IPAddresses ~= spoofip ) then
+              HostNameReturned = hostnamereturned
+              results_status = "Success"
+              if authoritystate == "A" then
+                answertype = "Authoritative"
+              elseif authoritystate == "NA" then
+                answertype = "NonAuthoritative"
+              end
+	        state = "Complete"
+            end
+            ipadd_list[#ipadd_list +1] = IPAddresses
+        end
+      end
+    successcount = successcount + 1
+    end
+    if output and responseTime then
+      dnsquery_results[i] = format('%s,%s,%s,%s,%s,%d\n', results_status, answertype, HostNameReturned, table.concat(ipadd_list, ";"), dnsserverIP, responseTime)
+    end
+  end
+
+  local fh, msg = io.open("/tmp/nslookupdiag_"..user, "w")
+  assert(fh, msg)
+  fh:write(format('%d\n', successcount))
+  if dnsquery_results ~= nil then
+    for k, v in pairs(dnsquery_results) do
+	  fh:write(v)
+    end
+  end
+  fh:close()
+
+  local info ={}
+  info["successcount"] = successcount
+  -- Publish the nslookupdiag result on ubus
+  ubus_conn:send('nslookupdiag.nslookupdiag_'.. user, info)
+end
+
+local err, msg = pcall(dnsquery, usr)
+if not err then
+  state = "Error_Internal"
+  logger:critical(msg)
+end
+
+-- write results to UCI
+cursor:set(config, usr, "state", state)
+cursor:commit("nslookupdiag")

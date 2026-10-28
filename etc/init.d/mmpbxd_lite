@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+
+source $IPKG_INSTROOT/lib/functions.sh
+
+################################################################################
+##### ENTRY FUNCTIONS                                                      #####
+################################################################################
+# These are the functions called by the service manager
+stop() {
+  disable_profile()
+  {
+    config_get profile_enabled $1 enabled 0
+    if [ $profile_enabled -eq 1 ] ; then
+      logger -t mmpbxd "Profile $1 is enabled, disabling ..."
+      ubusCommand="ubus call mmpbx.profile toggle '{\"profile\":\"$1\"}'"
+      eval $ubusCommand
+    else
+      logger -t mmpbxd "Profile $1 is already disabled, nothing to do ..."
+    fi
+  }
+
+  logger -t mmpbxd "Stopping: disabling SIP profiles"
+  config_load mmpbxrvsipnet
+  config_foreach disable_profile profile
+}

@@ -1,0 +1,418 @@
+-- Automatically generated from InternetGatewayDevice:1.4
+-- using generator version 2.1
+local InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANEthernetInterfaceConfig.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "NoLink",
+          "Error",
+          "Disabled",
+        },
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MaxBitRate = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "10",
+          "100",
+          "Auto",
+        },
+      },
+      DuplexMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Half",
+          "Full",
+          "Auto",
+        },
+      },
+      ShapingRate = {
+        access = "readWrite",
+        type = "int",
+        range = {
+          {
+            min = "-1",
+          },
+        },
+      },
+      X_000E50_LinkSpeed = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+        description = "Current upstream and downstream physical bit rate (expressed in Mbps)",
+      },
+      ShapingBurstSize = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      X_000E50_CurrentDuplexMode = {
+	access = "readOnly",
+	type = "string",
+	description = "Current Duplex Mode",
+      },
+    }
+  }
+}
+
+local ubus = mapper("ubus").connect()
+local nwcommon = mapper("nwcommon")
+local getIntfInfo = nwcommon.getIntfInfo
+local ucihelper = mapper("ucihelper")
+local get_from_uci = ucihelper.get_from_uci
+local set_on_uci = ucihelper.set_on_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+
+local network = require("transformer.shared.common.network")
+local wandevice = require 'transformer.shared.models.igd.wandevice'
+local getDevtypeAndName = wandevice.getDevtypeAndName
+
+local binding = { config = "ethernet", sectionname = "", option = "", default = "" }
+local transactions = {}
+local commitapply = commitapply
+
+local devnames = {}
+local function setDevnameForKey(key, devname)
+  devnames[key] = devname
+end
+
+local function getDevnameForKey(key)
+  return devnames[key]
+end
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.entries = function(mapping, parentKey)
+  local devtype, devname = getDevtypeAndName(parentKey)
+  if devtype == "MOB" then
+    local data = ubus:call("network.interface." .. devname, "status", {})
+    if data and data.l3_device then
+      devname = data.l3_device
+    end
+  elseif devtype ~= "ETH" then
+    return {}
+  end
+  setDevnameForKey(parentKey, devname)
+  return { parentKey }
+end
+
+
+local function create_new_trafficdesc_section(new_td_name)
+  binding.sectionname = new_td_name
+  binding.option = nil
+  set_on_uci(binding,"trafficdesc",commitapply)
+end
+
+local function remove_trafficdesc_section(devname, td_name)
+    binding.sectionname = td_name
+    binding.option = nil
+    ucihelper.delete_on_uci(binding, commitapply)
+    binding.sectionname = devname
+    binding.option = "td"
+    set_on_uci(binding,"",commitapply)
+    transactions[binding.config] = true
+    return true
+end
+
+local function shaping_set(option_value, enable)
+  binding.option = "max_bit_rate"
+  set_on_uci(binding,option_value.max_bit_rate,commitapply)
+  binding.option = "max_burst_size"
+  set_on_uci(binding,option_value.max_burst_size,commitapply)
+  binding.option = "rate"
+  set_on_uci(binding,option_value.rate,commitapply)
+  binding.option = "ratio"
+  set_on_uci(binding,option_value.ratio,commitapply)
+  if enable then
+    binding.option = "enable"
+    set_on_uci(binding, "1", commitapply)
+  end
+  transactions[binding.config] = true
+  return true
+end
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.get = {
+  Enable = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "enable"
+    binding.default = "1"
+    return get_from_uci(binding)
+  end,
+  Status = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    local value = getIntfInfo(devname, "carrier")
+    if value == "1" then
+      return "Up"
+    end
+    if value == "0" then
+      return "NoLink"
+    end
+    return "Disabled"
+  end,
+  MACAddress = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "address")
+  end,
+  MaxBitRate = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "speed"
+    binding.default = "Auto"
+    local value = get_from_uci(binding)
+    if value == "auto" then
+      value = "Auto"
+    end
+    return value
+  end,
+  DuplexMode = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "duplex"
+    binding.default = ""
+    local value = get_from_uci(binding)
+    if value == "half" then
+      value = "Half"
+    else
+      value = "Full"
+    end
+    return value
+  end,
+  ShapingRate = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "td"
+    binding.default = ""
+    local trafficdesc = get_from_uci(binding)
+    if trafficdesc ~= "" then
+      binding.sectionname = trafficdesc
+      binding.option = "max_bit_rate"
+      binding.default = ""
+      local value = get_from_uci(binding)
+      if value ~= "" then
+        value = tostring(tonumber(value) * 1000)
+      else
+        value="-1"
+      end
+      return value
+    end
+    return "-1"
+  end,
+  X_000E50_LinkSpeed = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "speed", "0")
+  end,
+  ShapingBurstSize = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "td"
+    binding.default = ""
+    local trafficdesc = get_from_uci(binding)
+    if trafficdesc ~= "" then
+      binding.sectionname = trafficdesc
+      binding.option = "max_burst_size"
+      binding.default = ""
+      local value = get_from_uci(binding)
+      if value == "" then
+        value="0"
+      end
+      return value
+    end
+    return "0"
+  end,
+  X_000E50_CurrentDuplexMode = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return network.getFirstLine("/sys/class/net/" .. devname .. "/duplex")
+  end,
+}
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.set = {
+  Enable = function(mapping, param, value, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "enable"
+    set_on_uci(binding,value,commitapply)
+    transactions[binding.config] = true
+  end,
+  MaxBitRate = function(mapping, param, value, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "speed"
+    if value == "Auto" then
+      value = "auto"
+    end
+    set_on_uci(binding,value,commitapply)
+    transactions[binding.config] = true
+  end,
+  DuplexMode = function(mapping, param, value, key)
+    local devname = getDevnameForKey(key)
+    binding.sectionname = devname
+    binding.option = "duplex"
+    if value == "Half" then
+      value = "half"
+    else
+      value = "full"
+    end
+    set_on_uci(binding,value,commitapply)
+    transactions[binding.config] = true
+  end,
+  ShapingRate = function(mapping, param, value, key)
+    local devname = getDevnameForKey(key)
+    value = tonumber(value)
+    local max_burst_size = "2000"
+    if value then
+      binding.sectionname = devname
+      binding.option = "td"
+      binding.default = ""
+      local trafficdesc = get_from_uci(binding)
+      local new_td_name = binding.option .. binding.sectionname
+      if trafficdesc ~= "" then
+        local ethBinding = { config = "ethernet", sectionname = trafficdesc, option = "max_burst_size", default = "2000" }
+        max_burst_size = get_from_uci(ethBinding)
+      end
+      if trafficdesc == "" and value == -1 then
+        return true
+      elseif value == 0 then
+        return nil,"Not supported"
+      elseif trafficdesc == "" and (value > -1) and (value <= 100) then
+        set_on_uci(binding,new_td_name,commitapply)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = value, max_burst_size = max_burst_size, rate = "", ratio = "enabled" }
+        return shaping_set(option_value, true)
+      elseif trafficdesc == "" and (value > 100) then
+        if value < 1000 then
+          return nil, "Absolute value should be at least 1000 bps"
+        end
+        set_on_uci(binding,new_td_name,commitapply)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = value/1000, max_burst_size = max_burst_size, rate = "enabled", ratio = "" }
+        return shaping_set(option_value, true)
+      elseif trafficdesc ~= "" and value == -1 then
+        return remove_trafficdesc_section(devname, trafficdesc)
+      elseif trafficdesc ~= "" and (value > -1) and (value <= 100) then
+        binding.sectionname = trafficdesc
+        local option_value = { max_bit_rate = value, max_burst_size = max_burst_size, rate = "", ratio = "" }
+        return shaping_set(option_value, true)
+      elseif trafficdesc ~= "" and (value > 100) then
+        if value < 1000 then
+          return nil, "Absolute value should be at least 1000 bps"
+        end
+        binding.sectionname = trafficdesc
+        local option_value = { max_bit_rate = value/1000, max_burst_size = max_burst_size, rate = "enabled", ratio = "" }
+        return shaping_set(option_value, true)
+      end
+    end
+    return nil,"Not supported"
+  end,
+  ShapingBurstSize = function(mapping, param, value, key)
+    local devname = getDevnameForKey(key)
+    value = tonumber(value)
+    if value then
+      binding.sectionname = devname
+      binding.option = "td"
+      binding.default = ""
+      local trafficdesc = get_from_uci(binding)
+      local new_td_name = binding.option .. binding.sectionname
+      if trafficdesc == "" and (value == 0) then
+        return true
+      elseif trafficdesc == "" and (value > 0) then
+        set_on_uci(binding,new_td_name,commitapply)
+        create_new_trafficdesc_section(new_td_name)
+        local option_value = { max_bit_rate = "20000", max_burst_size = value, rate = "", ratio = "" }
+        return shaping_set(option_value)
+      elseif trafficdesc ~= "" and (value >= 0) then
+        binding.sectionname = trafficdesc
+        binding.option = "max_burst_size"
+        set_on_uci(binding,value,commitapply)
+        transactions[binding.config] = true
+        return true
+      end
+    end
+    return nil,"Not supported"
+  end,
+}
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.commit = function()
+  for config,_ in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_.revert = function()
+  for config,_ in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_)
+
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_Stats_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANEthernetInterfaceConfig.Stats.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      BytesSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_Stats_.get = {
+  BytesSent = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "tx_bytes")
+  end,
+  BytesReceived = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "rx_bytes")
+  end,
+  PacketsSent = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "tx_packets")
+  end,
+  PacketsReceived = function(mapping, param, key)
+    local devname = getDevnameForKey(key)
+    return getIntfInfo(devname, "rx_packets")
+  end,
+}
+
+register(InternetGatewayDevice_WANDevice_i_WANEthernetInterfaceConfig_Stats_)

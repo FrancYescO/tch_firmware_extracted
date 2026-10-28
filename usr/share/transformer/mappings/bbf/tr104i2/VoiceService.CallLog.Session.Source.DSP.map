@@ -1,0 +1,204 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local mapper = mapper
+local tr104Helper = require("transformer.shared.tr104helper")
+local uciHelper = require("transformer.mapper.ucihelper")
+local voiceHelper = require("transformer.shared.voice_helper")
+local conn = mapper("ubus").connect()
+local forEachOnUci = uciHelper.foreach_on_uci
+local codecBinding = { config = "mmpbx", sectionname = "codec_filter" }
+local callStatsList = "CALL STATISTICS"
+local resolve, match = resolve, string.match
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallLog.{i}.Session.{i}.Source.DSP.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_", Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_, register)
+
+local function getCapabilityCodec(mapping, grandKey, codecValue)
+    local codecKey = ""
+    forEachOnUci(codecBinding, function(s)
+        if s.name == codecValue and s._key then
+            codecKey = s._key .. "|"..grandKey
+            return false
+         end
+    end)
+    return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.Capabilities.Codec.{i}.', codecKey) or ""
+end
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallLog.{i}.Session.{i}.Source.DSP.ReceiveCodec.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Codec = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.Capabilities.Codec.{i}.",
+                description = "The codec in use for the incoming voice stream",
+            },
+            SilenceSuppression = {
+                access = "readOnly",
+                type = "boolean",
+                description = "Whether or not silence suppression is in use for the incoming voice stream",
+            },
+            --[[Overruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            Underruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+            }, ]]--
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function getReceiveCodec(mapping, param, key, parentKey, grandKey)
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            if tostring(sessionData["CallKey"]) == keyValue then
+               if param == "Codec" then
+                    return getCapabilityCodec(mapping, grandKey, sessionData["RxCodec"])
+                else
+                    return sessionData["RxCodecVad"] and tostring(sessionData["RxCodecVad"]) or ""
+                end
+            end
+        end
+    end
+    return ""
+end
+
+local function getAllReceiveCodec(mapping, key, parentKey, grandKey)
+    local result = {}
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            for param in pairs(Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_.objectType.parameters) do
+                if tostring(sessionData["CallKey"]) == keyValue then
+                    if param == "Codec" then
+                        result[param] = getCapabilityCodec(mapping, grandKey, sessionData["RxCodec"])
+                    else
+                        result[param] =  sessionData["RxCodecVad"] and tostring(sessionData["RxCodecVad"]) or ""
+                    end
+                end
+            end
+        end
+    end
+    return result
+end
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_.get = getReceiveCodec
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_.getall = getAllReceiveCodec
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_", Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_ReceiveCodec_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallLog.{i}.Session.{i}.Source.DSP.TransmitCodec.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            Codec = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.Capabilities.Codec.{i}.",
+                description = "The codec in use for the outgoing voice stream",
+            },
+            SilenceSuppression = {
+                access = "readOnly",
+                type = "boolean",
+                description = "Whether or not silence suppression is in use for the outgoing voice stream",
+            },
+            PacketizationPeriod = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Current outgoing packetization period in milliseconds",
+             },
+            --[[Overruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            Underruns = {
+                access = "readOnly",
+                type = "unsignedInt",
+            }, ]]--
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local transmitCodecParam = {
+    SilenceSuppression = "TxCodecVad",
+    PacketizationPeriod = "TxCodecPtime",
+}
+
+local function getTransmitCodec(mapping, param, key, parentKey, grandKey)
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            if tostring(sessionData["CallKey"]) == keyValue then
+                if param == "Codec" then
+                    return getCapabilityCodec(mapping, grandKey, sessionData["Codec"])
+                else
+                  return sessionData[transmitCodecParam[param]] and tostring(sessionData[transmitCodecParam[param]]) or ""
+                end
+            end
+        end
+    end
+    return ""
+end
+
+local function getAllTransmitCodec(mapping, key, parentKey, grandKey)
+    local result = {}
+    local keyValue, profileNumber = voiceHelper.splitKey(key)
+    local callStatsData = conn:call("mmdbd.call.statistics", "get", {["profile"]= profileNumber}) or {}
+    if callStatsData and callStatsData[callStatsList] then
+        for _, sessionData in ipairs (callStatsData[callStatsList]) do
+            for param in pairs(Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_.objectType.parameters) do
+                if tostring(sessionData["CallKey"]) == keyValue then
+                    if param == "Codec" then
+                        result[param] = getCapabilityCodec(mapping, grandKey, sessionData["Codec"])
+                    else
+                        result[param] = sessionData[transmitCodecParam[param]] and tostring(sessionData[transmitCodecParam[param]]) or ""
+                    end
+                end
+            end
+        end
+    end
+    return result
+end
+
+Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_.get = getTransmitCodec
+Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_.getall = getAllTransmitCodec
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_", Multi_Services_VoiceService_i_CallLog_i_Session_i_Source_DSP_TransmitCodec_, register)

@@ -1,0 +1,134 @@
+#!/bin/sh
+
+CTRLDIR=/var/rtfd
+
+usage() {
+	echo "Reset to factory default: Erase active configuration"
+	echo "$(basename $0) [--all | --soft] [--dry-run] [--cancel]"
+	echo "Option:"
+	echo "    --all     : Remove all configurations (by erasing user partition)"
+	echo "    --soft    : keep selected settings"
+	echo "    --dry-run : do not erase any mtd"
+	echo "    --fast,-f : skip execution of shutdown/kill scripts"
+	echo "    --cancel  : turn a started rtfd into a reboot"
+}
+
+valid_rtfd_command() {
+	local CMD="$1"
+	case "$CMD" in
+	'--soft'|'--all'|'--default')
+		echo "$CMD"
+		;;
+	'*')
+		echo "unknown type of rtfd: $CMD"
+		exit 0
+		;;
+	esac
+}
+
+run_fast_rtfd() {
+	logger -t rtfd "call RTFD $*"
+	/etc/init.d/rtfd shutdown
+	sync
+	/sbin/reboot -f
+}
+
+schedule_rtfd_and_reboot() {
+	logger -t rtfd "scheduled RTFD $* during reboot"
+	sync
+	/sbin/reboot
+}
+
+record_rtfd_reboot() {
+	if [ -f /lib/functions/reboot_reason.sh ]; then
+		. /lib/functions/reboot_reason.sh
+		set_reboot_reason RTFD
+	fi
+}
+
+create_rtfd_invoke_file() {
+	mkdir -p  "${CTRLDIR}"
+	echo "$*" > "${CTRLDIR}/invoke"
+}
+
+libre_reset_handling() {
+	LIBRE_FILE=/usr/bin/libre_luci
+	if [ -f "$LIBRE_FILE" ]; then
+		if  [ -z "${DRYRUN}" ] ; then
+			logger -t rtfd "libre module factory reset"
+			libre_luci --server 172.16.234.2 --port 7778 --command reset_to_factory > /dev/null
+			libre_luci --server 172.16.234.2 --port 7778 --command reboot > /dev/null
+		else
+			logger -t rtfd "skipping libre module factory reset because of ${DRYRUN}"
+		fi
+	fi
+}
+
+#utility to configure /etc/init.d/rtfd via the file in /var/rtfd/invoke
+# @param cmd
+trigger_rtfd() {
+	local CMD=$(valid_rtfd_command "$1")
+	local DRYRUN="$2"
+	local FAST="$3"
+	create_rtfd_invoke_file "$CMD" "$FAST" "$DRYRUN"
+	record_rtfd_reboot
+	libre_reset_handling
+	if [ "${FAST}" = "--fast" ]; then
+		run_fast_rtfd "$CMD" "$DRYRUN" "$FAST"
+	else
+		schedule_rtfd_and_reboot "$CMD" "$DRYRUN"
+	fi
+}
+
+cancel() {
+	[ ! -d "${CTRLDIR}" ] && exit
+	rm -Rf "${CTRLDIR}"
+	logger -t rtfd "cancelling RTFD, reboot still scheduled"
+}
+
+prevent_mode_conflict() {
+	local current=$1
+	local prev=$2
+	if [ "${prev}" != '--default' -a "${prev}" != "${current}" ] ; then
+		echo '!!'
+		echo "ERROR: option ${current} conflicts with ${prev}"
+		echo '!!'
+		usage
+		exit 1
+	fi
+	return 0
+}
+
+# main dispatcher
+
+CMD='--default'
+DRYRUN=''
+FAST=''
+for arg in "$@"
+do
+	case "${arg}" in
+	'--soft')
+		prevent_mode_conflict "${arg}" "${CMD}" && CMD="${arg}"
+		;;
+	'--all')
+		prevent_mode_conflict "${arg}" "${CMD}" && CMD="${arg}"
+		;;
+	'--dry-run')
+		DRYRUN="${arg}"
+		;;
+	'--cancel')
+		cancel
+		exit
+		;;
+	'--fast'|'-f')
+		FAST='--fast'
+		;;
+	*)
+		usage
+		exit 1
+		;;
+	esac
+done
+
+ubus send rtfd '{ "state" : "started" }'
+trigger_rtfd "${CMD}" "${DRYRUN}" "${FAST}"
