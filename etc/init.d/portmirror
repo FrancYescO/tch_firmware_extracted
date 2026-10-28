@@ -1,0 +1,83 @@
+#!/bin/sh /etc/rc.common
+
+START=25
+
+check_setportmirror() {
+    if [ ! -x "/usr/bin/setportmirror" ]; then
+	echo "script /usr/bin/setportmirror not found"
+	return 1
+    fi
+
+    return 0
+}
+
+portmirror_load() {
+    local cfg="$1"
+    local srcintf="" dstintf="" direction=""
+
+    config_get srcintf "$cfg" srcintf
+    if [ -z "$srcintf" ]; then
+	echo "skip portmirror configuration '$cfg', srcintf not set"
+	return 0
+    fi
+
+    config_get dstintf "$cfg" dstintf
+    config_get direction "$cfg" direction
+
+    # check to invoke LAN-2-LAN mirroring
+    # TODO: FOR NOW, WE WILL ONLY MIRROR PORTS THAT ARE PART OF THE ETH SWITCH
+    local lanifs=$(echo eth0 eth1 eth2 eth3)
+    if [ "$(echo $lanifs | grep $srcintf)" != "" ]; then
+        logger -t portmirror "*** RUNNING LAN-2-LAN MIRROR ***"
+        /usr/bin/setportmirrorlan2lan "$srcintf" "$dstintf" $direction
+        return 0
+    fi
+
+    /usr/bin/setportmirror "$srcintf" "$dstintf" $direction
+    return 0
+}
+
+portmirror_reset_all() {
+    local srcintf
+
+    cd /sys/class/net || return 1
+    for srcintf in *; do
+	/usr/bin/setportmirror "$srcintf" "" any &>/dev/null
+	/usr/bin/setportmirrorlan2lan "$srcintf" "" any &>/dev/null
+    done
+    return 0
+}
+
+check_portmirror_persist() {
+    # keep track of CPE bootup
+    local portmirror_bootfile=/tmp/portmirror_boot
+    # read info from UCI configuration
+    local persist_on_reboot
+    config_get persist_on_reboot "dev1" persist_on_reboot 0
+    # remove pre-existing (gui) mirroring configuration and reload
+    [ "${persist_on_reboot}" == "0" ] && [ ! -e ${portmirror_bootfile} ] && {
+        portmirror_reset_all
+        uci del portmirror.gui 2>/dev/null
+        uci commit portmirror
+        touch ${portmirror_bootfile} && sync
+        /etc/init.d/portmirror restart
+    }
+}
+
+start() {
+    check_setportmirror || return 1
+
+    # load configuration from UCI
+    config_load portmirror
+    config_foreach portmirror_load portmirror
+
+    # check to maintain previous mirror settings on CPE reboot
+    check_portmirror_persist
+}
+
+stop() {
+    check_setportmirror || return 1
+
+    # reset port mirroring on all interfaces
+    portmirror_reset_all
+}

@@ -1,0 +1,159 @@
+-- Copyright (c) 2020 Technicolor
+-- All Rights Reserved
+--
+-- This program contains proprietary information which is a trade
+-- secret of TECHNICOLOR and/or its affiliates and also is protected as
+-- an unpublished work under applicable Copyright laws. Recipient is
+-- to retain this program in confidence and is not permitted to use or
+-- make copies thereof other than as permitted in a written agreement
+-- with TECHNICOLOR, UNLESS OTHERWISE EXPRESSLY ALLOWED BY APPLICABLE LAWS.
+
+-- Script connects to specified IOT Thing
+-- Receives an MQTT Messages which contains the TR069 datamodel parameter
+-- Sends an MQTT Message response of the specified TR069 datamodel parameter
+-- The TR069 datamodel parameter can be IGD or Device2 datamodel.
+-- The script is derived from the existing orchestra agent.
+
+--- Values given in mqtt request are validated.
+-- Validators for mqtt parameter values are handled here.
+--
+-- @module mqttservices_validator
+--
+
+local M = {}
+local nwCommon = require("transformer.mapper.nwcommon")
+
+local supportedFirewallModes = {
+  lax = true,
+  normal = true,
+  high = true,
+  user = true
+}
+
+local weekdays = {
+  Mon = true,
+  Tue = true,
+  Wed = true,
+  Thu = true,
+  Fri = true,
+  Sat = true,
+  Sun = true
+}
+
+function M.isNumber(value)
+  return type(value) == 'number'
+end
+
+function M.isString(value)
+  return type(value) == 'string'
+end
+
+function M.isBoolean(value)
+  value = tonumber(value)
+  if value == 1 or value == 0 then
+    return true
+  end
+  return false
+end
+
+function M.validateFirewallMode(mode)
+  return supportedFirewallModes[mode] and true or false
+end
+
+function M.isValidMac(value)
+  return nwCommon.isMAC(value)
+end
+
+function M.validateTodMode(value)
+  if value == "block" or value == "allow" then
+    return true
+  end
+  return false
+end
+
+-- Validate the TOD rule start/stop time value. Valid value will be in hh:mm format.
+function M.validateTime(value)
+  local hours, mins = value:match("^(%d+):(%d+)$")
+  hours, mins = tonumber(hours), tonumber(mins)
+  if hours and mins and hours >= 0 and hours < 24 and mins >=0 and mins < 60 then
+    return true
+  end
+  return false
+end
+
+function M.validateTodType(value)
+  return value == 'mac' and true or false
+end
+
+function M.validateWeekday(value)
+  return weekdays[value] or false
+end
+
+function M.isValidURL(site)
+  if type(site) == 'string' then
+    --extract only domain part in URL
+    site = site:match("[%w]+://([^/ ]*)") or site:match("([^/ ]*)") or site
+    -- check if the site starts with www then remove it from URL.
+    local domain = site:match("^www%.(%S+)") or site
+    -- Domain name cannot be empty or too long
+    if domain and ( #domain == 0 or #domain > 255 ) then
+      return false
+    end
+
+    local i, index = 0, 0
+    repeat
+      i = i+1
+      index = string.find(domain, ".", i, true)
+      local label = string.sub(domain, i, index)
+      local strippedLabel = string.match(label, "[^%.]*")
+      -- Domain name segments is not separated by dots
+      if i == 1 and index == nil then
+        return false
+      end
+      if strippedLabel ~= nil then
+        -- Dot at start or end of domain name is not allowed. Successive dots are not allowed in domain name.
+        if #strippedLabel == 0 then
+          return false
+        end
+        -- Domain name segments (seperated by dots) cannot be longer than 63 characters.
+        if #strippedLabel > 63 then
+          return false
+        end
+        local correctLabel = string.match(strippedLabel, "^[%w][%w%-]*[%w]")
+        if #strippedLabel == 1 then
+          -- Domain name segments (seperated by dots) of single character length cannot be a special character.
+          if not string.match(strippedLabel, "[a-zA-Z0-9]") then
+            return false
+          end
+         -- Domain name should start and end only with alphanumeric characters.
+         -- Domain name cannot contain white space or special characters other than hyphen or dot.
+        elseif strippedLabel ~= correctLabel then
+          return false
+        end
+      end
+      i = index
+    until not index
+    return true
+  end
+  return false
+end
+
+function M.validateURLfilterDevice(value)
+  local validDeviceValue = {
+    all = true,
+    single = true
+  }
+  return validDeviceValue[value] or false
+end
+
+function M.validateURLfilterAction(value)
+  local validActions = {
+    DROP = true,
+    drop = true,
+    ACCEPT = true,
+    accept = true
+  }
+  return validActions[value] or false
+end
+
+return  M

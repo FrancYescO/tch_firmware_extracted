@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+
+source $IPKG_INSTROOT/lib/functions/functions-tch.sh
+
+START=20
+
+start() {
+        # Check whether current platform is 11ac platform or not
+        if (pidof wl1-kthrd > /dev/null); then
+            setcpumask wfd0-thrd 0x02
+            setcpumask wfd1-thrd 0x01
+
+            # Move serial interrupt from cpu2 to cpu1, make it more responsive when throtteling is active
+            serial_interrupt_num=`cat /proc/interrupts | awk '/serial/{print substr($1, 1, length($1)-1)}'`
+            echo 1 > /proc/irq/$serial_interrupt_num/smp_affinity
+        fi
+}
+
+stop() {
+        # Check whether current platform is 11ac platform or not
+        if (pidof wl1-kthrd > /dev/null); then
+            setcpumask wfd0-thrd 0x03
+            setcpumask wfd1-thrd 0x03
+
+            # Move serial interrupt back to cpu2
+            serial_interrupt_num=`cat /proc/interrupts | awk '/serial/{print substr($1, 1, length($1)-1)}'`
+            echo 2 > /proc/irq/$serial_interrupt_num/smp_affinity
+        fi
+}
+

@@ -1,0 +1,238 @@
+-- Manually generated
+local Multi_X_000E50_AccessControl_Host_i_ = {
+  objectType = {
+    name = "#ROOT.X_000E50_AccessControl.Host.{i}.",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Configuration to 'allow' or 'block' access from host based on MAC",
+    parameters = {
+      Enabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "The flag to enable or disable the rule.",
+      },
+      MACAddress = {
+        access = "readWrite",
+        type = "string",
+        description = "MACAddress of the host.",
+      },
+      StartTime = {
+        access = "readWrite",
+        type = "string",
+        description = "Start time of the schedule. In format of '[hour]:[minute]'. Only one clock time '[hour]:[minute]' can be specified.",
+      },
+      StopTime = {
+        access = "readWrite",
+        type = "string",
+        description = "Stop time of the schedule. In format of '[hour]:[minute]'. Only one clock time '[hour]:[minute]' can be specified.",
+      },
+      Weekdays = {
+        access = "readWrite",
+        type = "string",
+        description = "Weekday can be any value of 'Mon, Tue, Wed, Thu, Fri, Sat, Sun'.",
+      },
+      Mode = {
+        access = "readWrite",
+        type = "string",
+        description = "Mode to allow/block the host.",
+        enumeration = {
+          "Allow",
+          "Block",
+        }
+      }
+    }
+  }
+}
+
+local lower = string.lower
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local common = mapper("nwcommon")
+local todBinding = { config = "tod" }
+local network = require("transformer.shared.common.network")
+local configChanged = false
+
+local modeMap = {
+  allow = "Allow",
+  block = "Block"
+}
+
+local knownWeekDay = {
+  Mon = true,
+  Tue = true,
+  Wed = true,
+  Thu = true,
+  Fri = true,
+  Sat = true,
+  Sun = true,
+  All = true
+}
+
+local function getUciValue(section, option, default)
+  todBinding.sectionname = section
+  todBinding.option = option
+  todBinding.default = default
+  return getFromUci(todBinding)
+end
+
+local function setUciValue(section, option, value)
+  todBinding.sectionname = section
+  todBinding.option = option
+  setOnUci(todBinding, value, commitapply)
+  configChanged = true
+end
+
+local function getWeekdays(weekdays)
+  local validDays = {}
+  for _, day in ipairs(weekdays) do
+    if knownWeekDay[day] then
+      validDays[#validDays + 1] = day
+    end
+  end
+  return table.concat(validDays, ",")
+end
+
+Multi_X_000E50_AccessControl_Host_i_.entries = function()
+  local entries = {}
+  todBinding.sectionname = "host"
+  uciHelper.foreach_on_uci(todBinding, function(s)
+    entries[#entries + 1] = s[".name"]
+  end)
+  return entries
+end
+
+Multi_X_000E50_AccessControl_Host_i_.get = {
+  Enabled = function(mapping, param, key)
+    return getUciValue(key, "enabled", "0")
+  end,
+  MACAddress = function(mapping, param, key)
+    return getUciValue(key, "id")
+  end,
+  StartTime = function(mapping, param, key)
+    return getUciValue(key, "start_time")
+  end,
+  StopTime = function(mapping, param, key)
+    return getUciValue(key, "stop_time")
+  end,
+  Weekdays = function(mapping, param, key)
+    return getWeekdays(getUciValue(key, "weekdays", {}))
+  end,
+  Mode = function(mapping, param, key)
+    return modeMap[getUciValue(key, "mode")] or ""
+  end
+}
+
+Multi_X_000E50_AccessControl_Host_i_.getall = function(mapping, key)
+  todBinding.sectionname = key
+  todBinding.option = nil
+  local todData = uciHelper.getall_from_uci(todBinding)
+  return {
+    Enabled = todData.enabled or "0",
+    MACAddress = todData.id or "",
+    StartTime = todData.start_time or "",
+    StopTime = todData.stop_time or "",
+    Weekdays = getWeekdays(todData.weekdays or {}),
+    Mode = modeMap[todData.mode] or "",
+  }
+end
+
+local function validWeekdays(weekdays)
+  local validDays = {}
+  for day in weekdays:gmatch("([^,]+)") do
+    if not knownWeekDay[day] then
+      return nil, "Invalid Weekday(s)"
+    end
+    validDays[#validDays + 1] = day
+  end
+  return validDays
+end
+
+local function numberInRange(value, low, high)
+  if not value and low and high then
+    return false
+  end
+  return (low<=value) and (value<=high)
+end
+
+local function validTime(hour, minute)
+  return numberInRange(hour, 0, 23) and numberInRange(minute, 0, 59)
+end
+
+local function validScheduleTime(time)
+  local hour, minute = time:match("^(%d+):(%d+)$")
+  if hour and minute then
+    return validTime(tonumber(hour), tonumber(minute))
+  end
+end
+
+local function setTimeValue(option)
+  return function(_, _, value, key)
+    if not validScheduleTime(value) then
+      return nil, "Invalid Time"
+    end
+    setUciValue(key, option, value)
+  end
+end
+
+Multi_X_000E50_AccessControl_Host_i_.set = {
+  Enabled = function(mapping, param, value, key)
+    setUciValue(key, "enabled", value)
+  end,
+  MACAddress = function(mapping, param, value, key)
+    if not common.isMAC(value) then
+      return nil, "Invalid MAC address"
+    end
+    setUciValue(key, "id", value)
+  end,
+  Weekdays = function(mapping, param, value, key)
+    local weekdays, err = validWeekdays(value)
+    if not weekdays then
+      return nil, err
+    end
+    setUciValue(key, "weekdays", weekdays)
+  end,
+  StartTime = setTimeValue("start_time"),
+  StopTime = setTimeValue("stop_time"),
+  Mode = function(mapping, param, value, key)
+    setUciValue(key, "mode", lower(value))
+  end,
+}
+
+Multi_X_000E50_AccessControl_Host_i_.add = function(mapping)
+  local host = network.getNewSection("tod", "host")
+  todBinding.sectionname = host
+  todBinding.option = nil
+  uciHelper.set_on_uci(todBinding, "host", commitapply)
+  setUciValue(host, "type", "mac")
+  return host
+end
+
+Multi_X_000E50_AccessControl_Host_i_.delete = function(mapping, key)
+  todBinding.sectionname = key
+  todBinding.option = nil
+  uciHelper.delete_on_uci(todBinding, commitapply)
+  configChanged = true
+  return true
+end
+
+Multi_X_000E50_AccessControl_Host_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(todBinding)
+  end
+  configChanged = false
+end
+
+Multi_X_000E50_AccessControl_Host_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(todBinding)
+  end
+  configChanged = false
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicate = duplicator(Multi_X_000E50_AccessControl_Host_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, mapping in ipairs(duplicate) do
+  register(mapping)
+end
