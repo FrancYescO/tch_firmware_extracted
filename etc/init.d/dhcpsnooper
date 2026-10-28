@@ -1,0 +1,37 @@
+#!/bin/sh /etc/rc.common
+
+START=60
+USE_PROCD=1
+
+start_service() {
+	config_load dhcpsnooping
+	local args val
+	config_get_bool val global enable 1
+	[ "$val" -gt 0 ] || return 0
+
+	config_get val global queue 0
+	local args="-q $val"
+	config_get_bool val global trace 0
+	[ "$val" -gt 0 ] && args="$args -v"
+
+	logger -t dhcpsnooper "Starting DHCP snooper daemon"
+
+	procd_open_instance
+	procd_set_param command /usr/bin/dhcpsnooper $args
+	procd_set_param respawn
+	procd_close_instance
+}
+
+reload_service()
+{
+	stop
+	start
+}
+
+service_triggers() {
+	procd_add_reload_trigger "dhcpsnooping"
+}
+
+service_started() {
+	procd_set_config_changed firewall
+}

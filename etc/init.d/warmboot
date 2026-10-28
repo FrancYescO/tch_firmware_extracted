@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+
+START=11
+STOP=97
+
+. $IPKG_INSTROOT/lib/functions/reboot_reason.sh
+
+start() {
+    . $IPKG_INSTROOT//lib/config/uci.sh
+    uci_set_state system warmboot '' warmboot
+    uci_set_state system warmboot reboot $(cat /proc/prozone/reboot)
+# default : CRASH ; will be reset to PWR in case of power cycle
+    set_reboot_reason CRASH
+}
+
+stop() {
+# in case of 'reboot', set to CLI if no other then PWR reboot reason set
+    is_reboot_reason && set_reboot_reason CLI
+}

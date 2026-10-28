@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+
+# Start/stop minidlna via procd.
+# Minidlna is restarted from within the hotplug.d mount scripts. These script
+# are triggered by a system call from within mountd. As a consequence all these
+# scripts and their childs have a PGID (process group ID) equal to the one of
+# mountd. The minidlna scripts need access to, possible timed-out and thus
+# unmounted, partitions. Mount requests from processes with the same PGID as
+# mountd are ignored by mountd. The minidlna scripts can thus not trigger
+# mounts. Workaround is to start the minidlna scripts via procd via its original
+# services script.
+USE_PROCD=1
+MINIDLNA_INIT=/etc/init.d/minidlna
+
+start_service()
+{
+  procd_open_instance
+  procd_set_param command "${MINIDLNA_INIT}" "start"
+  procd_close_instance
+}
+
+stop_service()
+{
+  "${MINIDLNA_INIT}" "stop"
+}
+
+reload_service()
+{
+  "${MINIDLNA_INIT}" "reload"
+}

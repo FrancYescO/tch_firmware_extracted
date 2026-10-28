@@ -1,0 +1,76 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_DeviceInfo_MemoryStatus_ = {
+  objectType = {
+    name = "#ROOT.DeviceInfo.MemoryStatus.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Total = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Free = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local open = io.open
+
+local function getMemoryStatus(param)
+  local value = "0"
+  local fd = open("/proc/meminfo")
+  if fd then
+    for line in fd:lines() do
+      if line:find(param) then
+        value = line:match("%d+") or "0"
+        break
+      end
+    end
+    fd:close()
+  end
+  return value
+end
+
+local function getMemoryStatusAll()
+  local memTotal, memFree
+  local fd = open("/proc/meminfo")
+    if fd then
+      for line in fd:lines() do
+        if line:find("MemTotal") then
+          memTotal = line:match("%d+") or "0"
+        elseif line:find("MemFree") then
+          memFree = line:match("%d+") or "0"
+        end
+        if memTotal and memFree then
+          break
+        end
+      end
+      fd:close()
+    end
+    return memTotal, memFree
+end
+
+Multi_DeviceInfo_MemoryStatus_.get = {
+  Total = getMemoryStatus("MemTotal"),
+  Free  = getMemoryStatus("MemFree"),
+}
+
+Multi_DeviceInfo_MemoryStatus_.getall = function()
+  local memTotal, memFree = getMemoryStatusAll()
+  return {
+    Total = memTotal or "0",
+    Free  = memFree or "0",
+  }
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DeviceInfo_MemoryStatus_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+ register(dupli)
+end

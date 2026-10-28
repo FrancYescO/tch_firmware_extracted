@@ -1,0 +1,460 @@
+#!/usr/bin/env lua
+--[[
+/********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+** Copyright (c) 2015 - 2016  -  Technicolor Delivery Technologies, SAS **
+** - All Rights Reserved                                                **
+** Technicolor hereby informs you that certain portions                 **
+** of this software module and/or Work are owned by Technicolor         **
+** and/or its software providers.                                       **
+** Distribution copying and modification of all such work are reserved  **
+** to Technicolor and/or its affiliates, and are not permitted without  **
+** express written authorization from Technicolor.                      **
+** Technicolor is registered trademark and trade name of Technicolor,   **
+** and shall not be used in any manner without express written          **
+** authorization from Technicolor                                       **
+*************************************************************************/
+--]]
+
+local require, loadfile, pcall, setfenv, setmetatable = require, loadfile, pcall, setfenv, setmetatable
+local pairs, ipairs, type, tostring, tonumber = pairs, ipairs, type, tostring, tonumber
+local insert, remove = table.insert, table.remove
+local match, gsub = string.match, string.gsub
+
+local posix = require("tch.posix")
+local lfs = require("lfs")
+local cli_store = require("clash.core.module_store")
+local cli_io = require("clash.core.io_handler")
+local cli_eventloop = require("clash.core.event_loop")
+local cli_session_control = require("clash.core.session_control")
+
+local log_level
+local historyfile
+local module_path
+local cmdwhitelist = {}
+
+
+local module_metatable = {
+  __index = _G,
+  __newindex = function()
+    error("global variables are evil", 2)
+  end
+}
+
+local function create_wrapper(object, functionname)
+  return function(...)
+    object[functionname](object, ...)
+  end
+end
+
+local function create_require_wrapper(logger)
+  return function(module_name)
+    if module_name:match("^verifier%.") or module_name:match("^completer%.") then
+      return require("clash.modules."..module_name)
+    elseif module_name:match("^helper%.") then
+      return require("clash."..module_name)
+    elseif module_name == "logger" then
+      return logger
+    else
+      return require(module_name)
+    end
+  end
+end
+
+local function load_optional_modules(cli, file_path, module_type, module_id)
+  local ok, errmsg = true, nil
+  for file in lfs.dir(file_path) do
+    if file ~= "." and file ~= ".." and match(file, "([^%/]+)%.lua$") then
+      local typename = match(file, "([^%/]+)%.lua$")
+      local mod_function
+      ok, mod_function = pcall(_G.require, module_type.."."..typename)
+      if not ok then
+        errmsg = mod_function
+        break
+      end
+      ok, errmsg = cli.store:register_module(mod_function, module_id, typename)
+      if not ok then
+        break
+      end
+      cli.io_handler:registerState(typename)
+    end
+  end
+  return ok, errmsg
+end
+
+local internals = {
+  stop = "clash.core.internal_command.stop_command"
+}
+
+--- Parse the given file and validate if the required functions available or not.
+-- @param cli
+-- @param file Absolute path of the file to be loaded
+-- @return true If file loaded successfully and all sanity checks passed.
+-- @return nil, error message If an error occurred during loading or if one of the mandatory fields is not present in the module.
+local function load_command(cli, file)
+  cli.io_handler.log:debug("Loading command %s", file)
+  local loadfunction, errmsg = loadfile(file)
+  if not loadfunction then
+    -- file not found or syntax error in module
+    return nil, errmsg
+  end
+  setfenv(loadfunction, cli.command_env)
+  -- Try to load the module
+  local results, module = pcall(loadfunction)
+  if not results then
+    -- Logical error in module, error message present in 'module' variable
+    return nil, module
+  end
+
+  if not module.init or not module.destroy or not module.name then
+    -- One of the required command module fields is not present
+    return nil, "init, destroy or name not present"
+  end
+  if internals[module.name] then
+    -- Trying to override an internal command
+    return nil, "Overriding an internal command is not allowed"
+  end
+  module._file = file
+  cli.modules[#cli.modules + 1] = module
+  return true
+end
+
+--- Load the modules recursively from the given path.
+-- @param cli
+-- @param path Absolute path from which to load the modules.
+-- @return true If all modules in the given path loaded successfully.
+-- @return nil, error message If anything failed during the loading of the modules.
+local function load_commands_recursively(cli, path)
+  local mode = lfs.attributes(path, "mode")
+  local result, errmsg
+  if mode == "file" then
+    result, errmsg = load_command(cli, path)
+    if not result then
+      -- Just ignore paths that fail to load
+      cli.io_handler.log:error("Failed to load %s", tostring(path))
+    end
+  elseif mode == "directory" then
+    for file in lfs.dir(path) do
+      -- eliminate the default current and parent directory
+      if file ~= "." and file ~= ".." then
+        -- Call the function for each entry of the directory.
+        result, errmsg = load_commands_recursively(cli, path.."/"..file)
+        if not result then
+          return nil, errmsg
+        end
+      end
+    end
+  else
+    return nil, "Given path has illegal file mode"
+  end
+  return true
+end
+
+local function load_internal(cli, path)
+  local mod = require(path)
+  mod.load_cli(cli)
+  mod._file = "./"..gsub(path, ".", "/") .. " .lua"
+  cli.modules[#cli.modules + 1] = mod
+end
+
+local function load_internal_commands(cli)
+  load_internal(cli, "clash.core.internal_command.stop_command")
+end
+
+--- Recursively load the files inside the given path.
+-- @param path Absolute path to be used for loading module files
+-- @return true If all modules present in the given path are loaded correctly.
+-- @return nil, error message In case of failure to load a module.
+local function load_files(cli)
+  -- Create the command environment once.
+  local command_env = {
+    print = create_wrapper(cli.io_handler, "println"),
+    register = create_wrapper(cli.store, "register_module"),
+    unregister = create_wrapper(cli.store, "unregister_module"),
+    add_socket = create_wrapper(cli.event_loop, "registerEventSocket"),
+    remove_socket = create_wrapper(cli.event_loop, "unregisterEventSocket"),
+  }
+  -- Nobody is allowed to create new global variables
+  setmetatable(command_env, module_metatable)
+  cli.command_env = command_env
+
+  local path = cli.module_path -- Module path should point to a directory
+  local mode = lfs.attributes(path, "mode")
+  -- Do some sanity checks.
+  if mode ~= "directory" then
+    return nil, "Given path is not a directory"
+  end
+  local verifier_path = path.."/verifier"
+  if lfs.attributes(verifier_path, "mode") ~= "directory" then
+    return nil, "No verifier path present"
+  end
+  local completer_path = path.."/completer"
+  if lfs.attributes(completer_path, "mode") ~= "directory" then
+    return nil, "No completer path present"
+  end
+  local command_path = path.."/command"
+  if lfs.attributes(command_path, "mode") ~= "directory" then
+    return nil, "No command path present"
+  end
+
+  -- First load the verifiers. This will populate the known data types.
+  local result, errmsg = load_optional_modules(cli, verifier_path, "verifier", cli.store.VERIFIER_MODULE)
+  if not result then
+    return nil, errmsg
+  end
+
+  -- Now load the completers.
+  result, errmsg = load_optional_modules(cli, completer_path, "completer", cli.store.COMPLETER_MODULE)
+  if not result then
+    return nil, errmsg
+  end
+
+  -- Finally load the commands.
+  result, errmsg = load_commands_recursively(cli, command_path)
+  if not result then
+    return nil, errmsg
+  end
+  load_internal_commands(cli)
+  return true
+end
+
+--- Function to query the current user
+-- @treturn string The username of the logged in user.
+-- @return nil, error message In case of failure to determine the username.
+local function query_user_id()
+  -- query current user
+  local username = posix.getusername()
+  if not username or username == "" then
+    return nil, "Failed to get the current username"
+  end
+  username = gsub(username, '^%s+', '')
+  username = gsub(username, '%s+$', '')
+  username = gsub(username, '[\n\r]+', '')
+  return username
+end
+
+--- Load the config from UCI
+-- @tparam string username The username of the currently logged in user.
+-- @note If no clash UCI configuration is present, a default configuration is used.
+local function load_config(username)
+  local uci = require("uci")
+  -- The global UCI_CONFIG can be set when running tests. If set we want to
+  -- use it. Otherwise it's nil and the context is created with the default conf_dir.
+  local cursor = uci.cursor(UCI_CONFIG)
+  local uci_config = cursor:get_all("clash" ,"main_config")
+  log_level = uci_config and uci_config.log_level or 6
+  log_level = tonumber(log_level)
+  module_path = uci_config and uci_config.module_path or "/usr/lib/lua/clash/modules"
+
+  uci_config = cursor:get_all("clash", username)
+  historyfile = uci_config and uci_config.historyfile or "/etc/clash/history.txt"
+  cmdwhitelist = uci_config and uci_config.command or {}
+
+  return true
+end
+
+--- Check if a module/command is allowed for the current user.
+local function module_allowed(modulename)
+  if internals[modulename] then
+    return true
+  end
+  for _, command in ipairs(cmdwhitelist) do
+    if command == modulename then
+      return true
+    end
+  end
+  return false
+end
+
+--- Initialize the loaded modules
+local function init_modules(cli, username)
+  local to_remove = {}
+  for index, module in ipairs(cli.modules) do
+    -- check if module is allowed for user
+    if username=="root" or module_allowed(module.name) then
+      -- call the init function of loaded modules.
+      local result, errmsg = pcall(module.init)
+      -- If module init() failed, inform error message to 
+      if not result then
+        -- Just ignore modules that fail to initialize
+        cli.io_handler.log:critical("init failed for %s: %s", module._file, errmsg)
+        to_remove[#to_remove + 1] = index
+      end
+    end
+  end
+  while #to_remove > 0 do
+    remove(cli.modules, to_remove[#to_remove])
+    to_remove[#to_remove] = nil
+  end
+  cli.io_handler.log:debug("Initialized %d modules", #cli.modules)
+  return true
+end
+
+--- De-initialize the loaded modules. This should happen in the reverse order of initialization.
+local function deinit_modules(cli)
+  for index = #cli.modules, 1, -1 do
+    cli.io_handler.log:debug("Deinit module with index %d", index)
+    local module = cli.modules[index]
+    -- call the destroy function of loaded modules.
+    local result, errmsg = pcall(module.destroy)
+    -- If module destroy() failed, inform error message to user
+    if not result then
+      cli.io_handler.log:critical("destroy failed for %s: %s", module._file, errmsg)
+    end
+    cli.modules[index] = nil
+  end
+  for type, verifier in pairs(cli.store:retrieve_modules(cli.store.VERIFIER_MODULE)) do
+    cli.store:unregister_module(verifier, cli.store.VERIFIER_MODULE, type)
+  end
+  for type, completer in pairs(cli.store:retrieve_modules(cli.store.COMPLETER_MODULE)) do
+    cli.store:unregister_module(completer, cli.store.COMPLETER_MODULE, type)
+  end
+end
+
+local function load_native_helpers(cli)
+  local sessionid = cli.session:get_uuid()
+  -- load transformer helper
+  local proxy = require("clash.helper.transformer")
+  proxy.set_uuid(sessionid)
+  -- load command assistance
+  local cmd_assist = require("clash.helper.command")
+  cmd_assist.start_listen_socket(create_wrapper(cli.event_loop, "registerEventSocket"),create_wrapper(cli.io_handler, "println_raw"), sessionid)
+end
+
+--- Function to load the modules (commands, completers and core modules)
+-- This command will be helpful for dynamically loading/unloading the modules
+local function create(args)
+  local batchmode = (#args > 0 and true) or false
+  local username, errmsg = query_user_id()
+  if not username then
+    return nil, "CLI failed to determine user: " .. errmsg
+  end
+  -- Load config
+  load_config(username)
+  local prompt = username
+  if batchmode then
+    prompt = ""
+  end
+  -- Initialize the core modules
+  local io_handler
+  io_handler, errmsg = cli_io.init(log_level, prompt)
+  if not io_handler then
+    return nil, "CLI IO handler failed to initialize: "..errmsg
+  end
+  if not batchmode then
+    io_handler:clearScreen()
+    -- Print the Technicolor banner
+    io_handler:loadBanner("/etc/banner")
+    io_handler:loadHistory(historyfile)
+    io_handler:loadCompleter()
+  end
+
+  local store
+  store, errmsg = cli_store.init(io_handler.log, io_handler.lapp)
+  if not store then
+    return nil, "CLI module store failed to initialize: "..errmsg
+  end
+  io_handler:setStore(store)
+
+  local session = cli_session_control.new(io_handler.log)
+  local ok
+  ok, errmsg = session:start()
+  if not ok then
+    return nil, "Could not start a CLI session: "..errmsg
+  end
+
+  local event_loop
+  event_loop, errmsg = cli_eventloop.init(io_handler, session, args)
+  if not event_loop then
+    return nil, "CLI event loop failed to initialize: "..errmsg
+  end
+
+  local cli = {
+    io_handler = io_handler,
+    store = store,
+    event_loop = event_loop,
+    module_path = module_path,
+    modules = {},
+    session = session,
+  }
+
+  _G.require = create_require_wrapper(cli.io_handler.log)
+  -- Load the helpers provided by clash itself.
+  load_native_helpers(cli)
+
+  -- Load modules from disk
+  local loaded
+  loaded, errmsg = load_files(cli)
+  _G.require = require
+  if not loaded then
+    return nil, "CLI failed to load files: "..errmsg
+  end
+
+  -- Initialize the loaded modules
+  local initialized
+  initialized, errmsg = init_modules(cli, username)
+  if not initialized then
+    return nil, "CLI failed to initialize modules: "..errmsg
+  end
+
+  if not batchmode then
+    -- Add the input socket to the CLI event loop.
+    cli.event_loop:addInputSocket()
+  else
+    cli.event_loop:addTimerSocket()
+  end
+  return cli
+end
+
+local function destroy(cli_instance)
+  if cli_instance.destroyed then
+    -- A double destroy can occur when Clash is killed by a signal
+    return
+  end
+  cli_instance.event_loop:destroy()
+  deinit_modules(cli_instance)
+  for packagename in pairs(package.loaded) do
+    if match(packagename, "^clash%.") or match(packagename, "^verifier%.") or match(packagename, "^completer%.") then
+      package.loaded[packagename] = nil
+    end
+  end
+  cli_instance.io_handler:destroy()
+  cli_instance.session:stop()
+  cli_instance.destroyed = true
+end
+
+local signals = require("signal")
+
+--- Entry function to CLI. This will handle user commands.
+local function cli(args)
+  -- Load all the CLI modules. Initialize the event loop.
+  local cli_instance, errmsg = create(args)
+
+  if not cli_instance then
+    return
+  end
+
+  if #args > 0 then
+    for k,v in pairs(signals) do
+      if type(v) == "number" then
+        signals.signal(v, function() destroy(cli_instance) end)
+      end
+    end
+  end
+
+  local continue = true
+  local reload
+
+  while continue and cli_instance do
+    reload = cli_instance.event_loop:run()
+    cli_instance.io_handler.log:debug("event loop run returned with boolean %s", tostring(reload))
+    if reload then
+      destroy(cli_instance)
+      cli_instance = create(args)
+    else
+      continue = false
+    end
+  end
+  destroy(cli_instance)
+end
+
+cli({...})

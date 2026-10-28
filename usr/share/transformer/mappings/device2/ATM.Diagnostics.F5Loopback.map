@@ -1,0 +1,146 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Device_ATM_Diagnostics_ = {
+  objectType = {
+    name = "Device.ATM.Diagnostics.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+
+register(Device_ATM_Diagnostics_)
+
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Device_ATM_Diagnostics_F5Loopback_ = {
+  objectType = {
+    name = "Device.ATM.Diagnostics.F5Loopback.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      DiagnosticsState = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        enumeration = {
+          "None",
+          "Requested",
+          "Complete",
+          "Error_Internal",
+          "Error_Other",
+        },
+      },
+      Interface = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.ATM.Link.{i}.",
+      },
+      NumberOfRepetitions = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      Timeout = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "1",
+          },
+        },
+      },
+      SuccessCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      FailureCount = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      AverageResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MinimumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+      MaximumResponseTime = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local nwmodel = require "transformer.shared.models.device2.network"
+local helper = require("transformer.shared.atmpinghelper")
+local atmInterface
+
+helper.startup()
+
+local ATMDiagnosticsF5LoopbackDefaultvalues = {
+  Interface = "",
+  DiagnosticsState = "None",
+  NumberOfRepetitions = "1",
+  Timeout = "1",
+  SuccessCount = "0",
+  FailureCount = "0",
+  AverageResponseTime = "0",
+  MinimumResponseTime = "0",
+  MaximumResponseTime = "0",
+}
+
+Device_ATM_Diagnostics_F5Loopback_.get = function(mapping, param)
+  if atmInterface then
+    local value = helper.get(atmInterface, param)
+    if param == "Interface" then
+      value = resolve("Device.ATM.Link.{i}.", atmInterface) or ""
+    end
+    return value
+  else
+    return ATMDiagnosticsF5LoopbackDefaultvalues[param]
+  end
+end
+
+Device_ATM_Diagnostics_F5Loopback_.set = function(mapping, param, pvalue)
+  if param == "Interface" and pvalue ~= "" then
+    local rc
+    rc, pvalue = pcall(tokey, pvalue, "Device.ATM.Link.{i}.")
+    if not rc then
+      return nil, "invalid value"
+    end
+    local model = nwmodel.load()
+    local intf = model:getUciKey(pvalue)
+    if intf then
+      atmInterface = intf
+    else
+      return nil, "invalid value (no atm "..pvalue.." found)"
+    end
+  end
+
+  if atmInterface then
+    helper.set(atmInterface, param, pvalue, commitapply)
+  end
+end
+
+Device_ATM_Diagnostics_F5Loopback_.commit = helper.commit
+
+Device_ATM_Diagnostics_F5Loopback_.revert = helper.revert
+
+register(Device_ATM_Diagnostics_F5Loopback_)

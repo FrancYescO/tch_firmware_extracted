@@ -1,0 +1,42 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+
+local InternetGatewayDevice_WANDevice_i_WANConnectionDevice_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.",
+    access = "readOnly",  -- add/delete currently not supported
+    numEntriesParameter = "WANConnectionNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      -- WANIPConnectionNumberOfEntries
+      -- automatically created when InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANIPConnection.{i}. is loaded
+      -- WANPPPConnectionNumberOfEntries
+      -- automatically created when InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANPPPConnection.{i}. is loaded
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local split_key = mapper("nwcommon").split_key
+
+InternetGatewayDevice_WANDevice_i_WANConnectionDevice_i_.entries = function(mapping, parentkey)
+  local WANConnectionDevices = {}
+  local devtype, devname = split_key(parentkey)
+
+  if devtype == "ETH" then
+    WANConnectionDevices[#WANConnectionDevices + 1] = parentkey
+  elseif devtype == "DSL" then
+    local binding = { config = "xtm", sectionname = "atmdevice" }
+    uci_helper.foreach_on_uci(binding, function(s)
+      WANConnectionDevices[#WANConnectionDevices + 1] = "ATM|" .. s[".name"]
+    end)
+    binding.sectionname = "ptmdevice"
+    uci_helper.foreach_on_uci(binding, function(s)
+      WANConnectionDevices[#WANConnectionDevices + 1] = "ETH|" .. s[".name"]
+    end)
+  end
+  return WANConnectionDevices
+end
+
+register(InternetGatewayDevice_WANDevice_i_WANConnectionDevice_i_)

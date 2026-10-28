@@ -1,0 +1,92 @@
+-- Automatically generated from InternetGatewayDevice:1.14 and Device:2.10
+-- using generator version 2.3
+local Multi_DeviceInfo_VendorConfigFile_i_ = {
+  objectType = {
+    name = "#ROOT.DeviceInfo.VendorConfigFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorConfigFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      Version = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Date = {
+        access = "readOnly",
+        type = "dateTime",
+      },
+      Description = {
+        access = "readOnly",
+        type = "string",
+        max = "256",
+      },
+--[[ TODO:
+      UseForBackupRestore = {
+        access = "readOnly",
+        type = "boolean",
+      }
+--]]
+    }
+  }
+}
+
+local lfs = require("lfs")
+
+Multi_DeviceInfo_VendorConfigFile_i_.entries = function()
+  local vendorConfigEntries = {}
+  local banks = {"bank_1", "bank_2"}
+  for _, bank in ipairs(banks) do
+    if lfs.attributes("/overlay/" .. bank, "mode") == "directory" then
+      vendorConfigEntries[#vendorConfigEntries + 1] = bank
+    end
+  end
+  return vendorConfigEntries
+end
+
+local function getRecentModifiedTime(path)
+  local recentModifiedTime = 0
+  if lfs.attributes(path, "mode") == "directory" then
+    for file in lfs.dir(path) do
+      local modifiedTime = lfs.attributes(path .."/".. file).modification
+      if recentModifiedTime < modifiedTime then
+        recentModifiedTime = modifiedTime
+      end
+    end
+  end
+  return recentModifiedTime
+end
+
+Multi_DeviceInfo_VendorConfigFile_i_.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Version = "1.00",
+  Date = function()
+    return os.date("%FT%XZ", getRecentModifiedTime("/etc/config/"))
+  end,
+  Description = function(mapping, param, key)
+    return  "Vendor config file is " .. key .. " configuration"
+  end,
+}
+
+-- A getall implementation is not done as it will not bring any improvement
+-- it duplicates the work of get functionality
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DeviceInfo_VendorConfigFile_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

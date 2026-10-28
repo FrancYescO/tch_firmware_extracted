@@ -1,0 +1,46 @@
+#!/bin/sh
+# Tiscali Env Vars
+uci set env.custovar=envvars
+uci set env.custovar.first='1'
+uci set env.custovar.URL='www.tiscali.it'
+uci set env.custovar.cwmpd_enabled='1'
+uci set env.custovar.usbpower='1'
+uci set env.var.rtfds='1'
+
+#Set env prefix for WiFi SSID
+uci set env.var.ssid_prefix='TISCALI-'
+uci set env.var.ssid_prefix_5G='TISCALI5G-'
+uci set env.var.prod_name='MediaAccess TG789vac v2'
+uci set env.var.prod_number='MediaAccess TG789vac v2'
+
+uci commit env
+
+#FW SUFFIX
+#uci set versioncusto.override=override
+#uci set versioncusto.override.fwversion_suffix="-MST_1"
+#uci commit versioncusto
+
+#Samba
+uci set samba.@samba[0].name="TG$(uci get env.var.prod_number) Share"
+uci set samba.@samba[0].description="$(uci get env.var.prod_friendly_name)"
+uci set samba.@samba[0].enabled="$(uci get env.custovar.usbpower)"
+uci commit samba
+
+#MiniDLNA
+uci set minidlna.config.enabled="$(uci get env.custovar.usbpower)"
+uci set minidlna.config.friendly_name="TG$(uci get env.var.prod_number) DLNA Share"
+uci commit minidlna
+
+
+#Systemlog
+uci set system.@system[0].log_prefix="$(uci get env.rip.factory_id)$(uci get env.rip.serial)"
+uci commit system
+
+
+#Workaround for WANSENSING and Voice not restarting correctly
+sed -i 's/TERM/KILL/g' /etc/init.d/wansensing
+uci set mmpbx.global.enabled=1
+uci commit mmpbx
+
+#
+

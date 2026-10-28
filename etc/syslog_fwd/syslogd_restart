@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+system_config() {
+	local cfg="$1"
+
+	local conloglevel
+
+	config_get conloglevel "$cfg" conloglevel
+	if [ -x /etc/init.d/log ] ;then
+		/etc/init.d/log reload
+	elif [ -x /sbin/syslogd ]; then
+		local args log_ip log_size log_port log_type log_file
+		config_get log_ip "$cfg" log_ip 
+		config_get log_size "$cfg" log_size 16
+		config_get log_port "$cfg" log_port 514
+		config_get log_type "$cfg" log_type circular
+		config_get log_file "$cfg" log_file "/var/log/messages"
+		args="${log_ip:+-L -R ${log_ip}:${log_port}} ${conloglevel:+-l $conloglevel}"
+		if [ "$log_type" = "file" ]; then
+			args="$args -s $log_size -O $log_file -S"
+		else
+			args="$args -C${log_size}"
+		fi
+		service_start /sbin/syslogd $args
+	fi
+}
+
+start() {
+
+	config_load system
+	config_foreach system_config system
+
+}
+
+stop() {
+	service_stop /sbin/syslogd
+}

@@ -1,0 +1,21 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/usr/lib/intercept/functions.sh
+
+config_load intercept
+config_get_bool enabled config enabled
+config_get list_wan config wan
+
+[ "$enabled" == 1 ] && list_contains list_wan "$INTERFACE" || exit 0
+
+config_get_bool active state active
+
+case "$ACTION" in
+    ifup)
+        [ "$active" == 1 ] && $INTERCEPT_SETUP ifup
+    ;;
+    ifdown)
+        [ "$active" == 1 ] || $INTERCEPT_SETUP ifdown
+    ;;
+esac
+

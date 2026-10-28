@@ -1,0 +1,54 @@
+-- Automatically generated from InternetGatewayDevice:1.4
+-- using generator version 2.1
+local WANEthernetLinkConfig = {
+  objectType = {
+    name = "InternetGatewayDevice.WANDevice.{i}.WANConnectionDevice.{i}.WANEthernetLinkConfig.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      EthernetLinkStatus = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "Down",
+          "Unavailable",
+        },
+      },
+    }
+  }
+}
+
+----------------------------------------------------------
+-- Local definitions
+-- -------------------------------------------------------
+local nwcommon = mapper("nwcommon")
+local split_key = nwcommon.split_key
+local getIntfInfo = nwcommon.getIntfInfo
+
+----------------------------------------------------------
+-- Mapper implementation
+----------------------------------------------------------
+
+-- There's only one parameter so make the get() a function instead of a table with one function.
+WANEthernetLinkConfig.get = function(mapping, param, parentkey, grandparentkey)
+  local devtype, devname = split_key(parentkey)
+  local gdevtype = split_key(grandparentkey)
+  -- A WANEtherlinkConfig should only be present when the grandparent WANDevice
+  -- is an Ethernet one. We can't just look at the devtype of the parent because
+  -- that can be ETH because it's a PTM device. We also have to look at the
+  -- devtype of the grandparent
+  if devtype == "ETH" and gdevtype == "ETH" then
+    local operstate = getIntfInfo(devname, "operstate")
+    if operstate == "up" then
+      return "Up"
+    end
+    if operstate == "down" then
+      return "Down"
+    end
+  end
+  return "Unavailable"
+end
+
+register(WANEthernetLinkConfig)
