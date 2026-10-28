@@ -1,0 +1,37 @@
+#!/bin/sh
+# This file is Confidential Information of Cujo LLC.
+# Copyright (c) 2019 CUJO LLC. All rights reserved.
+
+# This sh has pipefail:
+# shellcheck disable=SC2039
+set -euo pipefail
+
+features="fingerprint safebro traffic"
+connection_tries=20
+
+tries=$connection_tries
+while [ $tries -gt 0 ] && ! "$CUJO_HOME/bin/rabidsh" 2>/dev/null; do
+    tries=$((tries - 1))
+    echo >&2 "Waiting for Rabid to start up ($tries tries remaining)..."
+    sleep 1
+done
+if [ $tries -eq 0 ]; then
+    echo >&2 "Rabid doesn't seem to be running!"
+    exit 1
+fi
+
+printf >&2 "Setting traffic level to appdata... "
+if "$CUJO_HOME/bin/rabidsh" -e "cujo.traffic.setlevel('appdata')"; then
+    echo >&2 "success"
+else
+    echo >&2 "FAILED!"
+fi
+
+for feature in $features; do
+    printf >&2 "Enabling %s... " "$feature"
+    if "$CUJO_HOME/bin/rabidsh" -e "cujo.$feature.enable:set(true)"; then
+        echo >&2 "success"
+    else
+        echo >&2 "FAILED!"
+    fi
+done

@@ -1,0 +1,130 @@
+local obj = {
+	objectType = {
+		name = "#ROOT.",
+		access = "readOnly",
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			BytesSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			BytesReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			PacketsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			PacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			ErrorsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			ErrorsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			UnicastPacketsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			UnicastPacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			DiscardPacketsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			DiscardPacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			MulticastPacketsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			MulticastPacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			BroadcastPacketsSent = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			BroadcastPacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+			UnknownProtoPacketsReceived = {
+			  access = "readOnly",
+			  type = "unsignedLong",
+			},
+		}
+	}
+}
+
+local setmetatable = setmetatable
+local helper = require("mobiled.scripthelpers")
+local conn = mapper("ubus").connect()
+if not conn then
+	return
+end
+
+local nwcommon = mapper("nwcommon")
+local getIntfInfo = nwcommon.getIntfInfo
+
+local ethStatsMap = {
+	BytesSent = "tx_bytes",
+	BytesReceived = "rx_bytes",
+	PacketsSent = "tx_packets",
+	PacketsReceived = "rx_packets",
+	ErrorsSent = "tx_errors",
+	ErrorsReceived = "rx_errors",
+	DiscardPacketsSent = "tx_dropped",
+	DiscardPacketsReceived = "rx_dropped"
+}
+
+local function getall(mapping, key)
+	local info = helper.getUbusData(conn, "mobiled.device", "get", { imei = key })
+	local dev_idx = tonumber(info.dev_idx)   or 1
+	local device_info = helper.getUbusData(conn, "mobiled.device", "get", { dev_idx = dev_idx })
+	local result = {}
+	setmetatable(result, { __index = function() return "" end })
+
+	result["BytesSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["BytesSent"], "0")
+	result["BytesReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["BytesReceived"], "0")
+	result["PacketsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["PacketsSent"], "0")
+	result["PacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["PacketsReceived"], "0")
+	result["ErrorsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["ErrorsSent"], "0")
+	result["ErrorsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["ErrorsReceived"], "0")
+	result["DiscardPacketsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["DiscardPacketsSent"], "0")
+	result["DiscardPacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["DiscardPacketsReceived"], "0")
+	result["UnicastPacketsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["UnicastPacketsSent"], "0")
+	result["UnicastPacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["UnicastPacketsReceived"], "0")
+	result["MulticastPacketsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["MulticastPacketsSent"], "0")
+	result["MulticastPacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["MulticastPacketsReceived"], "0")
+	result["BroadcastPacketsSent"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["BroadcastPacketsSent"], "0")
+	result["BroadcastPacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["BroadcastPacketsReceived"], "0")
+	result["UnknownProtoPacketsReceived"] = getIntfInfo(device_info.network_interfaces, ethStatsMap["UnknownProtoPacketsReceived"], "0")
+
+	return result
+end
+
+local function get(mapping, paramName, key)
+	return getall(mapping, key)[paramName]
+end
+
+obj.getall = getall
+obj.get = get
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(obj, "#ROOT", {"InternetGatewayDevice.X_000E50_Cellular.Interface.{i}.Stats", "Device.Cellular.Interface.{i}.Stats"})
+for _, dupli in ipairs(duplicates) do
+	register(dupli)
+end

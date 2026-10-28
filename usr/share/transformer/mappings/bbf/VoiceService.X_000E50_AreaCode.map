@@ -1,0 +1,165 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local transactions = {}
+local table, type = table, type
+local areacodeBinding = { config = "mmpbx", sectionname = "areacode_translation"}
+local areacodeEntries = {}
+
+local Multi_Services_VoiceService_i_X_000E50_AreaCode_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.X_000E50_AreaCode.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "X_000E50_AreaCodeNumberOfEntries",
+        parameters = {
+            Level = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                        max = "5"
+                    }
+                },
+            },
+            AreaCode = {
+                access = "readOnly",
+                type = "string",
+                min = "1",
+                max = "20",
+            },
+            Action = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "showareacode",
+                    "hideareacode"
+                }
+            },
+            Prefix = {
+                access = "readOnly",
+                type = "string",
+                max = "20",
+            },
+            delete = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        max = "20"
+                    }
+                },
+            },
+            executeprefdel = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "always",
+                    "insideareacode"
+                }
+            }
+            -- "X_000E50_AreaCodeNumberOfEntries",
+            -- automatically created when Multi.Services.VoiceService.{i}.X_000E50_AreaCode.{i}. is loaded
+        }
+    }
+}
+
+local translateAction = {
+    ['1'] = "showareacode",
+    ['0'] = "hideareacode",
+}
+
+local translatePrefdel = {
+    ['0'] = "insideareacode",
+    ['1'] = "always",
+}
+
+local function convertAction(value)
+    return translateAction[value]
+end
+
+local function convertPref(value)
+    return translatePrefdel[value]
+end
+
+Multi_Services_VoiceService_i_X_000E50_AreaCode_i_.entries = function(mapping, parentKey)
+    local uaEntries = {}
+    if parentKey:match("INTUA") then
+        return uaEntries
+    end
+    uciHelper.foreach_on_uci(areacodeBinding, function(s)
+        if (not s._key) then
+            areacodeBinding.sectionname = s[".name"]
+            areacodeBinding.option = "_key"
+            s._key = uciHelper.generate_key_on_uci(areacodeBinding)
+            uciHelper.commit_keys(areacodeBinding)
+        end
+            uaEntries [#uaEntries + 1] = string.format("areacode_translation|%s",s._key)
+            areacodeEntries [s._key] = s
+    end)
+    return uaEntries
+end
+
+local areacodeMap = {
+    value = {
+        Level = "level",
+        AreaCode = "areacode",
+        Action = {"show" , convertAction},
+        Prefix = "prefix",
+        delete = "remove_header_length",
+        executeprefdel = { "execprefdel", convertPref },
+    },
+    default = {
+        Level = "1",
+        AreaCode = "",
+        Action = "showareacode",
+        Prefix = "",
+        delete = "0",
+        executeprefdel = "insideareacode",
+    }
+}
+
+Multi_Services_VoiceService_i_X_000E50_AreaCode_i_.getall = function(mapping, key)
+    local data = {}
+    local keyId = key:match("|(.*)")
+    local object = areacodeEntries[keyId]
+    for p in pairs (Multi_Services_VoiceService_i_X_000E50_AreaCode_i_.objectType.parameters) do
+        if (areacodeMap.value[p]) then
+            if type(areacodeMap.value[p]) == 'table' then
+                local conversion = (areacodeMap.value[p][2])
+                data[p] = conversion and conversion(object[areacodeMap.value[p][1]])
+            else
+                data[p] = object[areacodeMap.value[p]]
+            end
+        end
+        data[p] = data[p] or areacodeMap.default[p]
+    end
+    return data
+end
+
+Multi_Services_VoiceService_i_X_000E50_AreaCode_i_.get = function(mapping, param, key)
+    local keyId = key:match("|(.*)")
+    local object = areacodeEntries[keyId]
+    if type(areacodeMap.value[param]) == "table" then
+        local conversion = (areacodeMap.value[param][2])
+        local result = conversion and conversion(object[areacodeMap.value[param][1]])
+        return result or areacodeMap.default[param]
+    else
+        return object[areacodeMap.value[param]] or areacodeMap.default[param]
+    end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_VoiceService_i_X_000E50_AreaCode_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, object in ipairs(duplicates) do
+    if object.objectType.name:match("^InternetGatewayDevice.") then
+        object.objectType.parameters["X_FASTWEB_BoundIfName"] = nil
+    end
+    register(object)
+end
