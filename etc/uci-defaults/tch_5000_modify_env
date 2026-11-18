@@ -1,0 +1,49 @@
+#!/bin/sh
+#NG-71142; NG-71196; NG-96899
+
+#********************************************************************
+#*		To distinguish boards
+#*********************************************************************
+
+board=`uci get env.var.hardware_version`
+
+
+if [ $board == "VANT-6" ]; then
+	
+	uci set env.var.variant_friendly_name='AGCOMBO'
+
+elif [ $board == "VBNT-K" ]; then
+
+	uci set env.var.variant_friendly_name='AGEVO'
+	
+elif [ $board == "VBNT-K_SFP" ]; then
+
+	uci set env.var.variant_friendly_name='AGHP'
+
+elif [ $board == "VBNT-S" ]; then
+
+	uci set env.var.variant_friendly_name='AGHP'
+
+elif [ $board == "VBNT-F" ]; then
+
+	uci set env.var.variant_friendly_name='AGEVO_reference'
+
+fi
+#to address NG-71142
+uci set upnpd.config.model_name="$(uci get env.var.variant_friendly_name)"
+uci commit upnpd
+
+#to address NG-71196
+uci set env.var.ppp_realm_ipv6=`uci get env.var.serial`-`uci get env.var.oui`@00000.agcombo.unicav6
+uci set env.var.ppp_realm_ipv4=`uci get env.var.serial`-`uci get env.var.oui`@00000.agcombo.unica
+uci set network.wan.username=`uci get env.var.ppp_realm_ipv4`
+uci commit network
+
+#Generate unlock env: TCOMITAGW-2212
+
+uci set env.var.unlockedstatus='0'
+uci set env.var.unlockGUIbutton='1'
+
+uci commit env
+
+
