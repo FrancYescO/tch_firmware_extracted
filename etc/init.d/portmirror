@@ -1,0 +1,54 @@
+#!/bin/sh /etc/rc.common
+
+START=25
+
+check_setportmirror() {
+    if [ ! -x "/usr/bin/setportmirror" ]; then
+	echo "script /usr/bin/setportmirror not found"
+	return 1
+    fi
+
+    return 0
+}
+
+portmirror_load() {
+    local cfg="$1"
+    local srcintf="" dstintf="" direction=""
+
+    config_get srcintf "$cfg" srcintf
+    if [ -z "$srcintf" ]; then
+	echo "skip portmirror configuration '$cfg', srcintf not set"
+	return 0
+    fi
+
+    config_get dstintf "$cfg" dstintf
+    config_get direction "$cfg" direction
+
+    /usr/bin/setportmirror "$srcintf" "$dstintf" $direction
+    return 0
+}
+
+portmirror_reset_all() {
+    local srcintf
+
+    cd /sys/class/net || return 1
+    for srcintf in *; do
+	/usr/bin/setportmirror "$srcintf" "" any &>/dev/null
+    done
+    return 0
+}
+
+start() {
+    check_setportmirror || return 1
+
+    # load configuration from UCI
+    config_load portmirror
+    config_foreach portmirror_load portmirror
+}
+
+stop() {
+    check_setportmirror || return 1
+
+    # reset port mirroring on all interfaces
+    portmirror_reset_all
+}

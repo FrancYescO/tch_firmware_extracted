@@ -1,0 +1,263 @@
+local require, mapper, register = require, mapper, register
+local table, pairs, tostring, error = table, pairs, tostring, error
+local string = string
+local fw_helper = require("transformer.shared.firewall_helper")
+
+local mapping_dmz_rpc = {
+    objectType = {
+        name = "rpc.network.firewall.dmz.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            enable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            blocked = {
+                access = "readOnly",
+                type = "boolean",
+            },
+        },
+    }
+}
+
+local uci_helper = mapper("ucihelper")
+
+mapping_dmz_rpc.get = {
+    enable = function(mapping, param)
+        return uci_helper.get_from_uci({config= "firewall", sectionname="fwconfig", option="dmz", default="0"})
+    end,
+    blocked = function(mapping, param)
+        return fw_helper.dmz_blocked() and "1" or "0"
+    end,
+}
+
+mapping_dmz_rpc.set = {
+    enable = function(mapping, paramname, paramvalue)
+      fw_helper.set_dmz_enable(paramvalue, commitapply)
+    end,
+}
+
+register(mapping_dmz_rpc)
+
+-- uci.firewall.dmzredirect.@
+local mapinfo_dmzredirect_uci = {
+    config = "firewall",
+    type = "dmzredirect",
+    options = { "enabled", "name", "family", "src", "dest", "dest_mac", "dest_ip", "target" },
+}
+
+local mapping_dmzredirect_uci = mapper("uci_1to1").createNamedMultiMap(mapinfo_dmzredirect_uci)
+
+local mapping_dmzredirect_rpc = {
+    objectType = {
+        name = "rpc.network.firewall.dmz.redirect.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = mapping_dmzredirect_uci.objectType.parameters,
+    }
+}
+local redirect_key = "dmzredirect"
+
+mapping_dmzredirect_rpc.get = function(mapping, param)
+    mapping_dmzredirect_uci.entries(mapping_dmzredirect_uci)
+    return mapping_dmzredirect_uci.get(mapping_dmzredirect_uci, param, redirect_key)
+end
+
+mapping_dmzredirect_rpc.getall = function(mapping)
+    mapping_dmzredirect_uci.entries(mapping_dmzredirect_uci)
+    return mapping_dmzredirect_uci.getall(mapping_dmzredirect_uci, redirect_key)
+end
+
+-- UCI cursor used to save redirect dynamic state in /var/state (e.g. dest_ip address for MAC-based redirects)
+local cursor = require("uci").cursor(UCI_CONFIG, "/var/state")
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+-- Change IP-based DMZ forwardings of known devices to MAC-based ones
+local function dmzforward_ip2macbased()
+    local pfw_dest = {}
+    local pfw_entries = mapping_dmzredirect_uci.entries(mapping_dmzredirect_uci)
+    local _, pfw_key
+    for _, pfw_key in ipairs(pfw_entries) do
+        local pfw = mapping_dmzredirect_uci.getall(mapping_dmzredirect_uci, pfw_key)
+        if pfw.target ~= "SNAT" and pfw.family ~= "" then
+            if pfw.dest_ip == "" and pfw.dest_mac ~= "" then
+                pfw_dest[pfw_key] = { mac = pfw.dest_mac, family = pfw.family }
+            elseif pfw.dest_ip ~= "" and pfw.dest_ip ~= "0.0.0.0" and pfw.dest_ip ~= "::" and
+                   pfw.dest_mac == "" then
+                pfw_dest[pfw_key] = { ip = pfw.dest_ip, family = pfw.family }
+            end
+        end
+    end
+
+    -- perform host lookup
+    local pfw_hosts = {}
+    local entry
+    for _, entry in pairs(pfw_dest) do
+        if pfw_hosts[(entry.ip or entry.mac) .. entry.family] == nil then
+            local devices = conn:call("hostmanager.device", "get", entry.ip and
+                                        { [entry.family .. "-address"] = entry.ip } or
+                                        { ["mac-address"] = entry.mac } )
+            if devices ~= nil then
+                -- select first result
+                local dev
+                _, dev = next(devices, nil)
+
+                if (dev ~= nil and dev[entry.family] ~= nil) then
+                    -- find device matching mac or ip address
+                    local ip, destmac, destip
+
+                    if not entry.ip and dev["mac-address"] == entry.mac then
+                        destmac = entry.mac
+                    end
+
+                    for _, ip in pairs(dev[entry.family]) do
+                        if entry.ip and ip["address"] == entry.ip then
+                            -- save MAC address (will be used in redirect rules as dest_mac)
+                            destmac = dev["mac-address"]
+                        end
+                        if ip["redirect-dest"] then
+                            -- this address is preferred by host manager,
+                            -- save IP address (will be used in redirect rules as dest_ip)
+                            destip = ip["address"]
+                        end
+                        if destmac and destip then
+                            -- found what we were looking for
+                            break
+                        end
+                    end
+
+                    -- store found destmac and destip
+                    if destmac then
+                        local newhost = { destmac = destmac, destip = destip, family = entry.family }
+                        if entry.ip then
+                            pfw_hosts[entry.ip .. entry.family] = newhost
+                        end
+                        pfw_hosts[destmac .. entry.family] = newhost
+                    end
+                end
+            end
+        end
+    end
+
+    -- 1) configure dest_mac address on those redirects that will be transformed in MAC-based DMZ forwards
+    -- 2) (re)set dest_ip address to '0.0.0.0' (or '::' for ipv6 family)
+    --    so that persistent information will not contain current (and potentially short lived) IP address of the device
+    for pfw_key, entry in pairs(pfw_dest) do
+        if entry.ip then
+            local hostkey, destmac
+
+            hostkey = entry.ip .. entry.family
+            if pfw_hosts[hostkey] ~= nil then
+                destmac = pfw_hosts[hostkey].destmac
+            end
+
+            if destmac == nil then
+                -- shouldn't happen, but better safe than sorry
+                pfw_dest[pfw_key] = nil
+            else
+                mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, "dest_mac", destmac, pfw_key)
+                mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, "dest_ip", entry.family == "ipv6" and "::" or "0.0.0.0", pfw_key)
+            end
+        elseif entry.mac then
+            mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, "dest_ip", entry.family == "ipv6" and "::" or "0.0.0.0", pfw_key)
+        else
+            -- shouldn't happen, but better safe than sorry
+            pfw_dest[pfw_key] = nil
+        end
+    end
+
+    return pfw_dest, pfw_hosts
+end
+
+-- Save MAC-based DMZ forwardings current dest_ip
+-- The save will occur in /var/state/firewall file and it will
+-- not be persistent between reboots
+local function dmzforward_macbased_save_destip(pfw_dest, pfw_hosts)
+    local config = mapinfo_dmzredirect_uci.config
+    local section = mapinfo_dmzredirect_uci.type
+    local destip
+
+    -- prepare list of dest_ip
+    local pfw_var_state = {}
+    local function cb(t)
+        local dest = pfw_dest[t[".name"]]
+        local hostkey
+
+        if dest then
+            hostkey = (dest.ip or dest.mac) .. dest.family
+        end
+
+        if hostkey and pfw_hosts[hostkey] then
+            pfw_var_state[t[".name"]] = pfw_hosts[hostkey].destip
+        end
+    end
+    cursor:load(config)
+    cursor:foreach(config, section, cb)
+
+    -- save current DMZ forwarding destination IPs in /var/state
+    for section, destip in pairs(pfw_var_state) do
+        if section and destip then
+            cursor:set(config, section, "dest_ip", destip)
+        end
+    end
+    cursor:save(config)
+    cursor:unload(config)
+end
+
+-- Remove MAC-based DMZ forwardings current dest_ip
+-- The save will occur in /var/state/firewall file and it will
+-- not be persistent between reboots
+local function dmzforward_macbased_remove_destip(parentkey)
+    if parentkey then
+        local config = mapinfo_dmzredirect_uci.config
+        local section = mapinfo_dmzredirect_uci.type
+
+        cursor:load(config)
+
+        -- remove current DMZ forwarding dest_ip from /var/state
+        cursor:revert(config, parentkey, "dest_ip")
+
+        cursor:unload(config)
+    end
+end
+
+mapping_dmzredirect_rpc.set = function(mapping, paramname, value)
+    mapping_dmzredirect_uci.entries(mapping_dmzredirect_uci)
+    local result, errmsg = mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, paramname, value, redirect_key)
+    if paramname == "dest_ip" then
+        -- when dest_ip changes do the following:
+        -- 1) reset MAC address
+        mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, "dest_mac", "", redirect_key)
+
+        -- 2) remove dest_ip from /var/state
+        dmzforward_macbased_remove_destip(redirect_key)
+    elseif paramname == "dest_mac" and value ~= "" then
+        -- when setting dest_mac do the following:
+        -- 1) reset IP address
+        mapping_dmzredirect_uci.set(mapping_dmzredirect_uci, "dest_ip", "", redirect_key)
+
+        -- 2) remove dest_ip from /var/state
+        dmzforward_macbased_remove_destip(redirect_key)
+    end
+    return result, errmsg
+end
+
+mapping_dmzredirect_rpc.commit = function(mapping)
+    local pfw_dest, pfw_hosts = dmzforward_ip2macbased()
+    local result, errmsg = mapping_dmzredirect_uci.commit(mapping_dmzredirect_uci)
+    if result and next(pfw_dest, nil) then
+        dmzforward_macbased_save_destip(pfw_dest, pfw_hosts)
+    end
+    return result, errmsg
+end
+
+mapping_dmzredirect_rpc.revert = function(mapping)
+    return mapping_dmzredirect_uci.revert(mapping_dmzredirect_uci)
+end
+
+register(mapping_dmzredirect_rpc)
+

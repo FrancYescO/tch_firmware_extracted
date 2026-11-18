@@ -1,0 +1,149 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_DAEMONIZE=1
+SERVICE_WRITE_PID=1
+unset SERVICE_MATCH_EXEC
+
+local_check_old_config() {
+    #If an old action was defined restore it.
+    OLD_ACTION="$(uci get ngwfdd.config.old_action 2> /dev/null)"
+    OLD_URL="$(uci get ngwfdd.config.old_url 2> /dev/null)"
+    if [ -n "${OLD_ACTION}" ]; then
+        uci set system.@coredump[0].action=${OLD_ACTION}
+        uci set ngwfdd.config.old_action=""
+        #OLD_URL can be an empty string. If it is, then the original url was also empty
+        #We set the values.
+        uci set system.@coredump[0].url=${OLD_URL}
+        uci set ngwfdd.config.old_url=""
+        uci commit system.@coredump[0]
+        uci commit ngwfdd.config
+    fi
+}
+
+local_safe_start_service() {
+    service_check $1 2> /dev/null
+    if [ "$?" = "0" ]; then
+        echo "$1 is already running ..."
+    else
+        service_start $@
+    fi
+}
+
+start() {
+    ENABLE="$(uci get ngwfdd.config.enable 2> /dev/null)"
+    if [ "${ENABLE}" != "1" ]; then
+        #If an old action was defined restore it.
+        local_check_old_config
+        exit 0
+    fi
+
+    OWN_VERSION="$(opkg info ngwfdd | grep Version | cut -d: -f2 | tr -d ' ')"
+    STORED_VERSION="$(uci get ngwfdd.config.ngwfdd_version 2> /dev/null)"
+    if [ "${OWN_VERSION}" != "${STORED_VERSION}" ]; then
+        uci set ngwfdd.config.ngwfdd_version="${OWN_VERSION}"
+        uci commit ngwfdd.config
+    fi
+
+    #Configuration check; Make sure all parameters are set.
+    BASE_URL="$(uci get ngwfdd.config.base_url 2> /dev/null)"
+    if [ -z "${BASE_URL}" -o "xhttps" != "$(echo x${BASE_URL} | cut -d: -f1 )" ]; then
+        echo "ngwfdd.config.base_url is not configured properly = '${BASE_URL}'"
+        exit 1
+    fi
+
+    FIFO_DIR="$(uci get ngwfdd.config.fifo_dir)"
+    if [ -z "${FIFO_DIR}" ]; then
+        echo "ngwfdd.config.fifo_dir is not set"
+        exit 1
+    fi
+
+    if [ ! -e ${FIFO_DIR} ]; then
+        mkdir -p ${FIFO_DIR}
+        if [ "$?" != "0" ]; then
+            exit 1
+        fi
+    else
+        #Fifo dir exists. It must be a directory.
+        if [ ! -d ${FIFO_DIR} ]; then
+            echo "ngwfdd.config.fifo_dir(='${FIFO_DIR}') exists, but is not a directory."
+            exit 1
+        fi
+    fi
+
+    if [ ! -x /usr/share/ngwfdd ] ; then
+        exit 1
+    fi
+
+    CORE_URL="$(uci get ngwfdd.config.core_url 2> /dev/null)"
+    #An empty core URL is allowed. The existing crash config will be used.
+    if [ -n "${CORE_URL}" ]; then
+        #First check if we have a valid URL
+        if [  "xhttps" != "$(echo x${CORE_URL} | cut -d: -f1 )" ]; then
+            echo "ngwfdd.config.core_url is not configured properly = '${CORE_URL}'"
+            exit 1
+        fi
+        #Check if we need to back-up the current coredump config.
+        OLD_ACTION="$(uci get ngwfdd.config.old_action 2> /dev/null)"
+        if [ -z "${OLD_ACTION}" ]; then
+            #only store the old config, if we haven't done it.
+            ACTION="$(uci get system.@coredump[0].action)"
+            URL="$(uci get system.@coredump[0].url 2> /dev/null)"
+            uci set ngwfdd.config.old_action="${ACTION}"
+            uci set ngwfdd.config.old_url="${URL}"
+            uci commit ngwfdd.config
+        fi
+        uci set system.@coredump[0].url=${CORE_URL}
+        uci set system.@coredump[0].action=upload
+        uci commit system.@coredump[0]
+    fi
+
+    #Fill optional parameters if needed.
+    SERIAL_CFG="$(uci get ngwfdd.config.serial_nr 2> /dev/null)"
+    SERIAL="$(uci get env.rip.factory_id)$(uci get env.rip.serial)"
+    if [ -z "${SERIAL_CFG}" -o "${SERIAL_CFG}" != "${SERIAL}" ]; then
+        uci set ngwfdd.config.serial_nr="${SERIAL}"
+        uci commit ngwfdd.config
+    fi
+
+    BOARD_CFG="$(uci get ngwfdd.config.board_name 2> /dev/null)"
+    BOARD="$(uci get env.rip.board_mnemonic)"
+    if [ -z "${BOARD_CFG}" -o "${BOARD_CFG}" != "${BOARD}" ]; then
+        uci set ngwfdd.config.board_name="${BOARD}"
+        uci commit ngwfdd.config
+    fi
+
+    VERSION_CFG="$(uci get ngwfdd.config.firmware_version 2> /dev/null)"
+    VERSION="$(uci get version.@version[0].version | cut -d- -f1)"
+    if [ -z "${VERSION_CFG}" -o "${VERSION_CFG}" != "${VERSION}" ]; then
+        uci set ngwfdd.config.firmware_version="${VERSION}"
+        uci commit ngwfdd.config
+    fi
+
+    for x in $(ls /usr/share/ngwfdd/mod_*.lua) ; do
+        name=$(basename "${x}" .lua | cut -c5-)
+        fifo="${FIFO_DIR}/${name}"
+        if [ ! -p ${fifo} ];then
+            rm -rf ${fifo} || true
+            mkfifo ${fifo}
+        fi
+        echo "starting lua service ${x}"
+        local_safe_start_service ${x} ${fifo}
+    done
+
+    echo "starting ngwfdd..."
+    local_safe_start_service /usr/bin/ngwfdd
+}
+
+stop() {
+    local_check_old_config
+    FIFO_DIR="$(uci get ngwfdd.config.fifo_dir)"
+    for x in $(ls /usr/share/ngwfdd/*.lua) ; do
+        service_stop ${x} 2> /dev/null
+        name=$(basename "${x}" .lua | cut -c5-)
+        rm -f "${FIFO_DIR}/${name}"
+    done
+
+    service_stop /usr/bin/ngwfdd 2> /dev/null
+}
+

@@ -1,0 +1,61 @@
+#!/usr/bin/env lua
+
+--[[
+  clash-iptables-wrapper is designed for the CLI's (clash) iptables command.
+  It may be used from a root shell, but this is not its main purpose.
+
+  Summary:
+    The script may be called with any list of arguments.
+    The script in turn calls `iptables` with these arguments, with one important exception:
+       `-L all`
+       As the other options, `-L` is also passed trough as is, except when it is set with value `all`.
+       This value is stripped from the arguments, so that `iptables` is executed with plain `-L`.
+       When `-L` is set to a chain name, `-L 'that_chain_name'` is simply passed to iptables.
+
+  Background:
+    Declaring clash command with flag `-L (string default "")` is insufficient to get the arguments flow
+    correctly from clash -> transformer -> iptables in all cases.
+
+    Due to design, when `-L` is left empty, it never arrives at iptables, hence we would not be able to
+    list all chains from iptables. The wrapper script covers this by translating `-L all` to `all` before calling
+    iptables.
+]]--
+
+local posix = require("tch.posix")
+
+-- Call iptables with provided args string.
+-- The args table should represent valid iptables arguments,
+-- but it will report back its error(s) if not.
+local function iptables(args)
+  local _, errmsg = posix.execv("/usr/sbin/iptables", args)
+  -- execv() never returns, unless errors
+  print("Error: " .. (errmsg or "unkown error"))
+end
+
+-- Fix the arg table when arguments `-L all` are provided.
+-- This function returns the arg table, with `all` being removed
+-- when `-L all` is provided (see summary for background).
+local function arg_fixup(arg)
+  local args = {}
+
+  -- This flag is set when finding arg `-L`.
+  -- The next argument is then the chain name, or `all`
+  local checknext=false
+
+  for i=1, #arg do
+    if checknext and arg[i] == "all" then
+      -- `L all` was provided; do not append `all`, just reset the flag
+      checknext = false
+    else
+      args[#args + 1] = arg[i]
+    end
+
+    -- When arg is `-L`, check its value for `all`
+    if arg[i] == "-L" then
+      checknext = true
+    end
+  end
+  return args
+end
+
+iptables( arg_fixup(arg) )

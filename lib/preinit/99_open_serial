@@ -1,0 +1,39 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+# This script is installed to /lib/preinit/ to ensure it is run
+# before /sbin/procd (PID 1) is launched.
+# When starting, procd interprets /etc/inittab .
+# There are no means to reload /etc/inittab,
+# so it must be setup as desired up front.
+
+has_serial_user=0
+
+# Restore `askconsole` to /etc/inittab
+__prepare_inittab() {
+	# In closed builds, `askconsole` is commented in /etc/inittab; restore it
+	sed -ir "s#^\#::askconsole#::askconsole#" /etc/inittab
+}
+
+# Helper function to check if specified user has serial access
+__check_serial() {
+	local user="$1"
+	local serial=$(uci_get clash."$user".serial)
+	if [ "$serial" -eq 1 ]; then
+		has_serial_user=1
+	fi
+}
+
+# If any users require it, reopen serial port in closed builds
+_open_serial() {
+	config_load "clash"
+	config_foreach __check_serial user
+
+	if [ "$has_serial_user" -eq 1 ]; then
+		__prepare_inittab
+	fi
+}
+
+boot_hook_add preinit_mount_root _open_serial
+

@@ -1,0 +1,319 @@
+local require, mapper, register = require, mapper, register
+local table, pairs, tostring, error = table, pairs, tostring, error
+local string = string
+
+-- uci.firewall.userredirect.@
+local mapinfo_userredirect_uci = {
+    config = "firewall",
+    type = "userredirect",
+    options = { "enabled", "name", "family", "src", "dest", "src_dport", "dest_mac",
+                "dest_ip", "dest_port", "target", "tch_interface" },
+    lists = { "proto" }
+}
+
+local mapping_portforward_uci = mapper("uci_1to1").createNamedMultiMap(mapinfo_userredirect_uci)
+
+local mapping_portforward_rpc = {
+    objectType = {
+        name = "rpc.network.firewall.portforward.{i}.",
+        access = mapping_portforward_uci.objectType.access,
+        minEntries = mapping_portforward_uci.objectType.minEntries,
+        maxEntries = mapping_portforward_uci.objectType.maxEntries,
+        parameters = mapping_portforward_uci.objectType.parameters,
+    }
+}
+
+mapping_portforward_rpc.get = function(mapping, param, key)
+    local result, errmsg = mapping_portforward_uci.get(mapping_portforward_uci, param, key)
+    if param == "dest_ip" and (result == "0.0.0.0" or result == "::") then
+        result = "unknown"
+    end
+    return result, errmsg
+end
+
+mapping_portforward_rpc.getall = function(mapping, key)
+    local result, errmsg = mapping_portforward_uci.getall(mapping_portforward_uci, key)
+    if type(result) == "table" and (result.dest_ip == "0.0.0.0" or result.dest_ip == "::") then
+        result.dest_ip = "unknown"
+    end
+    return result, errmsg
+end
+
+-- UCI cursor used to save redirect dynamic state in /var/state (e.g. dest_ip address for MAC-based redirects)
+local cursor = require("uci").cursor(UCI_CONFIG, "/var/state")
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+
+-- Generate a new section name
+local function portforward_get_unused_name()
+    local name
+    local start = math.random(0, 0xfffe)
+    local id = start
+
+    repeat
+        if id >= 0xFFFF then
+            id = 0
+        else
+            id = id + 1
+        end
+        if id == start then
+            return nil, "Failed to generate an unique name for the new object"
+        end
+        name = mapping_portforward_uci.binding["type"] .. string.format("%04X", id)
+    until mapping_portforward_uci.instances[name] == nil
+
+    return name
+end
+
+-- Change IP-based port forwardings of known devices to MAC-based ones
+local function portforward_ip2macbased()
+    local pfw_dest = {}
+    local pfw_entries = mapping_portforward_rpc.entries()
+    local _, pfw_key
+
+    for _, pfw_key in ipairs(pfw_entries) do
+        local pfw = mapping_portforward_uci.getall(mapping_portforward_uci, pfw_key)
+        if pfw.target ~= "SNAT" and pfw.family ~= "" then
+            if pfw.dest_ip == "" and pfw.dest_mac ~= "" then
+                pfw_dest[pfw_key] = { mac = pfw.dest_mac, family = pfw.family }
+            elseif pfw.dest_ip ~= "" and pfw.dest_ip ~= "0.0.0.0" and pfw.dest_ip ~= "::" and
+                   pfw.dest_mac == "" then
+                pfw_dest[pfw_key] = { ip = pfw.dest_ip, family = pfw.family }
+            end
+        end
+    end
+
+    -- perform host lookup
+    local pfw_hosts = {}
+    local entry
+    for _, entry in pairs(pfw_dest) do
+        if pfw_hosts[(entry.ip or entry.mac) .. entry.family] == nil then
+            local devices = conn:call("hostmanager.device", "get", entry.ip and
+                                        { [entry.family .. "-address"] = entry.ip } or
+                                        { ["mac-address"] = entry.mac } )
+            if devices ~= nil then
+                -- select first result
+                local dev
+                _, dev = next(devices, nil)
+
+                if (dev ~= nil and dev[entry.family] ~= nil) then
+                    -- find device matching mac or ip address
+                    local ip, destmac, destip
+
+                    if not entry.ip and dev["mac-address"] == entry.mac then
+                        destmac = entry.mac
+                    end
+
+                    for _, ip in pairs(dev[entry.family]) do
+                        if entry.ip and ip["address"] == entry.ip then
+                            -- save MAC address (will be used in redirect rules as dest_mac)
+                            destmac = dev["mac-address"]
+                        end
+                        if ip["redirect-dest"] then
+                            -- this address is preferred by host manager,
+                            -- save IP address (will be used in redirect rules as dest_ip)
+                            destip = ip["address"]
+                        end
+                        if destmac and destip then
+                            -- found what we were looking for
+                            break
+                        end
+                    end
+
+                    -- store found destmac and destip
+                    if destmac then
+                        local newhost = { destmac = destmac, destip = destip, family = entry.family }
+                        if entry.ip then
+                            pfw_hosts[entry.ip .. entry.family] = newhost
+                        end
+                        pfw_hosts[destmac .. entry.family] = newhost
+                    end
+                end
+            end
+        end
+    end
+
+    -- 1) configure dest_mac address on those redirects that will be transformed in MAC-based port forwards
+    -- 2) (re)set dest_ip address to '0.0.0.0' (or '::' for ipv6 family)
+    --    so that persistent information will not contain current (and potentially short lived) IP address of the device
+    for pfw_key, entry in pairs(pfw_dest) do
+        if entry.ip then
+            local hostkey, destmac
+
+            hostkey = entry.ip .. entry.family
+            if pfw_hosts[hostkey] ~= nil then
+                destmac = pfw_hosts[hostkey].destmac
+            end
+
+            if destmac == nil then
+                -- shouldn't happen, but better safe than sorry
+                pfw_dest[pfw_key] = nil
+            else
+                mapping_portforward_uci.set(mapping_portforward_uci, "dest_mac", destmac, pfw_key)
+                mapping_portforward_uci.set(mapping_portforward_uci, "dest_ip", entry.family == "ipv6" and "::" or "0.0.0.0", pfw_key)
+            end
+        elseif entry.mac then
+            mapping_portforward_uci.set(mapping_portforward_uci, "dest_ip", entry.family == "ipv6" and "::" or "0.0.0.0", pfw_key)
+        else
+            -- shouldn't happen, but better safe than sorry
+            pfw_dest[pfw_key] = nil
+        end
+    end
+
+    return pfw_dest, pfw_hosts
+end
+
+-- Save MAC-based port forwardings current dest_ip
+-- The save will occur in /var/state/firewall file and it will
+-- not be persistent between reboots
+local function portforward_macbased_save_destip(pfw_dest, pfw_hosts)
+    local config = mapinfo_userredirect_uci.config
+    local section = mapinfo_userredirect_uci.type
+    local destip
+
+    -- prepare list of dest_ip
+    local pfw_var_state = {}
+    local function cb(t)
+        local dest = pfw_dest[t[".name"]]
+        local hostkey
+
+        if dest then
+            hostkey = (dest.ip or dest.mac) .. dest.family
+        end
+
+        if hostkey and pfw_hosts[hostkey] then
+            pfw_var_state[t[".name"]] = pfw_hosts[hostkey].destip
+        end
+    end
+    cursor:load(config)
+    cursor:foreach(config, section, cb)
+
+    -- save current port forwarding destination IPs in /var/state
+    for section, destip in pairs(pfw_var_state) do
+        if section and destip then
+            cursor:set(config, section, "dest_ip", destip)
+        end
+    end
+    cursor:save(config)
+    cursor:unload(config)
+end
+
+-- Remove MAC-based port forwardings current dest_ip
+-- The save will occur in /var/state/firewall file and it will
+-- not be persistent between reboots
+local function portforward_macbased_remove_destip(parentkey)
+    if parentkey then
+        local config = mapinfo_userredirect_uci.config
+        local section = mapinfo_userredirect_uci.type
+
+        cursor:load(config)
+
+        -- remove current port forwarding dest_ip from /var/state
+        cursor:revert(config, parentkey, "dest_ip")
+
+        cursor:unload(config)
+    end
+end
+
+mapping_portforward_rpc.add = function(mapping, name)
+    if name == nil then
+        local errmsg
+        name, errmsg = portforward_get_unused_name()
+        if name == nil then
+            return nil, errmsg
+        end
+    end
+    return mapping_portforward_uci.add(mapping_portforward_uci, name)
+end
+
+mapping_portforward_rpc.entries = function(mapping)
+    local config = mapinfo_userredirect_uci.config
+    local section = mapinfo_userredirect_uci.type
+    local pfw_entries = mapping_portforward_uci.entries(mapping_portforward_uci)
+    local _, key, cursor_loaded
+
+    -- Rename anonymous sections if they exist
+    for _, key in pairs(pfw_entries) do
+        if string.find(key, section .. "%[%d+%]") then
+            if not cursor_loaded then
+                cursor:load(config)
+                cursor_loaded = true
+            end
+            
+            key = mapping_portforward_uci.instances[key]
+            local t = cursor:get_all(config, key)
+            local n = portforward_get_unused_name()
+
+            if n == nil or type(t) ~= "table" then
+                break
+            end
+
+            cursor:delete(config, key)
+            cursor:set(config, n, section)
+
+            local k, v
+            for k, v in pairs(t) do
+                if string.sub(k, 1, 1) ~= "." and k ~= "_key" then
+                    cursor:set(config, n, k, v)
+                end
+            end
+        end
+    end
+
+    if cursor_loaded then
+        cursor:commit(config)
+        cursor:unload(config)
+
+        -- Reload entries, some of them were renamed
+        pfw_entries = mapping_portforward_uci.entries(mapping_portforward_uci)
+    end
+
+    return pfw_entries
+end
+
+mapping_portforward_rpc.set = function(mapping, paramname, value, key)
+    local result, errmsg = mapping_portforward_uci.set(mapping_portforward_uci, paramname, value, key)
+    if paramname == "dest_ip" then
+        -- when dest_ip changes do the following:
+        -- 1) reset MAC address
+        mapping_portforward_uci.set(mapping_portforward_uci, "dest_mac", "", key)
+
+        -- 2) remove dest_ip from /var/state
+        portforward_macbased_remove_destip(key)
+    elseif paramname == "dest_mac" and value ~= "" then
+        -- when setting dest_mac do the following:
+        -- 1) reset IP address
+        mapping_portforward_uci.set(mapping_portforward_uci, "dest_ip", "", key)
+
+        -- 2) remove dest_ip from /var/state
+        portforward_macbased_remove_destip(key)
+    end
+    return result, errmsg
+end
+
+mapping_portforward_rpc.delete = function(mapping, parentkey)
+    portforward_macbased_remove_destip(parentkey)
+
+    return mapping_portforward_uci.delete(mapping_portforward_uci, parentkey)
+end
+
+mapping_portforward_rpc.commit = function(mapping)
+    local pfw_dest, pfw_hosts = portforward_ip2macbased()
+    local result, errmsg = mapping_portforward_uci.commit(mapping_portforward_uci)
+    if result and next(pfw_dest, nil) then
+        portforward_macbased_save_destip(pfw_dest, pfw_hosts)
+    end
+    return result, errmsg
+end
+
+mapping_portforward_rpc.revert = function(mapping)
+    return mapping_portforward_uci.revert(mapping_portforward_uci)
+end
+
+register(mapping_portforward_rpc)
+
+for _, submap in ipairs(mapping_portforward_uci.submappings) do
+    submap.objectType.name = mapping_portforward_rpc.objectType.name .. submap.binding.option .. ".@."
+    register(submap)
+end
+

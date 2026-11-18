@@ -1,0 +1,29 @@
+#!/usr/bin/env lua
+local cursor = require("uci").cursor()
+local config = arg[1] or "downloaddiag"
+local sectiontype = "user"
+local updated = false
+
+-- reload
+cursor:load(config)
+-- iterate over all sections
+cursor:foreach(config, sectiontype, function(s)
+  local user=s['.name']
+  local pidfile = "/var/run/tr143_" .. config .. "_" .. user .. ".pid"
+  if s['state']=='Requested' then
+    -- stop running tr143
+    os.execute("start-stop-daemon -K -p " .. pidfile .. "; killall -9 tr143_diag")
+    -- start it again
+    os.execute("start-stop-daemon -S -b -p " .. pidfile .. " -m -x /usr/bin/tr143 -- " .. user .. " " .. config)
+    -- update state
+    cursor:set(config,user,"state",'InProgress')
+    updated = true
+  elseif s['state']=='None' then
+    -- stop running tr143
+    os.execute("start-stop-daemon -K -p " .. pidfile .. "; killall -9 tr143_diag")
+  end
+end)
+
+if updated then
+  cursor:commit(config)
+end

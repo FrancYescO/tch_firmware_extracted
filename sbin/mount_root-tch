@@ -1,0 +1,199 @@
+#!/bin/sh
+
+find_mtd_part() {
+	local PART=$(awk -F: "/$1/{print \$1}" /proc/mtd)
+
+	if [ ! -z "$PART" ]; then
+		PART="${PART##mtd}"
+		if [ ! -z "$PART" ]; then
+			echo /dev/mtdblock$PART
+		fi
+	fi
+}
+
+find_mount_jffs2() {
+	local options
+	local mtdpartname
+	local mtdpart
+
+	options=$(grep "^mount=" /etc/jffs2_options 2>/dev/null | sed "s/^mount=//" )
+	if [ ! -z $options ]; then
+		options="-o $options"
+	fi
+
+	mkdir -p /tmp/overlay
+
+	for mtdpartname in rootfs_data userfs data_vol; do
+		mtdpart="$(find_mtd_part $mtdpartname)"
+		if [ -n "$mtdpart" ]; then
+			mount -t jffs2 $options "$mtdpart" /tmp/overlay
+			if [ $? -ne 0 ]; then
+				echo "failed to mount $mtdpartname on $mtdpart as jffs2"
+			else
+				mtd -qq unlock $mtdpartname
+				if [ $? -ne 0 ]; then
+					echo "failed to unlock $mtdpartname, partition not writeable"
+					umount /tmp/overlay
+				else
+					return 0
+				fi
+			fi
+		fi
+	done
+
+	echo "failed to find suitable partition to mount"
+	return 1
+}
+
+find_available_ubi_num() {
+	local lastubidevice=
+	for x in $(ubinfo | grep "Present UBI devices" | cut -d':' -f2 | tr "," "\n")
+	do
+		lastubidevice=$x
+	done
+
+	if [ -z "$lastubidevice" ]
+	then
+		lastubidevice=ubi0
+	fi
+
+	last_num=$(echo $lastubidevice | sed 's/ubi//')
+	avail_dev_num=`expr $last_num + 1`
+	echo $avail_dev_num
+}
+
+find_mount_ubifs() {
+	local partition=$1
+	local dir=$2
+	local mtd_file=/proc/mtd
+
+	mtd_block_number=$(cat "$mtd_file" | grep -i "$partition" | sed 's/^mtd//' | awk -F ':' '{print $1}')
+	if [ -z "$mtd_block_number" ]
+	then
+		echo "No $partition partition found"
+		return 1
+	fi
+	echo "Detected block device: $dir for $partition" > /dev/kmsg
+	mkdir -p "$dir"
+
+	ubi_num="$(find_available_ubi_num)"
+	ubiattach -m "$mtd_block_number" -d $ubi_num /dev/ubi_ctrl
+
+	mount -t ubifs ubi$ubi_num:overlay $dir
+	if [ $? -ne 0 ]; then
+		echo "failed to mount ubi$ubi_num:overlay on ubifs"
+		return 1
+	fi
+
+	mkdir -p $dir/0
+	mkdir -p $dir/1
+
+	return 0
+}
+
+
+pivot() { # <new_root> <old_root>
+	local new=$1
+	local old=$2
+	mount -o move /proc $new/proc && \
+	pivot_root $new $new$old && {
+		mount -o move $old/dev /dev
+		mount -o move $old/tmp /tmp
+		mount -o move $old/sys /sys 2>&-
+		mount -o move $old/overlay /overlay 2>&-
+	}
+}
+
+fopivot() { # <rw_root> <ro_root>
+	local rw_root=$1
+	local ro_root=$2
+	ovl=$(cat /proc/filesystems | grep "\overlay\b" | awk '{print $2}')
+	if [ "$ovl" = "overlay" ]	#Since Linux 3.18-rc6, overlayfs has been renamed overlay
+	then
+		echo "mounting overlay fs"
+		mount -t overlay -o lowerdir=/,upperdir=/overlay/1,workdir=/overlay/0 overlay /mnt && rw_root=/mnt
+	else
+		echo "mounting overlayfs fs"
+		mount -t overlayfs -olowerdir=/,upperdir=$rw_root "overlayfs:$rw_root" /mnt && rw_root=/mnt
+	fi
+	pivot $rw_root $ro_root
+}
+
+check_banktable() {
+	if [ -f /lib/modules/$(uname -r)/bankmgr.ko ]; then
+		insmod bankmgr 2>/dev/null
+	fi
+}
+
+ramoverlay() {
+	echo "falling back to ramoverlay"
+	mkdir -p /tmp/root
+	mount -t tmpfs -o mode=0755 root /tmp/root
+	echo "creating directories"
+	# mirror dir tree from /rom to /tmp/root
+	# special handling require for some as mounted fs's are skipped with xdev
+	for f in $(find / -xdev -type d) dev overlay mnt proc tmp; do
+		f=${f#/}
+		if [ ! -z $f ]; then
+			mkdir -p /tmp/root/$f
+		fi
+	done
+	echo "setting up files"
+	for f in $(find / -xdev -type f); do
+		f=${f#/}
+		case "$f" in
+		rom/*)
+			# we do not want to put files under /rom
+			# they will be hidden when pivot_root puts the current root on /rom
+			;;
+		etc/config/*|\
+		usr/lib/opkg/info/*)
+			# file likely to be updated, copy
+			cp -af /$f /tmp/root/$f
+			;;
+		*)
+			ln -sf /rom/$f /tmp/root/$f
+		esac
+	done
+	# handle symlinks seperately
+	for f in $(find / -xdev -type l); do
+		cp -af $f /tmp/root/${f#/}
+	done
+	echo "ramoverlay populated"
+	pivot /tmp/root /rom
+}
+
+mount_root_tch() {
+	local config
+
+	find_mount_jffs2
+	if [ $? -ne 0 ]; then
+		find_mount_ubifs overlay /tmp/overlay
+		if [ $? -ne 0 ]; then
+			ramoverlay
+			return
+		fi
+	fi
+
+	echo "switching to overlay"
+	mount -o move /tmp/overlay /overlay 2>&-
+
+	check_banktable
+	if [ -f /proc/banktable/booted ]; then
+		config=/overlay/$(cat /proc/banktable/booted)
+	else
+		config=/overlay
+	fi
+
+	for f in /lib/mount_root/*; do
+		[ -x $f ] && $f $config
+	done
+
+	mkdir -p $config
+	fopivot $config /rom
+
+	# make sure /tmp has the correct permissions !
+	chmod 01777 /tmp
+}
+
+mount_root_tch

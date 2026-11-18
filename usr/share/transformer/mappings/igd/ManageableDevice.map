@@ -1,0 +1,122 @@
+-- Automatically generated from InternetGatewayDevice:1.3
+-- using generator version 2.1
+local InternetGatewayDevice_ManagementServer_ManageableDevice_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.ManagementServer.ManageableDevice.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ManageableDeviceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      ManufacturerOUI = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "6",
+      },
+      SerialNumber = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      ProductClass = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+    }
+  }
+}
+
+local uci_helper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+
+local content = {}
+
+local ip_modes = {"ipv4", "ipv6"}
+local items = {
+    ["ManufacturerOUI"] = "manufacturer-oui",
+    ["SerialNumber"] = "serial-number",
+    ["ProductClass"] = "product-class"
+}
+
+InternetGatewayDevice_ManagementServer_ManageableDevice_i_.entries = function(mapping)
+    local entries = {}
+    content = {}
+    -- Reload the initial objects
+    local key = ""
+    local found = false
+    local devices = conn:call("hostmanager.device", "get", {})
+    if type(devices) == "table" then
+        for _,device in pairs(devices) do
+            found = false
+            for _,mode in ipairs(ip_modes) do
+                if device["mac-address"] and device[mode] and type(device[mode]) == "table" then
+                    for _,v in pairs(device[mode]) do
+                        if v.dhcp and v.state and v.state == "connected"
+                            and v.dhcp.tags and v.dhcp.tags:match("cpewan%-id") then
+                            key = device["mac-address"]
+                            entries[#entries + 1] = key
+                            content[key] = {}
+                            for param,item in pairs(items) do
+                                content[key][param] = v.dhcp[item] or ""
+                            end
+                            found = true
+                            break
+                        end
+                    end
+                end
+                if found then break end
+            end
+        end
+    end
+    return entries
+end
+
+InternetGatewayDevice_ManagementServer_ManageableDevice_i_.getall = function(mapping, key)
+    if key and content[key] then
+        return content[key]
+    end
+    return nil, "Invalid key"
+end
+
+InternetGatewayDevice_ManagementServer_ManageableDevice_i_.get = function(mapping, param, key)
+    if param and key and content[key] and content[key][param] then
+        return content[key][param]
+    end
+    return nil, "Invalid parameters"
+end
+
+local function getManageable(name)
+    local binding = {
+        config = "env",
+        sectionname = "var",
+        option = name,
+    }
+    return uci_helper.get_from_uci(binding)
+end
+
+InternetGatewayDevice_ManagementServer_ManageableDevice_i_.add = function(mapping)
+    local key = getManageable("manageable_mac")
+    if key ~= "" and not content[key] then
+        content[key] = {}
+        content[key]["ManufacturerOUI"] = getManageable("manageable_oui")
+        content[key]["SerialNumber"] = getManageable("manageable_serial")
+        content[key]["ProductClass"] = getManageable("manageable_prod")
+        return key
+    end
+    return nil, "Invalid manageable information"
+end
+
+InternetGatewayDevice_ManagementServer_ManageableDevice_i_.delete = function(mapping, key)
+    if key and content[key] then
+        content[key] = nil
+        return true
+    end
+    return nil, "No instance"
+end
+
+register(InternetGatewayDevice_ManagementServer_ManageableDevice_i_)
+

@@ -1,0 +1,45 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+CWMPD_PID_FILE=/var/run/cwmpd.pid
+CWMPEVENTS_PID_FILE=/var/run/cwmpevents.pid
+
+wait_for_voice_up() {
+  config_load mmpbx
+  config_get mmpbxenabled global enabled 0
+  [ "$mmpbxenabled" == "0" ] && return
+
+  count=0
+  while [ $count -lt 15 ]
+  do
+    local mmpbx_state=$(uci_get_state mmpbx state "")
+
+    if [ "$mmpbx_state" == "RUNNING" ] ; then
+      break
+    fi
+
+    logger -t cwmpd " Voice not up yet ... delaying startup"
+    sleep 5
+    count=`expr $count + 1`
+  done
+}
+
+boot() {
+  logger -t cwmpd "Starting cwmpd on boot"
+  wait_for_voice_up
+  procd_open_service "cwmpd"
+
+  procd_open_instance
+  procd_set_param command /usr/bin/cwmpd
+  procd_set_param pidfile "${CWMPD_PID_FILE}"
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+  procd_close_instance
+
+  procd_open_instance
+  procd_set_param command /usr/bin/cwmpevents
+  procd_set_param pidfile "${CWMPEVENTS_PID_FILE}"
+  procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
+  procd_close_instance
+  procd_close_service
+  service_started
+}
