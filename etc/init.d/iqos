@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+START=70
+
+
+iqosrule() {
+  local priority
+  local proto
+  local destports
+  local rule="$1"
+  local stst="$2"
+  config_get priority "$rule" priority "1"
+  config_get proto "$rule" proto "tcp"
+  config_get destports "$rule" destports
+  if [ -z destports ]; then
+    echo "the destinations ports are not filled in skipping rule"
+    return
+  fi
+  case "$proto" in
+    udp)
+      proto="1"
+    ;;
+    tcp)
+      proto="0"
+    ;;
+  esac
+  if [ "$stst" = "start" ] ; then
+    IFS=","
+    for port in $destports ; do
+      iqctl addport --proto "$proto" --dport "$port" --ent 1 --prio "$priority"
+    done
+    unset IFS
+  else
+    IFS=","
+    for port in $destports ; do
+      iqctl remport --proto "$proto" --dport "$port" --ent 1
+    done
+    unset IFS
+  fi
+}
+
+
+
+start() {
+  iqctl remport --proto 0 --dport 8080 --ent 1 2> /dev/null
+  iqctl remport --proto 0 --dport 80 --ent 1 2> /dev/null
+  iqctl remport --proto 1 --dport 67 --ent 1 2> /dev/null
+  iqctl remport --proto 1 --dport 68 --ent 1 2> /dev/null
+  iqctl remport --proto 1 --dport 2427 --ent 1 2> /dev/null
+  iqctl remport --proto 1 --dport 53 --ent 1 2> /dev/null
+  iqctl remport --proto 1 --dport 2727 --ent 1 2> /dev/null
+
+  config_load iqos
+  config_foreach iqosrule rule start
+}
+
+stop(){
+  config_load iqos
+  config_foreach iqosrule rule stop
+}
+
+
+
