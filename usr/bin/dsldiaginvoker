@@ -1,0 +1,65 @@
+#!/usr/bin/env lua
+-- this script will be called by commit and apply on
+-- InternetGatewayDevice.WANDevice.{i}.WANDSLDiagnostics.LoopDiagnosticsState
+local logger = require 'transformer.logger'
+local xdslctl = require("transformer.shared.xdslctl")
+local cmdhelper = require("transformer.shared.cmdhelper")
+local execute = os.execute
+local ubus = require("ubus")
+local ubus_conn
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end
+
+local function getDiagStatus()
+    local none_mt = { __index = function() return "None" end }
+    local LoopDiagnosticsStateMapping = setmetatable({
+        ["progress"] = "Requested",
+        ["completed"] = "Complete",
+        ["internal"] = "Error_Internal",
+        ["other"] = "Error_Other",
+        }, none_mt)
+
+    local values = {}
+    local keyarray = {"status", "LoopDiagnostic"}
+    local xdslctlstate={ command = "xdslctl info --state",
+                         lookup  = {["status"] = { pat = "^Status:%s+(%S+)" },["LoopDiagnostic"] = { pat = "^Loop Diagnostic%s+.*%s+(%a+)" },}
+                       }
+
+    cmdhelper.parseCmd(xdslctlstate, keyarray, values)
+
+    return LoopDiagnosticsStateMapping[values["LoopDiagnostic"]]
+end
+
+local function getDiagResult()
+    local result
+    local waittimes = 60
+    local sleep_time = 10
+
+    for i = 1, waittimes do
+        result = getDiagStatus()
+        if result == "Requested" then
+            -- wait until after completion of the Diagnostics
+            execute("sleep " .. sleep_time)
+        else
+            break
+        end
+    end
+
+    return result
+end
+
+logger:debug("====== DSL will down ======")
+execute("sleep 5")
+logger:debug("====== DSL LoopDiagnosticsState is operating ======")
+execute("xdslctl connection --diagmode")
+local result = getDiagResult()
+
+logger:debug("====== DSL Resume ======")
+execute("xdslctl connection --up")
+execute("sleep 5")
+
+-- Publish the diag result on ubus
+local info = {}
+info["LoopDiagnosticsState"] = result
+ubus_conn:send('dsl.loopdiagnostics_igd', info)
