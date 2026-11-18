@@ -1,0 +1,282 @@
+#!/bin/sh /etc/rc.common
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+START=80
+STOP=10
+USE_PROCD=1
+EXTRA_COMMANDS="debug debug6"
+
+MSKIP=0x1000000
+MSTOP=0x2000000
+REDIR=0x4000000
+MASK=$(( ${MSKIP} | ${MSTOP} | ${REDIR} ))
+queue=2
+
+redirect_url_option=""
+
+clear_firewall_part() {
+        local cmd=$1
+        (
+        ${cmd} -t mangle -D PREROUTING -p tcp --sport 80 -j urlfilter-svr
+        ${cmd} -t mangle -D PREROUTING -p tcp --dport 80 -j urlfilter-clnt
+
+        ${cmd} -t mangle -F urlfilter-clnt
+        ${cmd} -t mangle -F urlfilter-svr
+        ${cmd} -t mangle -F urlfilter
+        ${cmd} -t mangle -F urlfilter-skip
+
+        ${cmd} -t mangle -X urlfilter-clnt
+        ${cmd} -t mangle -X urlfilter-svr
+        ${cmd} -t mangle -X urlfilter
+        ${cmd} -t mangle -X urlfilter-skip
+
+        ) >/dev/null 2>&1
+}
+
+clear_firewall() {
+        clear_firewall_part "iptables"
+        clear_firewall_part "ip6tables"
+}
+
+setup_firewall_part() {
+        local cmd=$1
+        local keyword_enabled=$2
+        local interfaces=$3
+        (
+        ${cmd} -t mangle -N urlfilter-svr
+        ${cmd} -t mangle -N urlfilter-clnt
+        ${cmd} -t mangle -N urlfilter
+        ${cmd} -t mangle -N urlfilter-skip
+
+        # svr only needed if keyword filtering is enabled
+        [ "${keyword_enabled}" == "1" ] && ${cmd} -t mangle -A PREROUTING -p tcp --sport 80 -j urlfilter-svr
+        ${cmd} -t mangle -A PREROUTING -p tcp --dport 80 -j urlfilter-clnt
+        ${cmd} -t mangle -A urlfilter-clnt -m socket -j RETURN
+
+        for intf in ${interfaces}
+        do
+                ${cmd} -t mangle -A urlfilter-clnt -i ${intf} -j urlfilter-skip
+        done
+
+        ##
+        ## WAN -> LAN
+        ##
+        ${cmd} -t mangle -A urlfilter-svr -m mark ! --mark 0x0/${MASK} -j CONNMARK --save-mark --nfmask ${MASK} --ctmask ${MASK}
+        ${cmd} -t mangle -A urlfilter-svr -m mark --mark ${REDIR}/${MASK} -j DROP
+
+        # disable FlowCache accelerator
+        ${cmd} -t mangle -A urlfilter-svr -p tcp --sport 80 -m mark --mark 0x0/${MASK} -j SKIPLOG || true
+        ${cmd} -t mangle -A urlfilter-svr -p tcp --sport 80 -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
+
+        ##
+        ## LAN -> WAN
+        ##
+        ${cmd} -t mangle -A urlfilter -m mark --mark ${MSTOP}/${MSTOP} -j CONNMARK --or-mark ${MSTOP}
+        ${cmd} -t mangle -A urlfilter -m mark --mark 0x0/${MASK} -j CONNMARK --restore-mark --nfmask ${MASK} --ctmask ${MASK}
+        ${cmd} -t mangle -A urlfilter -m mark --mark ${REDIR}/${MASK} -j DROP
+
+        for intf in ${interfaces}
+        do
+		# disable FlowCache accelerator for the first x packets
+		${cmd} -t mangle -A urlfilter -p tcp -i ${intf} --dport 80 -m mark --mark 0x0/${MASK} -m connbytes --connbytes-mode packets --connbytes-dir original ! --connbytes 8 -j SKIPLOG
+                ${cmd} -t mangle -A urlfilter -p tcp -i ${intf} --dport 80 -m mark --mark 0x0/${MASK} -j NFQUEUE --queue-num ${queue}
+        done
+
+        ${cmd} -t mangle -A urlfilter -j CONNMARK --save-mark --nfmask ${MASK} --ctmask ${MASK}
+        ${cmd} -t mangle -A urlfilter -j CONNMARK -m mark --mark ${MASK}/${MASK} --and-mark ${REDIR}
+
+        ) >/dev/null 2>&1
+}
+
+setup_firewall() {
+        local ipv6_enabled=$1
+        local keyword_enabled=$2
+        local interfaces=$3
+
+        setup_firewall_part "iptables" "${keyword_enabled}" "${interfaces}"
+        [ "${ipv6_enabled}" = "1" ] && setup_firewall_part "ip6tables" "${keyword_enabled}" "${interfaces}"
+}
+
+
+insert_skip_rule() {
+        local server=$1
+        local dev=$2
+        local mac=$3
+        local target=$4
+        local ipv6_apply=1
+        local ipv4_apply=1
+        local param
+
+        [ -n "$dev" ] && {
+                # if device string is not empty
+                param="-s ${dev}"
+                if [ "${dev//:}" = "${dev}" ]; then
+                        ipv6_apply=0
+                else
+                        ipv4_apply=0
+                fi
+        }
+        [ -n "$mac" ] && {
+                param="${param} -m mac --mac-source ${mac}"
+        }
+        [ -n "$server" ] && {
+                # if device string is not empty
+                param="${param} -d ${server}"
+                if [ "${server//:}" = "${server}" ]; then
+                        ipv6_apply=0
+                else
+                        ipv4_apply=0
+                fi
+        }
+
+        (
+        [ "${ipv4_apply}" = "1" ] && iptables -t mangle -A urlfilter-skip ${param} -j "${target}"
+        [ "${ipv6_apply}" = "1" ] && ip6tables -t mangle -A urlfilter-skip ${param} -j "${target}"
+        ) >/dev/null 2>&1
+}
+
+handle_skip_site_mac_list() {
+        local mac=$1
+        local ipv6_enable=$2
+        local server=$3
+        local target=$4
+
+        insert_skip_rule "$server" "" "$mac" $target
+}
+
+
+handle_skip_site_dev_list() {
+        local device=$1
+        local ipv6_enable=$2
+        local server=$3
+        local target=$4
+
+        insert_skip_rule "$server" "$device" "" $target
+}
+
+handle_skip_site() {
+        local cfg="$1"
+        local ipv6_enable="$2"
+        local server
+        local invert
+        local target="RETURN"
+
+        local is_v4=0
+
+        config_get server "$cfg" server ""
+        config_get_bool invert "$cfg" invert "0"
+
+        [ "$invert" = "1" ] && target="urlfilter"
+
+        config_list_foreach "$cfg" device handle_skip_site_dev_list "${ipv6_enable}" "$server" $target
+        config_list_foreach "$cfg" mac handle_skip_site_mac_list "${ipv6_enable}" "$server" $target
+
+        [ "$invert" = "1" -a -n "$server" ] && insert_skip_rule "$server" "" "" "${target}"
+
+}
+
+handle_each_intf() {
+        local intf=$1
+        local t
+
+        network_get_device t $intf
+        interfaces="$interfaces $t"
+}
+
+weburl_config() {
+        local interfaces
+        local urlfilter_enable
+        local keyword_enable
+        local ipv6_enable
+
+        clear_firewall
+
+        config_load parental
+        config_get_bool urlfilter_enable general enable 1
+        [ "$urlfilter_enable" = "1" ] || return
+
+        config_get_bool queue general queue 2
+        config_get_bool keyword_enable general keywordfilter_enable 0
+        config_get_bool ipv6_enable general ipv6_enable 0
+        config_get REDIR general redirected_mark 0x4000000
+        config_get MSTOP general stop_processing_mark 0x2000000
+        config_get MSKIP general skipped_mark 0x1000000
+        MASK=$(( ${MSKIP} | ${MSTOP} | ${REDIR} ))
+
+        config_get blocked_page_redirect redirect blocked_page_redirect ""
+        if [ -z "$blocked_page_redirect" ]; then
+                local hostname=$(uci get dhcp.@dnsmasq[0].hostname 2>/null | awk -F ' ' '{print $1}')
+                if [ -n "$hostname" ]; then
+                        redirect_url_option="-u http://$hostname.$(uci get dhcp.@dnsmasq[0].domain)$(uci get web.parentalblock.target 2>/null)"
+                fi
+        fi
+
+        # initialize urlfilter targets
+        interfaces=""
+        config_list_foreach general lan_intf handle_each_intf
+        setup_firewall "${ipv6_enable}" "${keyword_enable}" "${interfaces}"
+
+
+        # process skip_site section
+        config_foreach handle_skip_site skip_site "${ipv6_enable}"
+        (
+                iptables -t mangle -A urlfilter-skip -j urlfilter
+                [ "${ipv6_enable}" = "1" ] && ip6tables -t mangle -A urlfilter-skip -j urlfilter
+        )  >/dev/null 2>&1
+        true
+}
+
+debug() {
+        local cmd=${1:-iptables}
+        reset
+        (
+        echo ========================================== PREROUTING
+        ${cmd} -t mangle -vnL PREROUTING --line-numbers
+        echo
+        echo ========================================== URLFILTER-CLNT
+        ${cmd} -t mangle -vnL urlfilter-clnt --line-numbers
+        echo
+        echo ========================================== URLFILTER-SKIP
+        ${cmd} -t mangle -vnL urlfilter-skip --line-numbers
+        echo
+        echo ========================================== URLFILTER
+        ${cmd} -t mangle -vnL urlfilter --line-numbers
+        echo
+        echo ========================================== URLFILTER-SVR
+        ${cmd} -t mangle -vnL urlfilter-svr --line-numbers
+
+        ${cmd} -t mangle -Z PREROUTING
+        ${cmd} -t mangle -Z urlfilter-clnt
+        ${cmd} -t mangle -Z urlfilter-skip
+        ${cmd} -t mangle -Z urlfilter
+        ${cmd} -t mangle -Z urlfilter-svr
+        true
+        ) 2>/dev/null
+}
+
+debug6() {
+        debug ip6tables
+}
+
+start_service() {
+        weburl_config
+
+        procd_open_instance
+        procd_set_param command /usr/sbin/urlfilterd ${redirect_url_option}
+        procd_set_param respawn
+        procd_close_instance
+}
+
+service_triggers() {
+        procd_add_reload_trigger "parental"
+}
+
+reload_service() {
+        weburl_config
+        procd_send_signal weburl
+}
+
+stop_service() {
+        clear_firewall
+}

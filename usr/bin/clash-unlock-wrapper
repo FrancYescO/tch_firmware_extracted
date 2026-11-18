@@ -1,0 +1,68 @@
+#!/bin/sh
+
+# clash-unlock-wrapper is designed for the CLI's (clash) unlock command.
+# The purpose of the command is to provide a way to unlock the GW
+# with either a Permanent tag or a Temporal tag
+
+#Summary:
+# The unlock command is of the format
+#	unlock [options] <tag>
+#	- options allowed are -p & -t
+#	- -p,--permanent is the option to unlock the GW with a permanent tag
+#	- -t,--temporary is the option to unlock the GW with a temporal tag; if specified tag will be valid only till a reboot
+#	- <tag> is the tag content needed to be specified.
+
+# Source the efu_handler to unlock the Gateway on the fly
+. /lib/functions/efu_handler.sh
+
+# Temporary file location to store the tag
+file=$(mktemp)
+
+cleanup() {
+	#remove the temp file on exit
+	rm -rf $file 2>/dev/null
+}
+trap cleanup EXIT
+
+# Write the tag to the temporary file
+echo "$2" >$file 2>/dev/null
+
+# Error is thrown if the tag cannot be written to the file
+if [ $? -ne 0 ]; then
+	echo "Unlock tag cannot be saved"
+	exit 1
+fi
+
+# Verify the type of the tag specified; either a permanent or a temporal tag
+if [[ "$1" == "--permanent" ]]; then
+	rip-write-efu.sh $file &>/dev/null
+	if [ $? -ne 0 ]; then
+		echo "Unlock tag is invalid"
+		exit 1
+	fi
+	errStatus=$(awk '/^Permanent/{print $3}' /proc/efu/info)
+elif [[ "$1" == "--temporary" ]]; then
+	base64 -d $file >/proc/efu/temporal_tag 2>/dev/null
+	if [ $? -ne 0 ]; then
+		echo "Unlock tag is invalid"
+		exit 1
+	fi
+	errStatus=$(awk '/^Temporal/{print $3}' /proc/efu/info)
+fi
+
+# Verify if the unlock tag is valid or not
+# If valid, apply the unlock mechanism
+if [ "$errStatus" != "valid" ]; then
+	echo "Unlock tag is invalid"
+	exit 1
+else
+	echo "Unlock tag is saved successfully"
+	# Call the dynamically unlocking mechanism
+	efu_handler_apply_config
+	if [ $? -ne 0 ]; then
+		echo "Gateway cannot be unlocked"
+		exit 1
+	else
+		echo "Gateway is unlocked successfully"
+        fi
+fi
