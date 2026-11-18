@@ -1,0 +1,163 @@
+-- Manually generated InternetGatewayDevice.X_Multi.
+local mapper, commitapply, register, ipairs, string = mapper, commitapply, register, ipairs, string
+local uciHelper = mapper("ucihelper")
+local setOnUci = uciHelper.set_on_uci
+local getFromUci = uciHelper.get_from_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local firewallBinding = { config = "firewall" }
+local configChanged
+local foreachOnUci = uciHelper.foreach_on_uci
+
+local InternetGatewayDevice_Multi_ = {
+  objectType = {
+    name = "InternetGatewayDevice.#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    },
+    description = "To get or set params for the corresponding protocol ALG"
+  }
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(InternetGatewayDevice_Multi_, "#ROOT", {"X_000E50_ALG", "X_ALG"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local InternetGatewayDevice_X_Multi_ = {
+  objectType = {
+    name = "InternetGatewayDevice.X_#ROOT.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        description = "To enable or disable the corresponding protocol ALG"
+      },
+      PORTS = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "65535",
+          },
+        },
+        default = "0",
+        description = "To get or set the destination port for the corresponding protocol ALG"
+      },
+    },
+    description = "To get or set the params of the corresponding protocol ALG"
+  }
+}
+
+local function getEnable()
+  local result = "0"
+  firewallBinding.sectionname = "helper"
+  firewallBinding.option = "enable"
+  foreachOnUci(firewallBinding, function(s)
+    if string.match(s['.name'], "h323") and s['enable'] == "1" then
+      result = "1"
+      return false
+    end
+  end)
+  return result
+end
+
+-- To get the protocol name from the mapping
+-- @param mapping mapping from which the protocol name can be retrieved
+local function getProtocol(mapping)
+  local protocol = mapping.objectType.name:match("%.([^%.]*)%.$")
+  return string.lower(protocol)
+end
+
+-- To get the param for the protocol from the uci
+-- @param mapping mapping from which the protocol name can be retrieved
+-- @param param the param to be read from uci
+local function get(mapping, param)
+  firewallBinding.sectionname = getProtocol(mapping).."helper"
+  if param == "Enable" then
+    firewallBinding.option = "enable"
+    firewallBinding.default = "1"
+    if getProtocol(mapping) == "h323" then
+      return getEnable()
+    end
+  elseif param == "PORTS" then
+    firewallBinding.option = "dest_port"
+    firewallBinding.default = "0"
+  end
+  return getFromUci(firewallBinding)
+end
+
+-- To set the param for the protocol in the uci
+-- @param mapping mapping from which the protocol name can be retrieved
+-- @param param the param to be modified/added in the section
+-- @param value value of the param to be modified/added in the section
+local function set(mapping, param, value)
+  local isSection = false
+  local section = getProtocol(mapping).."helper"
+  firewallBinding.sectionname = "helper"
+  foreachOnUci(firewallBinding, function(s)
+    if s['.name'] == section then
+      firewallBinding.sectionname = s['.name']
+      isSection = true
+      return false
+    end
+  end)
+  if param == "Enable" then
+    firewallBinding.option = "enable"
+    if isSection then
+      setOnUci(firewallBinding, value, commitapply)
+    elseif section == "h323helper" then
+      firewallBinding.sectionname = "h323rashelper"
+      setOnUci(firewallBinding, value, commitapply)
+      firewallBinding.sectionname = "h323q931helper"
+      setOnUci(firewallBinding, value, commitapply)
+    else
+      return nil, "Error setting Enable, helper section does not exist in firewall config"
+    end
+  elseif param == "PORTS" then
+    firewallBinding.option = "dest_port"
+    setOnUci(firewallBinding, value, commitapply)
+  end
+  configChanged = true
+end
+
+InternetGatewayDevice_X_Multi_.getall = function(mapping)
+  firewallBinding.sectionname = getProtocol(mapping).."helper"
+  local firewallConfig = uciHelper.getall_from_uci(firewallBinding)
+  return {
+    PORTS = firewallConfig['dest_port'] or "0",
+  }
+end
+
+InternetGatewayDevice_X_Multi_.get = get
+InternetGatewayDevice_X_Multi_.set = set
+
+InternetGatewayDevice_X_Multi_.commit = function()
+  if configChanged then
+    commit(firewallBinding)
+  end
+  configChanged = false
+end
+
+InternetGatewayDevice_X_Multi_.revert = function()
+  if configChanged then
+    revert(firewallBinding)
+  end
+  configChanged = false
+end
+
+duplicator = mapper("multiroot").duplicate
+duplicates = duplicator(InternetGatewayDevice_X_Multi_, "#ROOT", { "000E50_ALG.FTP", "ALG.FTP", "000E50_ALG.H323", "ALG.H323", "000E50_ALG.IPSEC", "ALG.IPSEC", "000E50_ALG.L2TP", "ALG.L2TP", "000E50_ALG.PPTP", "ALG.PPTP", "000E50_ALG.RTSP", "ALG.RTSP", "000E50_ALG.SIP", "ALG.SIP", "000E50_ALG.TFTP", "ALG.TFTP"})
+for _, dupli in ipairs(duplicates) do
+  if not (dupli.objectType.name:match("000E50_ALG.RTSP") or dupli.objectType.name:match("ALG.RTSP") or dupli.objectType.name:match("ALG.SIP") or dupli.objectType.name:match("000E50_ALG.SIP")) then
+    dupli.objectType.parameters.PORTS = nil
+  end
+  register(dupli)
+end

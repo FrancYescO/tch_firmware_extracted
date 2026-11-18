@@ -1,0 +1,75 @@
+#!/bin/sh /etc/rc.common
+
+START=96
+STOP=04
+
+MVFS_PID_FILE=/var/run/mvfs.pid
+MVFS_BIN=/usr/bin/mvfs
+MVFS_GROUP="daemon"
+MVFS_FS="/usr/bin/mvfs"
+MVFS_MOUNT_DIR="/var/mvfs"
+MVFS_CONFIG_DIR="/tmp/.mvfs"
+MVFS_CONFIG="${MVFS_CONFIG_DIR}/mvfs.ini"
+MVFS_TAGDB=".mvfs/tagdb"
+
+_log(){
+    logger -t mvfsd "$1"
+}
+
+start()
+{
+  if [ -f $MVFS_PID_FILE ]; then
+    return 1
+  fi
+
+  if [ -x $MVFS_BIN ]; then
+    _log "start mvfsd."
+    mvfs_mkdirs
+    chmod 777 "$(dirname ${MVFS_MOUNT_DIR})"
+    test -d "${MVFS_MOUNT_DIR}" && rmdir "${MVFS_MOUNT_DIR}"
+    mkdir -p "${MVFS_MOUNT_DIR}"
+
+    local loglevel
+    config_load dlnad
+    config_get loglevel log mvfs_logLevel
+
+    if [ -z $loglevel ]; then
+      ${MVFS_FS} ${MVFS_MNTOPT} -o config=${MVFS_CONFIG} "${MVFS_MOUNT_DIR}"
+    else
+      ${MVFS_FS} ${MVFS_MNTOPT} -o config=${MVFS_CONFIG} "${MVFS_MOUNT_DIR}" -o l=$loglevel
+    fi
+
+    pid_mvfs=$(ps |grep $MVFS_BIN | grep -v grep | awk '{print $1}')
+    echo $pid_mvfs > $MVFS_PID_FILE
+  else
+    _log "mvfsd not present."
+  fi
+}
+
+stop()
+{
+  umount "${MVFS_MOUNT_DIR}" 2>/dev/null
+  service_stop $MVFS_FS
+  if [ -f $MVFS_CONFIG ]; then
+    rm -f $MVFS_CONFIG
+  fi
+
+  if [ -f $MVFS_PID_FILE ]; then
+    rm -f $MVFS_PID_FILE
+  fi
+  _log "mvfsd stopped."
+}
+
+reload()
+{
+  service_reload $MVFS_FS
+}
+
+mvfs_mkdirs()
+{
+  mkdir -p "${MVFS_CONFIG_DIR}"
+  chmod -R 777 "${MVFS_CONFIG_DIR}"
+  touch "${MVFS_CONFIG}"
+  chmod 666 "${MVFS_CONFIG}"
+}
+
