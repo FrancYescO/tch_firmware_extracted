@@ -1,0 +1,34 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+SERVICE_DAEMONIZE=1
+
+set_uuid() {
+        UUID_PATH='wifi_doctor_agent.config.uuid'
+        UUID=`uci get ${UUID_PATH}`
+
+        if [ "${UUID}" == "" ] ; then
+          logger -t wifi_doctor_agent "No UUID was found, Generating new uuid"
+          uci set ${UUID_PATH}="$(cat /proc/sys/kernel/random/uuid)"
+          uci commit wifi_doctor_agent
+        fi
+}
+
+start() {
+        config_load wifi_doctor_agent
+        config_get_bool enabled config enabled 0
+        set_uuid
+        [ ${enabled} -gt 0 ] || return 1
+        logger -t WIFIDR "Starting wifi-doctor-agent"
+        service_start /usr/bin/wifi-doctor-agent
+}
+
+stop() {
+        logger -t WIFIDR "Stopping wifi-doctor-agent"
+        service_stop /usr/bin/wifi-doctor-agent
+}
+
+reload() {
+        logger -t WIFIDR "Restarting wifi-doctor-agent"
+        restart
+}
