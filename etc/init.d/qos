@@ -1,0 +1,40 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=65
+
+exec_qos_mgr() {
+  local action=$1
+  local try=1 max_attempts=5
+  while ! /usr/bin/qos -q ${action} ; do
+    try=$((try + 1))
+    if [ ${try} -gt ${max_attempts} ] ; then
+      echo Failed to $action qos after ${max_attempts} attempts
+      break
+    fi
+    sleep 1s
+  done
+}
+
+start() {
+  /usr/lib/qos/generate.sh firewall start | sh
+  exec_qos_mgr start
+}
+
+stop() {
+  /usr/lib/qos/generate.sh firewall stop | sh
+  exec_qos_mgr stop
+}
+
+restart() {
+  /usr/lib/qos/generate.sh firewall start | sh
+  exec_qos_mgr restart
+}
+
+reload() {
+  local action
+  /usr/lib/qos/generate.sh firewall start | sh
+  iptables -t mangle -L QoS_FW -n >/dev/null 2>&1 && action=reload || action=restart
+  exec_qos_mgr ${action}
+}
+
