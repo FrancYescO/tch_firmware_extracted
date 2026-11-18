@@ -1,0 +1,629 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_WiFi_AccessPoint_i_ = {
+  objectType = {
+    name = "Device.WiFi.AccessPoint.{i}.",
+    access = "readOnly", -- currently readWrite not supported
+    numEntriesParameter = "AccessPointNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error_Misconfigured",
+          "Error",
+        },
+        default = "Disabled",
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      SSIDReference = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.WiFi.SSID.{i}.",
+        default = "",
+      },
+      SSIDAdvertisementEnabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      X_000E50_BandSteerEnabled = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable or Disable the BandSteer",
+      },
+--[[ TODO
+      RetryLimit = {
+        access = "readWrite",
+        status = "deprecated",
+        type = "unsignedInt",
+        range = {
+          {
+            min = "0",
+            max = "7",
+          },
+        },
+      },
+--]]
+      WMMCapability = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      UAPSDCapability = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      WMMEnable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      UAPSDEnable = {
+        access = "readOnly", --readWrite not supported
+        type = "boolean",
+      },
+      -- AssociatedDeviceNumberOfEntries
+      -- automatically created when Device.WiFi.AccessPoint.{i}.AssociatedDevice.{i}. is loaded
+      MaxAssociatedDevices = {
+        access = "readWrite",
+        type = "unsignedInt",
+        default = "0",
+      },
+      IsolationEnable = {
+        access = "readOnly", -- Currently readWrite not supported
+        type = "boolean",
+      },
+      MACAddressControlEnabled = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      AllowedMACAddress = {
+        access = "readWrite",
+        list = true,
+        type = "string",
+      },
+      X_BeaconAdvertisementEnabled = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Indicates whether the access point is sending out beacons",
+      },
+      X_BeaconType = {
+        access = "readWrite",
+        type = "string",
+        description = "The capabilities that are currently enabled on the access point",
+        enumeration = {
+          "None",
+          "Basic",
+          "11i",
+          "WPAand11i",
+          --[[ Currently not supported
+          "BasicandWPA",
+          "BasicandWPAand11i",
+          --]]
+        },
+      },
+      X_WEPEncryptionLevel = {
+        access = "readOnly",
+        list = true,
+        max = "64",
+        type = "string",
+        description = "Supported key lengths",
+        enumeration = {
+          "Disabled",
+          "40-bit",
+          "104-bit",
+        },
+      },
+      X_BasicEncryptionModes = {
+        access = "readWrite",
+        type = "string",
+        max = "31",
+        description = "Encryption modes that are available when basic 802.11 is enabled",
+        enumeration = {
+          "None",
+          "WEPEncryption",
+        },
+      },
+      X_BasicAuthenticationMode = {
+        access = "readOnly", -- readwrite not supported
+        type = "string",
+        description = "Authentication modes that are available when basic 802.11 is enabled",
+        max = "31",
+        enumeration = {
+          "None",
+          --[[ Other values are currently not supported.
+          "EAPAuthentication",
+          "SharedAuthentication",--]]
+        },
+      },
+      X_WPAEncryptionModes = {
+        access = "readOnly",
+        type = "string",
+        description = "Encryption modes that are available when WPA is enabled",
+        max = "31",
+        enumeration = {
+          "TKIPEncryption",
+          --[[ This should only be queried when beacon type includes WPA and only expose TKIP in WPA
+          "AESEncryption",
+          "TKIPandAESEncryption",
+          --]]
+        },
+      },
+      X_WPAAuthenticationMode = {
+        access = "readWrite",
+        type = "string",
+        description = "Authentication modes that are available when WPA is enabled",
+        max = "31",
+        enumeration = {
+          "PSKAuthentication",
+          "EAPAuthentication",
+        },
+      },
+      X_IEEE11iEncryptionModes = {
+        access = "readOnly",
+        type = "string",
+        description = "Encryption modes that are available when 802.11i is enabled",
+        max = "31",
+        enumeration = {
+          "AESEncryption",
+          --[[ This should only be queried when beacon type includes WPA2 and only expose AES in WPA2
+          "TKIPEncryption",
+          "TKIPandAESEncryption",
+          --]]
+        },
+      },
+      X_IEEE11iAuthenticationMode = {
+        access = "readWrite",
+        type = "string",
+        description = "Authentication modes that are available when 802.11i is enabled",
+        max = "31",
+        enumeration = {
+          "PSKAuthentication",
+          "EAPAuthentication",
+          -- "EAPandPSKAuthentication", This should only be queried when beacon type includes WPA2 and not allowing dual support
+        },
+      },
+      X_WEPKeyIndex = {
+        access = "readOnly", -- readwrite not supported
+        type = "string",
+        description = "The index of the default WEP key",
+      },
+    }
+  }
+}
+
+local nwmodel = require 'transformer.shared.models.device2.network'
+nwmodel.register('WiFiAP', Device_WiFi_AccessPoint_i_.objectType.name)
+local model
+
+local mapper = mapper
+local uci_helper = mapper("ucihelper")
+local getFromUci = uci_helper.get_from_uci
+local nwCommon = mapper("nwcommon")
+local binding_wireless = {config = "wireless"}
+local binding_web = {config = "web"}
+local binding_system = {config = "system"}
+local isConfigChanged = false
+local bandSteerHelper = require("transformer.shared.bandsteerhelper")
+local network = require("transformer.shared.common.network")
+local wlan = require("transformer.shared.WLANConfigurationCommon")
+local nwWifi = require("transformer.shared.wifi")
+local isBandSteerEnabledByAp = bandSteerHelper.isBandSteerEnabledByAp
+local setBandSteerValue = bandSteerHelper.setBandSteerValue
+local ubus = require("transformer.mapper.ubus").connect()
+
+local accessPointMap = {
+  Enable = "state",
+  SSIDAdvertisementEnabled = "public",
+  MaxAssociatedDevices = "max_assoc",
+  IsolationEnable = "ap_isolation",
+  SSIDReference = "iface",
+  AllowedMACAddress = "acl_accept_list",
+  MACAddressControlEnabled = "acl_mode",
+  X_BeaconType  = "security_mode",
+  X_BasicEncryptionModes = "security_mode",
+  X_000E50_BandSteerEnabled = "bandsteer_id"
+}
+
+local beaconTypeMap = {
+  ["none"]         = "Basic",
+  ["wep"]          = "Basic",
+  ["wpa-psk"]      = "WPA",
+  ["wpa2-psk"]     = "11i",
+  ["wpa-wpa2-psk"] = "WPAand11i",
+  ["wpa"]          = "WPA",
+  ["wpa2"]         = "11i",
+  ["wpa-wpa2"]     = "WPAand11i",
+  ["WPA"]          = "wpa",
+  ["WPAand11i"]    = "wpa-wpa2",
+  ["11i"]          = "wpa2"
+}
+
+local encryptionModeMap = {
+  wep  = "WEPEncryption",
+  none = "None"
+}
+
+local wpaAuthenticationModeMap = {
+  ["wpa2-psk"]     = "PSKAuthentication",
+  ["wpa-wpa2-psk"] = "PSKAuthentication",
+  ["wpa2"]         = "EAPAuthentication",
+  ["wpa-wpa2"]     = "EAPAuthentication",
+}
+
+local function entriesWifiAccess(mapping)
+  model = nwmodel.load()
+  return model:getKeys('WiFiAP')
+end
+
+local function getUciValue(param, key, default, option)
+  binding_wireless.sectionname = model:getUciKey(key)
+  option = option or accessPointMap[param]
+  binding_wireless.option = option
+  binding_wireless.default = default
+  local value = getFromUci(binding_wireless)
+  if (type(value) == 'table') then
+    return table.concat(value, ",") or ""
+  end
+  return value
+end
+
+--- Retrieve the accesspoint security data
+-- @function getDataFromAPSecurity
+-- @param key interface name
+-- @param option if present only particular value is returned(used in get) else the entire AP security info is returned
+-- @return the table containing AP Security information for the given interface or {}
+local function getDataFromAPSecurity(key, option)
+  local apSecInfo = ubus:call("wireless.accesspoint.security", "get", { name = key }) or {}
+  if option then
+    return apSecInfo[key] and tostring(apSecInfo[key][option] or "") or ""
+  end
+  return apSecInfo[key] or {}
+end
+
+--- Retrieve the accesspoint Authentication Mode
+-- @function getAuthenticationMode
+-- @param key AccessPoint name
+-- @return the Authentication Mode of the AP
+local function getAuthenticationMode(key)
+  local mode = getDataFromAPSecurity(key, "mode")
+  return wpaAuthenticationModeMap[mode] or "PSKAuthentication"
+end
+
+local getWifiAccess = {
+  Enable = function(mapping, param, key)
+    local enabled
+    local access_values = network.getAccessPointInfo(model:getUciKey(key))
+    if access_values.oper_state == 1 then
+      enabled = "1"
+    end
+    return enabled or getUciValue(param, key, "0")
+  end,
+
+  Status = function(mapping, param, key)
+    local access_values = network.getAccessPointInfo(model:getUciKey(key))
+      if access_values.oper_state == 1 then
+        return 'Enabled'
+      else
+        return 'Disabled'
+      end
+  end,
+
+  AllowedMACAddress = function(mapping, param, key)
+    return getUciValue(param, key)
+  end,
+
+  MACAddressControlEnabled = function(mapping, param, key)
+    local enabled
+    binding_wireless.sectionname = model:getUciKey(key)
+    binding_wireless.option = accessPointMap[param]
+    enabled = getFromUci(binding_wireless)
+    if enabled == "disabled" or enabled == "unlock" then
+      enabled = "0"
+    else
+      enabled = "1"
+    end
+    return enabled
+  end,
+
+  SSIDReference = function(mapping, param, key)
+    return model:getLowerLayersResolved(key, resolve)
+  end,
+
+  SSIDAdvertisementEnabled = function(mapping, param, key)
+    return getUciValue(param, key, "0")
+  end,
+
+  X_000E50_BandSteerEnabled = function(mapping, param, key)
+    local bs_state = ubus:call("wireless.bandsteer", "get", {}) or {}
+    local bsid = getUciValue(param, key, "")
+    if bsid ~= "" then
+      return bs_state[bsid] and tostring(bs_state[bsid]["oper_state"] or 0) or "0"
+    end
+    return "0"
+  end,
+
+  WMMCapability = "1", -- returning 1 as we are supporting wmm
+
+  UAPSDCapability = "0", -- returning 0 as we don't have support for wmm power save
+
+  WMMEnable = function(mapping, param, key)
+     local iface = getUciValue(param, key, "", "iface")
+     return getUciValue(param, iface, "", "qos_prio_override") or "1"
+  end,
+
+  UAPSDEnable = "0", -- returning 0 as we don't have support for wmm power save
+
+  MaxAssociatedDevices = function(mapping, param, key)
+    return getUciValue(param, key, "0")
+  end,
+
+  IsolationEnable = function(mapping, param, key)
+    return getUciValue(param, key, "0")
+  end,
+
+  X_BeaconAdvertisementEnabled = "1",
+
+  X_BeaconType = function(mapping, param, key)
+    return beaconTypeMap[getUciValue(param, key, "")] or ""
+  end,
+
+  X_WEPEncryptionLevel = "Disabled,40-bit,104-bit",
+
+  X_BasicEncryptionModes = function(mapping, param, key)
+    return encryptionModeMap[getUciValue(param, key, "")] or ""
+  end,
+
+  X_BasicAuthenticationMode = "None",
+
+  X_WPAEncryptionModes = "TKIPEncryption",
+
+  X_WPAAuthenticationMode = function(mapping, param, key)
+    return getAuthenticationMode(key)
+  end,
+
+  X_IEEE11iEncryptionModes = "AESEncryption",
+
+  X_IEEE11iAuthenticationMode = function(mapping, param, key)
+    return getAuthenticationMode(key)
+  end,
+
+  X_WEPKeyIndex = "1",
+}
+
+local function setDataOnUci(mapping, param, value, key, option)
+  binding_wireless.sectionname = model:getUciKey(key)
+  option = option or accessPointMap[param]
+  binding_wireless.option = option
+  uci_helper.set_on_uci(binding_wireless, value, commitapply)
+  isConfigChanged = true
+end
+
+local function getAclMode(key)
+  binding_wireless.sectionname = model:getUciKey(key)
+  binding_wireless.option = "acl_mode"
+  return getFromUci(binding_wireless)
+end
+
+--- set authentication mode
+-- @function setAuthenticationMode
+-- @param key the interface name
+-- @param value the value to be set in the given option
+local function setAuthenticationMode(mapping, param, key, value, commitApply)
+  local iface = getUciValue(param, key, "", "iface")
+  if not bandSteerHelper.isBaseIface(iface) and bandSteerHelper.isBandSteerEnabledByIface(iface) then
+    return nil, "Cannot modify the value when bandsteer is enabled"
+  end
+  local secMode = getDataFromAPSecurity(key, "mode")
+  local mode
+  if not wpaAuthenticationModeMap[secMode] then
+    return nil, "Authentication mode cannot be set for this capability"
+  end
+  if value == "PSKAuthentication" then
+    if (secMode == "wpa-wpa2" or secMode == "wpa-wpa2-psk") then
+      mode = "wpa-wpa2-psk"
+    else
+      mode = "wpa2-psk"
+    end
+  elseif value == "EAPAuthentication" then
+    if (secMode == "wpa-wpa2" or secMode == "wpa-wpa2-psk") then
+      mode = "wpa-wpa2"
+    else
+      mode = "wpa2"
+    end
+  end
+  if nwWifi.isSupportedMode(key, mode) then
+    setDataOnUci(mapping, param, mode, key, "security_mode")
+    wlan.modifyBSPeerNodeAuthentication("security_mode", mode, key, commitApply)
+  else
+    return nil, "Authentication mode cannot be set for unsupported security modes"
+  end
+end
+
+local setWifiAccess = {
+  X_000E50_BandSteerEnabled = function(mapping, param, value, key)
+    if bandSteerHelper.isMultiapEnabled(key) then
+      return nil, "Cannot modify the value when easymesh is enabled"
+    end
+    local bandSteer, errMsg = setBandSteerValue(value, model:getUciKey(key), commitapply, "1")
+    if not bandSteer then
+      return nil, errMsg
+    end
+    isConfigChanged = true
+  end,
+
+  Enable = function(mapping, param, value, key)
+    local oldValue = getUciValue(param, key, "0")
+    if oldValue == value then
+      return
+    end
+    setDataOnUci(mapping, param, value, key)
+    nwWifi.splitSSID(param, key)
+  end,
+
+  SSIDAdvertisementEnabled = function(mapping, param, value, key)
+    local oldValue = getUciValue(param, key, "0")
+    if oldValue == value then
+      return
+    end
+    setDataOnUci(mapping, param, value, key)
+    nwWifi.splitSSID(param, key)
+  end,
+
+  MaxAssociatedDevices = setDataOnUci,
+
+  IsolationEnable = setDataOnUci,
+
+  SSIDReference = function(mapping, param, value, key)
+    local rc
+    rc, value = pcall(tokey, value, "Device.WiFi.SSID.{i}.")
+    if not rc or not value then
+      return nil, "Invalid value"
+    end
+    setDataOnUci(mapping, param, value, key)
+  end,
+
+  MACAddressControlEnabled = function(mapping, param, value, key)
+    local aclmode = "disabled"
+    if value == "1" then
+      aclmode = "lock"
+    end
+    setDataOnUci(mapping, param, aclmode, key)
+  end,
+
+  AllowedMACAddress = function(mapping, param, value, key)
+    local macList = {}
+    if getAclMode(key) == "lock" then
+      for mac in string.gmatch(value, '([^,]+)') do
+        if nwCommon.isMAC(mac) then
+          macList[#macList+1] = mac
+        else
+          return nil, "Invalid MAC address; cannot set"
+        end
+      end
+      setDataOnUci(mapping, param, macList, key)
+    else
+      return nil, "Set Failed. MAC Address Control is currently disabled"
+    end
+  end,
+
+  X_BeaconType = function(mapping, param, value, key)
+    local iface = getUciValue(param, key, "", "iface")
+    if not bandSteerHelper.isBaseIface(iface) and bandSteerHelper.isBandSteerEnabledByIface(iface) then
+      return nil, "Cannot modify the value when bandsteer is enabled"
+    end
+    local supportedSecMode = getDataFromAPSecurity(key, "supported_modes")
+    local secMode = getUciValue(param, key, "", "security_mode")
+    local beaconType = beaconTypeMap[value]
+    if not beaconType then
+      if value == "Basic" then
+        if secMode ~= "none" and secMode ~= "wep" then
+          if supportedSecMode:match("wep") then
+            beaconType = "wep"
+          else
+            beaconType = "none"
+          end
+        else
+          beaconType = secMode
+        end
+      else
+        return nil, "Unsupported BeaconType Value"
+      end
+    else
+      if secMode:match("psk") then
+        beaconType = beaconType .. "-psk"
+      end
+    end
+    if nwWifi.isSupportedMode(key, beaconType) then
+      setDataOnUci(mapping, param, beaconType, key, "security_mode")
+      wlan.modifyBSPeerNodeAuthentication("security_mode", beaconType, key, commitapply)
+    else
+      return nil, "Cannot modify the beacon type for unsupported security modes"
+    end
+  end,
+
+  X_BasicEncryptionModes = function(mapping, param, value, key)
+    local iface = getUciValue(param, key, "", "iface")
+    if not bandSteerHelper.isBaseIface(iface) and bandSteerHelper.isBandSteerEnabledByIface(iface) and value == "WEPEncryption" then
+      return nil, "Cannot modify BasicEncryptionModes when band steer enabled"
+    end
+    local supportedModes = getDataFromAPSecurity(key, "supported_modes")
+    local secMode = getUciValue(param, key, "", "security_mode")
+    local mode = ""
+    -- BasicEncryptionModes is effect only when BeaconType is Basic
+    if secMode == "none" or secMode == "wep" then
+      if value == "WEPEncryption" then
+        if not supportedModes:match("wep") then
+          return nil, "wep is not supported"
+        end
+        mode = "wep"
+      elseif value == "None" then
+        mode = "none"
+      end
+      if mode ~= "" then
+        setDataOnUci(mapping, param, mode, key, "security_mode")
+        wlan.modifyBSPeerNodeAuthentication("security_mode", mode, key, commitapply)
+      end
+    else
+      return nil, "Not supported if BeaconType is not 'Basic'"
+    end
+  end,
+  X_WPAAuthenticationMode = function(mapping, param, value, key)
+    return setAuthenticationMode(mapping, param, key, value, commitapply)
+  end,
+
+  X_IEEE11iAuthenticationMode = function(mapping, param, value, key)
+    return setAuthenticationMode(mapping, param, key, value, commitapply)
+  end,
+
+  WMMEnable = function(mapping, param, value, key)
+     local iface = getUciValue(param, key, "", "iface")
+     local radio = getUciValue(param, iface, "", "device")
+     local type = getUciValue(param, radio, "", "type")
+     if type == "quantenna" and radio == "radio_5G" then
+       return nil, "WMMEnable is not applicable for quantenna based radio_5G"
+     else
+       return setDataOnUci(mapping, param, value, iface, "qos_prio_override")
+     end
+  end,
+}
+
+Device_WiFi_AccessPoint_i_.entries = entriesWifiAccess
+Device_WiFi_AccessPoint_i_.get = getWifiAccess
+Device_WiFi_AccessPoint_i_.set = setWifiAccess
+
+Device_WiFi_AccessPoint_i_.commit = function()
+  bandSteerHelper.uci_commit()
+  if isConfigChanged then
+    uci_helper.commit(binding_wireless)
+    uci_helper.commit(binding_web)
+    uci_helper.commit(binding_system)
+    isConfigChanged = false
+  end
+end
+
+Device_WiFi_AccessPoint_i_.revert = function()
+  bandSteerHelper.uci_revert()
+  if isConfigChanged then
+    uci_helper.revert(binding_wireless)
+    uci_helper.commit(binding_web)
+    isConfigChanged = false
+  end
+end
+
+register(Device_WiFi_AccessPoint_i_)

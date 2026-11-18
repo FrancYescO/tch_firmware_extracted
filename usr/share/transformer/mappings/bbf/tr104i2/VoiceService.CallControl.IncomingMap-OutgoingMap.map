@@ -1,0 +1,283 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local foreachOnUci = uciHelper.foreach_on_uci
+local transactions = {}
+local mmpbxBinding = { config = "mmpbx" }
+local mmpbxrvsipnetBinding = { config = "mmpbxrvsipnet" }
+local resolve, commitApply = resolve, commitapply
+local tr104Helper = require("transformer.shared.tr104helper")
+
+local configurations = {
+    config = "mmpbx",
+    incomingMapSectionName = "incoming_map",
+    outgoingMapSectionName = "outgoing_map",
+    parentKey = "SIPUA",
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_IncomingMap_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.IncomingMap.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "IncomingMapNumberOfEntries",
+        enableParameter = "Enable",
+        minEntries = 0,
+        maxEntries = math.huge,
+        aliasParameter = "Alias",
+        parameters = {
+            --[[Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Enable or disable the entry",
+            },
+            Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            Line = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Line.{i}.",
+                description = "Line used by the call"
+            },
+            Extension = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Extension.{i}.",
+                description = "Extension that rings on incoming call",
+            },
+            Order = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                default = "1",
+                description = "Indicates the order in which extensions ring",
+            },
+            Timeout = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "The time in seconds the extension will ring before it is considered that there was no reply",
+            },
+
+        }
+
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function commit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+Multi_Services_VoiceService_i_CallControl_IncomingMap_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    local deviceList = {}
+    local binding = {}
+    local key
+    if parentKey == configurations["parentKey"] then
+        binding.config = configurations["config"]
+        binding.sectionname = configurations["incomingMapSectionName"]
+        foreachOnUci(binding, function(s)
+            key = s['.name']
+            local _, ltype = key:match("((%w+_%w+)_%d+)")
+            if ltype == "sip_profile" and type(s.device) == "table" then
+                deviceList = s.device or {}
+                for _, device in pairs(deviceList) do
+                    entries[#entries + 1] = s['.name'] .. "|" .. device
+                end
+            end
+        end)
+    end
+    return entries
+end
+Multi_Services_VoiceService_i_CallControl_IncomingMap_i_.get = {
+    Line = function(mapping, param, key)
+        return resolve("Device.Services.VoiceService.{i}.CallControl.Line.{i}.", key:match("((%w+_%w+)_%d+)")) or ""
+    end,
+    Extension = function(mapping, param, key)
+        return resolve("Device.Services.VoiceService.{i}.CallControl.Extension.{i}.", key:match(".*|(.*)$")) or ""
+    end,
+    Timeout = function()
+        mmpbxBinding.sectionname = "global"
+        mmpbxBinding.option = "no_answer_timeout"
+        mmpbxBinding.default = "0"
+        return getFromUci(mmpbxBinding)
+    end,
+    Order = "1",
+}
+
+Multi_Services_VoiceService_i_CallControl_IncomingMap_i_.set = {
+    Timeout = function(mapping, paramName, paramValue, key)
+        mmpbxBinding.sectionname = "global"
+        mmpbxBinding.option = "no_answer_timeout"
+        setOnUci(mmpbxBinding, paramValue, commitApply)
+        transactions[mmpbxBinding.config] = true
+    end,
+}
+
+Multi_Services_VoiceService_i_CallControl_IncomingMap_i_.commit = commit
+
+Multi_Services_VoiceService_i_CallControl_IncomingMap_i_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_IncomingMap_i_",Multi_Services_VoiceService_i_CallControl_IncomingMap_i_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.OutgoingMap.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "OutgoingMapNumberOfEntries",
+        enableParameter = "Enable",
+        minEntries = 0,
+        maxEntries = math.huge,
+        aliasParameter = "Alias",
+        parameters = {
+            --[[Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+                description = "Enable or disable the entry",
+            },
+            Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            CLIPNoScreeningNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+                description = "Public number to be presented outgoing calls, instead of the effective extension number",
+            },
+           Extension = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Extension.{i}.",
+                description = "Extension that rings on incoming call",
+            },
+            Line = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Line.{i}.",
+                description = "Line used by the call",
+            },
+            Order = {
+                access = "readOnly",
+                type = "unsignedInt",
+                range = {
+                    {
+                        min = "1",
+                    },
+                },
+                default = "1",
+                description = "The order in which using the lines is attempted. This is used to implement a backup mechanism",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_.entries = function(mapping, parentKey, key)
+    local entries = {}
+    local binding = {}
+    local profileList = {}
+    if parentKey == configurations["parentKey"] then
+        binding.config = configurations["config"]
+        binding.sectionname = configurations["outgoingMapSectionName"]
+        foreachOnUci(binding, function(s)
+            profileList = type(s.profile) == "table" and s.profile or {}
+            for _, profile in pairs(profileList) do
+                if profile:match("(%w+_%w+)_%d+") == "sip_profile" then
+                    entries[#entries + 1] = s['.name'] .. "|" .. profile
+                end
+            end
+        end)
+    end
+    return entries
+end
+
+Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_.get = {
+    CLIPNoScreeningNumber = function (mapping, param, key)
+        mmpbxrvsipnetBinding.sectionname = key:match(".*|(.*)$")
+        mmpbxrvsipnetBinding.option = "display_name"
+        local displayName = getFromUci(mmpbxrvsipnetBinding)
+        if displayName ~= "" then
+            return displayName
+        else
+            mmpbxrvsipnetBinding.option = "uri"
+            return getFromUci(mmpbxrvsipnetBinding)
+        end
+    end,
+    Line = function(mapping, param, key)
+        return resolve("Device.Services.VoiceService.{i}.CallControl.Line.{i}.", key:match(".*|(.*)$")) or ""
+    end,
+    Extension = function(mapping, param, key)
+        return resolve("Device.Services.VoiceService.{i}.CallControl.Extension.{i}.", key:match("((%w+_%w+)_%d+)")) or ""
+    end,
+    Order = function(mapping, param, key)
+        local device, profileName = key:match("(%w+_%w+_%d+)|(.*)")
+        local result
+        local profilesMapped = {}
+        local prioritiesMapped = {}
+        mmpbxBinding.sectionname = configurations["outgoingMapSectionName"]
+        mmpbxBinding.option = ""
+        foreachOnUci(mmpbxBinding, function(s)
+            if device == s.device then
+                prioritiesMapped = s.priority or {}
+                profilesMapped = s.profile or {}
+                for index, profile in pairs(profilesMapped) do
+                    if profile == profileName then
+                        result = prioritiesMapped[index]
+                        break
+                    end
+                end
+            end
+        end)
+        return result
+    end,
+}
+
+Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_.set = {
+    CLIPNoScreeningNumber = function(mapping, paramName, paramValue, key)
+        mmpbxrvsipnetBinding.sectionname = key:match(".*|(.*)$")
+        mmpbxrvsipnetBinding.option = "display_name"
+        setOnUci(mmpbxrvsipnetBinding, paramValue, commitApply)
+        transactions[mmpbxrvsipnetBinding.config] = true
+    end,
+}
+
+Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_.commit = commit
+
+Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_.revert = revert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_", Multi_Services_VoiceService_i_CallControl_OutgoingMap_i_, register)

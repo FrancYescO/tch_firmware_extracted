@@ -1,0 +1,295 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallLog_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallLog.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "CallLogNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        aliasParameter = "Alias",
+        parameters = {
+            --[[Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            CallingPartyNumber = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                description = "Number of the party originating the call",
+            },
+            CalledPartyNumber = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                description = "Number of destination party of the call",
+            },
+            Source = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Line.{i}. VoiceService.CallControl.Extension.{i}. VoiceService.SIP.Registrar.{i}.Account.{i}. VoiceService.Trunk.{i}. VoiceService.SIP.Client.{i}.",
+                description = "Party originating the call",
+            },
+            Destination = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Line.{i}. VoiceService.CallControl.Extension.{i}. VoiceService.SIP.Registrar.{i}.Account.{i}. VoiceService.Trunk.{i}. VoiceService.SIP.Client.{i}.",
+                 description = "Destination party of the call",
+            },
+            RemoteParty = {
+                access = "readOnly",
+                type = "string",
+                max = "32",
+                description = "The phone number of the remote party after the dial plan has been processed",
+            },
+            UsedLine = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Line.{i}.",
+                description = "The phone number used to process the call",
+            },
+            UsedExtensions = {
+                access = "readOnly",
+                list = true,
+                type = "string",
+                pathRef = true,
+                targetParent = "VoiceService.CallControl.Extension.{i}.",
+                description = "The device used to process the call",
+            },
+            Direction = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Incoming",
+                    "Outgoing",
+                },
+                description = "Direction of the call",
+            },
+            Start = {
+                access = "readOnly",
+                type = "dateTime",
+                description = "Start time of the call",
+            },
+            Duration = {
+                access = "readOnly",
+                type = "unsignedInt",
+                description = "Length of the call in seconds",
+            },
+            CallTerminationCause = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "NoExtensionsMapped",
+                    "NoExtensionsAvailable",
+                    "AnonymousCallRejection",
+                    "CallWaitingRejected",
+                    "CallForwardingUnconditional",
+                    "CallForwardingBusy",
+                    "CallForwardingNoReply",
+                    "LocalDisconnect",
+                    "LocalForbidden",
+                    "LocalTimeout",
+                    "LocalMediaError.",
+                    "LocalPriority.",
+                    "LocalReject",
+                    "LocalTransfer",
+                    "LocalInternalError",
+                    "RemoteDisconnect",
+                    "RemoteBadRequest",
+                    "RemoteForbidden",
+                    "RemoteNotFound",
+                    "RemoteReject",
+                    "RemoteNotAllowed",
+                    "RemoteNotAcceptable",
+                    "RemoteTimeout",
+                    "RemoteUnavailable",
+                    "RemoteBusy",
+                    "RemoteNotSupported",
+                    "RemoteNetworkFailure",
+                },
+                description = "The call termination cause"
+            },
+            -- SessionNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallLog.{i}.Session.{i}. is loaded
+            -- SignalingPerformanceNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallLog.{i}.SignalingPerformance.{i}. is loaded
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local conn = mapper("ubus").connect()
+local lineHelper = require("transformer.shared.line_helper")
+local tr104Helper = require("transformer.shared.tr104helper")
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local forEachOnUci = uciHelper.foreach_on_uci
+local sipnetBinding = {config = "mmpbxrvsipnet", sectionname = "profile"}
+local callLogList, reasonPattern = "CALLLOG LIST", "REASON_(.+)"
+local resolve  = resolve
+local callListData = {}
+
+local callList   = {
+    CallingPartyNumber = "Localparty",
+    CalledPartyNumber  = "Remoteparty",
+    RemoteParty        = "Remoteparty",
+    Start              = "startTime"
+}
+
+local callDisconnectReason = {
+    NO_DEVICE_MAPPED              = "NoExtensionsMapped",
+    NO_DEVICE_AVAILABLE           = "NoExtensionsAvailable",
+    ACR                           = "AnonymousCallRejection",
+    CALL_WAITING_REJECTED         = "CallWaitingRejected",
+    CALL_FORWARDING_UNCONDITIONAL = "CallForwardingUnconditional",
+    CALL_FORWARDING_BUSY          = "CallForwardingBusy",
+    CALL_FORWARDING_NO_REPLY      = "CallForwardingNoReply",
+    LOCAL_DISCONNECT              = "LocalDisconnect",
+    LOCAL_FORBIDDEN               = "LocalForbidden",
+    LOCAL_TIMEOUT                 = "LocalTimeout",
+    LOCAL_MEDIAERROR              = "LocalMediaError",
+    LOCAL_PRIORITY                = "LocalPriority",
+    LOCAL_REJECT                  = "LocalReject",
+    LOCAL_TRANSFER                = "LocalTransfer",
+    LOCAL_INTERNALERROR           = "LocalInternalError",
+    REMOTE_DISCONNECT             = "RemoteDisconnect",
+    REMOTE_FORBIDDEN              = "RemoteForbidden",
+    REMOTE_NOTFOUND               = "RemoteNotFound",
+    REMOTE_REJECT                 = "RemoteReject",
+    REMOTE_NOTALLOWED             = "RemoteNotAllowed",
+    REMOTE_NOTACCEPTABLE          = "RemoteNotAcceptable",
+    REMOTE_TIMEOUT                = "RemoteTimeout",
+    REMOTE_UNAVAILABLE            = "RemoteUnavailable",
+    REMOTE_BUSY                   = "RemoteBusy",
+    REMOTE_NOTSUPPORTED           = "RemoteNotSupported",
+    REMOTE_NETWORK_FAILURE        = "RemoteNetworkFailure"
+}
+
+local function getProfileObject(mapping, lineUsed)
+    local profileUsed
+    forEachOnUci(sipnetBinding, function(s)
+        if s['.name'] then
+            local uriValue = getFromUci({config = "mmpbxrvsipnet", sectionname= s['.name'], option ="uri" })
+            if uriValue == lineUsed then
+                profileUsed = s['.name']
+                return false
+            end
+        end
+    end)
+    return resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.CallControl.Line.{i}.', profileUsed) or ""
+end
+
+local function getDuration(connectedTime, endTime)
+    if connectedTime ~= "0" and endTime ~= "0" then
+        return tostring(lineHelper.convert2Sec(endTime) - lineHelper.convert2Sec(connectedTime))
+    end
+    return "0"
+end
+
+local function getCallLogList(mapping, param, key)
+    if callListData and callListData[callLogList] then
+        for _, callLogValue in ipairs (callListData[callLogList]) do
+            if callLogValue["callkey"] == key then
+                local callLogParamName = callList[param]
+                if param == "CallTerminationCause" then
+                    local terminationReason = callLogValue["terminationReason"] and callLogValue["terminationReason"]:match(reasonPattern) or ""
+                    return terminationReason and callDisconnectReason[terminationReason] or ""
+                elseif param == "Duration" then
+                    local endTime, connectedTime = (callLogValue["endTime"] or "0"), (callLogValue["connectedTime"] or "0")
+                    return getDuration(connectedTime, endTime)
+                elseif param == "Source" or param == "UsedLine" then
+                    return getProfileObject(mapping, callLogValue["Localparty"])
+                elseif param == "UsedExtensions" then
+                    local extensions = {}
+                    if callLogValue["deviceName"] then
+                        for deviceUsed in callLogValue["deviceName"]:gmatch('[^,]+') do
+                            extensions[#extensions + 1] = resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.CallControl.Extension.{i}.', deviceUsed) or ""
+                        end
+                    end
+                    return table.concat(extensions, ',')
+                elseif param == "Direction" then
+                    if callLogValue["Direction"] == "1" then
+                        return "Incoming"
+                    end
+                    return "Outgoing"
+                elseif param == "Destination" then
+                    return getProfileObject(mapping, callLogValue["Remoteparty"])
+                elseif callLogParamName  then
+                    return tostring(callLogValue[callLogParamName])
+                end
+            end
+        end
+    end
+    return ""
+end
+
+local function getAllCallLogList(mapping, key)
+    local result = {}
+    if callListData and callListData[callLogList] then
+        for _, callLogData in ipairs (callListData[callLogList]) do
+            for param in pairs(Multi_Services_VoiceService_i_CallLog_i_.objectType.parameters) do
+               if callLogData["callkey"] == key then
+                   local callLogParamName = callList[param]
+                   if param == "CallTerminationCause" then
+                       local terminationReason = callLogData["terminationReason"] and callLogData["terminationReason"]:match(reasonPattern) or ""
+                       result[param] = terminationReason and callDisconnectReason[terminationReason] or ""
+                    elseif param == "Duration" then
+                        local endTime, connectedTime = (callLogData["endTime"] or "0"), (callLogData["connectedTime"] or "0")
+                        result[param] = getDuration(connectedTime, endTime)
+                    elseif param == "Source" or param == "UsedLine" then
+                        result[param] = getProfileObject(mapping, callLogData["Localparty"])
+                    elseif param == "UsedExtensions" then
+                        local extensions = {}
+                        if callLogData["deviceName"] then
+                            for deviceUsed in callLogData["deviceName"]:gmatch('[^,]+') do
+                                extensions[#extensions + 1] = resolve(mapping.objectType.name:match("^([^%.]*)%.")..'.Services.VoiceService.{i}.CallControl.Extension.{i}.', deviceUsed) or ""
+                            end
+                        end
+                        result[param] = table.concat(extensions, ',')
+                    elseif param == "Direction" then
+                        if callLogData["Direction"] == "1" then
+                            result[param] = "Incoming"
+                        else
+                            result[param] = "Outgoing"
+                        end
+                    elseif param == "Destination" then
+                        result[param] = getProfileObject(mapping, callLogData["Remoteparty"])
+                    elseif callLogParamName then
+                        result[param] = tostring(callLogData[callLogParamName])
+                    end
+                end
+            end
+        end
+    end
+    return result
+end
+
+Multi_Services_VoiceService_i_CallLog_i_.get = getCallLogList
+
+Multi_Services_VoiceService_i_CallLog_i_.getall = getAllCallLogList
+
+Multi_Services_VoiceService_i_CallLog_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    callListData = conn:call("mmdbd.calllog", "list", {}) or {}
+    if callListData and callListData[callLogList] then
+        for _, callData in ipairs (callListData[callLogList]) do
+            entries[#entries + 1] = callData["callkey"]
+        end
+    end
+    return entries
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallLog_i_", Multi_Services_VoiceService_i_CallLog_i_, register)

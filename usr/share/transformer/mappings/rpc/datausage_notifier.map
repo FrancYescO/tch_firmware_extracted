@@ -1,0 +1,62 @@
+local datausage_notifier = {
+	objectType = {
+		name = 'rpc.datausage_notifier.',
+		access = 'readOnly',
+		minEntries = 1,
+		maxEntries = 1,
+		parameters = {
+			enabled = {
+				access = "readWrite",
+				type = "boolean"
+			},
+			web_selected_interface = {
+				access = "readWrite",
+				type = "string"
+			},
+			event = {
+				access = "readWrite",
+				type = "string"
+			}
+		}
+	}
+}
+
+local uciHelper = mapper("ucihelper")
+local conn = mapper("ubus").connect()
+if not conn then
+	return nil, "Failed to connect to UBUS"
+end
+
+local web_selected_interface = "wan"
+local datausage_notifier_binding = { config="datausage_notifier", sectionname="global", option="enabled" }
+
+function datausage_notifier.get(mapping, paramName)
+	if paramName == "enabled" then
+		local enabled =  uciHelper.get_from_uci(datausage_notifier_binding)
+		return enabled ~= "" and enabled or "1"
+	elseif paramName == "web_selected_interface" then
+		return web_selected_interface
+	end
+	return ""
+end
+
+function datausage_notifier.set(mapping, paramName, value)
+	if paramName == "enabled" then
+		uciHelper.set_on_uci(datausage_notifier_binding, value, commitapply)
+		commitapply:newset("rpc.datausage_notifier.enabled") -- to restart the datausage_notifier daemon
+	elseif paramName == "web_selected_interface" then
+		web_selected_interface = value
+	elseif paramName == "event" then
+		conn:send(string.format("datausage.%s", value), {})
+	end
+end
+
+function datausage_notifier.commit()
+	uciHelper.commit({config = "datausage_notifier"})
+end
+
+function datausage_notifier.revert()
+	uciHelper.revert({config = "datausage_notifier"})
+end
+
+register(datausage_notifier)

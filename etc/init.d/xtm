@@ -1,0 +1,516 @@
+#!/bin/sh /etc/rc.common
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+START=18
+
+#XTM_DEBUG=1
+
+lock /var/lock/xtm.lock
+trap "lock -u /var/lock/xtm.lock" EXIT
+
+app_cmd() {
+    [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] xtmctl $@" 1>&2
+    xtmctl "$@"
+}
+
+qos_cmd() {
+    [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] /usr/bin/qos -q $@" 1>&2
+    /usr/bin/qos -q "$@"
+}
+
+LIB_SETUPTM="setuptm"
+if lua -e "require('${LIB_SETUPTM}')" 2> /dev/null ; then
+  [ "${XTM_DEBUG}" = 1 ] && LIB_SETUPTM_DEBUG=true || LIB_SETUPTM_DEBUG=false
+  LIB_SETUPTM_INIT="local setuptm = require('${LIB_SETUPTM}') \
+                    setuptm.enable_logging(${LIB_SETUPTM_DEBUG}) \
+                    setuptm.enable_tmctl_logging(${LIB_SETUPTM_DEBUG})"
+fi
+
+setuptm_cmd() {
+  [ -n "${LIB_SETUPTM_INIT}" ] || return
+
+  [ "${XTM_DEBUG}" != 1 ] || echo "[cmd] setuptm $@" 1>&2
+
+  lua -e "${LIB_SETUPTM_INIT} ; setuptm.$@"
+}
+
+find_tdte() { # tdname [index]
+    local tdname=$1
+    local servicecat pcr scr mbs mcr
+    uci2tdte $tdname servicecat pcr scr mbs mcr
+    if [ "$?" -ne 0 ]
+    then
+        echo "Failed to parse td $tdname"
+        return 1
+    fi
+
+    for i in pcr scr mbs mcr
+    do
+        eval "$i=\${$i:-0}" # if not set, set to zero
+    done
+
+    local res=$( (app_cmd operate tdte --show | awk "/^[ \t]*[0-9]+[ \t]+${servicecat}[ \t]+${pcr}[ \t]+${scr}[ \t]+${mbs}[ \t]+${mcr}[ \t]+\$/ { if(\$1 != 1) { print \$1; exit 0; } }") || echo "")
+    [ -n "$res" ] || return 1
+    if [ -n "$2" ]
+    then
+        eval "$2=$res"
+    fi
+    return 0
+}
+
+flush_tdte() {
+   local tds=$(app_cmd operate tdte --show | awk 'BEGIN { OFS="" ; ORS=" "} /^[0-9]+/ { if($1 != 1) print $1 }' || echo "")
+   for i in $tds
+   do
+       app_cmd operate tdte --delete "$i" || echo "Warning: failed to delete tdte index $i"
+   done
+}
+
+add_tdte() { # tdname
+    local tdname=$1
+    if find_tdte $tdname # already exists
+    then
+        return 0
+    fi
+    local servicecat pcr scr mbs mcr
+    uci2tdte $tdname servicecat pcr scr mbs mcr
+    if [ "$?" -ne 0 ]
+    then
+        echo "Failed to parse td $tdname"
+        return 1
+    fi
+
+    local missingparams=""
+    local params="--add $servicecat"
+    case "$servicecat" in
+        ubr) # [mcr]
+            [ -n "$mcr" ] && params="${params} $mcr"
+        ;;
+        ubr_pcr) # pcr [mcr]
+            [ -n "$pcr" ] && params="${params} $pcr" || missingparams="${missingparams} pcr"
+            [ -n "$mcr" ] && params="${params} $mcr"
+        ;;
+        cbr) # pcr
+            [ -n "$pcr" ] && params="${params} $pcr"
+        ;;
+        rtvbr) # pcr scr mbs
+            [ -n "$pcr" ] && params="${params} $pcr" || missingparams="${missingparams} pcr"
+            [ -n "$scr" ] && params="${params} $scr" || missingparams="${missingparams} scr"
+            [ -n "$mbs" ] && params="${params} $mbs" || missingparams="${missingparams} mbs"
+        ;;
+        nrtvbr) # pcr scr mbs
+            [ -n "$pcr" ] && params="${params} $pcr" || missingparams="${missingparams} pcr"
+            [ -n "$scr" ] && params="${params} $scr" || missingparams="${missingparams} scr"
+            [ -n "$mbs" ] && params="${params} $mbs" || missingparams="${missingparams} mbs"
+        ;;
+        *)
+            echo "xtm.${tdname}.servicecat not properly specified"
+            return 1
+        ;;
+    esac
+    if [ -n "$missingparams" ]
+    then
+        echo "The following parameters are missing for td $tdname: $missingparams"
+        return 1
+    fi
+    app_cmd operate tdte $params
+    if [ "$?" -ne 0 ]
+    then
+        echo "Failed to create td $tdname"
+        return 1
+    fi
+    return 0
+}
+
+uci2tdte() { #  $1 = tdname $2 = servicecat   $3 = pcr    $4 = scr   $5 = mbs   $6 = mcr
+    [ "$#" -eq '6' ] || return 1
+    local tdname=$1
+    config_get servicecat "$tdname" servicecat
+    config_get pcr "$tdname" peak_cell_rate
+    config_get scr "$tdname" sustained_cell_rate
+    config_get mbs "$tdname" max_burst_size
+    config_get mcr "$tdname" min_cell_rate
+    [ -n "$servicecat" ] || return 1
+    eval "$2=$servicecat"
+    eval "$3=$pcr"
+    eval "$4=$scr"
+    eval "$5=$mbs"
+    eval "$6=$mcr"
+    return 0
+}
+
+uci2atmdeviceid() {
+    eval "$4=$1.$2.$3"
+    return 0;
+}
+
+uci2ptmdeviceid() {
+    case "$2" in
+        low) eval "$3=$1.1";;
+        high) eval "$3=$1.2";;
+        *) return 1;;
+    esac
+
+    return 0
+}
+
+uciatmulp2encaps () {
+    #$1 = enc (vxmux/llc)
+    #$2 = ulp (ip/eth/ppp)
+    #llcsnap_eth|llcsnap_rtip|llcencaps_ppp|vcmux_eth|vcmux_ipoa|vcmux_pppoa
+    local prefix
+    local suffix
+    local result
+    case "$1" in
+        vcmux)
+        prefix='vcmux'
+        case "$2" in
+            eth) suffix='eth';;
+            ppp) suffix='pppoa';;
+            ip)  suffix='ipoa';;
+            *) return 1;;
+        esac
+        ;;
+        llc)
+        prefix='llcsnap'
+        case "$2" in
+            eth) suffix='eth';;
+            ppp)
+                suffix='ppp'
+                prefix='llcencaps'
+                ;;
+            ip) suffix='rtip';;
+            *) return 1;;
+        esac
+        ;;
+        *) return 1;;
+    esac
+    result="${prefix}_${suffix}"
+    eval "$3=$result"
+    return 0
+}
+
+uci2portid () {
+    case "$1" in
+        fast) eval "$2='1'" ;;
+        interleaved) eval "$2='2'" ;;
+        *) return 1;;
+    esac
+    return 0
+}
+
+
+get_deviceids () {
+    local ids=`xtmctl operate conn --show | awk '
+        BEGIN { OFS="" ; ORS=" "}
+        {
+            if ($1 == "PTM" ) {
+                if ( $3=="low" ) {
+                    priomask=1
+                }
+                else {
+                    priomask=2
+                }
+                print $2,".",priomask
+            }
+            else if ($1 == "ATM") {
+                gsub("/",".",$3)
+                print $2,".",$3
+            }
+        }'`
+    eval $1='$ids'
+}
+
+# Retrieve all queue ids for a given ptm or atm device
+get_queueids() {
+    local deviceid="$1"
+    local qid_offset
+
+    local xtm_version=`app_cmd 2>&1 | tail -c 4`
+    if echo "$xtm_version 2.3" | awk '{exit !($1 > $2)}'; then
+        qid_offset=`app_cmd operate conn --show | head -1 | sed 's/qId.*//' | wc -c`
+    else
+        qid_offset=`app_cmd operate conn --show | head -1 | sed 's/q_id.*//' | wc -c`
+    fi
+    local ids=`app_cmd operate conn --show $deviceid | tail -n+2 | cut -b ${qid_offset}- | cut -d' ' -f 1`
+
+    eval $2='$ids'
+}
+
+# Returns 0 in case the provide <port_id.vpi.vci> or <port_id.ptmpri_id> is an ATM device,
+# based on the number of dots
+is_atm_device() {
+    local deviceid="$1"
+    echo "$deviceid" | grep "\..*\." > /dev/null
+}
+
+# Adds an ATM or PTM queue. The policy must be the same for all queues within a single device
+add_queue() {
+    local deviceid="$1"
+    local priority="$2"
+    local weight="$3"
+    local policy="$4"
+    # only passed for ptm
+    local mbr_kbps="$5"
+    local pbr_kbps="$6"
+    local mbs="$7"
+
+    local ptm_options=""
+
+    if ! is_atm_device $deviceid; then
+        ptm_options="$mbr_kbps $pbr_kbps $mbs"
+    fi
+
+    app_cmd operate conn --addq $deviceid $priority $policy $weight dt $ptm_options
+}
+
+# Configures QoS queues for an ATM or PTM device
+configure_qos_dev() {
+    local interface="$1"
+    local deviceid="$2"
+    local devname="$3"
+    local mode="$4"
+
+    # Check if QoS for device is already configured (should never be the case)
+    [ -z "$(uci_get_state xtm "${devname}" QoS_classgroup)" ] || return
+
+    if [ -z "${interface}" ]; then
+        # Check if QoS config for device is present
+        config_get qos_device "${devname}" TYPE
+        [ "${qos_device}" = "device" ] || return 1
+        # Check if QoS config for device should be enabled
+        config_get_bool qos_enable "${devname}" enable 1
+        if [ "${qos_enable}" != "1" ]; then
+            uci_set_state xtm "${devname}" QoS_classgroup disabled # Keep status info for debug
+            return
+        fi
+    else
+        # Check whether this interface matches xtm device
+        network_get_physdev intf_dev "${interface}"
+        # strip vlan if present
+        intf_dev="$(echo "${intf_dev}" | sed -r 's/\.[0-9]+$//' | sed -r 's/\_v[0-9]+$//')"
+        [ "${intf_dev}" = "${devname}" ] || return
+
+        # Check if QoS config for interface is enabled and requires device QoS
+        config_get_bool qos_enable "${interface}" enabled 1
+        [ "${qos_enable}" = "1" ] || return
+    fi
+
+    config_get classgroup "${interface:-${devname}}" classgroup
+    [ -n "${classgroup}" ] || return
+
+    config_get classes "$classgroup" classes
+    [ -n "$classes" ] || return
+    config_get policy "$classgroup" policy wrr
+
+    case "${policy}" in
+      sp|sp_wfq) policy="wfq" ;;
+      sp_wrr) policy="wrr" ;;
+    esac
+
+    for class in ${classes}; do
+        config_get priority "${class}" priority 0
+        config_get weight "${class}" weight 1
+        if [ ${priority} -gt 7 ]; then
+            echo "Warning: priority cannot be higher than 7"
+            priority=7
+        fi
+        if [ "$mode" = "ptm" ]
+        then
+            config_get mbr "${class}" min_bit_rate 0
+            config_get pbr "${class}" max_bit_rate 0
+            config_get mbs "${class}" max_burst_size 0
+            add_queue "${deviceid}" "${priority}" "${weight}" "${policy}" "${mbr}" "${pbr}" "${mbs}"
+        else
+            add_queue "${deviceid}" "${priority}" "${weight}" "${policy}"
+        fi
+    done
+
+    # Prevent configuring this device multiple times
+    uci_set_state xtm "${devname}" QoS_classgroup "${classgroup}"
+}
+
+# Configures queues for an ATM or PTM device
+configure_queues() {
+    local deviceid="$1"
+    local devname="$2"
+    local mode="$3"
+
+    # Use queue definition from QoS section
+    config_load qos
+
+    if ! configure_qos_dev "" "${deviceid}" "${devname}" "${mode}"
+    then # Backwards compatibility
+        config_foreach configure_qos_dev interface "${deviceid}" "${devname}" "${mode}"
+    fi
+
+    # Restore loaded UCI config for XTM
+    config_load xtm
+
+    # Check if QoS is configured for this device, else clear QoS state
+    [ "$(uci_get_state xtm "${devname}" QoS_classgroup disabled)" = "disabled" ] || return
+    uci_revert_state xtm "${devname}" QoS_classgroup
+
+    # Create default queue, id 0
+    if [ "$mode" = "ptm" ]
+    then
+        add_queue $deviceid 0 1 wrr 0 0 0
+    else
+        #if there a single queue we need to take over the interpvc qos value to make interpvc qos work
+        config_get priority "$devname" priority 0
+        add_queue $deviceid $priority 1 wrr
+    fi
+}
+
+atm_start() {
+    local devname="$1"
+    local encaps vpi vci ulp path portid enc portids td
+    local atmdeviceid
+    local tdteindex
+    #default value for path = fast
+    config_get path "$devname" path "fast"
+    [ -n "$path" ] && uci2portid "$path" portid || return 1
+
+    config_get vpi "$devname" vpi
+    config_get vci "$devname" vci
+    config_get ulp "$devname" ulp
+    config_get enc "$devname" enc
+    config_get td "$devname" td
+    #priority between pvc works with inverse logic and 0 is not a valid value.
+    config_get priority "$devname" priority "0"
+    config_get weight "$devname" weight "1"
+    if [ $priority -gt 8 ] && [ $priority -lt 0 ] ; then
+       echo "pvc priority not in range configure default"
+       priority=0
+    fi
+    if [ $weight -gt 63 ] && [ $weight -lt 1 ] ; then
+       echo "pvc weight not in range configure default"
+       weight=1
+    fi
+    [ -n "$enc" ] && [ -n "$ulp" ] && uciatmulp2encaps "$enc" "$ulp" "encaps"  || return 1
+
+    [ -n "$vpi" ] && [ -n "$vci" ] && uci2atmdeviceid "$portid" "$vpi" "$vci" "atmdeviceid"  || return 1
+
+    if [ -n "$td" ]
+    then
+        find_tdte "$td" tdteindex
+        if [ "$?" -ne 0 ]
+        then
+            echo "Failed to resolve td $td, cannot create interface $atmdeviceid"
+            return 1
+        fi
+        app_cmd operate conn --add $atmdeviceid aal5 $encaps $priority $weight $tdteindex
+    else
+        app_cmd operate conn --add $atmdeviceid aal5 $encaps $priority $weight 1
+    fi
+    configure_queues $atmdeviceid $devname "atm"
+    app_cmd operate conn --createnetdev $atmdeviceid $devname
+    if [ "$?" -ne "0" ]
+    then
+        echo "WARNING: Interface $devname was not created. Check your uci configuration."
+    fi
+    qos_cmd device $devname
+}
+
+ptm_start() {
+    local devname="$1"
+    local priority path portid
+    local ptmdeviceid
+
+    #default value for path = fast
+    config_get path "$devname" path "fast"
+    [ -n "$path" ] && uci2portid "$path" portid || return 1
+
+    config_get priority "$devname" priority "low"
+    [ -n "$priority" ] && uci2ptmdeviceid "$portid" "$priority" "ptmdeviceid" || return 1
+
+    app_cmd operate conn --add $ptmdeviceid  0 1
+    configure_queues $ptmdeviceid $devname "ptm"
+    app_cmd operate conn --createnetdev $ptmdeviceid $devname
+    if [ "$?" -ne "0" ]
+    then
+        echo "WARNING: Interface $devname was not created. Check your uci configuration."
+    fi
+    qos_cmd device $devname
+}
+
+xtm_configure_start() {
+    local xtm_mode=$(xdslctl info --show | sed -n -e 's/^TPS-TC\s*:\s*\([A-Z]*\).*$/\1/p')
+    config_foreach add_tdte trafficdesc
+    [ "$xtm_mode" = "PTM" ] && config_foreach ptm_start ptmdevice start
+    [ "$xtm_mode" = "ATM" ] && config_foreach atm_start atmdevice start
+
+    setuptm_cmd "reload('xtm')"
+}
+
+xtm_configure_stop() {
+    #delete every device reported by xmtctml operate conn --show
+    get_deviceids deviceids
+    for deviceid in $deviceids
+    do
+        get_queueids $deviceid queueids
+        for q in $queueids
+        do
+            app_cmd operate conn --deleteq $deviceid $q
+        done
+        app_cmd operate conn --deletenetdev $deviceid
+        app_cmd operate conn --delete $deviceid
+    done
+    flush_tdte
+
+    uci_revert_state xtm
+}
+
+xtm_preconfigure() {
+    config_load xtm
+
+    # check for 5.02L.06 (or later)
+    if [ ! -e '/proc/sys/net/core/blog_tcpack_prio_inc' ]; then
+      # load and apply default xtm drop thresholds (=queue size)
+      local threshold_default='512'
+      for n in adsl vdsl vdslrtx gfast; do
+        local var="threshold_$n"
+        config_get ${var} drop_threshold $n ${threshold_default}
+        val="$(eval "echo \${${var}}")"
+
+        app_cmd threshold --$n ${val}
+      done
+    fi
+}
+
+start() {
+    [ "$(uci_get_state xtm state status stopped)" = "started" ] && return
+
+    xtm_preconfigure
+
+    if $(xdslctl info | grep -q "Showtime") || ([ -e "/usr/bin/xdslctl1" ] && $(xdslctl1 info | grep -q "Showtime")); then
+        xtm_configure_start
+        uci_revert_state xtm state status
+        uci_set_state xtm state status started
+    else
+        if [ -e "/usr/bin/xdslctl1" ]; then
+          app_cmd start --bondingenable
+        else
+          app_cmd start
+        fi
+
+        # Avoid starting multiple times as this adds additional queues.
+        app_cmd operate conn --show | grep enabled >/dev/null && exit
+
+        #enable the two ports and keep them enabled (like Broadcom does)
+        for portid in 1 2
+        do
+            app_cmd operate intf --state "$portid" enable
+        done
+        uci_set_state xtm state '' state
+    fi
+}
+
+stop() {
+    [ "$(uci_get_state xtm state status stopped)" = "stopped" ] && return
+    xtm_configure_stop
+    # xtm.state is deleted in xtm_configure_stop
+    uci_set_state xtm state '' state
+    uci_set_state xtm state status stopped
+}

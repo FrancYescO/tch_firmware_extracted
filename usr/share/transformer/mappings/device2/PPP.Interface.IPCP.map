@@ -1,0 +1,166 @@
+-- Automatically generated from Device:2.2
+-- using generator version 2.1
+local Device_PPP_Interface_i_IPCP_ = {
+  objectType = {
+    name = "Device.PPP.Interface.{i}.IPCP.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      LocalIPAddress = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      RemoteIPAddress = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      },
+      DNSServers = {
+        access = "readOnly",
+        list = true,
+        maxItems = "2",
+        type = "string",
+        default = "",
+      },
+      PassthroughEnable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      PassthroughDHCPPool = {
+        access = "readOnly", --readWrite currently not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.DHCPv4.Server.Pool.{i}.",
+        default = "",
+      },
+    }
+  }
+}
+
+local nwmodel = require "transformer.shared.models.device2.network"
+local network = require("transformer.shared.common.network")
+local ubus = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local networkBinding = { config = "network" , sectionname = "lan", option = "pppoerelay" }
+local table, mapper, commitApply = table, mapper, commitapply
+local configChanged = false
+
+local function get_ubusStatus(key)
+  local model = nwmodel.load()
+  local intf = model:getInterface(key)
+  return ubus:call("network.interface." .. intf, "status", {})
+end
+
+local function getLocalIPAddress(mapping, param, key, ubusStatus)
+  ubusStatus = ubusStatus or get_ubusStatus(key)
+  if ubusStatus and ubusStatus["ipv4-address"] and ubusStatus["ipv4-address"][1] then
+    return ubusStatus["ipv4-address"][1]["address"] or ""
+  end
+  return ""
+end
+
+local function getPassthroughEnable(mapping, param, key, ubusStatus)
+  ubusStatus = ubusStatus or get_ubusStatus(key)
+  local pppoeList = getFromUci(networkBinding)
+  if #pppoeList ~= 0 then
+    for _, relayValue in pairs(pppoeList) do
+      if relayValue == ubusStatus["device"] then
+        return "1"
+      end
+    end
+  end
+  return "0"
+end
+
+local function getRemoteIPAddress(mapping, param, key, ubusStatus)
+  ubusStatus = ubusStatus or get_ubusStatus(key)
+  if ubusStatus and ubusStatus["route"] and ubusStatus["route"][1] then
+    return ubusStatus["route"][1]["nexthop"] or ""
+  end
+  return ""
+end
+
+local function getDNSServers(mapping, param, key, ubusStatus)
+  ubusStatus = ubusStatus or get_ubusStatus(key)
+  if ubusStatus and ubusStatus["dns-server"] then
+    local dnsServers = {}
+    table.foreach(ubusStatus["dns-server"], function(s)
+      if not network.listContains(dnsServers, ubusStatus["dns-server"][s]) then
+        dnsServers[#dnsServers+1] = ubusStatus["dns-server"][s]
+      end
+    end)
+    return table.concat(dnsServers,",")
+  end
+  return ""
+end
+
+Device_PPP_Interface_i_IPCP_.get = {
+  LocalIPAddress = getLocalIPAddress,
+  RemoteIPAddress = getRemoteIPAddress,
+  DNSServers = getDNSServers,
+  PassthroughEnable = getPassthroughEnable,
+  PassthroughDHCPPool = ""
+}
+
+Device_PPP_Interface_i_IPCP_.getall = function(mapping, key)
+  local ubusStatus = get_ubusStatus(key)
+  local allValues = {
+    LocalIPAddress = getLocalIPAddress(mapping, nil , key,  ubusStatus),
+    RemoteIPAddress = getRemoteIPAddress(mapping, nil , key, ubusStatus),
+    DNSServers = getDNSServers(mapping, nil , key, ubusStatus),
+    PassthroughEnable = getPassthroughEnable(mapping, nil, key, ubusStatus),
+    PassthroughDHCPPool = ""
+  }
+  return allValues
+end
+
+Device_PPP_Interface_i_IPCP_.set = {
+  PassthroughEnable = function(mapping, paramName, paramValue, key, ubusStatus)
+    ubusStatus = ubusStatus or get_ubusStatus(key)
+    local pppoeList = getFromUci(networkBinding)
+    local setList = pppoeList
+    local isMatch = false
+    if #pppoeList ~= 0 then
+      for index, relayValue in pairs(pppoeList) do
+        if relayValue == ubusStatus["device"] then
+          if paramValue == "0" then
+            table.remove(setList, index)
+          end
+          isMatch = true
+          break
+        end
+      end
+      if isMatch == false and paramValue == "1" then
+        setList[#setList+1] = ubusStatus["device"]
+      end
+    else
+      if paramValue == "1" then
+        setList = {ubusStatus["device"]}
+      end
+    end
+    setOnUci(networkBinding, setList, commitApply)
+    configChanged = true
+  end
+}
+
+Device_PPP_Interface_i_IPCP_.commit = function()
+  if configChanged then
+    uciHelper.commit(networkBinding)
+  end
+  configChanged = false
+end
+
+Device_PPP_Interface_i_IPCP_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+  end
+  configChanged = false
+end
+
+register(Device_PPP_Interface_i_IPCP_)

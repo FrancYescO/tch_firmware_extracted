@@ -1,0 +1,112 @@
+#!/usr/bin/env lua
+local log = require ('tch.logger')
+log.init("phonebook", 6)
+
+local open, write, close, lines   = io.open, io.write, io.close, io.lines
+local find, match, upper, gsub = string.find, string.match, string.upper, string.gsub
+
+local vcfFile = "/tmp/phonebook.vcf"
+
+local ubus = require('ubus').connect()
+
+if not ubus then
+  log:error("Failed to connect to ubus")
+end
+
+local exportType = {
+  mobile = "TEL;CELL:",
+  home = "TEL;HOME:",
+  work = "TEL;WORK:"
+}
+
+local function export_vcf()
+    local file = open(vcfFile .. ".tmp","w+")
+    local content = ubus:call("mmdbd.phonebook", "list", {})
+    local data = content and content["results"]
+    if data and type(data) == 'table' then
+        local contactID = "-1"
+        local buff = ""
+        for _, v in pairs(data) do
+            if contactID == v["ContactID"] then
+                buff = buff .. (exportType[v["Type"]] or exportType["home"]) .. v["Number"] .. "\r\n"
+            else
+                if contactID ~= "-1" then
+                    buff = buff .. "END:VCARD\r\n"
+                    file:write(buff)
+                end
+
+                contactID = v["ContactID"]
+                buff = "BEGIN:VCARD\r\nVERSION:2.1\r\n"
+
+                if v["Name"] or v["FirstName"] then
+                    local fullName = {}
+                    fullName[#fullName + 1] = v["Name"]
+                    fullName[#fullName + 1] = v["MiddleName"]
+                    fullName[#fullName + 1] = v["FirstName"]
+                    local fn = table.concat(fullName, " ")
+
+                    fullName = {}
+                    fullName[#fullName + 1] = v["FirstName"] or ""
+                    fullName[#fullName + 1] = v["Name"] or ""
+                    fullName[#fullName + 1] = v["MiddleName"] or ""
+                    local n = table.concat(fullName, ";")
+
+                    buff = buff .. "FN;" .. fn .. "\r\nN;" .. n .. ";\r\n"
+                           .. (exportType[v["Type"]] or exportType["home"]) .. v["Number"] .. "\r\n"
+                end
+            end
+        end
+
+        if contactID ~= "-1" then
+            buff = buff .. "END:VCARD\r\n"
+            file:write(buff)
+        end
+        file:close()
+        os.rename(vcfFile .. ".tmp", vcfFile)
+    end
+end
+
+local function import_vcf()
+    local line
+    local entries, numbers = {}, {}
+    local lastname, firstname, middlename
+
+    for line in lines(vcfFile) do
+        if(find(line, "BEGIN:VCARD") ~= nil) then
+            numbers={}
+        elseif(find(line, "END:VCARD") ~= nil) then
+            if((firstname ~= "" or lastname ~= "") and numbers ~= nil) then
+                entries[#entries+1] = {FirstName = firstname, MiddleName = middlename, LastName = lastname, Numbers = numbers}
+            end
+        elseif(match(line, "^N")) then
+            firstname, lastname, middlename = match(line, "(%w*);(%w*);(%w*)", 3)
+        elseif(match(line, "^TEL") or match(line, "^item%d\.TEL")) then
+            local importtype, value = match (line, "[\"type:\"|\"TYPE:\"]*(%w+)[;|,]*.*:(.+)", 5)
+            if (value ~= nil) then
+                local number = gsub(value, "[-()%s]", "")
+                local typeID = upper(importtype)
+                if (typeID == "CELL") then
+                    typeID = "1"
+                elseif (typeID == "HOME") then
+                    typeID = "2"
+                else
+                    typeID = "0"
+                end
+                numbers[#numbers + 1] = {Number = number, TypeID = typeID}
+            end
+        end
+    end
+
+    if(next(entries) ~= nil) then
+         ubus:call("mmdbd.phonebook", "create", {contacts = entries})
+    end
+    os.remove(vcfFile)
+end
+
+if (arg[1] == "export") then
+    export_vcf()
+elseif arg[1] == "import" then
+    import_vcf()
+else
+    log:error("Invalid input!")
+end

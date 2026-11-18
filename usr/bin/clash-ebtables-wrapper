@@ -1,0 +1,65 @@
+#!/usr/bin/env lua
+
+--[[
+  clash-ebtables-wrapper is designed for the CLI's (clash) ebtables command.
+  It may be used from a root shell, but this is not its main purpose.
+
+  Summary:
+    The script calls `ebtables` with the provided arguments, with one important exception:
+       `-L all` and `-Z all`
+       As the other options, `-L` and `-Z` is also passed through as is, except when it is set with value `all`.
+       Value `all` is stripped from the arguments, so that `ebtables` is executed with plain `-L` or `-Z`.
+       When `-L` is set to a chain name, `-L 'that_chain_name'` is simply passed to ebtables.
+       Similarly when `-Z` is set to a chain name, `-Z 'that_chain_name'` is simply passed to ebtables.
+
+  Background:
+    Declaring the clash command with flag `-L (string default "")` or `-Z (string default "")` is insufficient to get the arguments flow
+    correctly from clash -> transformer -> ebtables in all cases.
+
+    Due to design, when `-L` or `-Z` is left empty, it never arrives at ebtables, hence we would not be able to
+    list all chains from ebtables. The wrapper script covers this by translating `-L all` to `-L` and `-Z all` to `-Z`  before calling
+    ebtables.
+]]--
+
+local posix = require("tch.posix")
+
+-- Call ebtables with provided args string.
+-- The args table should represent valid ebtables arguments,
+-- but it will report back its error(s) if not.
+local function ebtables(args)
+  local backend = "/usr/sbin/ebtables"
+  local _, errmsg = posix.execv(backend, args)
+  -- execv() never returns, unless errors
+  print("Error: " .. (errmsg or "unkown error"))
+end
+
+-- Fix the arg table when arguments `-L all` or '-Z all' are provided.
+-- This function returns the arg table, with `all` being removed
+-- when `-L all` or '-Z all' is provided (see summary for background).
+--
+-- This function also returns a flag that indicates
+local function arg_fixup(arguments)
+  local lastarg
+  local renameArgs, fixedArgs = {}, {}
+
+-- Ebtables expects the -t option to come first.
+-- root@OpenWrt:~# ebtables -L -t nat
+-- Please put the -t option first.
+-- Since lua iterators are non predictable and we cannot determine the order in which user enters the option, always append options -L and -Z at the last
+
+  for _, arg in ipairs(arguments) do
+    if lastarg == "-t" then
+      fixedArgs[#fixedArgs + 1] = "-t"
+      fixedArgs[#fixedArgs + 1] = arg
+    elseif arg ~= "-t" and arg ~= "all" then
+      renameArgs[#renameArgs + 1] = arg
+    end
+    lastarg = arg
+  end
+  for _, arg in ipairs(renameArgs) do
+    fixedArgs[#fixedArgs + 1] = arg
+  end
+  return fixedArgs
+end
+
+ebtables( arg_fixup(arg) )

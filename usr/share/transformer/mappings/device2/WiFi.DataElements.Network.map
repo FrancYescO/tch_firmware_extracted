@@ -1,0 +1,84 @@
+-- Manually generated
+local Device_WiFi_DataElements_Network_ = {
+  objectType = {
+    name = "Device.WiFi.DataElements.Network.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      ID = {
+        access = "readWrite",
+        description = "A unique identifier for this particular Wi-Fi network.",
+        type = "string"
+      },
+      ControllerID = {
+        access = "readWrite",
+        description = "A unique identifier for a Multi-AP controller.",
+        type = "string"
+      }
+    }
+  }
+}
+
+local register = register
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local commitApply = commitapply
+local binding = {}
+local transactions = {}
+local function getUciParam(config, sectionName, option, default)
+  binding.config = config
+  binding.sectionname = sectionName
+  binding.default = default
+  if option then
+    binding.option = option
+    return getFromUci(binding)
+  end
+  return getAllFromUci(binding)
+end
+
+local function setUciParam(config, sectionName, option, value)
+  binding.config = config
+  binding.sectionname = sectionName
+  binding.option = option
+  setOnUci(binding,value,commitApply)
+  transactions[config] = true
+end
+
+Device_WiFi_DataElements_Network_.get = {
+  ID = function(mapping, param, key)
+    return  getUciParam("multiap", "controller", "de_networkid")
+  end,
+  ControllerID = function(mapping, param, key)
+    return  getUciParam("multiap", "controller", "de_controllerid")
+  end
+}
+
+Device_WiFi_DataElements_Network_.set = {
+  ID = function(mapping, param, value, key)
+    setUciParam("multiap", "controller", "de_networkid", value)
+  end,
+  ControllerID = function(mapping, param, value, key)
+    setUciParam("multiap", "controller", "de_controllerid", value)
+  end
+}
+
+Device_WiFi_DataElements_Network_.commit = function()
+  for config,_ in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+
+Device_WiFi_DataElements_Network_.revert = function()
+  for config,_ in pairs(transactions) do
+    revert({config =  config})
+  end
+  transactions = {}
+end
+
+register(Device_WiFi_DataElements_Network_)
