@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=12
+APP=ledfw.lua
+STATUSLED_APP=status-led-eventing.lua
+PID_FILE=/var/run/$APP.pid
+STATUSLED_PID_FILE=/var/run/$STATUSLED_APP.pid
+
+start() {
+        insmod technicolor_led 2>/dev/null
+        if [ -x /sbin/$STATUSLED_APP ]; then
+            start-stop-daemon -S -x $STATUSLED_APP -p $STATUSLED_PID_FILE -m -b
+        fi
+        start-stop-daemon -S -x $APP -p $PID_FILE -m -b
+}
+
+stop() {
+#        start-stop-daemon -K -n $APP -p $PID_FILE -s TERM
+        killall -KILL $APP
+        if [ -x /sbin/$STATUSLED_APP ]; then
+#           long process name : start-stop-daemon fails to stop the daemon; replace with ' killall'
+#           start-stop-daemon -K -n $STATUSLED_APP -p $STATUSLED_PID_FILE -s TERM
+            killall -KILL $STATUSLED_APP
+        fi
+        rm -rf $PID_FILE
+        rm -rf $STATUSLED_PID_FILE
+}

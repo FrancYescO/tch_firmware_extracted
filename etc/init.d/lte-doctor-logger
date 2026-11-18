@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+
+USE_PROCD=1
+
+start_service() {
+	local _ENABLED=$(uci_get ltedoctor @logger[0] enabled "1")
+	if [ "$_ENABLED" = "1" ]; then
+		logger -t "lte-doctor" "Starting LTE Doctor"
+		local _NETSPEED=$(uci_get ltedoctor @logger[0] netspeed "")
+		if [ -n "$_NETSPEED" ]; then
+			logger -t "lte-doctor" "Starting netspeed monitor on $_NETSPEED"
+			procd_open_instance
+			procd_set_param command /usr/bin/netspeed $_NETSPEED
+			procd_set_param respawn
+			procd_close_instance
+		fi
+		procd_open_instance
+		local DB_PATH=$(uci_get ltedoctor @logger[0] path "/tmp/lte-doctor.db")
+		local INTERVAL=$(uci_get ltedoctor @logger[0] interval "5")
+		local PERIOD=$(uci_get ltedoctor @logger[0] period "1")
+		procd_set_param command /usr/bin/lte-doctor-logger $INTERVAL $PERIOD $DB_PATH
+		procd_set_param respawn
+		procd_close_instance
+	else
+		logger -t mobiled "LTE Doctor disabled"
+	fi
+}
+
