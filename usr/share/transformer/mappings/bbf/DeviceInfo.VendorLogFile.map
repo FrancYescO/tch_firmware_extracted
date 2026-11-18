@@ -1,0 +1,225 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Multi_DeviceInfo_VendorLogFile_i_ = {
+  objectType = {
+    name = "#ROOT.DeviceInfo.VendorLogFile.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "VendorLogFileNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "64",
+      },
+      MaximumSize = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      Persistent = {
+        access = "readOnly",
+        type = "boolean",
+      },
+      X_000E50_DeviceLogFilter = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+         enumeration = {
+         "SIP",
+         "DHCP",
+         "PPP",
+         "CWMPD",
+         "WANSENSING",
+         "FON",
+         "ALL",
+         },
+      },
+      X_000E50_DeviceLogLevel = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+        enumeration = {
+        "Normal",
+        "Verbose"
+        },
+      },
+      X_000E50_Rotate = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+      X_000E50_Size = {
+        access = "readWrite",
+        type = "unsignedInt",
+      },
+    }
+  }
+}
+
+local lfs = require("lfs")
+local binding = { config = "system" }
+local uci_helper = mapper("ucihelper")
+local get_from_uci = uci_helper.get_from_uci
+local getall_from_uci = uci_helper.getall_from_uci
+local set_on_uci = uci_helper.set_on_uci
+local normal_priority = { "emerg", "alert", "crit", "err", "warning" }
+local categories = {
+  ALL = { "" },
+  SIP = { "mmpbx", "mmpbxd%[%d+%]" },
+  DHCP = { "dhcp" },
+  PPP = { "ppp" },
+  CWMPD = { "cwmpd","cwmpd%[%d+%]" },
+  WANSENSING = { "transformer: %[wansensing%]" },
+  FON = { "hotspotd" }
+}
+
+local function get_patterns(category, level)
+  local patterns = {}
+  local keywords = categories[category]
+
+  if not keywords then return nil end
+
+  for _,keyword in ipairs(keywords) do
+      if level == "Normal" then
+         for _,priority in ipairs(normal_priority) do
+             patterns[#patterns+1] = "\."..priority.."%s+"..keyword
+         end
+      else
+         patterns[#patterns+1] =keyword
+      end
+  end
+
+  return patterns
+end
+
+local function uci_set_pattern(key,category,level)
+  binding.sectionname = key
+  if(category == "ALL" and level =="Verbose" ) then
+    binding.option = "logall"
+    set_on_uci(binding, 1, commitapply)
+  else
+    local patterns = get_patterns(category, level) or {}
+    binding.option = "pattern"
+    set_on_uci(binding, patterns, commitapply)
+    binding.option = "logall"
+    uci_helper.delete_on_uci(binding, commitapply)
+  end
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.entries = function(mapping)
+  local logEntries = {}
+  binding.sectionname = "log"
+  uci_helper.foreach_on_uci(binding, function(s)
+    logEntries[#logEntries+1] = s['.name']
+  end)
+  return logEntries
+end
+
+local function getUciValue(option, key, default)
+  binding.sectionname = key
+  binding.option = option
+  binding.default = default
+  return get_from_uci(binding)
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.get = {
+  Name = function(mapping, param, key)
+    return getUciValue("path", key)
+  end,
+
+  MaximumSize = function(mapping, param, key)
+    -- Max number of files is 1 (the current log file) plus max number of log rotation files.
+    -- size is the maximum size per file
+    binding.sectionname = key
+    binding.option = nil
+    local logConfig = getall_from_uci(binding)
+    local size = tonumber(logConfig.size) or 0
+    local rotate = logConfig.rotate and tonumber(logConfig.rotate) or 0
+    return tostring(size * (rotate + 1))
+  end,
+
+  Persistent = function(mapping, param, key)
+    -- log file is persistent when path, size and rotate options are valid at the same time
+    binding.sectionname = key
+    binding.option = nil
+    local logConfig = getall_from_uci(binding)
+    local path = logConfig.path or ""
+    local validPath = lfs.attributes(path, "mode") == "file"
+    local size = tonumber(logConfig.size) or 0
+    local rotate = logConfig.rotate and tonumber(logConfig.rotate) or 0
+    return (validPath and size > 0 and rotate > 0) and "1" or "0"
+  end,
+  X_000E50_DeviceLogFilter = function(mapping, param, key)
+    return getUciValue("logfilter", key, "ALL")
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, key)
+    return getUciValue("loglevel", key, "Normal")
+  end,
+  X_000E50_Rotate = function(mapping, param, key)
+    return getUciValue("rotate", key, "0")
+  end,
+  X_000E50_Size = function(mapping, param, key)
+    return getUciValue("size", key, "0")
+  end
+}
+
+Multi_DeviceInfo_VendorLogFile_i_.getall = function(mapping,key)
+  binding.sectionname = key
+  local values = getall_from_uci(binding)
+  return {
+    Name = values.path or "",
+    MaximumSize = values.size or "0",
+  }
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.set = {
+  X_000E50_DeviceLogFilter = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "loglevel"
+      local level = get_from_uci(binding)
+      local category = value
+      uci_set_pattern(key,category,level)
+      binding.option = "logfilter"
+      return set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_DeviceLogLevel = function(mapping, param, value, key)
+     binding.sectionname = key
+     binding.option = "logfilter"
+     local level = value
+     local category = get_from_uci(binding)
+     uci_set_pattern(key,category,level)
+     binding.option = "loglevel"
+     return set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_Rotate = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "rotate"
+      return set_on_uci(binding, value, commitapply)
+  end,
+  X_000E50_Size = function(mapping, param, value, key)
+      binding.sectionname = key
+      binding.option = "size"
+      return set_on_uci(binding, value, commitapply)
+  end,
+}
+
+Multi_DeviceInfo_VendorLogFile_i_.commit = function()
+  uci_helper.commit(binding)
+end
+
+Multi_DeviceInfo_VendorLogFile_i_.revert = function()
+  uci_helper.revert(binding)
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_DeviceInfo_VendorLogFile_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
