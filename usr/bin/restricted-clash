@@ -1,0 +1,115 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+# Helper function for logging with category `restricted-clash`
+__log() {
+	logger -t restricted-clash "$*"
+}
+
+__check_parent_process() { # parent_name protocol_name
+  local parent_name="${1}"
+  local protocol_name="${2}"
+  local curr="self"
+  local Name=""
+  local PPid=""
+
+  # Test if I'm forked by the expected parent process
+  until [ "$Name" = "${parent_name}" ] || [ "$PPid" = "1" ]
+  do
+    Name=`awk '/Name:/{print $2}' /proc/$curr/status`
+    PPid=`awk '/PPid:/{print $2}' /proc/$curr/status`
+    curr="$PPid"
+  done
+
+  if [ "$Name" = "${parent_name}" ]; then
+    __log "User $USER is connecting through ${protocol_name}..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if the current session is established by a Telnet connection
+_is_telnet() {
+  # Test if user is connecting through telnet
+  readlink -f /proc/self/fd/0 | grep -q pts
+  if [ "$?" -ne 0 ]; then
+    return 1
+  fi
+  __check_parent_process "telnetd" "Telnet"
+  return $?
+}
+
+# Check if the current session is established by a SSH connection
+_is_ssh() {
+  __check_parent_process "dropbear" "SSH"
+  return $?
+}
+
+# Check if the current session is established over a serial connection
+_is_serial() {
+
+  # Test if user is connecting through serial
+  readlink -f /proc/self/fd/0 | grep -q tty
+
+  if [ "$?" -eq 0 ]; then
+    __log "User $USER is connecting through tty..."
+    return 0
+  fi
+
+  return 1
+}
+
+# Verify if specified user has access to clash over the specified interface.
+#   * SSH: on any interface `uci.clash.user.ssh` or list of interfaces `uci.clash.user.ssh_interface`
+#   * Serial: `uci.clash.user.serial`
+#   * Telnet: `uci.clash.user.telnet`
+# 1: the connection type; should be `serial`, `ssh` or `telnet`
+_verify_access() {
+  local access=$(lua - "$1" <<EOF
+    local acc = require('clash-access-control').check(...)
+    print(acc and "1" or "")
+EOF
+)
+  if [ ! -z "$access" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# Check all pre-conditions before starting the shell:
+#   (1) Connection must be through serial or by SSH, nothing else.
+#   (2) User must have access over that respective connection.
+# Anything else is not allowed or supported.
+if _is_serial; then
+  # Only grant access if user has serial access
+  _verify_access "serial" || exit 1
+elif _is_ssh; then
+  # Only grant access if user has ssh access
+  _verify_access "ssh" || exit 1
+  if [ $# -gt 0 -a "${1}" = "-c" ]; then
+    # Drop the argument added by SSH
+    shift 1
+  fi
+  if [ $# -gt 0 ]; then
+    # There are still arguments, check that the first one doesn't start with scp
+    first_word=$(echo ${1} | cut -d " " -f 1)
+    if [ "${first_word}" = "scp" ]; then
+      # Explicitly block SCP
+      exit 1
+    fi
+  fi
+elif _is_telnet; then
+  # Only grant access if user has telnet access
+  _verify_access "telnet" || exit 1
+else
+  __log "User $USER attempts login through unrecognized protocol!"
+  exit 1
+fi
+
+# Start clash
+/usr/bin/clash $@
+
+__log "User $USER exited"
+

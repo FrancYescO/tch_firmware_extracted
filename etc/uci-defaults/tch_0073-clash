@@ -1,0 +1,181 @@
+#!/bin/sh
+
+. /lib/functions/provision.sh
+
+config="clash"
+
+# Not ideal, but provision.sh insists in starting to count from 500.
+_top_id=550
+
+_log() {
+	logger -t ${config} "$1"
+}
+
+# Helper function to detect closed build
+__is_closed_build() {
+	expr `uci show version.@version[0].version | cut -d '-' -f2 | cut -c3` % 2 || {
+		return 0
+	}
+	return 1
+}
+
+# Close root access on closed builds.
+_close_root_access() {
+	sed -i 's#\(root.*\)/bin/ash#\1/bin/false#' /etc/passwd
+}
+
+# Add (restricted-)clash to /etc/shells
+_add_shell() {
+	# Shells set to /etc/passwd must be present in /etc/shells
+	grep -q "restricted-clash" /etc/shells || echo "/usr/bin/restricted-clash" >>/etc/shells
+}
+
+# Set shell to (restricted-)clash for the specified user
+_set_shell() {
+	local usr="$1"
+
+	# Set the user's shell to restricted-clash
+	sed -i "s#\($usr.*\)/bin/ash#\1/usr/bin/restricted-clash#" /etc/passwd
+}
+
+# From specified installed keys, install selected public keys to the user's authorized keys
+__ssh_key() {
+	local key="$1"
+
+	# The comment to search must not be empty
+	if [[ "$key" ]]; then
+		local installedkeys="$2"
+		local userkeys="$3"
+		# Append SSH public key for which `key` matches the SSH key's comment.
+		# Comments are always at the end of the .pub file. They may contain whitespace.
+		# This means we must anchor grep at the end and include a leading space in the pattern.
+		grep -q " $key$" "$userkeys" || {
+			local ikey=$(grep " $key$" "$installedkeys")
+			if [[ "$ikey" ]]; then
+				_log "  Installing '$key' key to $userkeys"
+				echo "$ikey" >> "$userkeys"
+			fi
+		}
+	fi
+}
+
+# If configured, set up public key authentication for specified user
+_user_key() {
+	local usr="$1"
+	local keys=$(uci get -q ${config}.$usr.ssh_key)
+
+	# Only install public key(s) if the list option exists and is not empty
+	if [[ "$keys" ]]; then
+		_log "Clash user $usr has public keys '$keys'"
+		local ssh_path="/home/$usr/.ssh"
+
+		mkdir -p "$ssh_path"
+		chown "$usr:$usr" "$ssh_path"
+		chmod 700 "$ssh_path"
+
+		local installedkeys="/etc/dropbear/authorized_keys"
+		if [ -f "$installedkeys" ]
+		then
+			local userkeys="$ssh_path/authorized_keys"
+			# Generate or clear target file
+			> "$userkeys"
+			# Install each matching key that is configured for this user
+			config_list_foreach "$usr" ssh_key __ssh_key "$installedkeys" "$userkeys"
+			chmod 600 "$userkeys"
+			chown "$usr:$usr" "$userkeys"
+		fi
+	fi
+}
+
+# Create the user to /etc/passwd and /etc/shadow, and set their shell
+_create_user() {
+	local usr="$1"
+
+	# First, simply create the user with empty password
+	create_user $usr ""
+
+	# Then `lock` the account; it will be unlocked if a password is provisioned.
+	# Otherwise, user can only log in using public key authentication.
+	passwd -l "$usr"
+
+	# Set the user's shell; always do this only AFTER create_user
+	_set_shell "$usr"
+}
+
+# Set the user's password to /etc/shadow
+_set_password() {
+	local usr="$1"
+	local key
+
+	# See if a dedicated password was specified by optional script firstboot-clash-passw script
+	local passw=$(uci get -q -P /var/state clash.$usr.passw)
+	if [[ "$passw" ]]; then
+		_log "Creating clash user $usr with password from /var/state"
+		key="$passw"
+		# Clean up for security - must not leave the passwords in the clear
+		uci -P /var/state del clash.$usr.passw
+	else
+		# If no dedicated password specified, see if a gak_id is configured in web config
+		local gid=$(uci get -q ${config}.$usr.gak_id)
+
+		if [[ "$gid" ]]; then
+			_log "Creating clash user $usr with key from gak_id $gid"
+			key=$(get_access_key $gid)
+		fi
+	fi
+
+	# If a key is configured, encrypt and set it to /etc/shadow
+	if [[ "$key" ]]; then
+		set_pass "$usr" "$key"
+	else
+		_log "Clash user $usr has no password configured"
+	fi
+}
+
+# Set up the user's clash history
+_setup_history() {
+	local usr="$1"
+
+	local hfile=$(uci get ${config}.${usr}.historyfile)
+	if [ -n "${hfile}" ]; then
+		touch "${hfile}"
+		chown ${usr}:${usr} ${hfile}
+	fi
+}
+
+# The setup function that must be called to fully setup each clash user
+_setup_clash_user() {
+	local usr="$1"
+
+	# (1) Create the user in the OpenWRT system
+	_create_user "$usr"
+
+	# (2) Set the user's password, if any
+	_set_password "$usr"
+
+	# (3) Set up the user's public key authentication, if any
+	_user_key "$usr"
+
+	# (4) Set up the user's history
+	_setup_history "$usr"
+}
+
+# The entry point function that calls the individual setup functions
+setup() {
+	config_load ${config}
+
+	# Create the users as specified in config
+	config_foreach _setup_clash_user user
+
+	# Add (restricted-)clash to shells
+	_add_shell
+
+	# Close access with user `root` for closed builds
+
+	if __is_closed_build; then
+		_close_root_access
+	fi
+}
+
+setup
+
