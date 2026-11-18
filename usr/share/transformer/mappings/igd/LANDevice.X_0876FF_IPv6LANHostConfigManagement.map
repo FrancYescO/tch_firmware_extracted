@@ -1,0 +1,270 @@
+local InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.X_0876FF_IPv6LANHostConfigManagement.",
+    description = "IPv6LANHostConfigManagement",
+    access = "readOnly",
+    enableParameter = "Enable",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+        description = "Enable ipv6",
+      },
+      ULAPrefix = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "Prefix from ULAAddress",
+      },
+      ULAPrefixLength = {
+        access = "readOnly",
+        type = "string",
+        default = "64",
+        description = "ULAPrefixLength",
+      },
+      ULAAddress = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "ULAAddress",
+      },
+      IPv6PrefixID = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        description = "IPv6PrefixID",
+      },
+      AddressingType = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "stateless",
+          "stateful",
+           },
+        description = "AddressingType",
+      },
+      PrefixLength = {
+        access = "readOnly",
+        type = "int",
+        default = "64",
+        description = "PrefixLength",
+      },
+      SubnetID = {
+        access = "readOnly",
+        activeNotify = "canDeny",
+        type = "int",
+        description = "SubnetID from ULAAddress",
+      },
+      RALifetime = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "int",
+        description = "RALifetime",
+      },
+      LeaseTime = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "int",
+        description = "LeaseTime",
+      },
+      DNSServers = {
+        access = "readOnly",
+        list = true,
+        maxItems = "3",
+        max = "64",
+        type = "string",
+        description = "DNSServers",
+      },
+      DHCPv6MinAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "DHCPv6 Minimum Address",
+      },
+      DHCPv6MaxAddress = {
+        access = "readOnly",
+        type = "string",
+        description = "DHCPv6 Maximum Address",
+      },
+    }
+  }
+}
+
+local mapper, pairs = mapper, pairs
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local getAllFromUci = uciHelper.getall_from_uci
+local setOnUci = uciHelper.set_on_uci
+local networkBinding = { config = "network" }
+local dhcpBinding = { config = "dhcp" }
+local commitapply = commitapply
+local commit = uciHelper.commit
+local revert = uciHelper.revert
+local transactions = {}
+local posix = require 'tch.posix'
+local AF_INET6 = posix.AF_INET6
+
+local function getUciValue(binding, sectionName, paramName, default)
+  binding.sectionname = sectionName
+  binding.option = paramName
+  binding.default = default
+  return getFromUci(binding)
+end
+
+local function getDHCPv6MinMaxAddress(key)
+  local interfaceInfo = conn:call("network.interface." .. key, "status", {}) or {}
+  if interfaceInfo["ipv6-prefix-assignment"] and interfaceInfo["ipv6-prefix-assignment"][1] and
+        interfaceInfo["ipv6-prefix-assignment"][1]["mask"] < 96 then
+    local prefix = interfaceInfo["ipv6-prefix-assignment"][1]["address"]
+    -- TODO: Add support for dynamic IPv6 Configuration for MinAddress and MaxAddress
+    -- once lower layer support is available.
+    return prefix and prefix .. "100", prefix .. "fff"
+  end
+end
+
+local function setUciValue(binding, sectionName, option, value)
+  binding.sectionname = sectionName
+  binding.option = option
+  setOnUci(binding, value, commitapply)
+  transactions[networkBinding.config] = true
+  transactions[dhcpBinding.config] = true
+end
+
+local function addressSplit()
+  local address = getUciValue(networkBinding, "globals", "ula_prefix", "1")
+  local addressTable = {}
+  local ipv6Address = address:gsub("/%S%S", '')
+  local rc = posix.inet_pton(AF_INET6, ipv6Address)
+  if rc then
+    for index=1,16,2 do
+      addressTable[#addressTable+1] = string.format("%02x%02x", rc:byte(index), rc:byte(index+1))
+    end
+  end
+  return addressTable
+end
+
+local function getDNSServer(mapping, parentkey)
+  local data = conn:call("network.interface.wan6", "status" ,{})
+  local dnsTable = data and data['dns-server'] or {}
+  return table.concat(dnsTable, ",")
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.get = {
+  Enable = function(mapping, param, key)
+    return getUciValue(networkBinding, "lan", "ipv6", "1")
+  end,
+  ULAPrefix = function(mapping, param, key)
+    local value = addressSplit()
+    return value[1] or ""
+  end,
+  ULAPrefixLength = "64",
+  ULAAddress = function(mapping, param, key)
+    return getUciValue(networkBinding, "globals", "ula_prefix", "1") or ""
+  end,
+  IPv6PrefixID = function(mapping, param, key)
+    local value = addressSplit()
+    local prefixID
+    if value[5] then
+      prefixID = value[5] .. ':' .. value[6] .. ':' .. value[7] .. ':' .. value[8]
+    end
+    return prefixID or ""
+  end,
+  AddressingType = function(mapping, param, key)
+    local value = getUciValue(dhcpBinding, "lan", "ra_management", "0")
+    return value == "0" and "stateless" or "stateful"
+  end,
+  PrefixLength = "64",
+  SubnetID = function(mapping, param, key)
+    local value = addressSplit()
+    return value[4] or "0"
+  end,
+  RALifetime = function(mapping, param, key)
+    local raLifetime = getUciValue(dhcpBinding, "lan", "ra_lifetime", "0")
+    return tostring(tonumber(raLifetime) / 60)
+  end,
+  LeaseTime = function(mapping, param, key)
+    local value =  getUciValue(dhcpBinding, "lan", "leasetime", "0")
+    return value:gsub("h", '')
+  end,
+  DNSServers = function(mapping, param, key)
+    return getDNSServer() or ""
+  end,
+  DHCPv6MinAddress = function(mapping, param, key)
+    local minAddress = getDHCPv6MinMaxAddress(key)
+    return minAddress or ""
+  end,
+  DHCPv6MaxAddress = function(mapping, param, key)
+    local _, maxAddress = getDHCPv6MinMaxAddress(key)
+    return maxAddress or ""
+  end
+}
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.getall = function(mapping, key)
+  networkBinding.sectionname = "globals"
+  networkBinding.option = nil
+  dhcpBinding.sectionname = "lan"
+  dhcpBinding.option = nil
+  local configValues = getAllFromUci(networkBinding)
+  local configValuesDhcp = getAllFromUci(dhcpBinding)
+  local value = addressSplit()
+  local time = configValuesDhcp.leasetime
+  local minAddress, maxAddress = getDHCPv6MinMaxAddress(key)
+  local prefixID
+  if value[5] then
+    prefixID = value[5] .. ':' .. value[6] .. ':' .. value[7] .. ':' .. value[8]
+  end
+  time = time:gsub("h", '')
+  local dnsServer = getDNSServer()
+  return {
+    Enable = configValues.ipv6 and configValues.ipv6,
+    ULAPrefix = value[1] or "",
+    ULAAddress = configValues.ula_prefix or "",
+    AddressingType = configValuesDhcp.ra_management == "0" and "stateless" or "stateful",
+    RALifetime = tostring(tonumber(configValuesDhcp.ra_lifetime) / 60),
+    LeaseTime = time,
+    DNSServers = dnsServer or "",
+    IPv6PrefixID = prefixID or "",
+    SubnetID = value[4] or "0",
+    DHCPv6MinAddress = minAddress or "",
+    DHCPv6MaxAddress = maxAddress or ""
+  }
+end
+
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.set = {
+  Enable = function(mapping, param, value)
+    setUciValue(networkBinding, "lan", "ipv6", value)
+    transactions[networkBinding] = true
+  end,
+  AddressingType = function(mapping, param, value)
+    local state = value == "stateless" and "0" or "2"
+    setUciValue(dhcpBinding, "lan", "ra_management", state)
+    transactions[dhcpBinding] = true
+  end,
+  RALifetime = function(mapping, param, value)
+    local converted_value = tonumber(value) * 60
+    setUciValue(dhcpBinding, "lan", "ra_lifetime", tostring(converted_value))
+    transactions[dhcpBinding] = true
+  end,
+  LeaseTime = function(mapping, param, value)
+    setUciValue(dhcpBinding, "lan", "leasetime", value)
+    transactions[dhcpBinding] = true
+  end,
+}
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.commit = function ()
+  for config in pairs(transactions) do
+    commit({config = config})
+  end
+  transactions = {}
+end
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_.revert = function ()
+  for config in pairs(transactions) do
+    revert({config = config})
+  end
+  transactions = {}
+end
+
+register(InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_)

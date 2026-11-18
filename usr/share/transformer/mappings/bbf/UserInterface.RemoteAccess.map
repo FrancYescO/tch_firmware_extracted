@@ -1,0 +1,257 @@
+-- Automatically generated from Device:2.9
+-- using generator version 2.2
+local Multi_UserInterface_RemoteAccess_ = {
+  objectType = {
+    name = "#ROOT.UserInterface.RemoteAccess.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Port = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range = {
+          {
+            max = "65535",
+          },
+        },
+      },
+      SupportedProtocols = {
+        access = "readOnly",
+        list = true,
+        type = "string",
+        enumeration = {
+          "HTTP",
+          "HTTPS",
+        },
+      },
+      Protocol = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "HTTP",
+          "HTTPS",
+        },
+      },
+    }
+  }
+}
+
+local ucihelper = mapper 'ucihelper'
+local open = io.open
+local transactions = {}
+local webBinding = { config = "web", sectionname = "remote", option = "port" }
+
+-- Access routines for the Remote Assistance case
+-- (the real web-framework-tch remote assistance)
+local RemoteAssistance = {}
+
+function RemoteAssistance:loadState()
+  local state = {
+    wanip="",
+    wanport="",
+    lanport="",
+    enabled="0",
+    password="_dummy_",
+    mode="0",
+  }
+  local f = open("/var/run/assistance/remote",'r')
+  if f then
+    for ln in f:lines() do
+      local key, value = ln:match('^%s*([^=%s]*)%s*=%s*([^%s]*)')
+      if key then
+        state[key] = value
+      end
+    end
+    f:close()
+  end
+  return state
+end
+
+function RemoteAssistance:setEnable(value)
+  local f = open("/tmp/.remoteassistance",'w')
+  if f then
+    f:write(value)
+    f:close()
+  end
+  commitapply:newset("UserInterface.RemoteAccess.Enable")
+end
+
+function RemoteAssistance:setPort(value)
+  local state = RemoteAssistance:loadState()
+  if state.enabled == "1" then
+    return nil, "Port cannot be modified when Remote Assistance is enabled"
+  end
+  ucihelper.set_on_uci(webBinding, value, commitapply)
+  transactions[webBinding] = true
+end
+
+local function getEnable(state)
+  state = state or RemoteAssistance:loadState()
+  return state.enabled == "1" and "1" or "0"
+end
+
+local function getPort(state)
+  local port = ucihelper.get_from_uci(webBinding)
+  local fromPort, toPort = port:match('^%s*(%d+)%s*-%s*(%d+)%s*$')
+  if fromPort then
+    state = state or RemoteAssistance:loadState()
+    return  state.wanport or ""
+  end
+  return port
+end
+
+Multi_UserInterface_RemoteAccess_.get = {
+  Enable = function(mapping, param, key)
+    return getEnable()
+  end,
+
+  Port = function(mapping, param, key)
+    return getPort()
+  end,
+
+  SupportedProtocols = "HTTPS",
+
+  Protocol = "HTTPS",
+}
+
+Multi_UserInterface_RemoteAccess_.getall = function(mapping, key)
+  local state = RemoteAssistance:loadState()
+  return {
+    Enable = getEnable(state),
+    Port = getPort(state),
+  }
+end
+
+local function setPort(value)
+  local state = RemoteAssistance:loadState()
+  if value == state.wanport then
+    -- setting the same value as the current one is a NOP
+    -- (but always valid)
+    return
+  end
+  return RemoteAssistance:setPort(value)
+end
+
+local function setProtocol(value)
+  if value ~= "HTTPS" then
+    return nil, "value is not a supported protocol"
+  end
+  -- no more left to do as the protocol is always HTTPS
+end
+
+Multi_UserInterface_RemoteAccess_.set = {
+  Enable = function(mapping, param, value)
+    return RemoteAssistance:setEnable(value)
+  end,
+  Port = function(mapping, param, value)
+    return setPort(value)
+  end,
+  Protocol = function(mapping, param, value)
+    return setProtocol(value)
+  end,
+}
+
+Multi_UserInterface_RemoteAccess_.commit = function()
+  for binding in pairs(transactions) do
+    ucihelper.commit(binding)
+  end
+  transactions = {}
+end
+
+Multi_UserInterface_RemoteAccess_.revert = function()
+  for binding in pairs(transactions) do
+    ucihelper.revert(binding)
+  end
+  transactions = {}
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_UserInterface_RemoteAccess_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local remoteConsoleAccess = require("transformer.shared.remoteconsoleaccess")
+local register = register
+
+local Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_ = {
+  objectType = {
+    name = "#ROOT.UserInterface.RemoteAccess.X_0876FF_Telnet.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Parameters associated with remote access via telnet",
+    parameters = {
+      Enable  = {
+        access = "readWrite",
+        type = "boolean",
+        description = "Enable / Disable remote console access via telnet",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        description = "Username for remote telnet access",
+      },
+      Password = {
+        access = "readWrite",
+        type = "string",
+        description = "Password for remote telnet access",
+      },
+      IdleDisconnectTime = {
+        access = "readWrite",
+        type = "unsignedInt",
+        range =
+          {
+             max = "9"
+          },
+        description = "Idle timeout for remote telnet access, after which connection closes automatically",
+      }
+    }
+  }
+}
+
+local getParamMap = {
+  Enable = remoteConsoleAccess.getRemoteTelnetEnable,
+  Username = remoteConsoleAccess.getRemoteConsoleUserName,
+  Password = remoteConsoleAccess.getRemoteConsolePassword,
+  IdleDisconnectTime = remoteConsoleAccess.getRemoteTelnetIdleTimeout
+}
+
+local setParamMap = {
+  Enable = remoteConsoleAccess.setRemoteTelnetEnable,
+  Username = remoteConsoleAccess.setRemoteConsoleUserName,
+  Password = remoteConsoleAccess.setRemoteConsolePassword,
+  IdleDisconnectTime = remoteConsoleAccess.setRemoteTelnetTimeout
+}
+
+Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_.get = getParamMap
+
+Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_.set = function(mapping, param, value)
+  local _, msg = setParamMap[param](value, commitapply)
+  if msg then
+    return nil, msg
+  end
+  return true
+end
+
+Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_.commit = remoteConsoleAccess.commit_remoteconsole_data
+
+Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_.revert = remoteConsoleAccess.revert_remoteconsole_data
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_UserInterface_RemoteAccess_X_0876FF_Telnet_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  if dupli.objectType.name:match('^Device.') then
+    -- Remove igd-specific parameters from device2
+    dupli.objectType.parameters.Enable = nil
+    dupli.objectType.parameters.Username = nil
+    dupli.objectType.parameters.Password = nil
+    dupli.objectType.parameters.IdleDisconnectTime = nil
+  end
+  register(dupli)
+end

@@ -1,0 +1,193 @@
+-- Manually generated
+local Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_STA_i_ = {
+  objectType = {
+    name = "Device.WiFi.DataElements.Network.Device.{i}.Radio.{i}.BSS.{i}.STA.{i}.",
+    numEntriesParameter = "STANumberOfEntries",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+        max = "17",
+      },
+      TimeStamp = {
+        access = "readOnly",
+        type = "string",
+      },
+      SignalStrength = {
+        access = "readOnly",
+        type = "unsignedInt",
+        range = {
+          max = "255"
+        }
+      },
+      LastConnectTime = {
+        access = "readOnly",
+        type = "unsignedInt",
+      },
+      BytesReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      BytesSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      PacketsReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorsSent = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      ErrorReceived = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      RetransCount = {
+        access = "readOnly",
+        type = "unsignedLong",
+      },
+      IPv4Address = {
+        access = "readOnly",
+        type = "string",
+        max = "15"
+      },
+      IPv6Address = {
+        access = "readOnly",
+        type = "string",
+        max = "45"
+      },
+      HostName = {
+        access = "readOnly",
+        type = "string"
+      },
+    }
+  }
+}
+
+local conn = mapper("ubus").connect()
+local cacheData = {}
+local host_data
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+local concat = table.concat
+local paramMap = {
+  BytesSent = "txbytes",
+  BytesReceived = "rxbytes",
+  PacketsSent = "txpkts",
+  PacketsReceived = "rxpkts",
+  ErrorsSent = "txpkterrrors",
+  ErrorsReceived = "rxpkterrors",
+  RetransCount = "retransmission_cnt",
+  SignalStrength = "rssi",
+  LastConnectTime = "since_assoc_time",
+}
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_STA_i_.entries = function(mapping, parent, grand, great)
+  cacheData = conn:call("multiap.controller.station", "list", {}) or {}
+  local data = conn:call("multiap.controller.agent_info", "get", { almac = great }) or {}
+  host_data = conn:call("hostmanager.device", "get", {}) or {}
+  local bssInfo = data[great] and data[great]["radio_info"] and data[great]["radio_info"][grand] and data[great]["radio_info"][grand]["bss_info"] and data[great]["radio_info"][grand]["bss_info"][parent] or {}
+  bssInfo = bssInfo["sta_list"] or {}
+  local entries = {}
+  for idx,mac in ipairs(bssInfo) do
+    if cacheData[mac] and cacheData[mac]["rssi"] and cacheData[mac]["rssi"] ~= "" and cacheData[mac]["rssi"] ~= 0 then
+      entries[#entries + 1] = string.format("%s|%s_%s_%s", mac, parent, grand, great)
+    end
+  end
+  return entries
+end
+
+local function getIPAddress(version,key)
+  local hostData = conn:call("hostmanager.device", "get", { ["mac-address"] = key }) or {}
+  local ipaddr = {}
+    for ip in pairs(hostData) do
+      for _, idx in pairs(hostData[ip][version]) do
+        ipaddr[#ipaddr+1] = idx["address"] or ""
+      end
+    end
+  return ipaddr and concat(ipaddr,",") or ""
+end
+
+local function getHostName(key)
+  local hostData = conn:call("hostmanager.device", "get", { ["mac-address"] = key }) or {}
+  for dev in pairs(hostData) do
+    return hostData[dev] and hostData[dev]["hostname"] or ""
+  end
+  return ""
+end
+
+local function getTime(time)
+  local currTime = os.time()
+  time = time and (currTime - (tonumber(time) or 0)) or currTime
+  return os.date("%Y-%m-%dT%H:%M:%SZ", time) or ""
+end
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_STA_i_.get = function(mapping, param, key)
+  local key = splitKey(key)
+  if param == "MACAddress" then
+    return key
+  end
+  if param == "TimeStamp" then
+    return getTime()
+  end
+  if param == "IPv4Address" then
+    return getIPAddress("ipv4",key)
+  end
+  if param == "IPv6Address" then
+    return getIPAddress("ipv6",key)
+  end
+  if param == "HostName" then
+    return getHostName(key)
+  end
+  if paramMap[param] then
+    local result = cacheData[key] and cacheData[key][paramMap[param]] or "0"
+    if param == "LastConnectTime" then
+      result = getTime(result) or getTime() or ""
+    end
+    return tostring(result)
+  end
+  return "0"
+end
+
+Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_STA_i_.getall = function(mapping, key)
+  local key = splitKey(key)
+  local allValues = {}
+  local data = cacheData[key] or {}
+  for param, option in pairs(paramMap) do
+    if param == "MACAddress" then
+      allValues[param] = key
+    end
+    if param == "TimeStamp" then
+      allValues[param] = getTime()
+    end
+    if param == "IPv4Address" then
+      allValues[param] = getIPAddress("ipv4",key)
+    end
+    if param == "IPv6Address" then
+      allValues[param] = getIPAddress("ipv6",key)
+    end
+    if param == "HostName" then
+      allValues[param] = getHostName(key)
+    end
+    allValues[param] = data[option] or "0"
+    if param == "LastConnectTime" then
+      allValues[param] = getTime(allValues[param]) or getTime() or ""
+    end
+    if param == "SignalStrength" then
+      allValues[param] = allValues[param] ~= "" and (allValues[param] + 110) * 2 or "0"
+    end
+    allValues[param] = allValues[param] and tostring(allValues[param]) or ""
+  end
+  return allValues
+end
+
+register(Device_WiFi_DataElements_Network_Device_i_Radio_i_BSS_i_STA_i_)

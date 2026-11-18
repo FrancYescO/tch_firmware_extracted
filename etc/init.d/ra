@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+# must come after nginx!
+START=85
+USE_PROCD=1
+
+boot() {
+  if [ ! -z $(uci show web | grep "web.state_.*\.enabled=1") ]; then
+    while true; do
+      sleep 1
+      wget -O /dev/null -q http://127.0.0.1 && return
+    done
+  fi
+  start
+}
+
+service_triggers() {
+   INTERFACE_NAME="$(uci get web.@assistance[0].interface 2> /dev/null)"
+   INTERFACE6_NAME="$(uci get web.@assistance[0].interface6 2> /dev/null)"
+   if [ -z "${INTERFACE_NAME}" ]; then
+     INTERFACE_NAME="wan"
+   fi
+   procd_add_interface_trigger "interface.*" $INTERFACE_NAME wget -O /dev/null http://127.0.0.1:55555/ra
+   if [ -n "${INTERFACE6_NAME}" ]; then
+     procd_add_interface_trigger "interface.*" $INTERFACE6_NAME wget -O /dev/null http://127.0.0.1:55555/ra
+   fi
+}

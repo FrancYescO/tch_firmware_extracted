@@ -1,0 +1,41 @@
+#!/bin/sh
+
+. /lib/config/uci.sh
+
+proxyAddress=`echo "$2" | awk '{print $1}'`
+isIPAddress=$(IFS=.;set -- $proxyAddress; if [[ $1 -le 255 && $2 -le 255 && $3 -le 255 && $4 -le 255 ]] 2>/dev/null; then echo true; else echo false; fi)
+
+restart_mmpbxd() {
+  if [ "$(uci -P /var/state get mmpbx.state)" == "RUNNING" ] || [ "$(uci -P /var/state get mmpbx.state)" == "STARTING" ] ; then
+    /etc/init.d/mmpbxd restart
+  else
+    echo "MMPBX won't be restarted "
+  fi
+}
+
+
+if [ "$(uci_get mmpbxrvsipnet.sip_net.interface)" == "$1" ]; then
+  if [ $isIPAddress = true ]; then
+    if [ "$(uci_get mmpbxrvsipnet.sip_net.primary_proxy)" != "$proxyAddress" ]; then
+      uci_set mmpbxrvsipnet sip_net primary_proxy "$proxyAddress"
+      uci_set mmpbxrvsipnet sip_net primary_registrar "$proxyAddress"
+      uci_set mmpbxrvsipnet sip_net transport_type "UDP"
+      uci_set mmpbxrvsipnet sip_net primary_proxy_port "5060"
+      uci_set mmpbxrvsipnet sip_net domain_name ""
+      uci_commit mmpbxrvsipnet
+      restart_mmpbxd
+    else
+      echo "The proxy address didn't change so nothing to do .."
+    fi
+  else
+    if [ "$(uci_get mmpbxrvsipnet.sip_net.domain_name)" != "$proxyAddress" ]; then
+      uci_set mmpbxrvsipnet sip_net domain_name "$proxyAddress"
+      uci_set mmpbxrvsipnet sip_net primary_proxy "$proxyAddress"
+      uci_set mmpbxrvsipnet sip_net primary_registrar "$proxyAddress"
+      uci_commit mmpbxrvsipnet
+      restart_mmpbxd
+    else
+      echo "The proxy address didn't change so nothing to do .."
+    fi
+  fi
+fi

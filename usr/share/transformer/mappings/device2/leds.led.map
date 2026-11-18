@@ -1,0 +1,201 @@
+local open, string, register = io.open, string, register
+local leds = require("transformer.shared.leds")
+local uci_helper = mapper("ucihelper")
+local getFromUci = uci_helper.get_from_uci
+local setOnUci = uci_helper.set_on_uci
+local foreachOnUci = uci_helper.foreach_on_uci
+local ledbinding = {config = "ledfw"}
+local configChanged = false
+local Multi_Leds_i_ = {
+  objectType = {
+    name = "Device.Leds.X_000E50_Led.{i}.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+             "On",
+             "Off",
+             "Blinking",
+             "Netdev",
+        },
+      },
+      Brightness = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+             "Low",
+             "Middle",
+             "high",
+             "None",
+        },
+      },
+      Color = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+             "Red",
+             "Orange",
+             "Blue",
+             "Green",
+             "Cyan",
+             "White",
+             "Magenta",
+             "None",
+        },
+      },
+    }
+  }
+}
+
+local ledsInfo = {}
+
+Multi_Leds_i_.entries = function(mapping)
+  local entries = {}
+  ledsInfo = leds.getLedsInfo()
+  for k, v in pairs(ledsInfo) do
+    entries[#entries+1] = k
+  end
+  return entries
+end
+
+Multi_Leds_i_.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Status = function(mapping, param, key)
+    return ledsInfo[key].mixStatus
+  end,
+  Brightness = function(mapping, param, key)
+    return ledsInfo[key].mixBrightness
+  end,
+  Color = function(mapping, param, key)
+    return ledsInfo[key].mixColor
+  end,
+}
+
+register(Multi_Leds_i_)
+
+
+local Device_DeviceInfo_X_TELUS_LED_i_ = {
+  objectType = {
+    name = "Device.DeviceInfo.X_TELUS_LED.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+      },
+      Brightness = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "low",
+          "medium",
+          "high",
+        },
+      },
+    },
+  }
+}
+
+
+
+local function getBrightness(key)
+      ledbinding.sectionname = key
+      ledbinding.option = "green"
+      local value = getFromUci(ledbinding)
+      if value == "250" then
+        return "high"
+      elseif value == "70" then
+        return "medium"
+      elseif value == "10" then
+        return "low"
+      end
+  return ""
+end
+
+local function getName(key)
+      ledbinding.sectionname = key
+      ledbinding.option = "name"
+      local value = getFromUci(ledbinding)
+      return getFromUci(ledbinding) or ""
+end
+
+local function setUciValue(value, key)
+  ledbinding.sectionname = key
+  ledbinding.option = "red"
+  setOnUci(ledbinding, value, commitapply)
+  configChanged = true
+  ledbinding.option = "green"
+  setOnUci(ledbinding, value, commitapply)
+  configChanged = true
+  ledbinding.option = "blue"
+  setOnUci(ledbinding, value, commitapply)
+  configChanged = true
+end
+
+local function setBrightness(mapping,value, key)
+ local val
+ if value == "high" then
+      val = "250"
+ elseif value == "medium" then
+      val = "70"
+ elseif value == "low" then
+      val = "10"
+ end
+ setUciValue(val,key)
+ configChanged = true
+end
+
+Device_DeviceInfo_X_TELUS_LED_i_.entries = function(mapping)
+  local entries = {}
+  ledbinding.sectionname = "brightness"
+   foreachOnUci(ledbinding, function(s)
+      entries[#entries+1] = s[".name"]
+   end)
+  return entries
+end
+
+Device_DeviceInfo_X_TELUS_LED_i_.get = {
+  Name = function(mapping, param, key)
+    return getName(key)
+  end,
+  Brightness = function(mapping, param, key)
+    return getBrightness(key)
+  end,
+}
+
+Device_DeviceInfo_X_TELUS_LED_i_.set = {
+  Brightness = function(mapping,param,value,key)
+   setBrightness(mapping,value, key)
+   commitapply:newset("Device.DeviceInfo.X_TELUS_LED.{i}.Brightness")
+  end,
+}
+
+Device_DeviceInfo_X_TELUS_LED_i_.commit = function()
+  if configChanged == true then
+    uci_helper.commit(ledbinding)
+    configChanged = false
+  end
+end
+
+Device_DeviceInfo_X_TELUS_LED_i_.revert = function()
+  if configChanged == true then
+    uci_helper.revert(ledbinding)
+    configChanged = false
+  end
+end
+
+
+register(Device_DeviceInfo_X_TELUS_LED_i_)
+

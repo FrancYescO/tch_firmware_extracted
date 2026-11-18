@@ -1,0 +1,58 @@
+. /lib/functions.sh
+do_button () {
+	local button
+	local action
+	local handler
+	local min
+	local max
+	local state
+	local dly
+	local last_bg_pid
+	local do_handler=0
+
+	#uncomment next line for 'hold'-button debug logs
+	#local phb_log_tag="Press-and-Hold buttons"
+
+	config_get button $1 button
+	config_get action $1 action
+	config_get handler $1 handler
+	config_get min $1 min
+	config_get max $1 max
+	config_get dly $1 hold 0
+	config_get state $1 state
+
+	#uncomment next two lines to sanitize 'handler' string; Not done yet, because some current custo button handlers will not work any more
+	#delcharset="()\`\$*;|"
+	#handler=$(echo ${handler} | tr -d ${delcharset})
+
+	[ -z "$state" ] && state=1
+	[ "$ACTION" = "$action" -a "$BUTTON" = "$button" -a -n "$handler" -a "$state" = "1" ] && {
+		[ "$phb_log_tag" ] && logger -t "$phb_log_tag" "config $1 $button $ACTION 'hold':$dly seconds delay"
+		[ -z "$min" -a -z "$max" ] && do_handler=1
+		[ -z "$min" -a -n "$max" ] && [ $max -gt $SEEN ] && do_handler=1
+		[ -n "$min" -a -z "$max" ] && [ $min -le $SEEN ] && do_handler=1
+		[ -n "$min" -a -n "$max" ] && [ $min -le $SEEN -a $max -gt $SEEN ] && do_handler=1
+		[ "$do_handler" = "1" ] && {
+			if [ $dly -eq 0 ]; then
+				eval "$handler"
+			elif [ -z "$phb_log_tag" ]; then
+				eval "{ sleep $dly;$handler;rm -f ${BUTTON}_pressed_$1_last_bg.pid; }&"
+				last_bg_pid=$!
+				echo ${last_bg_pid} >${BUTTON}_${ACTION}_$1_last_bg.pid
+			else
+				eval "{ sleep $dly;logger -t \"$phb_log_tag\" \"After $dly seconds of delay, now executing '$handler'\";$handler;rm -f ${BUTTON}_pressed_$1_last_bg.pid; }&"
+				last_bg_pid=$!
+				echo ${last_bg_pid} >${BUTTON}_${ACTION}_$1_last_bg.pid
+				logger -t "$phb_log_tag" "hold=$dly, ${BUTTON}_${ACTION}_$1_last_bg.pid last BG PID=$last_bg_pid"
+			fi
+		}
+	}
+	[ "$ACTION" = "released" -a "$BUTTON" = "$button" -a "$state" = "1" -a -f ${BUTTON}_pressed_$1_last_bg.pid -a $dly -gt $SEEN ] && {
+		[ -n "$phb_log_tag" ] && logger -t "$phb_log_tag" "Press-and-hold button handler waiting process PID in ${BUTTON}_pressed_$1_last_bg.pid=$(cat ${BUTTON}_pressed_$1_last_bg.pid) stopped"
+		kill -9 $(cat ${BUTTON}_pressed_$1_last_bg.pid); rm -f ${BUTTON}_pressed_$1_last_bg.pid
+		[ -n "$phb_log_tag" ] && logger -t "$phb_log_tag" "Button Handler not executed because button released too soon!"
+	}
+}
+
+config_load button
+config_foreach do_button button

@@ -1,0 +1,321 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local setOnUci = uciHelper.set_on_uci
+local conn = mapper("ubus").connect()
+local profileHelper = require("transformer.shared.profile_helper")
+local tr104Helper = require("transformer.shared.tr104helper")
+local lineHelper = require("transformer.shared.line_helper")
+local binding = {}
+local mt = { __index = function() return "" end }
+local commonDefault = setmetatable({}, mt)
+local resolve = resolve
+local transactions = {}
+local commitApply, pairs, type = commitapply, pairs, type
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_Line_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.Line.{i}.",
+        access = "readWrite",
+        numEntriesParameter = "LineNumberOfEntries",
+        enableParameter = "Enable",
+        minEntries = 0,
+        maxEntries = math.huge,
+        --aliasParameter = "Alias",
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+            },
+            --[[ QuiescentMode = {
+             access = "readWrite",
+             type = "boolean",
+            },]]--
+            Status = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Up",
+                    "Error",
+                    "Testing",
+                    "Quiescent",
+                    "Disabled",
+                },
+                default = "Disabled",
+            },
+            -- Alias = {
+            --  access = "readWrite",
+            --  activeNotify = "canDeny",
+            --  type = "string",
+            -- },
+            CallStatus = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Idle",
+                    "Dialing",
+                    "Delivered",
+                    "Connected",
+                    "Alerting",
+                    "Disconnected",
+                },
+            },
+            Origin = {
+                access = "readOnly",
+                type = "string",
+                enumeration = {
+                    "Static",
+                    "DDIRange",
+                },
+            },
+            DirectoryNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+                default = "",
+            },
+            Provider = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.SIP.Client.{i}. VoiceService.H323.Client.{i}. VoiceService.ISDN.BRI.{i}. VoiceService.ISDN.PRI.{i}. VoiceService.POTS.FXO.{i}. VoiceService.Trunk.{i}.",
+            },
+            CallingFeatures = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "string",
+                max = "256",
+                pathRef = true,
+                targetParent = "VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function commitObject()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revertObject()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local callStatus = setmetatable({
+    MMPBX_CALLSTATE_DIALING = "Dialing",
+    MMPBX_CALLSTATE_ALERTING = "Alerting",
+    MMPBX_CALLSTATE_CALL_DELIVERED = "Delivered",
+    MMPBX_CALLSTATE_CONNECTED = "Connected",
+    MMPBX_CALLSTATE_DISCONNECTED = "Disconnected"
+}, { __index = function() return "Idle" end })
+
+local configurations = {
+    config = "mmpbxrvsipnet",
+    sectionname = "profile",
+    parentKey = "SIPUA",
+}
+
+local profileRegStatus = setmetatable({
+    Registered = "Up",
+    Unregistered = "Disabled",
+}, { __index = function() return "Disabled" end })
+
+local function getCallStatus(config, name)
+    local calls = conn:call("mmpbx.call", "get", {}) or {}
+    local callTable = {}
+    for _, val in pairs(calls) do
+        if val.callState ~= nil and val.profile == name then
+            callTable[#callTable + 1] = val.callState
+        end
+    end
+    if #callTable > 0 then
+        return callStatus[callTable[1]]
+    end
+    return "Idle"
+end
+
+local function getProfileStatus(config, name)
+    local profiles = conn:call("mmpbx.profile", "get", {}) or {}
+    if profiles[name] then
+        local regStatus = profiles[name]["sipRegisterState"] or ""
+        if profileRegStatus[regStatus] == "Disabled" and profiles[name]["enable"] == "true" then
+            return "Error"
+        else
+            return profileRegStatus[regStatus] or ""
+        end
+    else
+        return "Error"
+    end
+end
+
+local function getEnable(config, sectionName)
+    binding = {
+        config = config,
+        sectionname = sectionName,
+        option = "enabled",
+        default = "0"
+    }
+    return getFromUci(binding)
+end
+
+local function setEnable(binding, paramValue, commitApply)
+    binding.option = "enabled"
+    if paramValue ~= getFromUci(binding) then
+        setOnUci(binding, paramValue, commitApply)
+    end
+end
+
+local lineSipnetMap = {
+    value = {
+        Enable = getEnable,
+        CallStatus = getCallStatus,
+        Status = getProfileStatus,
+        DirectoryNumber = "directory_Number",
+	Provider = function( _, name)
+            return (resolve("Device.Services.VoiceService.{i}.SIP.Client.{i}." , name) or "")
+	end,
+	CallingFeatures = function( _, name)
+            return resolve("Device.Services.VoiceService.{i}.VoiceProfile.{i}.Line.{i}.CallingFeatures" , name) or ""
+	end,
+    },
+    default = commonDefault,
+}
+
+local lineMaps = {
+    sip_profile = lineSipnetMap,
+}
+
+local setLineSipnetMap = {
+    Enable = setEnable,
+    DirectoryNumber = true,
+}
+
+local setLineMaps = {
+    sip_profile = setLineSipnetMap,
+}
+
+local function setParam(maps, setMaps)
+    return function(mapping, param, value, key, parentKey)
+        local config, name, ltype = tr104Helper.getInfoFromKeyForLine(key, parentKey)
+        binding.config = config
+        binding.sectionname = name
+        local map = maps[ltype]
+        local setMap = setMaps[ltype]
+
+        if setMap[param] then
+            if type(setMap[param]) == "function" then
+                local err, msg = setMap[param](binding, value, commitApply)
+                if not err and msg then
+                    return err, msg
+                end
+                transactions[binding.config] = true
+                return true
+            elseif type(map.value[param]) == "string" then
+                binding.option = map.value[param]
+                local oldValue = getFromUci(binding)
+                if oldValue ~= value then
+                    setOnUci(binding, value, commitApply)
+                    transactions[binding.config] = true
+                end
+                return true
+            end
+        end
+        return nil, "Not supported currently"
+    end
+end
+
+local function sipWatchCB(mapping, action, config, sectionType, sectionName, option)
+    if option == "enabled" then
+        return { {key = sectionName, paramname = "Enable"} }
+    end
+end
+
+local function mmpbxProfileEvent(mapping, event, msg)
+    if msg.sip and msg.sip.oldest and msg.sip.newest and msg.sip.oldest.registered and msg.sip.newest.registered then
+        local oldest = msg.sip.oldest.registered
+        local newest = msg.sip.newest.registered
+        if (oldest == "Unregistered" and newest == "Registered") or
+            (oldest == "Registered" and newest == "Unregistered") then
+            return { { key = msg.name, paramname = "Status" } }
+        end
+    end
+end
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    if parentKey == configurations["parentKey"] then
+        binding.config = configurations["config"]
+        binding.sectionname = configurations["sectionname"]
+        uciHelper.foreach_on_uci(binding, function(s)
+            entries[#entries + 1] = s['.name']
+        end)
+    end
+    return entries
+end
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.get = lineHelper.getParamLine(lineMaps)
+Multi_Services_VoiceService_i_CallControl_Line_i_.getall = function(mapping, key, parentKey)
+    local config, name, ltype = tr104Helper.getInfoFromKeyForLine(key, parentKey)
+    local map = lineMaps[ltype]
+    binding.config = config
+    binding.sectionname = name
+    binding.option = nil
+    local object = uciHelper.getall_from_uci(binding)
+    local data = {}
+
+    for param, _ in pairs(Multi_Services_VoiceService_i_CallControl_Line_i_.objectType.parameters) do
+        if map.value[param] then
+            if type(map.value[param]) == "function" then
+                data[param] = map.value[param](config, name)
+            else
+                data[param] = object[map.value[param]]
+            end
+        end
+        data[param] = data[param] or map.default[param]
+    end
+    return data
+end
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.set = setParam(lineMaps, setLineMaps)
+Multi_Services_VoiceService_i_CallControl_Line_i_.commit = commitObject
+Multi_Services_VoiceService_i_CallControl_Line_i_.revert = revertObject
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.add = function(mapping, parentKey)
+    if parentKey == configurations["parentKey"] then
+           return profileHelper.profile_add(true, transactions, commitApply)
+    else
+        return nil, "Not supported for add"
+    end
+end
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.delete = function(mapping, key, parentKey)
+    local _, _, ltype = tr104Helper.getInfoFromKeyForLine(key, parentKey)
+    if ltype == "sip_profile" then
+        profileHelper.profile_delete(key, transactions, commitApply)
+        return true
+    else
+        return nil, "Not supported for delete"
+    end
+end
+
+Multi_Services_VoiceService_i_CallControl_Line_i_.add_watchers = function(mapping)
+    local uciEventSource = eventsource("uci")
+    uciEventSource.watch(mapping, { set = sipWatchCB }, "mmpbxrvsipnet", "profile", nil, "enabled")
+    local ubusEventSource = eventsource("ubus")
+    ubusEventSource.watch_event(mapping, mmpbxProfileEvent, "mmpbx.profile.status")
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_Line_i_", Multi_Services_VoiceService_i_CallControl_Line_i_, register)

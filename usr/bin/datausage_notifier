@@ -1,0 +1,172 @@
+#!/usr/bin/lua
+
+local ubus, uloop, uci = require('ubus'), require('uloop'), require('uci')
+local logger = require('tch.logger')
+local posix = require("tch.posix")
+
+local notifier = {
+	config_file = "datausage_notifier",
+	config = {},
+	queue = {}
+}
+
+function notifier:cleanup()
+	self.action_queue_timer:cancel()
+	self.ubus:close()
+	uloop.cancel()
+end
+
+function notifier:reloadconfig()
+	self.log:info("Reloading config")
+	self:load_config()
+end
+
+function notifier:load_config()
+	local cursor = uci.cursor()
+	local c = cursor:get(self.config_file, "global", "tracelevel")
+	self.config.tracelevel = tonumber(c) or 6
+
+	if not self.log then
+		logger.init("datausage-notifier", tonumber(self.config.tracelevel), posix.LOG_PID)
+		self.log = logger.new("datausage-notifier")
+	else
+		self.log:set_log_level(self.config.tracelevel)
+	end
+
+	notifier.actions = {}
+	cursor:foreach(self.config_file, "action", function(action)
+		if type(action.events) == "table" and action.handler then
+			action.enabled = action.enabled ~= '0' and action.enabled ~= 'false'
+			local status, m = pcall(require, "datausage_notifier." .. action.handler)
+			action.handler = status and m or nil
+			if action.handler and action.handler.process then
+				table.insert(notifier.actions, action)
+			end
+		end
+	end)
+	cursor:close()
+end
+
+function notifier:queue_action(action, received_event, retries)
+	if not self.queue[action['.name']] then
+		self.queue[action['.name']] = {
+			action = action,
+			event = received_event,
+			retries = retries,
+			iteration = 0
+		}
+		self.action_queue_timer:set(10000)
+	end
+end
+
+function notifier:dequeue_action(action_name)
+	self.log:info("Stopping retry of " .. action_name)
+	self.queue[action_name] = nil
+end
+
+function notifier:queue_empty()
+	if next(self.queue) then
+		return false
+	end
+	return true
+end
+
+function notifier:process_queue()
+	for action_name, queued_item in pairs(self.queue) do
+		queued_item.iteration = queued_item.iteration + 1
+		self.log:info("Retrying %s (%d out of %d)", action_name, queued_item.iteration, queued_item.retries)
+		local ret, errMsg = queued_item.action.handler.process(self, queued_item.action, queued_item.event)
+		if ret or queued_item.iteration == queued_item.retries then
+			self:set_last_executed(queued_item.action, queued_item.event)
+			self.queue[action_name] = nil
+		elseif errMsg then
+			self.log:warning(errMsg)
+		end
+	end
+	if not self:queue_empty() then
+		self.action_queue_timer:set(10000)
+	end
+end
+
+local function interface_matches(action, interface)
+	if not action.interfaces or not interface then
+		return true
+	end
+	for _, ifname in pairs(action.interfaces) do
+		if ifname == interface then
+			return true
+		end
+	end
+	return false
+end
+
+function notifier:set_last_executed(action, event)
+	local cursor = uci.cursor()
+	cursor:set(self.config_file, action['.name'], "last_executed", event)
+	cursor:commit(self.config_file)
+	cursor:close()
+	action.last_executed = event
+end
+
+function notifier:handle_event(received_event, received_event_data)
+	local handled = false
+	for _, action in pairs(self.actions) do
+		for _, event in pairs(action.events) do
+			if event == received_event and (not received_event_data or interface_matches(action, received_event_data.interface)) then
+				if received_event == "reset" then
+					self:dequeue_action(action['.name'])
+				end
+				if action.enabled and received_event ~= action.last_executed then
+					local ret, errMsg = action.handler.process(self, action, received_event)
+					if not ret then
+						if errMsg then self.log:warning("[%s] %s", action['.name'], errMsg) end
+						self:queue_action(action, received_event, 3)
+					else
+						self:set_last_executed(action, received_event)
+					end
+				else
+					self.log:info("[%s] Nothing to do for %s event", action['.name'], received_event)
+				end
+				handled = true
+			end
+		end
+	end
+	if not handled then
+		self.log:warning('No handler defined for event "%s"', received_event)
+	end
+end
+
+function notifier:init()
+	self:load_config()
+
+	self.ubus = ubus.connect()
+	if not self.ubus then
+		return nil, "Failed to connect to UBUS"
+	end
+
+	local events = {}
+	events['datausage.limit_reached'] = function(...) self:handle_event("limit_reached", ...) end
+	events['datausage.threshold_reached'] = function(...) self:handle_event("threshold_reached", ...) end
+	events['datausage.ignore_limit'] = function(...) self:handle_event("ignore_limit", ...) end
+	events['datausage.ignore_threshold'] = function(...) self:handle_event("ignore_threshold", ...) end
+	events['datausage.reset'] = function(...) self:handle_event("reset", ...) end
+	self.ubus:listen(events)
+
+	local ubus_methods = {
+		['datausage_notifier'] = {
+			reload = {
+				function(...) self:reloadconfig(...) end, {}
+			}
+		}
+	}
+	self.ubus:add(ubus_methods)
+
+	uloop.init()
+	self.action_queue_timer = uloop.timer(function() self:process_queue() end)
+	return true
+end
+
+if notifier:init() then
+	uloop.run()
+	notifier:cleanup()
+end

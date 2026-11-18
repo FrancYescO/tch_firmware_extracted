@@ -1,0 +1,19 @@
+#!/bin/sh
+. "$IPKG_INSTROOT/lib/functions.sh"
+path="$(uci_get system @kernel_crash[0] path /tmp)"
+wltrap="$(find $path -name "debug-*.tgz" | wc -l)"
+
+[ -e "/proc/prozone/panic" -o "$wltrap" != "0" ] || exit 0
+
+Haswan=$(uci -q get network.wan)
+if [ -z $Haswan ];then
+  ifname="br-lan"
+else
+  ifname=`ifstatus wan | grep 'l3_device' | cut -d '"' -f 4`
+  if [ -z "$ifname" ];then
+    ifname=`ifstatus wan6 | grep 'l3_device' | cut -d '"' -f 4`
+  fi
+  [ -z "$ifname" ] && exit 0
+fi
+device=$ifname
+[ "$ACTION" = "ifup" ] && [ "$DEVICE" = "$device" ] && sh /sbin/kernel-panic-handler
