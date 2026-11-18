@@ -1,0 +1,329 @@
+-- Automatically generated from InternetGatewayDevice:1.14
+-- using generator version 2.3
+local LANEthernetInterface = {
+  objectType = {
+    name = "#ROOT.LANEthernetInterfaceConfig.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "LANEthernetInterfaceNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Up",
+          "NoLink",
+          "Error",
+          "Disabled",
+        },
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+      },
+      Name = {
+        access = "readOnly",
+        type = "string",
+        max = "16",
+      },
+      MACAddress = {
+        access = "readOnly",
+        type = "string",
+      },
+      MACAddressControlEnabled = {
+        access = "readOnly",  -- readWrite not supported
+        type = "boolean",
+      },
+      MaxBitRate = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "10",
+          "100",
+          "Auto",
+        },
+      },
+      DuplexMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Half",
+          "Full",
+          "Auto",
+        },
+      },
+      X_000E50_LinkSpeed = {
+        access = "readOnly",
+        type = "string",
+        description = "Active Port Speed",
+      },
+      X_000E50_CurrentDuplexMode = {
+        access = "readOnly",
+	type = "string",
+	description = "Current Duplex Mode",
+      }
+    }
+  }
+}
+
+local mapper, ipairs, commitapply =  mapper, ipairs, commitapply
+local common = mapper('nwcommon')
+local match, open, pairs = string.match, io.open, pairs
+local ucihelper = mapper('ucihelper')
+local get_from_uci = ucihelper.get_from_uci
+local set_on_uci = ucihelper.set_on_uci
+local getall_from_uci = ucihelper.getall_from_uci
+local commit = ucihelper.commit
+local revert = ucihelper.revert
+local netPath = "/sys/class/net/"
+local network = require("transformer.shared.common.network")
+local process = require ("tch.process")
+local ethernetBinding = { config = "ethernet"}
+local isConfigChanged = false
+local commitapply = commitapply
+
+local function getAllSpeedDuplex(key)
+  ethernetBinding.sectionname = key
+  local allValues = getall_from_uci(ethernetBinding)
+  local speed = allValues.speed or "auto"
+  local duplex = allValues.duplex or "full"
+  return speed, duplex
+end
+
+local function getProcessStatus(port)
+  local linkStatus = process.popen("ethctl", {port, "media-type"})
+  local autoNegotiation, speed, duplex
+  if linkStatus then
+    for line in linkStatus:lines() do
+      autoNegotiation = line:match("%s+(%S+),")
+      if autoNegotiation == "enabled" then
+        speed = "auto"
+        duplex = "auto"
+      else
+        speed, duplex = line:match("%s+(%S+)M+(%S+)$")
+        if duplex then
+          duplex = duplex == "HD" and "half" or "full"
+        else
+          speed, duplex = getAllSpeedDuplex(port)
+        end
+      end
+      linkStatus:close()
+      return speed, duplex
+    end
+    linkStatus:close()
+  end
+  speed, duplex = getAllSpeedDuplex(port)
+  return speed, duplex
+end
+
+local function updateConfig(key, checkValue)
+  local value
+  local configSpeed, configDuplex = getAllSpeedDuplex(key)
+  local cmdSpeed, cmdDuplex = getProcessStatus(key)
+  ethernetBinding.sectionname = key
+  if cmdSpeed ~= configSpeed or cmdDuplex ~= configDuplex then
+    if checkValue == "DuplexMode" then
+      ethernetBinding.option = "speed"
+      value = cmdSpeed
+    else
+      ethernetBinding.option = "duplex"
+      value = cmdDuplex
+    end
+    set_on_uci(ethernetBinding, value, commitapply)
+    isConfigChanged = true
+  end
+end
+
+local get_uci_network
+do
+  local nw = {config="network"}
+  get_uci_network = function(section, option, default)
+    nw.sectionname = section
+    nw.option = option
+    nw.default = default
+    return ucihelper.get_from_uci(nw)
+  end
+end
+
+local function get_pppoerelay_for_interface(ifname)
+  local relays = {}
+  local pppoerelay = get_uci_network(ifname, 'pppoerelay', {})
+  if type(pppoerelay)=='string' then
+    pppoerelay = {pppoerelay}
+  end
+  for _, n in ipairs(pppoerelay) do
+    relays[n] = true
+  end
+  return relays
+end
+
+-- entries for IGD.LANInterfaces.LANEthernetInterfaceConfig
+local function LANInterfacesEntries()
+  -- TR-098: `This object contains LAN-side layer 1/2 interfaces that are not currently connected to
+  -- the Gateway's IP router and which therefore do not currently reside within a LANDevice instance.`
+  --    => In our case, the LAN interfaces are always considered `connected`,
+  --       so no entries are instantiated under LANInterfaces
+  return {}
+end
+
+local intfDiagHelper = require("transformer.shared.intfdiaghelper")
+
+local dmordering = require "transformer.shared.models.dmordering"
+local objectPath = "InternetGatewayDevice.LANEthernetInterfaceConfig.{i}."
+
+-- entries for IGD.LANDevice.LANEthernetInterfaceconfig
+local function LANDeviceEntries(mapping, parentkey)
+  local relays = get_pppoerelay_for_interface(parentkey)
+
+  local interfaces = {}
+  local entries = {}
+  for _, interface in pairs(common.get_lower_layers(parentkey) or {}) do
+    -- Instances are interfaces starting with `eth` that are not relayed and not of VLAN pattern like "eth6.101"
+    if match(interface, "eth%S+") and not match(interface, "eth%S+%.") and not relays[interface] then
+      if not interfaces[interface] then
+        interfaces[interface] = true
+        entries[#entries+1] = interface
+      end
+    end
+  end
+
+  intfDiagHelper.startup(entries)
+  return dmordering.sort(entries, objectPath)
+end
+
+LANEthernetInterface.get = {
+  Name = function(mapping, param, key)
+    return key
+  end,
+  Enable = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = network.getFirstLine(netPath .. key .. "/carrier")
+    if carrier == "1" or carrier == "0" then
+      return "1"
+    end
+    return "0"
+  end,
+  Status = function(mapping, param, key)
+    -- assumes that carrier is not accessible if the interface is down. Behaves this way on broadcom.
+    -- if this is not reliable, then we can rely on operstate
+    local carrier = network.getFirstLine(netPath .. key .. "/carrier")
+    if carrier == "1" then
+      return "Up"
+    end
+    if carrier == "0" then
+      return "NoLink"
+    end
+    return "Disabled"
+  end,
+  MACAddress = function(mapping, param, key)
+    return network.getFirstLine(netPath .. key .. "/address") or ""
+  end,
+  MACAddressControlEnabled = "0",
+  MaxBitRate = function(mapping, param, key)
+    local value = getProcessStatus(key)
+    return value == "auto" and "-1" or value
+  end,
+  DuplexMode = function(mapping, param, key)
+    local speed, value = getProcessStatus(key)
+    if speed == "auto" then
+      return "Auto"
+    elseif value then
+      return value == "full" and "Full" or value == "half" and "Half"
+    end
+  end,
+  X_000E50_LinkSpeed = function(mapping, param, key)
+    return network.getFirstLine(netPath .. key .. "/speed") or ""
+  end,
+ X_000E50_CurrentDuplexMode = function(mapping, param, key)
+   local currentDuplex = network.getFirstLine(netPath .. key .. "/duplex")
+    return currentDuplex
+ end,
+}
+
+LANEthernetInterface.set = {
+  Enable = function(mapping, param, value, key)
+    local file_handler = open("/tmp/.lan_intf","w")
+    if file_handler then
+      if value == "0" then
+        file_handler:write("ifconfig "..key.." down")
+      else
+        file_handler:write("ifconfig "..key.." up")
+      end
+      file_handler:close()
+      commitapply:newset("LANEthernetInterfaceConfig.Enable")
+    else
+      return nil, "unexpected write error"
+    end
+  end,
+  MaxBitRate = function(mapping, param, value, key)
+    updateConfig(key, param)
+    ethernetBinding.sectionname = key
+    ethernetBinding.option = "speed"
+    local maxBitRate = "auto"
+    if value == "10" or value == "100" then
+      maxBitRate = value
+    elseif value ~= "-1" then
+      return nil, "Invalid value"
+    end
+    set_on_uci(ethernetBinding, maxBitRate, commitapply)
+    isConfigChanged = true
+  end,
+  DuplexMode = function(mapping, param, value, key)
+    updateConfig(key, param)
+    ethernetBinding.sectionname = key
+    ethernetBinding.option = "speed"
+    local speedValue = get_from_uci(ethernetBinding)
+    if speedValue ~= "auto" then
+      if value == "Auto" then
+        return nil, "Cannot set DuplexMode to Auto when MaxBitRate is not '-1'"
+      elseif value then
+        value = value == "Half" and "half" or value == "Full" and "full"
+      end
+    elseif value == "Auto" then -- Allow to set Auto if the value of speed is "auto" in uci.
+      return true -- Do nothing
+    else
+      return nil, "Cannot set DuplexMode when MaxBitRate is '-1'"
+    end
+    ethernetBinding.option = "duplex"
+    set_on_uci(ethernetBinding, value, commitapply)
+    isConfigChanged = true
+  end,
+}
+
+LANEthernetInterface.commit = function()
+  if isConfigChanged then
+    commit(ethernetBinding)
+    isConfigChanged = false
+  end
+end
+
+LANEthernetInterface.revert = function()
+  if isConfigChanged then
+    revert(ethernetBinding)
+    isConfigChanged = false
+  end
+end
+
+do
+  local duplicator = mapper("multiroot").duplicate
+  local duplicates = duplicator(LANEthernetInterface, "#ROOT", {
+                       "InternetGatewayDevice.LANDevice.{i}",
+                       "InternetGatewayDevice.LANInterfaces"
+                     })
+  for _, mapping in ipairs(duplicates) do
+    if mapping.objectType.name:match("InternetGatewayDevice.LANInterfaces") then
+      mapping.entries = LANInterfacesEntries
+    else
+      mapping.entries = LANDeviceEntries
+    end
+    register(mapping)
+  end
+end

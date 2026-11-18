@@ -1,0 +1,257 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local tr104Helper = require("transformer.shared.tr104helper")
+local uciHelper = mapper("ucihelper")
+local faxHelper = require("transformer.shared.fax_helper")
+local brcmfxsBinding = { config = "mmpbxbrcmfxsdev" }
+local foreachOnUci = uciHelper.foreach_on_uci
+local transactions = {}
+local setOnUci = uciHelper.set_on_uci
+local getFromUci = uciHelper.get_from_uci
+local voiceHelper = require("transformer.shared.voice_helper")
+local mmpbxBinding = { config = "mmpbx"}
+local binding = {}
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_VoIPProfile_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoIPProfile.{i}.",
+        access = "readWrite",
+        numEntriesParameter = "VoIPProfileNumberOfEntries",
+        enableParameter = "Enable",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            Enable = {
+                access = "readWrite",
+                type = "boolean",
+                default = "false",
+	        description = "Enable or disable the the VoIP profile",
+            },
+            Name = {
+                access = "readWrite",
+                type = "string",
+                max = "64",
+                default = "",
+	        description = "Human-readable string to identify the profile instance",
+            },
+            DTMFMethod = {
+                access = "readWrite",
+                list = true,
+                type = "string",
+                enumeration = {
+                   "InBand",
+                   "RFC4733",
+                   "SIPInfo",
+                },
+                default = "InBand",
+	        description = "Method by which DTMF digits MUST be passed",
+            },
+            DTMFMethodG711 = {
+                access = "readWrite",
+                type = "string",
+                enumeration = {
+                   "InBand",
+                   "RFC4733",
+                   "SIPInfo",
+                   "",
+                },
+                default = "",
+	        description = "Method by which DTMF digits MUST be passed if the the current codec is G.711",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local function commit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function revert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local configs = {
+    {"mmpbxrvsipnet", "network", "SIPUA"},
+}
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    for _, value in pairs(configs) do
+        if value[3] == parentKey then
+            binding.config = value[1]
+            binding.sectionname = value[2]
+            foreachOnUci(binding, function(s)
+                entries[#entries + 1] = value[1] .. "|" .. s['.name']
+            end)
+        end
+    end
+    return entries
+end
+
+local dtmfGetMap = setmetatable({
+    auto     = "RFC4733",
+    rfc2833  = "RFC4733",
+    sipinfo  = "SIPInfo",
+    disabled = "InBand",
+}, { __index = function() return "" end })
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.get = {
+    Enable = function ()
+        mmpbxBinding.sectionname = "global"
+        mmpbxBinding.option = "enabled"
+        return voiceHelper.getEnable(mmpbxBinding)
+    end,
+    Name = function(mapping, paramName, key)
+        local config, sectionName = key:match("(.*)|(.*)")
+        binding.config = config
+        binding.sectionname = sectionName
+        binding.option = "user_friendly_name"
+        return getFromUci(binding)
+    end,
+    DTMFMethod = function(mapping, paramName, key)
+        return dtmfGetMap[voiceHelper.getDtmfMethod()] or ""
+    end,
+    DTMFMethodG711 = function(mapping, paramName, key)
+        return dtmfGetMap[voiceHelper.getDtmfMethod()] or ""
+    end,
+}
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.set = {
+    Enable = function (mapping, paramName, paramValue, key)
+        mmpbxBinding.sectionname = "global"
+        mmpbxBinding.option = "enabled"
+	voiceHelper.setEnable(mmpbxBinding, paramValue, commitapply)
+	transactions[mmpbxBinding.config] = true
+    end,
+    Name = function(mapping, paramName, paramValue, key)
+        local config, sectionName = key:match("(.*)|(.*)")
+        binding.config = config
+        binding.sectionname = sectionName
+        binding.option = "user_friendly_name"
+        setOnUci(binding, paramValue, commitapply)
+        transactions[binding.config] = true
+    end,
+    DTMFMethodG711 = function (mapping, paramName, paramValue, key)
+        voiceHelper.setDtmfMethod(paramValue, transactions, commitapply)
+    end,
+    DTMFMethod = function (mapping, paramName, paramValue, key)
+        voiceHelper.setDtmfMethod(paramValue, transactions, commitapply)
+    end,
+}
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.commit = commit
+Multi_Services_VoiceService_i_VoIPProfile_i_.revert = revert
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.add = function ()
+    return nil, "Not supported for add"
+end
+
+Multi_Services_VoiceService_i_VoIPProfile_i_.delete = function ()
+    return nil, "Not supported for delete"
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoIPProfile_i_", Multi_Services_VoiceService_i_VoIPProfile_i_ , register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.VoIPProfile.{i}.FaxT38.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            MaxBitRate = {
+                access = "readOnly", -- ReadWrite not supported
+                type = "unsignedInt",
+                range = {
+                    {
+                     min = "0",
+                     max = "65535",
+                    },
+                },
+                default = "14400",
+                description = "Maximum data rate in bits per second for fax as defined in T.38",
+            },
+            HighSpeedRedundancy = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                     min = "0",
+                     max = "3",
+                    },
+                },
+                description = "Specifies the packet-level redundancy for high-speed data transmissions",
+            },
+            LowSpeedRedundancy = {
+                access = "readWrite",
+                type = "unsignedInt",
+                range = {
+                    {
+                     min = "0",
+                     max = "5",
+                    },
+               },
+               description = "Specifies the packet-level redundancy for low-speed data transmissions",
+            },
+            TCFMethod = {
+                access = "readOnly",  -- ReadWrite not supported
+                type = "string",
+                enumeration = {
+                    "Local",
+                    "Network",
+                },
+                description = "Specifies the method in which data is handled over the network",
+            },
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local setFaxParam = {
+    HighSpeedRedundancy = function(mapping, paramName, paramValue, key)
+        return faxHelper.setT38Redundancy(mapping, paramName, paramValue, key, transactions, commitapply)
+    end,
+    LowSpeedRedundancy = function(mapping, paramName, paramValue, key)
+        return faxHelper.setT38Redundancy(mapping, paramName, paramValue, key, transactions, commitapply)
+    end
+}
+
+local function setParam(mapping, param, value, key)
+    return function(mapping, param, value, key)
+        if setFaxParam[param] then
+            setFaxParam[param](mapping, param, value, key)
+            transactions[brcmfxsBinding.config] = true
+            return true
+        else
+            return nil, "Write not supported"
+        end
+    end
+end
+
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.get = faxHelper.getFaxParam(mapping, param, key)
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.set = setParam(mapping, param, value, key)
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.commit = commit
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.revert = revert
+
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.add = function ()
+    error ("Not implemented")
+end
+
+Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_.delete = function ()
+    error ("Not implemented")
+end
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_", Multi_Services_VoiceService_i_VoIPProfile_i_FaxT38_, register)

@@ -1,0 +1,125 @@
+local Multi_Services_X_000E50_WiFiAgent_Radio_i_ = {
+  objectType = {
+    name = "#ROOT_WiFiAgent.Radio.{i}.",
+    access = "readOnly",
+    minEntries = 0,
+    maxEntries = math.huge,
+    description = "Object to manage the Wi-Fi Doctor for the radio",
+    parameters = {
+      Name = {
+        access = "readOnly",
+        type = "string",
+        description = "Displays the name of the radio",
+      },
+      ACSAllowedChannels = {
+        access = "readWrite",
+        type = "string",
+        description = "Sets the list of allowed channels ACS may choose from for this radio",
+      },
+    }
+  }
+}
+
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local ubus = require("transformer.mapper.ubus").connect()
+local wirelessBinding = { config = "wireless" }
+local concat = table.concat
+local configChanged
+local triBandRadio = false
+
+local function getDefaultACSforRadio(key)
+  local radios = ubus:call("wireless.radio.acs", "get", { name = key }) or {}
+  return radios[key] and radios[key]["allowed_channels"] or ""
+end
+
+local function getAllowedChannelsUbus(key)
+  local radios = ubus:call("wireless.radio", "get", { name = key }) or {}
+  return radios[key] and radios[key]["allowed_channels"] or ""
+end
+
+local function getAllowedChannels(key)
+  if triBandRadio and key ~= "radio_2G" then
+    local lowband = getAllowedChannelsUbus("radio_5G")
+    local highband = getAllowedChannelsUbus("radio2")
+    return lowband .. " " .. highband
+  end
+  return getAllowedChannelsUbus(key)
+end
+
+Multi_Services_X_000E50_WiFiAgent_Radio_i_.entries = function()
+  local radios = {}
+  wirelessBinding.sectionname = "wifi-device"
+  uciHelper.foreach_on_uci(wirelessBinding, function(s)
+    radios[#radios + 1] = s['.name']
+  end)
+  triBandRadio = #radios == 3 and true or false
+  return radios
+end
+
+Multi_Services_X_000E50_WiFiAgent_Radio_i_.get = {
+  ACSAllowedChannels = function(mapping, param, key)
+    wirelessBinding.sectionname = key
+    wirelessBinding.option = "acs_allowed_channels"
+    local value = getFromUci(wirelessBinding)
+    if value == "" then
+      return getDefaultACSforRadio(key)
+    else
+      return value
+    end
+  end,
+  Name = function(mapping, param, key)
+    return key
+  end,
+}
+
+local function isAllowedChannel(list, channel)
+  for allowedChannel in list:gmatch("(%d+)") do
+    if allowedChannel == channel then
+      return true
+    end
+  end
+end
+
+Multi_Services_X_000E50_WiFiAgent_Radio_i_.set = {
+  ACSAllowedChannels = function(mapping, param, value, key)
+    wirelessBinding.sectionname = key
+    wirelessBinding.option = "acs_allowed_channels"
+    local allowedChannels = getAllowedChannels(key)
+    if value ~= "" then
+      local channelList = {}
+      for channel in value:gmatch("[^,%s]+") do
+        if not tonumber(channel) or not isAllowedChannel(allowedChannels, channel) then
+          return nil, "Please enter a valid channel"
+        elseif tonumber(channel) < 0 or tonumber(channel) > 180 then
+          return nil, "ACSAllowedChannels is out of range"
+        end
+        channelList[#channelList + 1] = channel
+      end
+      uciHelper.set_on_uci(wirelessBinding, concat(channelList, " "), commitapply)
+      configChanged = true
+    else
+      return nil, "ACSAllowedChannels should not be empty"
+    end
+  end,
+}
+
+Multi_Services_X_000E50_WiFiAgent_Radio_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(wirelessBinding)
+    configChanged = false
+  end
+end
+
+Multi_Services_X_000E50_WiFiAgent_Radio_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(wirelessBinding)
+    configChanged = false
+  end
+end
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_000E50_WiFiAgent_Radio_i_, "#ROOT", {"InternetGatewayDevice.Services.X_000E50", "Device.Services.X_000E50"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

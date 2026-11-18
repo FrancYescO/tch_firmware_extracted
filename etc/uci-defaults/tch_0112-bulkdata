@@ -1,0 +1,16 @@
+#!/bin/sh
+set_time_reference() {
+  local profile="$1"
+  refer_time=`uci get bulkdata.${profile}.report_interval`
+  default_time_ref=`uci get bulkdata.${profile}.time_reference`
+  
+  if [ "$default_time_ref" == "0001-01-01T00:00:00Z" ] ; then
+    refer_date=$(date +%s)
+    rand_sec=$(( RANDOM % $refer_time + $refer_date ))
+    local time_reference=$(date -d @$rand_sec -u +%FT%TZ)
+    uci set bulkdata.${profile}.time_reference=$time_reference
+  fi
+}
+config_load bulkdata
+config_foreach set_time_reference profile
+uci commit bulkdata

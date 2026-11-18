@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+START=99
+
+CRONPATH=/etc/crontabs
+CRONROOT=$CRONPATH/root
+
+boot () {
+    /usr/bin/memorystats.sh &
+    start
+}
+
+start () {
+    enable_stats=`uci get system.@system[0].memory_stats 2> /dev/null`
+    [ "${enable_stats}" -eq 1 ] && [ -f /etc/memorystats.d/memorystats.crontab ] && {
+      killall -0 crond 2>/dev/null || /etc/init.d/cron start
+      sed -i "/memorystats/d" $CRONROOT
+      cat /etc/memorystats.d/memorystats.crontab >> $CRONROOT
+      crontab -c $CRONPATH $CRONROOT
+      /etc/init.d/cron restart
+    }
+}
+
+stop () {
+    [ -f $CRONROOT ] && {
+      sed -i "/memorystats/d" $CRONROOT
+      crontab -c $CRONPATH $CRONROOT
+    }
+}
+

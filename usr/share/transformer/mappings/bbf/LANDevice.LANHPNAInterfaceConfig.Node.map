@@ -1,0 +1,123 @@
+-- Manually generated
+local Multi_LANDevice_i_LANHPNAInterfaceConfig_i_Node_i_ = {
+  objectType = {
+    name = "#ROOT.{i}.",
+    access = "readOnly",
+    numEntriesParameter = "X_0876FF_NodeNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      MACAdress = {
+        access = "readOnly",
+        type = "string",
+        description = "The physical address of this node",
+      },
+      NodeID = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The Node ID of this node",
+      },
+      IsMaster = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether this node is the HPNA network master",
+      },
+      MaxBitRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "This node's maximum HPNA PHY bit rate (expressed in Mbps)",
+      },
+      Active = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether or not this node is currently present in the HPNA network",
+      },
+      Synced = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Whether this node is synchronized with the HPNA network master",
+      },
+      TotalSyncTime = {
+        access = "readOnly",
+        type = "dateTime",
+        description = "Total time in seconds (since device reset) that this node has been up and synchronized to the HPNA network master",
+      },
+      PHYDiagnosticsEnable = {
+        access = "readOnly",
+        type = "boolean",
+        description = "Enable / disable PHY throughput diagnostics mode on this node",
+      },
+    }
+  }
+}
+
+local register, mapper = register, mapper
+local split_key = mapper("nwcommon").split_key
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local hpnaBinding = { config = "hpna" }
+local ethernetBinding = { config = "ethernet" }
+local tostring = tostring
+local devInfo = {}
+
+local function getUciValue(binding, section, option, default)
+  binding.sectionname = section
+  binding.option = option
+  binding.default = default
+  return getFromUci(binding)
+end
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_Node_i_.entries = function(mapping, parentKey)
+  local entries = {}
+
+  local devices = conn:call("hpna", "get", {}) or {}
+
+  devInfo = {}
+  if devices then
+    for dev, info in pairs(devices) do
+      entries[#entries + 1] = parentKey .. "|" .. dev
+      devInfo[dev] = {}
+      devInfo[dev]["NodeID"] = info.devid
+      devInfo[dev]["Active"] = info.link_state
+    end
+  end
+  return entries
+end
+
+Multi_LANDevice_i_LANHPNAInterfaceConfig_i_Node_i_.get = {
+  MACAdress = function(mapping, param, key)
+    local _, node = split_key(key)
+    return node
+  end,
+
+  NodeID = function(mapping, param, key)
+    local _, node = split_key(key)
+    return devInfo[node] and tostring(devInfo[node][param]) or ""
+  end,
+
+  IsMaster = "0", -- Hardcoded to "0" since the node connected is not master
+
+  MaxBitRate = function(mapping, param, key, parentKey)
+    local ifname = getUciValue(hpnaBinding, parentKey, "ifname")
+    return getUciValue(ethernetBinding, ifname, "speed", "0")
+  end,
+
+  Active = function(mapping, param, key)
+    local _, node = split_key(key)
+    return devInfo[node] and tostring(devInfo[node][param]) or ""
+  end,
+
+  Synced = "N/A",
+
+  TotalSyncTime = "N/A",
+
+  PHYDiagnosticsEnable = "N/A",
+}
+
+local duplicator = mapper("multiroot").duplicate
+local nodeDuplicates = duplicator(Multi_LANDevice_i_LANHPNAInterfaceConfig_i_Node_i_, "#ROOT", {"InternetGatewayDevice.LANDevice.{i}.LANHPNAInterfaceConfig.{i}.Node", "Device.HPNA.Interface.{i}.AssociatedDevice"})
+
+for _, dupli in ipairs(nodeDuplicates) do
+  register(dupli)
+end

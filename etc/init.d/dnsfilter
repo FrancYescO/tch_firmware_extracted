@@ -1,0 +1,111 @@
+#!/bin/sh /etc/rc.common
+
+. $IPKG_INSTROOT/lib/functions/network.sh
+
+START=80
+STOP=10
+USE_PROCD=1
+
+queue=3
+
+clear_firewall_part() {
+        local cmd=$1
+        (
+        ${cmd} -t mangle -D PREROUTING -p udp --dport 53 -j dnsfilter
+        ${cmd} -t mangle -D PREROUTING -p tcp --dport 53 -j dnsfilter
+
+        ${cmd} -t mangle -F dnsfilter
+        ${cmd} -t mangle -F dnsfilter-intercept
+
+        ${cmd} -t mangle -X dnsfilter
+        ${cmd} -t mangle -X dnsfilter-intercept
+
+        ) >/dev/null 2>&1
+}
+
+clear_firewall() {
+        clear_firewall_part "iptables"
+        clear_firewall_part "ip6tables"
+}
+
+setup_firewall_part() {
+        local cmd=$1
+        local interfaces=$2
+        (
+        ${cmd} -t mangle -N dnsfilter
+        ${cmd} -t mangle -N dnsfilter-intercept
+
+        ${cmd} -t mangle -A PREROUTING -p udp --dport 53 -j dnsfilter
+        ${cmd} -t mangle -A PREROUTING -p tcp --dport 53 -j dnsfilter
+
+        for intf in ${interfaces}
+        do
+                ${cmd} -t mangle -A dnsfilter -i ${intf} -j dnsfilter-intercept
+        done
+
+        # disable FlowCache accelerator
+        ${cmd} -t mangle -A dnsfilter-intercept -j SKIPLOG
+        ${cmd} -t mangle -A dnsfilter-intercept -j NFQUEUE --queue-num ${queue}
+
+        ) >/dev/null 2>&1
+}
+
+setup_firewall() {
+        local ipv6_enabled=$1
+        local interfaces=$2
+
+        setup_firewall_part "iptables" "${interfaces}"
+        [ "${ipv6_enabled}" = "1" ] && setup_firewall_part "ip6tables" "${interfaces}"
+}
+
+
+handle_each_intf() {
+        local intf=$1
+        local t
+
+        network_get_device t $intf
+        interfaces="$interfaces $t"
+}
+
+dnsfilter_config() {
+        local interfaces dnsfilter_enable mode ipv6_enable
+
+        clear_firewall
+
+        config_load parental
+        config_get_bool dnsfilter_enable general enable 1
+        config_get mode general mode "web"
+        [ "$dnsfilter_enable" = "1" -a "$mode" = "dns" ] || return
+
+        config_get_bool queue general queue 3
+        config_get_bool ipv6_enable general ipv6_enable 0
+
+        # initialize dnsfilter targets
+        interfaces=""
+        config_list_foreach general lan_intf handle_each_intf
+        setup_firewall "${ipv6_enable}" "${interfaces}"
+
+        true
+}
+
+start_service() {
+        dnsfilter_config
+
+        procd_open_instance
+        procd_set_param command /usr/sbin/dnsfilterd
+        procd_set_param respawn
+        procd_close_instance
+}
+
+service_triggers() {
+        procd_add_reload_trigger "parental"
+}
+
+reload_service() {
+        dnsfilter_config
+        procd_send_signal dnsfilter
+}
+
+stop_service() {
+        clear_firewall
+}
