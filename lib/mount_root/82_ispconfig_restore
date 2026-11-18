@@ -1,0 +1,25 @@
+#!/bin/sh
+
+BANKS="bank_1 bank_2"
+
+restore_ispconfig() {
+	local bank=$1
+	local tarfile=/overlay/ispconfig-$bank.tgz
+	if [ -f $tarfile ]; then
+		if [ ! -d /overlay/$bank ]; then
+			echo "Failed to restore ispconfig, $bank config not created yet"
+			exit 1
+		fi
+		mkdir -p /overlay/$bank/etc/ispconfig
+		cd /overlay/$bank/etc/ispconfig
+		tar -xzf $tarfile || {
+			echo "Failed to restore ispconfig on $bank, untar failed"
+			exit 1
+		}
+		rm $tarfile
+	fi
+}
+
+for bank in $BANKS; do
+	restore_ispconfig $bank
+done
