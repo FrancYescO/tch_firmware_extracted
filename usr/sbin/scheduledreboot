@@ -1,0 +1,27 @@
+#!/usr/bin/env lua
+local os = os
+local uci = require("uci")
+local proxy = require("datamodel")
+local cursor = uci.cursor()
+
+local enabled = cursor:get("system", "scheduledreboot", "enabled")
+
+-- Check if scheduledreboot_enabled is on, only then we need to initiate the reboot.
+-- If scheduledreboot_enabled is off, we just remove the cron job
+
+if enabled == "1" then
+  local rebootReason = cursor:get("system", "scheduledreboot", "rebootreason")
+  rebootReason = rebootReason or "CLI"
+  cursor:set("system", "scheduledreboot", "enabled", "0")
+  cursor:set("system", "scheduledreboot", "time", "")
+  cursor:set("system", "scheduledreboot", "rebootreason", "")
+  cursor:commit("system")
+  cursor:close()
+  -- Initiate reboot with reason as 'CLI' by default or else reason can be specified in system.scheduledreboot.rebootreason
+  proxy.set({ ["rpc.system.reboot"] = rebootReason })
+  proxy.apply()
+end
+
+cursor:close()
+-- Remove cron job if scheduledreboot_enabled is off or reboot has been triggered
+os.execute("crontab -c /etc/crontabs/ -l | grep -v '/usr/sbin/scheduledreboot' | crontab -c /etc/crontabs/ -")
