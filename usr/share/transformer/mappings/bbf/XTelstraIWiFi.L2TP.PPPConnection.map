@@ -1,0 +1,317 @@
+local Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.L2TP.PPPConnection.{i}.",
+        access = "readOnly",
+        minEntries = 0,
+        maxEntries = math.huge,
+        numEntriesParameter = "PPPConnectionNumberOfEntries",
+        parameters = {
+            -- Diagnostic parameters
+            ConnectionStatus = {
+                access = "readOnly",
+                type = "string",
+                max = "32",
+            },
+            PPPoESessionID = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            Name = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            Uptime = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            LastConnectionError = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+            },
+            AutoDisconnectTime = {
+                access = "readOnly",
+                type = "unsignedInt",
+                default = " ",
+            },
+            IdleDiscconnectTime = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            Username = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+            },
+            Password = {
+                access = "readOnly",
+                type = "string",
+                max = "64",
+            },
+            ExternalIPAddress = {
+                access = "readOnly",
+                type = "string",
+                max = "45",
+            },
+            RemoteIPAddress = {
+                access = "readOnly",
+                type = "string",
+                max = "45",
+            },
+            MACAddress = {
+                access = "readOnly",
+                type = "string",
+                max = "17",
+            },
+            PPPoEACName = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            PPPoEServiceName = {
+                access = "readOnly",
+                type = "string",
+                max = "256",
+            },
+            PPPLCPEcho = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            PPPLCPEchoRetry = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            -- End of Diagnostic parameters
+        }
+    }
+}
+
+-- Open connection to UBUS
+local conn = mapper("ubus").connect()
+local uci_helper = mapper("ucihelper")
+
+local file = "/proc/net/pppol2tp"
+local data = {}
+
+Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_.entries = function(mapping, parentkey)
+    local entries = {}
+    local sessid
+    local fd = io.open(file, "r")
+    if fd then
+        while(true) do
+            local line = fd:read("*l")
+            if not line then
+                break
+            end
+
+            local key = string.match(line, "SESSION 'sess %d+/(%d+)")
+            if key then
+                data[key] = {}
+                sessid = key
+                entries[#entries+1] = key
+            end
+            local tx_pkts, tx_bytes, tx_pkts_err, rx_pkts, rx_bytes, rx_pkts_err = string.match(line, "%d+/%d+%s(%d+)/(%d+)/(%d+)%s(%d+)/(%d+)/(%d+)")
+            if tx_pkts and tx_pkts_err and rx_pkts and rx_pkts_err and data[sessid] then
+                data[sessid]["tx_pkts"] = tx_pkts
+                data[sessid]["tx_bytes"] = tx_bytes
+                data[sessid]["tx_pkts_err"] = tx_pkts_err
+                data[sessid]["rx_pkts"] = rx_pkts
+                data[sessid]["rx_bytes"] = rx_bytes
+                data[sessid]["rx_pkts_err"] = rx_pkts_err
+            end
+
+            local interface = string.match(line, "interface%s(.*)")
+            if interface == "(null)" then
+                data[sessid] = {}
+                entries[#entries] = nil
+            elseif interface then
+                data[sessid]["interface"] = interface
+            end
+        end
+        fd:close()
+    end
+    return entries
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_.getall = function(mapping, key)
+    local res = {
+        ConnectionStatus = "",
+        PPPoESessionID = "",
+        Name = "",
+        Uptime = "",
+        LastConnectionError = "",
+        AutoDisconnectTime = "",
+        IdleDiscconnectTime = "",
+        Username = "",
+        Password = "",
+        ExternalIPAddress = "",
+        RemoteIPAddress = "",
+        MACAddress = "",
+        PPPoEACName = "",
+        PPPoEServiceName = "",
+        PPPLCPEcho = "",
+        PPPLCPEchoRetry = "",
+    }
+    res["PPPoESessionID"] = key
+    res["Name"] = data[key]["interface"] or res["Name"]
+    --[[local binding = {
+        config = "hotspotd",
+        sectionname = "tunnel",
+        option = "server"
+    }
+    res["ExternalIPAddress"] = uci_helper.get_from_uci(binding)]]
+    return res
+
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_.get = {
+    ConnectionStatus = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    PPPoESessionID = function(mapping, param, key)
+        return key
+    end,
+    Name = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return data[key]["interface"] or ""
+    end,
+    Uptime = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    LastConnectionError = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    AutoDisconnectTime = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    IdleDiscconnectTime = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    Username = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    Password = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    ExternalIPAddress = function(mapping, param, key)
+        --[[local binding = {
+            config = "hotspotd",
+            sectionname = "tunnel",
+            option = "server"
+        }]]
+        --return uci_helper.get_from_uci(binding)
+        return ""
+    end,
+    RemoteIPAddress = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    MACAddress = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    PPPoEACName = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    PPPoEServiceName = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    PPPLCPEcho = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+    PPPLCPEchoRetry = function(mapping, param, key)
+        -- Avaliable on Sprint35
+        return ""
+    end,
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end
+
+local Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_Stats_ = {
+    objectType = {
+        name = "#ROOT.Services.X_TELSTRA_IWIFI.{i}.L2TP.PPPConnection.{i}.Stats.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- Diagnostic parameters
+            EthernetBytesSent = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            EthernetBytesReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            EthernetPacketsSent = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            EthernetPacketsRecieved = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            EthernetErrorsSent = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            EthernetErrorsReceived = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            -- End of Diagnostic parameters
+        }
+    }
+}
+
+Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_Stats_.getall = function(mapping, key)
+    local res= {}
+    res["EthernetBytesSent"] = data[key]["tx_bytes"] or ""
+    res["EthernetBytesReceived"] = data[key]["rx_bytes"] or ""
+    res["EthernetPacketsSent"] = data[key]["tx_pkts"] or ""
+    res["EthernetPacketsRecieved"] = data[key]["rx_pkts"] or ""
+    res["EthernetErrorsSent"] = data[key]["tx_pkts_err"] or ""
+    res["EthernetErrorsReceived"] = data[key]["rx_pkts_err"] or ""
+    return res
+end
+
+Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_Stats_.get = {
+    EthernetBytesSent = function(mapping, param, key)
+        return data[key]["tx_bytes"] or ""
+    end,
+    EthernetBytesReceived = function(mapping, param, key)
+        return data[key]["rx_bytes"] or ""
+    end,
+    EthernetPacketsSent = function(mapping, param, key)
+        return data[key]["tx_pkts"] or ""
+    end,
+    EthernetPacketsRecieved = function(mapping, param, key)
+        return data[key]["rx_pkts"] or ""
+    end,
+    EthernetErrorsSent = function(mapping, param, key)
+        return data[key]["tx_pkts_err"] or ""
+    end,
+    EthernetErrorsReceived = function(mapping, param, key)
+        return data[key]["rx_pkts_err"] or ""
+    end,
+}
+
+duplicates = duplicator(Multi_Services_X_TELSTRA_IWIFI_i_L2TP_PPPConnection_i_Stats_, "#ROOT", {"InternetGatewayDevice", "Device"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

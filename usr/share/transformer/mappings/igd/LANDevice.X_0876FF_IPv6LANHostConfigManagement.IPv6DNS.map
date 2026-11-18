@@ -1,0 +1,237 @@
+-- Manually generated
+-- Mapping related to LAN IPv6 DNS servers
+
+local InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_ = {
+  objectType = {
+    name = "InternetGatewayDevice.LANDevice.{i}.X_0876FF_IPv6LANHostConfigManagement.IPv6DNS.{i}.",
+    description = "IPv6LANHostConfigManagement DNS Servers",
+    access = "readWrite",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      ServerIP = {
+        access = "readWrite",
+        type = "string",
+        description = "Static/Dynamic DNS Server"
+      }
+    }
+  }
+}
+
+local mapper = mapper
+local conn = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local getFromUci = uciHelper.get_from_uci
+local networkBinding = { config = "network" }
+local inet = require("tch.inet")
+local pairs, ipairs, type, tconcat = pairs, ipairs, type, table.concat
+local configChanged
+local serverInfo = {}
+local servers = {}
+local count
+
+--- Adds the given dns server to the entries table
+-- @param #string dnsServer The DNS server to be added to the entries.
+-- @param #number count The value used for forming unique key.
+-- @param #table entries The table containing the keys.
+-- @param #string parentKey The parent Key value(interface name).
+local function addServer(dnsServer, entries, parentKey)
+  if not servers[dnsServer] then
+    servers[dnsServer] = true
+    local key = {}
+    key[#key + 1] = parentKey
+    key[#key + 1] = count
+    key = tconcat(key)
+    serverInfo[key] = {}
+    serverInfo[key].type = "static"
+    serverInfo[key].address = dnsServer
+    entries[#entries + 1] = key
+    count = count + 1
+  end
+end
+
+--- Retrieves the value from the network config.
+-- @param #string interface The sectionname in the network config.
+-- @param #string option The option to be retrieved in the config.
+-- @return #string The value retrieved from the config.
+local function getUciValue(interface, option)
+  if interface then
+    networkBinding.sectionname = interface
+    networkBinding.option = option
+    return getFromUci(networkBinding)
+  end
+  return ""
+end
+
+--- Sets the value in the network config.
+-- @param #string sectionname The sectionname in the network config.
+-- @param #string option The option to be set in the config.
+-- @param #string value The value to be set in the given option.
+local function setUciValue(sectionname, option, value)
+  if sectionname then
+    networkBinding.sectionname = sectionname
+    networkBinding.option = option
+    uciHelper.set_on_uci(networkBinding, value, commitapply)
+    configChanged = true
+  end
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.entries = function(mapping, parentKey)
+  local entries = {}
+  servers = {}
+  count = 0
+  local uciDNS = getUciValue(parentKey, "dns")
+  if uciDNS ~= "" and type(uciDNS) == "table" then
+    for _, dnsServer in ipairs(uciDNS) do
+      if inet.isValidIPv6(dnsServer) then
+        addServer(dnsServer, entries, parentKey)
+      end
+    end
+  end
+  local ubusPath = {}
+  ubusPath[#ubusPath + 1] = "network.interface."
+  ubusPath[#ubusPath + 1] = parentKey
+  local ubusStatus = conn:call(tconcat(ubusPath), "status", {})
+  if ubusStatus and ubusStatus["dns-server"] then
+    for _, dnsServer in pairs(ubusStatus["dns-server"]) do
+      if inet.isValidIPv6(dnsServer) then
+        addServer(dnsServer, entries, parentKey)
+      end
+    end
+  end
+  local dummyDNS = getUciValue(parentKey, "dummy_dns")
+  if dummyDNS ~= "" and type(dummyDNS) == "table" then
+    for _, dnsServer in ipairs(dummyDNS) do
+      addServer(dnsServer, entries, parentKey)
+    end
+  end
+  return entries
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.get = {
+  ServerIP = function(mapping, param, key)
+    return serverInfo[key].address:match("default") and "" or serverInfo[key].address
+  end
+}
+
+--- Replaces the value in the given table.
+-- @param #table tableValue The table in which the value to be replaced.
+-- @param #string findValue The value to be found and replaced by the given value.
+-- @param #string replaceValue The replacement value.
+-- @return boolean found Indicates whether the given value is found or not.
+-- @return table res The new table with the replaced value.
+local function replaceTable(tableValue, findValue, replaceValue)
+  local found
+  local res = {}
+  for _, val in ipairs(tableValue) do
+    if findValue == val then
+      found = true
+      res[#res + 1] = replaceValue
+    else
+      res[#res + 1] = val
+    end
+  end
+  return found, res
+end
+
+--- Deletes the value from the given table.
+-- @param #table tableValue The table in which the value to be deleted.
+-- @param #string findValue The value to be deleted in the given table.
+-- @return boolean found Indicates whether the given value is deleted or not.
+-- @return table res The table after deleting the value.
+local function delValue(tableValue, findValue)
+  local found
+  local res = {}
+  for _, val in ipairs(tableValue) do
+    if findValue ~= val then
+      res[#res + 1] = val
+    else
+      found = true
+    end
+  end
+  return found, res
+end
+
+--- Modifies the dummy dns servers in the network config.
+-- @param #string key The key value.
+-- @param #string parentKey The key value(interface name).
+local function modifyDummyDNS(key, parentKey)
+  local dummyServers = getUciValue(parentKey, "dummy_dns")
+  dummyServers = dummyServers ~= "" and dummyServers or {}
+  local _, dummyServer = delValue(dummyServers, serverInfo[key].address)
+  setUciValue(parentKey, "dummy_dns", dummyServer)
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.set = {
+  ServerIP = function(mapping, param, value, key, parentKey)
+    if serverInfo[key].type == "static" then
+      if inet.isValidIPv6(value) and not servers[value] then
+        local staticServers = getUciValue(parentKey, "dns")
+        staticServers = staticServers ~= "" and staticServers or {}
+        local staticDns
+        local found
+        found, staticDns = replaceTable(staticServers, serverInfo[key].address, value)
+        if not found then
+          staticDns[#staticDns + 1] = value
+          modifyDummyDNS(key, parentKey)
+        end
+        setUciValue(parentKey, "dns", staticDns)
+      else
+        return nil, "Not a valid address"
+      end
+    else
+      return nil, "Dynamic DNS Servers cannot be modified"
+    end
+  end
+}
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.add = function(mapping, parentKey)
+  count = count or 0
+  local dummyDNS = getUciValue(parentKey, "dummy_dns")
+  if dummyDNS ~= "" and type(dummyDNS) == "table" then
+    dummyDNS[#dummyDNS + 1] = "default" .. #dummyDNS
+  else
+    dummyDNS = {}
+    dummyDNS[#dummyDNS + 1] = "default" .. #dummyDNS
+  end
+  setUciValue(parentKey, "dummy_dns", dummyDNS)
+  local key = {}
+  key[#key + 1] = parentKey
+  key[#key + 1] = count
+  key = tconcat(key)
+  count = count + 1
+  return key
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.delete =
+   function(mapping, key, parentKey)
+  if serverInfo[key].type == "static" then
+    local staticServers = getUciValue(parentKey, "dns")
+    local staticDns
+    local found
+    found, staticDns = delValue(staticServers, serverInfo[key].address)
+    if not found then
+      modifyDummyDNS(key, parentKey)
+    else
+      setUciValue(parentKey, "dns", staticDns)
+    end
+    return true
+  end
+  return nil, "Dynamic DNS Servers cannot be deleted"
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.commit = function()
+  if configChanged then
+    uciHelper.commit(networkBinding)
+    configChanged = false
+  end
+end
+
+InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+    configChanged = false
+  end
+end
+
+register(InternetGatewayDevice_LANDevice_i_X_0876FF_IPv6LANHostConfigManagement_IPv6DNS_i_)
