@@ -1,0 +1,69 @@
+#!/bin/sh /etc/rc.common
+
+START=60
+STOP=74
+USE_PROCD=1
+
+FIREWALL_SCRIPT=/lib/functions/firewall-dhcpsnooper.sh
+
+check_dhcpsnooper_interface() {
+	local iface="$1"
+	local enable
+
+	config_get_bool enable "$iface" enable "1"
+	[ "$enable" -gt 0 ] || return 0
+
+	procd_add_interface_trigger "interface.*" "$iface" $FIREWALL_SCRIPT "updown" "$iface" "$QUEUE"
+}
+
+add_dhcpsnooper_interface() {
+	local iface="$1"
+	local enable
+
+	config_get_bool enable "$iface" enable "1"
+	[ "$enable" -gt 0 ] || return 0
+
+	. $FIREWALL_SCRIPT "up" "$iface" "$QUEUE"
+}
+
+start_service() {
+	config_load dhcpsnooping
+	local args val
+	config_get_bool val global enable 1
+	[ "$val" -gt 0 ] || return 0
+
+	config_get QUEUE global queue 0
+	local args="-q $QUEUE"
+	config_get_bool val global trace 0
+	[ "$val" -gt 0 ] && args="$args -v"
+
+	logger -t dhcpsnooper "Starting DHCP snooper daemon"
+
+	. $FIREWALL_SCRIPT start
+	config_foreach add_dhcpsnooper_interface interface
+
+	procd_open_instance
+
+	procd_set_param command /usr/bin/dhcpsnooper $args
+	procd_set_param respawn
+
+	procd_close_instance
+}
+
+stop_service() {
+	logger -t dhcpsnooper "Stopping DHCP snooper daemon"
+
+	. $FIREWALL_SCRIPT stop
+}
+
+reload_service() {
+	stop
+	start
+}
+
+service_triggers() {
+	procd_add_config_trigger "config.change" "dhcpsnooping" /etc/init.d/dhcpsnooper reload
+
+	config_load "dhcpsnooping"
+	config_foreach check_dhcpsnooper_interface interface
+}
