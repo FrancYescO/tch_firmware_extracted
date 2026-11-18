@@ -1,0 +1,276 @@
+local tostring = tostring
+local tonumber = tonumber
+local io = io
+
+local uci = mapper 'ucihelper'
+local ubus = mapper('ubus').connect()
+
+local generic_app_map = {
+  objectType = {
+    name = "sys.generic_app.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      PairingState = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Idle",
+          "Initiated",
+          "Paired",
+          "TimedOut",
+          "Failed",
+        },
+      }
+    },
+  },
+
+  _pairingState = "Idle",
+}
+
+generic_app_map.get = {
+  PairingState = function(mapping)
+    return mapping._pairingState
+  end,
+}
+
+local PairingEventStateMap = {
+  Idle = {},
+  Initiated = {action="start", reason="none"},
+  Paired = {action="stop", reason="paired"},
+  TimedOut = {action="stop", reason="timed out"},
+  Failed = {action="stop", reason="failed"},
+}
+
+generic_app_map.set = {
+  PairingState = function(mapping, _, newState)
+    mapping._pairingState = newState
+    mapping._ubusEvent = PairingEventStateMap[newState]
+  end
+}
+
+generic_app_map.revert = function(mapping)
+  mapping._ubusEvent = nil
+end
+
+generic_app_map.commit = function(mapping)
+  local event = mapping._ubusEvent
+  if event and event.action then
+    ubus:send("generic_app.pairing", event)
+  end
+  mapping._ubusEvent = nil
+end
+
+register(generic_app_map)
+
+local pairing = {
+  objectType = {
+    name = "sys.generic_app.Pairing.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "PairingNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Alias = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Certificate = {
+        access = "readWrite",
+        type = "string",
+        description = "PEM encoded certificate data"
+      },
+      Name = {
+        access = "readWrite",
+        type = "string",
+        description = "An optional name for this entry"
+      },
+      Generation = {
+        access = "readWrite",
+        type = "unsignedInt",
+        description = "Indicates how recently this certificate was used. Higher is more recent."
+      }
+    }
+  },
+
+  _keyToSection = {},
+  _configsToCommit = {},
+  _certsToWrite = {}
+}
+
+local generic_app = { config="generic_app" }
+
+local function mapKeyToSection(mapping, key, section)
+  mapping._keyToSection[key] = section
+end
+
+local function sectionForKey(mapping, key)
+  return mapping._keyToSection[key]
+end
+
+local function clearKeyToSectionMappings(mapping)
+  mapping._keyToSection = {}
+end
+
+local function configToCommit(mapping, binding)
+  mapping._configsToCommit[binding] = true
+end
+
+local function uci_get(mapping, key, option)
+  local section = sectionForKey(mapping, key)
+  if section then
+    generic_app.sectionname = section
+    generic_app.option = option
+    return uci.get_from_uci(generic_app)
+  end
+  return ""
+end
+
+local function uci_set(mapping, key, option, value)
+  local section = sectionForKey(mapping, key)
+  if section then
+    generic_app.sectionname = section
+    generic_app.option = option
+    uci.set_on_uci(generic_app, value, commitapply)
+    configToCommit(mapping, generic_app)
+  end
+end
+
+local function certFilename(key)
+  return "/etc/ssl/paired/"..key
+end
+
+local function read_certificate(key)
+  local cert = ""
+  local f = io.open(certFilename(key), "r")
+  if f then
+    cert = f:read("*a")
+    f:close()
+  end
+  return cert
+end
+
+local function write_certificate(key, cert)
+  local f = io.open(certFilename(key), "w")
+  if f then
+    f:write(cert)
+    f:close()
+  end
+end
+
+local function delete_certificate(key)
+  os.remove(certFilename(key))
+end
+
+local function update_certificate(key, cert)
+  if cert~="" then
+    write_certificate(key, cert)
+  else
+    delete_certificate(key)
+  end
+end
+
+local function discard_cert_writes(mapping)
+  mapping._certsToWrite = {}
+end
+
+local function execute_certificate_updates(mapping)
+  for key, cert in pairs(mapping._certsToWrite) do
+    update_certificate(key, cert)
+  end
+  discard_cert_writes(mapping)
+end
+
+local function scheduleCertWrite(mapping, key, cert)
+  mapping._certsToWrite[key] = cert
+end
+
+local function scheduleCertDelete(mapping, key)
+  mapping._certsToWrite[key] = ""
+end
+
+function pairing.entries(mapping)
+  local entries = {}
+  generic_app.sectionname = "certificate"
+  uci.foreach_on_uci(generic_app, function(s)
+    local key = s.key
+    mapKeyToSection(mapping, key, s['.name'])
+    entries[#entries+1] = key
+  end)
+  return entries
+end
+
+local function createNewKey()
+  return uci.generate_key()
+end
+
+function pairing.add(mapping)
+  local key = createNewKey()
+  generic_app.sectionname = "certificate"
+  generic_app.option = nil
+  local section = uci.add_on_uci(generic_app, commitapply)
+  mapKeyToSection(mapping, key, section)
+  uci_set(mapping, key, "key", key)
+  return key
+end
+
+function pairing.delete(mapping, key)
+  generic_app.sectionname = sectionForKey(mapping, key)
+  generic_app.option = nil
+  uci.delete_on_uci(generic_app, commitapply)
+  configToCommit(mapping, generic_app)
+  scheduleCertDelete(mapping, key)
+  return true
+end
+
+pairing.get = {
+  Certificate = function(_, _, key)
+    return read_certificate(key)
+  end,
+  Name = function(mapping, _, key)
+    return uci_get(mapping, key, "name")
+  end,
+  Generation = function(mapping, _, key)
+    local gen = uci_get(mapping, key, "generation")
+    return tostring( tonumber(gen) or 0)
+  end
+}
+
+pairing.set = {
+  Certificate = function(mapping, _, value, key)
+    scheduleCertWrite(mapping, key, value)
+  end,
+  Name = function(mapping, _, value, key)
+    uci_set(mapping, key, "name", value)
+  end,
+  Generation = function(mapping, _, value, key)
+    uci_set(mapping, key, "generation", value)
+  end,
+}
+
+local function update_uci(mapping, action)
+  for binding in pairs(mapping._configsToCommit) do
+    action(binding)
+  end
+  mapping._configToCommit = {}
+end
+
+local function endTransaction(mapping, action)
+  clearKeyToSectionMappings(mapping)
+  update_uci(mapping, action)
+  execute_certificate_updates(mapping)
+end
+
+function pairing.commit(mapping)
+  endTransaction(mapping, uci.commit)
+end
+
+function pairing.revert(mapping)
+  discard_cert_writes(mapping)
+  endTransaction(mapping, uci.revert)
+end
+
+register(pairing)

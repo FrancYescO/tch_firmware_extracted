@@ -1,0 +1,92 @@
+#!/bin/sh
+[ $# -lt 2 ] && exit
+exec 3<&0
+exec <&-
+
+. "$IPKG_INSTROOT/lib/functions.sh"
+. "$IPKG_INSTROOT/lib/functions/reboot_reason.sh"
+
+log() {
+	echo $@ | tee /dev/console | logger -t postmortem
+}
+
+filename="$1"
+pid="$2"
+action="$(uci_get system @coredump[0] action nocore)"
+path="$(uci_get system @coredump[0] path /tmp)"
+reboot="$(uci_get system @coredump[0] reboot 1)"
+exceptions="$(uci_get system @coredump[0] reboot_exceptions)"
+
+for fname in $exceptions; do
+	fname_trunc=${fname:0:15}
+	tmp=`echo $filename | sed "s/^$fname_trunc.$pid//"`
+	if [ "$filename" != "$tmp" ]; then
+		#  Process is on reboot exception list, make/keep a coredump and don't reboot
+		log "core dump reboot exception from binary $fname"
+		reboot=0
+		break
+	fi
+done
+
+action_option="system.@coredump[0].action"
+reboot_option="system.@coredump[0].reboot"
+
+if [ -f /sbin/core-handler-lxc ]; then
+  . /sbin/core-handler-lxc
+fi
+
+if [ "$action" = "upload" ]
+then
+	url="$(uci_get system @coredump[0] url)"
+	version="$(uci_get version @version[0] version unknown)"
+	oid="$(uci_get version @version[0] oid unknown)"
+	factory_id="$(uci_get env rip factory_id unknown)"
+	serial="$(uci_get env rip serial unknown)"
+	board="$(uci_get env rip board_mnemonic unknown)"
+
+	# Insert the ngwfdd tag when uploading to Kibana
+	tag="$(uci_get ngwfdd config tag)"
+	capath="$(uci_get ngwfdd config capath)"
+	if [ -z "${capath}" ]; then
+		# Use default ca path if it is not set
+		capath="/etc/ssl/certs/"
+	fi
+
+	if [ -z "${url}" ]; then
+		action=compress
+	else
+		log "uploading core to ${url}"
+                find $path -maxdepth 1 -type f -name '*.*.*.*.core'|xargs rm -f
+                cat >${path}/${filename} <&3
+
+                curl -m 360 -X POST -F "exe=$(readlink -f /proc/${pid}/exe)" -F "version=${version}" -F "oid=${oid}" -F "serial=${factory_id}${serial}" -F "board=${board}" -F "file=@/${path}/${filename}" ${tag:+-F tag="$tag"} "${url}" --capath "${capath}" <&3 || action=compress
+               rm -f ${path}/${filename}
+	fi
+fi
+case "${action}" in
+	compress)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core.gz'|xargs rm -f
+		log "core dumped to ${path}/${filename}.gz"
+		gzip -c >${path}/${filename}.gz <&3
+		;;
+
+	store)
+		find $path -maxdepth 1 -type f -name '*.*.*.*.core'|xargs rm -f
+		log "core dumped to ${path}/${filename}"
+		cat >${path}/${filename} <&3
+		;;
+
+	upload)
+		;;
+
+	*)
+		log "core dump for pid ${pid} file ${filename} ignored due to $action_option=${action} setting"
+		;;
+esac
+
+if [ "${reboot}" -eq 1 ]
+then
+    log "Rebooting due to core dump and $reboot_option=1"
+    set_reboot_reason CRASH
+    /sbin/reboot
+fi

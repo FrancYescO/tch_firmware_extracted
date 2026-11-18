@@ -1,0 +1,93 @@
+--Manually generated
+local Multi_BondingDevice_ = {
+  objectType = {
+    name = "#ROOT_BondingDevice.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    description = "Parameters associated with the Bonded WAN Interface",
+    parameters = {
+      LinkStatus = {
+        access = "readOnly",
+        type = "string",
+	enumeration = {
+	  "Up",
+	  "Down",
+	  "Initializing",
+	  "Unavailable",
+        },
+        description = "State of the bonded connection from WANDevice to a connected entity",
+      },
+      PhysicalWANLinks = {
+        access = "readOnly",
+        type = "string",
+        description = "Comma-separated values of the physical WAN links part of the bonded connection",
+      },
+      DownstreamCurrRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The current physical layer aggregate data rate (expressed in Kbps) of the downstream bonded DSL connection",
+      },
+      UpstreamCurrRate = {
+        access = "readOnly",
+        type = "unsignedInt",
+        description = "The current physical layer aggregate data rate (expressed in Kbps) of the upstream bonded DSL connection",
+      },
+    },
+  }
+}
+
+local register, mapper = register, mapper
+local uciHelper = mapper("ucihelper")
+local dsl_supported, xdslctl = pcall(require,"transformer.shared.xdslctl")
+local xdslBinding = { config = "xdsl" }
+local xtm_supported, xtmctl = pcall(require,"transformer.shared.xtmctl")
+local bondingStatus = xtm_supported and xtmctl.getBondingStatus()
+
+local linkStatus = {
+  Showtime = "Up",
+  Idle = "Down",
+}
+
+Multi_BondingDevice_.get = {
+  LinkStatus = function(mapping, param, key)
+    if bondingStatus == "0" then
+      return "Down"
+    end
+    local status = xdslctl.infoValue("status", nil, nil, key)
+    if status then
+      return linkStatus[status] or "Initializing"
+    end
+    return "Unavailable"
+  end,
+  PhysicalWANLinks = function(mapping, param, key)
+    xdslBinding.sectionname = "xdsl"
+    local result = {}
+    uciHelper.foreach_on_uci(xdslBinding, function(s)
+      if mapping.objectType.name:match("^Device.") then
+        result[#result + 1] = resolve("Device.DSL.Line.{i}.","dsl:" .. s[".name"])
+      else
+        result[#result + 1] = resolve("InternetGatewayDevice.WANDevice.{i}.", "DSL|" .. s[".name"])
+      end
+    end)
+    return table.concat(result, ",")
+  end,
+  DownstreamCurrRate = function(mapping, param, key)
+    if bondingStatus == "0" then
+      return "0"
+    end
+    return xdslctl.infoValue("currentrate", "ds", "", key)
+  end,
+  UpstreamCurrRate = function (mapping, param, key)
+    if bondingStatus == "0" then
+      return "0"
+    end
+    return xdslctl.infoValue("currentrate", "us", "", key)
+  end,
+}
+
+local duplicator = mapper("multiroot").duplicate
+local duplicates = duplicator(Multi_BondingDevice_, "#ROOT", {"InternetGatewayDevice.X_0876FF", "InternetGatewayDevice.X_000E50", "Device.X_000E50"})
+for _, dupli in ipairs(duplicates) do
+  register(dupli)
+end

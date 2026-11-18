@@ -1,0 +1,211 @@
+local users_config_file = "/etc/config/users"
+-- create /etc/config/users if it doesn't exist
+local f = io.open(users_config_file)
+if not f then
+  f = io.open(users_config_file, "w")
+  if not f then
+    l:error("could not create " .. users_config_file)
+    return false
+  end
+  f:write([[
+config user
+  option enable '1'
+  option remoteaccesscapable '1'
+  option username 'user1'
+  option password 'pass1'
+  option language 'nederlands'
+  option creationtime '2015-02-05T02:51:45+11:00'
+  option _key '13619705455576'
+
+config user
+  option enable '1'
+  option remoteaccesscapable '0'
+  option username 'user2'
+  option password 'pass2'
+  option language 'frans'
+  option creationtime '2015-03-15T02:51:45+11:00'
+  option _key '13619705450375'
+
+config user
+  option enable '0'
+  option remoteaccesscapable '0'
+  option username 'user3'
+  option password 'pass3'
+  option language 'duits'
+  option creationtime '2015-04-25T02:51:45+11:00'
+  option _key '98419705454914'
+]])
+end
+f:close()
+
+local Users_ = {
+  objectType = {
+    name = "Users.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+--      UserNumberOfEntries = {
+--        access = "readOnly",
+--        type = "unsignedInt",
+--      },
+    }
+  }
+}
+
+register(Users_)
+
+local Users_User_i_ = {
+  objectType = {
+    name = "Users.User.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "UserNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      RemoteAccessCapable = {
+        access = "readWrite",
+        type = "boolean",
+        default = "false",
+      },
+      Username = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      Password = {
+        access = "readWrite",
+        hidden = "true",
+        type = "string",
+      },
+      Language = {
+        access = "readWrite",
+        type = "string",
+        default = "",
+      },
+      CreationTime = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+        activeNotify = "canDeny",
+      },
+    }
+  }
+}
+
+local uci_binding2 = {
+  global_config="users",
+  global_type="user",
+  Enable="enable",
+  RemoteAccessCapable="remoteaccesscapable",
+  Username="username",
+  Password="password",
+  Language="language",
+  CreationTime="creationtime"
+}
+
+mapper("multiuci").connect(Users_User_i_,uci_binding2)
+
+local uci_helper = mapper("ucihelper")
+local original_entries = Users_User_i_.entries
+local users_binding = {
+  config = "users",
+  sectionname = "user",
+}
+local key_cache = {}
+local function populate_key_cache()
+  key_cache = {}
+  uci_helper.foreach_on_uci(users_binding,function(s)
+    key_cache[s[".name"]] = s["_key"]
+  end)
+end
+
+Users_User_i_.entries = function(mapping)
+  populate_key_cache()
+  return original_entries(mapping)
+end
+
+local reverse_param_translation = {
+  enable = "Enable",
+  remoteaccesscapable = "RemoteAccessCapable",
+  username = "Username",
+  password = "Password",
+  language = "Language",
+  creationtime = "CreationTime",
+}
+
+local function translate_cb(mapping, action, config, sectiontype, sectionname, option)
+  if not next(key_cache) then
+    populate_key_cache()
+  end
+  if not key_cache[sectionname] then
+    return false
+  end
+  return { { key = key_cache[sectionname], paramname = reverse_param_translation[option] } }
+end
+
+Users_User_i_.add_watchers = function(mapping)
+  local uci_evsrc = eventsource("uci")
+  uci_evsrc.watch(mapping, { set = translate_cb }, "users", "user", nil, nil)
+end
+
+register(Users_User_i_)
+
+local Users_Empty = {
+  objectType = {
+    name = "Users.Empty.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+    }
+  }
+}
+register(Users_Empty)
+
+local Users_EmptyMI_i_ = {
+  objectType = {
+    name = "Users.EmptyMI.{i}.",
+    access = "readWrite",
+    minEntries = 1,
+    maxEntries = math.huge,
+    parameters = {
+      Username = {
+      access = "readOnly",
+      type = "string",
+      default = "",
+      }
+    }
+  }
+}
+
+Users_EmptyMI_i_.get = function() return "foo" end
+Users_EmptyMI_i_.entries = function() return {} end
+Users_EmptyMI_i_.add = function() end
+Users_EmptyMI_i_.delete = function() end
+
+register(Users_EmptyMI_i_)
+
+local Users_Huge = {
+  objectType = {
+    name = "Users.huge_name1huge_name2huge_name3huge_name4huge_name5huge_name6huge_name7huge_name8huge_name9huge_name10huge_name11huge_name12huge_name13huge_name14huge_name15huge_name16huge_name17huge_name18huge_name19huge_name20huge_name21huge_name22huge_name23huge_name24huge_name25huge_name26.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      Username = {
+        access = "readOnly",
+        type = "string",
+        default = "",
+      }
+    }
+  }
+}
+Users_Huge.get = function() return "foo" end
+register(Users_Huge)

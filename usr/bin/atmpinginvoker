@@ -1,0 +1,26 @@
+#!/usr/bin/env lua
+local cursor = require("uci").cursor()
+-- this script will be called by commit and apply on
+-- wanatmf5loopback.interface.DiagnosticsState
+-- If an interface is in state 'Requested', (re)launch
+-- an atmping for this interface and set the state to 'InProgress'
+-- If an interface is in state None, kill the associated atmping process
+local config = "wanatmf5loopback"
+local sectiontype = "wanatmf5loopback"
+-- reload
+cursor:load(config)
+-- iterate over all sections
+cursor:foreach(config, sectiontype, function(s)
+  local interface=s['.name']
+  if s['state']=='Requested' then
+    -- stop running atmping
+    os.execute("start-stop-daemon -K -p /var/run/atmping_" .. interface ..".pid")
+    -- start it again
+    os.execute("start-stop-daemon -S -b -p /var/run/atmping_" .. interface .. ".pid -m -x /usr/bin/atmping -- " .. interface)
+    -- update state
+    cursor:set(config,interface,"state",'InProgress')
+  elseif s['state']=='None' then
+    -- stop running atmping
+    os.execute("start-stop-daemon -K -p /var/run/atmping_" .. interface ..".pid")
+  end
+end)

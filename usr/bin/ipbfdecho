@@ -1,0 +1,187 @@
+#!/usr/bin/env lua
+
+local tonumber, assert, io, string =
+      tonumber, assert, io, string
+local format, match = string.format, string.match
+local logger = require 'transformer.logger'
+local cursor = require("uci").cursor()
+local process = require("tch.process")
+-- local common = require 'transformer.mapper.nwcommon'
+local ipdiag_helper = require 'transformer.shared.ipdiagnosticshelper'
+local ubus = require("ubus")
+-- UBUS connection
+local ubus_conn
+
+
+local log_config = {
+    level = 3,
+    stderr = false
+}
+-- get bfdecho configuration from UCI
+local config = "bfdecho"
+
+local state = "Complete"
+local status
+local ipaddr_used
+
+
+-- command line argument = user name
+local user=arg[1]
+-- interface cannot be nil
+if user==nil then
+  logger:critical("You need to specify an user (device2,igd,...)")
+  return
+end
+
+
+local output
+
+local function bfd_get_destmac(nexthop)
+  local fd = process.popen("ip", {"neigh"})
+  local destmac = nil
+  local line
+
+  if fd then
+    for line in fd:lines() do
+      if string.match(line,nexthop) then
+        destmac = string.match(line, "(%w+:%w+:%w+:%w+:%w+:%w+)")
+        break
+      end
+    end
+  fd:close()
+  end
+
+  return destmac
+end
+
+local function bfdecho(user)
+  -- get bfdecho configuration from UCI
+  local timeout = cursor:get(config, user, "timeout") or "1"
+  local dscp = cursor:get(config, user, "dscp") or "18"
+  local iptype = cursor:get(config, user, "iptype") or "IPv4"
+  local interface = cursor:get(config, user, "interface")
+
+  timeout = tonumber(timeout)
+  dscp = tonumber(dscp)
+  local allowed_dscp = {[10] = "AF11", [12] = "AF12", [14] = "AF13",
+                        [18] = "AF21", [20] = "AF22", [22] = "AF23",
+                        [26] = "AF31", [28] = "AF32", [30] = "AF33",
+                        [34] = "AF41", [36] = "AF42", [38] = "AF43",
+                        [0] = "CS0", [8] = "CS1", [16] = "CS2", [24] = "CS3", [32] = "CS4", [40] = "CS5", [48] = "CS6", [56] = "CS7",
+                        [46] = "EF",
+                        [4] = "lowdelay",
+                        [2] = "throughput",
+                        [1] = "reliability"}
+
+  -- check if all required parameters are present
+  if not (timeout and allowed_dscp[dscp] and iptype and interface) then
+    state = "Error_Other"
+    return
+  end
+
+  if timeout < 1 then timeout = 1 end
+
+  local data = ubus_conn:call("network.interface." .. interface, "status", {})
+  if not (data and data["up"]) then
+    state = "Error_InterfaceDown"
+    return
+  end
+
+  local intf = data["device"]
+  local src_ip
+  if iptype == "IPv4" then
+    src_ip = data["ipv4-address"] and data["ipv4-address"][1] and data["ipv4-address"][1].address
+  elseif iptype == "IPv6" then
+    src_ip = data["ipv6-address"] and data["ipv6-address"][1] and data["ipv6-address"][1].address
+  end
+  if not src_ip then
+    state = "Error_NoIPAddress"
+    return
+  end
+  ipaddr_used = src_ip
+
+  -- nexthop
+  local nexthop = ""
+  for j=1, #data["route"] do
+    local source = string.match(data["route"][j].source, "(.*)\/%d+")
+    if not source then
+      source = data["route"][j].source
+    end
+    if data["route"][j].nexthop and data["route"][j].nexthop ~= "0.0.0.0" and data["route"][j].nexthop ~= "::" and (data["route"][j].target == "0.0.0.0" or data["route"][j].target == "::") and src_ip == source then
+      nexthop = data["route"][j].nexthop
+      break
+    end
+  end
+  if nexthop == "" then
+    state = "Error_NoNextHop"
+    return
+  end
+
+  -- destmac
+  local destmac = bfd_get_destmac(nexthop)
+  if destmac == nil and iptype == "IPv4" then
+    -- Fix:  HPQC 12948. Sometimes getting destmac of the nexthop is not successful after wan is up immediately
+    logger:notice("send_bfdecho_msg : " .. "arping -c 1 -f -D " .. nexthop .. " -I " ..  intf)
+    os.execute("arping -c 1 -f -D " .. nexthop .. " -I " ..  intf .. "; sleep 5")
+    destmac = bfd_get_destmac(nexthop)
+  end
+  if not destmac then
+    state = "Error_NoDestMac"
+    return
+  end
+
+  -- send bfd echo package
+  local serial_number = cursor:get("env", "var", "serial") or ""
+  local oui = cursor:get("env", "var", "oui") or ""
+  local payload = oui .. "-" .. serial_number
+  local cmd = { "--intf ",intf ,"--dmac " ,destmac, "--srcip",src_ip, "--destip", destip "--qos ", allowed_dscp[dscp], "--timeout", timeout, "-p", payload}
+
+  local p = assert(process.popen("/usr/sbin/bfdecho", cmd))
+  if p then
+    output = p:read("*a")
+    if output then
+      status = match(output, (iptype == "IPv4" and "bfdechov4" or "bfdechov6") .. ".state.status=(%d)")
+    end
+    p:close()
+  end
+  if not status then
+    logger:error("Invalid status")
+    if output then
+      logger:error(output)
+    end
+    state = "Error_UnexpectedCmdReturn"
+    return
+  end
+
+  local fh, msg = io.open("/tmp/bfdecho_"..user, "w")
+  assert(fh, msg)
+  fh:write(format('%d\n', status))
+  fh:write(format('%s\n', ipaddr_used or ""))
+  fh:close()
+
+  local info ={}
+  info["status"] = status
+  info["state"] = state
+  -- Publish the bfdecho result on ubus
+  ubus_conn:send('bfdecho.bfdecho'.. user, info)
+end
+
+logger.init(log_config.level, log_config.stderr)
+logger = logger.new("BFDEcho", log_config.level)
+
+--publish results in ubus
+if ubus_conn == nil then
+  ubus_conn = ubus.connect()
+end
+
+
+local err, err_msg = pcall(bfdecho, user)
+if not err then
+  state = "Error_Internal"
+  logger:critical(err_msg)
+end
+
+
+-- write results to UCI
+cursor:set(config, user, "state",   state)
+cursor:commit("bfdecho")

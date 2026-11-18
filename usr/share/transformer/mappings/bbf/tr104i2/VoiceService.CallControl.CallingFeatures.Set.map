@@ -1,0 +1,556 @@
+local lfs = require("lfs")
+
+if lfs.attributes("/etc/config/mmpbx", "mode") ~= "file" then
+    return
+end
+
+local tr104Helper = require("transformer.shared.tr104helper")
+local commitapply, table = commitapply, table
+local serviceBinding = { config = "mmpbx", sectionname = "service" }
+local incomingBinding = { config = "mmpbx", sectionname = "incoming_map" }
+local outgoingBinding = { config = "mmpbx", sectionname = "outgoing_map" }
+local uciHelper = mapper("ucihelper")
+local networkBinding = { config = "mmpbxrvsipnet" }
+local setOnUci = uciHelper.set_on_uci
+local foreachOnUci = uciHelper.foreach_on_uci
+local addOnUci = uciHelper.add_on_uci
+local serviceDefault = require("transformer.shared.servicedefault")
+local namedParameter = serviceDefault.services.named_service_section
+local addService = serviceDefault.services.add
+local tmpBinding = {}
+local addBinding = {}
+local binding = {}
+local transactions = {}
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_CallingFeatures_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.CallingFeatures.",
+        access = "readOnly",
+        minEntries = 1,
+        maxEntries = 1,
+        parameters = {
+            -- SetNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.CallingFeatures.Set.{i}. is loaded
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_CallingFeatures_", Multi_Services_VoiceService_i_CallControl_CallingFeatures_, register)
+
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - START
+local Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_ = {
+    objectType = {
+        name = "#ROOT.Services.VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.",
+        access = "readOnly",
+        numEntriesParameter = "SetNumberOfEntries",
+        minEntries = 0,
+        maxEntries = math.huge,
+        parameters = {
+            --[[ Alias = {
+                access = "readWrite",
+                activeNotify = "canDeny",
+                type = "string",
+            },]]--
+            CallerIDEnable = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable or disable the transmission of caller ID information on incoming calls (CLIP)",
+            },
+            --[[ TO DO
+            CallerIDNameEnable = {
+                  access = "readWrite",
+                type = "boolean",
+            },]]--
+            CallWaitingEnable = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enables or disables call waiting in the Endpoint",
+            },
+            --[[ TO DO
+            CallForwardUnconditionalEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardUnconditionalNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            CallForwardOnBusyEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardOnBusyNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            CallForwardOnBusyRingTimeout = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            CallForwardOnNoAnswerEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallForwardOnNoAnswerNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "32",
+            },
+            CallForwardOnNoAnswerRingTimeout = {
+                access = "readWrite",
+                type = "unsignedInt",
+            },
+            CallTransferEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            MWIEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            VMWIEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            LineMessagesWaiting = {
+                access = "readOnly",
+                type = "unsignedInt",
+            },
+            AnonymousCallRejectionEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            AnonymousCallEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            DoNotDisturbEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            RepeatDialEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            VoiceMailEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            CallPickUpEnable = {
+               access = "readWrite",
+               type = "boolean",
+            },
+            CCBSEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            IIFCEnable = {
+               access = "readWrite",
+               type = "boolean",
+            },
+            BlockForwardEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            SecretForwarderEnable = {
+                access = "readWrite",
+                type = "boolean",
+            },
+            FollowMeEnable = {
+                access = "readWrite",
+                type = "boolean",
+            }, ]]--
+            X_DT_HotLine = {
+                access = "readWrite",
+                type = "boolean",
+                description = "Enable/Disable the warmline service",
+            },
+            X_DT_DelayedHotLineTime = {
+                access = "readWrite",
+                type = "unsignedInt",
+                description = "Specifies the timeout of warmline service",
+            },
+            X_DT_HotLineNumber = {
+                access = "readWrite",
+                type = "string",
+                max = "256",
+                description = "Automatic calling Number in warmline service",
+            },
+            -- CFTNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.CFT.{i}. is loaded
+            -- SCFNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.SCF.{i}. is loaded
+            -- SCREJNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.SCREJ.{i}. is loaded
+            -- FollowMeNumberOfEntries
+            -- automatically created when VoiceService.{i}.CallControl.CallingFeatures.Set.{i}.FollowMe.{i}. is loaded
+        }
+    }
+}
+-- Automatically generated from VoiceService:2.0 using generator version 2.3 - END
+
+local configs = {
+    {"mmpbxrvsipnet", "profile", "SIPUA"}
+}
+
+local function callingFeaturesCommit()
+    for config in pairs(transactions) do
+        uciHelper.commit({config = config})
+    end
+    transactions = {}
+end
+
+local function callingFeaturesRevert()
+    for config in pairs(transactions) do
+        uciHelper.revert({config = config})
+    end
+    transactions = {}
+end
+
+local serviceTable = {
+    CallWaitingEnable         = {"CALL_WAITING", "activated", "call_waiting"},
+    X_DT_HotLine            = {"WARMLINE", "activated", "warmline"},
+    X_DT_DelayedHotLineTime = {"WARMLINE", "timeout", "warmline"},
+    X_DT_HotLineNumber      = {"WARMLINE", "destination", "warmline"},
+}
+
+local function getSipDevice(profileName, servicetype)
+    local device = ""
+    if servicetype == "CALL_WAITING" then
+        foreachOnUci(incomingBinding, function(s)
+            if s.profile and type(s.profile) == "string" and s.profile == profileName and type(s.device) == "table" then
+                device = table.concat(s.device, " ")
+            end
+        end)
+    else
+        local priorityLevel = 0
+        local profilesMapped = {}
+        local prioritiesMapped = {}
+        local priorityValue
+        --Based on profile priority in outgoingmap , devices are taken
+        foreachOnUci(outgoingBinding, function(s)
+            if s.profile and type(s.device) == "string" and type(s.profile) == "table" and table.concat(s.profile, " "):match(profileName) then
+                prioritiesMapped =  s.priority or {}
+                profilesMapped = s.profile or {}
+                for index, profile in pairs(profilesMapped) do
+                    if profile == profileName and priorityLevel == 0 then
+                        priorityValue = prioritiesMapped[index]
+                        device = s.device.." "..device
+                        priorityLevel = 1
+                    elseif priorityLevel == 1 and profile == profileName and priorityValue >= prioritiesMapped[index] then
+                        -- previous priority is lower than current priority then remove the existing device
+                        if priorityValue ~= prioritiesMapped[index] then
+                            device = ""
+                        end
+                        device = s.device.." "..device
+                        priorityValue = prioritiesMapped[index]
+                    end
+                end
+            end
+        end)
+    end
+    return device
+end
+
+-- get the Warmline/Call-Waiting service section value based on device mapped in incoming/outgoing profile map
+local function getDeviceServiceValue(mapping, param, key)
+    local result = ""
+    local stype = serviceTable[param][1]
+    local option = serviceTable[param][2]
+    local deviceMapped = getSipDevice(key, stype)
+    foreachOnUci(serviceBinding, function(s)
+        if s['type'] == stype then
+            if s.device and type(s.device) == "table" then
+                local serviceDevice = table.concat(s.device, " ")
+                if #s.device == 1 then
+                    if deviceMapped:match(serviceDevice) then
+                        result = s[option] or ""
+                    end
+                else
+                    -- more than one device is present in service
+                    for device in deviceMapped:gmatch("%S+") do
+                        if serviceDevice:match(device) then
+                            result = s[option] or ""
+                        end
+                        if result == "0" and option == "activated" then
+                            return false
+                        end
+                    end
+                end
+            elseif s.device and type(s.device) == "string" then
+                if deviceMapped:match(s.device) then
+                    result = s[option] or ""
+               end
+            end
+            if result == "0" and option == "activated" then
+                return false
+            end
+        end
+    end)
+    return result
+end
+
+local function addServiceSection(newDeviceList, value, serviceName, serviceType, serviceOption)
+    addBinding.config = "mmpbx"
+    for _, deviceMap in pairs(newDeviceList) do
+        if namedParameter then
+            addBinding.sectionname = "service_"..serviceName.."_"..deviceMap
+            addBinding.option = nil
+            setOnUci(addBinding, "service", commitApply)
+        else
+            addBinding.sectionname = "service"
+            addBinding.sectionname = addOnUci(addBinding)
+        end
+        addBinding.option = "type"
+        setOnUci(addBinding, serviceType, commitApply)
+        addBinding.option = "device"
+        setOnUci(addBinding, {deviceMap}, commitapply)
+        for parameter, oldValue in pairs(addService[serviceType]) do
+            addBinding.option = parameter
+            if parameter ~= "servicetype" then
+                setOnUci(addBinding, oldValue, commitapply)
+            end
+        end
+        addBinding.option = serviceOption
+        setOnUci(addBinding, value, commitapply)
+        transactions[addBinding.config] = true
+    end
+end
+
+local function setDeviceServiceValue(mapping, param, value, key)
+    local checkProvision = false
+    local deviceList = {}
+    local deviceMatch = 0
+    local stype = serviceTable[param][1]
+    local option = serviceTable[param][2]
+    local namedParam = serviceTable[param][3]
+    local deviceMapped = {}
+    if stype == "CALL_WAITING" then
+        foreachOnUci(incomingBinding, function(s)
+            if s.profile and type(s.profile) == "string" and s.profile == key and type(s.device) == "table" then
+                deviceMapped = s.device
+            end
+        end)
+   else
+       local priorityLevel = 0
+       local profilesMapped = {}
+       local prioritiesMapped = {}
+       local priorityValue
+       foreachOnUci(outgoingBinding, function(s)
+            if s.profile and type(s.device) == "string" and type(s.profile) == "table" and table.concat(s.profile, " "):match(key) then
+                prioritiesMapped =  s.priority or {}
+                profilesMapped = s.profile or {}
+                for index, profile in pairs(profilesMapped) do
+                    if profile == key and priorityLevel == 0 then
+                        priorityValue = prioritiesMapped[index]
+                        deviceMapped[#deviceMapped + 1] = s.device
+                        priorityLevel = 1
+                    elseif priorityLevel == 1 and profile == key and priorityValue >= prioritiesMapped[index] then
+                        -- previous priority is lower than current priority then remove the existing deviceMapped
+                        if priorityValue ~= prioritiesMapped[index] then
+                            deviceMapped = {}
+                        end
+                        deviceMapped[#deviceMapped + 1] = s.device
+                        priorityValue = prioritiesMapped[index]
+                    end
+                end
+            end
+        end)
+    end
+    -- check incoming/outgoing map profile has an device list
+    if #deviceMapped > 0  then
+        foreachOnUci(serviceBinding, function(s)
+            if s['type'] == stype then
+                local deviceBinding = { config = "mmpbx", sectionname = s['.name']}
+                if s.device and type(s.device) == "table" then
+                    for _, deviceName in pairs(s.device) do
+                        for _, device in pairs(deviceMapped) do
+                            if device == deviceName and s.provisioned and s.provisioned == "0" then
+                                checkProvision = true
+                                break
+                            end
+                        end
+                    end
+                    if checkProvision then
+                        return false
+                    end
+                    -- check the service section is an add/append config
+                    if addService[stype] then
+                        if #s.device > 1 then
+                            local newDeviceList = {}
+                            -- comparing the incoming/outgoing profile map device list and service section device list
+                            for _, deviceName in pairs(s.device) do
+                                local similarDevice = false
+                                for _, device in pairs(deviceMapped) do
+                                    if deviceName == device then
+                                        deviceMatch = deviceMatch + 1
+                                        similarDevice = true
+                                        break
+                                    end
+                                end
+                                -- incoming/outgoing map device list is not matched with service section device list
+                                if not similarDevice then
+                                    newDeviceList[#newDeviceList+1] = deviceName
+                                end
+                            end
+                            -- incoming/outgoing map device list and service section device list are matched
+                            deviceBinding.option = "device"
+                            if #deviceMapped == deviceMatch and #newDeviceList == 0 then
+                                setOnUci(deviceBinding, s.device, commitApply)
+                                deviceBinding.option = option
+                                setOnUci(deviceBinding, value, commitApply)
+                                transactions[deviceBinding.config] = true
+                                deviceMapped = {}
+                            -- mismatching the incoming/outgoing map device list and service section list
+                            elseif #newDeviceList > 0 and deviceMatch > 0 then
+                               -- particular device is deleted from existing service section and new section created
+                                setOnUci(deviceBinding, newDeviceList, commitApply)
+                                transactions[deviceBinding.config] = true
+                                addServiceSection(deviceMapped, value, namedParam, stype, option)
+                                deviceMapped = {}
+                            end
+                        else
+                            for index, deviceName in pairs(deviceMapped) do
+                                if s.device and table.concat(s.device, " "):match(deviceName) then
+                                    deviceBinding.option = option
+                                    setOnUci(deviceBinding, value, commitapply)
+                                    transactions[deviceBinding.config] = true
+                                    table.remove(deviceMapped, index)
+                                end
+                            end
+                        end
+                    else
+                        -- append the service value in existing service section
+                        deviceList = s.device
+                        for _, deviceName in pairs(deviceMapped) do
+                            if s.device and not table.concat(s.device, " "):match(deviceName) then
+                                deviceList[#deviceList+1] = deviceName
+                            end
+                        end
+                        deviceBinding.option = "device"
+                        setOnUci(deviceBinding, deviceList, commitApply)
+                        deviceBinding.option = option
+                        setOnUci(deviceBinding, value, commitapply)
+                        transactions[deviceBinding.config] = true
+                        deviceMapped = {}
+                    end
+                end
+            end
+        end)
+        -- no device is matched with incoming/outgoing map device list so creating a new service sections
+        if #deviceMapped ~= 0 and  not checkProvision then
+            addServiceSection(deviceMapped, value, namedParam, stype, option)
+        end
+    else
+        return nil, "No device mapped to the profile"
+    end
+    if checkProvision then
+        return nil, "Provision is not enabled"
+    end
+    return true
+end
+
+Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_.entries = function(mapping, parentKey)
+    local entries = {}
+    for _, value in pairs(configs) do
+        if value[3] == parentKey then
+            networkBinding.config = value[1]
+            networkBinding.sectionname = value[2]
+            foreachOnUci(networkBinding, function(s)
+                entries[#entries + 1] = s['.name']
+            end)
+        end
+    end
+    return entries
+end
+
+Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_.get = {
+    CallerIDEnable = function(mapping, param, key, parentKey)
+        local enableValue = "0"
+        foreachOnUci(serviceBinding, function(s)
+            if s["type"] == "CLIP" then
+                if s.profile and type(s.profile) == "table" and table.concat(s.profile, " "):match(key) then
+                    enableValue = s["activated"] or "0"
+                end
+            end
+        end)
+        return enableValue
+    end,
+    CallWaitingEnable = getDeviceServiceValue,
+    X_DT_HotLine = getDeviceServiceValue,
+    X_DT_DelayedHotLineTime = getDeviceServiceValue,
+    X_DT_HotLineNumber = getDeviceServiceValue,
+}
+
+Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_.set = {
+    CallerIDEnable = function(mapping, param, value, key, parentKey)
+        foreachOnUci(serviceBinding, function(s)
+            if s['type'] == "CLIP" then
+                if addService["CLIP"] ~= nil and s.profile and #s.profile > 1 then
+                    -- particular profile is deleted from existing service section and new section created
+                    -- instead of enabling/disabling a service for all sip profiles
+                    tmpBinding.config = "mmpbx"
+                    tmpBinding.sectionname = s['.name']
+                    tmpBinding.option = "profile"
+                    local newProfileList = {}
+                    if (#s.profile > 1) then
+                        for _, value in ipairs(s.profile) do
+                            if value ~= key then
+                                newProfileList[#newProfileList + 1] = value
+                            end
+                        end
+                        if #s.profile ~= #newProfileList then
+                            setOnUci(tmpBinding, newProfileList, commitapply)
+                            transactions[tmpBinding.config] = true
+                            s.profile = newProfileList
+                            addBinding.config = "mmpbx"
+                            if namedParameter then
+                                addBinding.sectionname = s['.name'].."_"..key
+                                addBinding.option = nil
+                                setOnUci(addBinding, "service", commitapply)
+                            else
+                                addBinding.sectionname = "service"
+                                local sectionname = addOnUci(addBinding)
+                                addBinding.sectionname = sectionname
+                            end
+                            addBinding.option = "profile"
+                            local profileList = {key}
+                            setOnUci(addBinding, profileList, commitapply)
+                            -- existing parameters from old section are copied into new section
+                            for parameter, oldValue in pairs(s) do
+                                addBinding.option = parameter
+                                if not parameter:match("^[%._]") and parameter ~= "profile" then
+                                    setOnUci(addBinding, oldValue, commitapply)
+                                end
+                            end
+                            addBinding.option = "activated"
+                            setOnUci(addBinding, value, commitapply)
+                            transactions[addBinding.config] = true
+                        end
+                    end
+                else
+                    if s.profile and type(s.profile) == "table" and table.concat(s.profile, " "):match(key) then
+                        binding.config = "mmpbx"
+                        binding.sectionname = s['.name']
+                        binding.option = "activated"
+                        setOnUci(binding, value, commitapply)
+                        transactions[binding.config] = true
+                    end
+                end
+            end
+        end)
+    end,
+    CallWaitingEnable = setDeviceServiceValue,
+    X_DT_HotLine = setDeviceServiceValue,
+    X_DT_DelayedHotLineTime = setDeviceServiceValue,
+    X_DT_HotLineNumber = setDeviceServiceValue,
+}
+
+Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_.commit = callingFeaturesCommit
+Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_.revert = callingFeaturesRevert
+
+tr104Helper.registerObject("Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_", Multi_Services_VoiceService_i_CallControl_CallingFeatures_Set_i_, register)

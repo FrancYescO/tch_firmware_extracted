@@ -1,0 +1,103 @@
+-- Manually generated
+local Device_PeriodicStatistics_SampleSet_i_Parameter_i_ = {
+  objectType = {
+    name = "Device.PeriodicStatistics.SampleSet.{i}.Parameter.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "ParameterNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      CalculationMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Latest",
+          "Minimum",
+          "Maximum",
+          "Average",
+        },
+      },
+      Enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      Reference = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+      },
+      SampleMode = {
+        access = "readWrite",
+        type = "string",
+        enumeration = {
+          "Current",
+          "Change",
+        },
+      },
+      Values = {
+        access = "readOnly",
+        type = "string",
+      },
+    }
+  }
+}
+
+local bulk_helper = require "transformer.shared.bulkhelper"
+
+local getMap = {
+  Enable = {"enable_param"},
+  Reference = {"parameters"},
+  SampleMode = {"modes"},
+  CalculationMode = {"modes"},
+  Values = function(object, indexid)
+    local ref = string.match((object.parameters and object.parameters[indexid]) or "", "(.*)|(.*)") or ""
+    local samples = {}
+    local fd = io.popen("ls -1 -rt '/etc/bulkdata' | grep ".. object['.name'])
+    if fd then
+      for fileName in fd:lines() do
+        local file = io.open("/etc/bulkdata/" .. fileName)
+        if file then
+          local output = file:read("*all") or ""
+          output = output:match('%"'.. ref .. '%"%:%"(.-)%"%,\n') or output:match('%"'.. ref .. '%"%:(%d+)') or output:match('%"'.. ref .. '%"%:%"(.*)%"')
+          if output then
+            samples[#samples + 1] = output:gsub('%"', "")
+          end
+          file:close()
+        end
+      end
+      fd:close()
+    end
+    return table.concat(samples, ",")
+  end,
+}
+
+local setMap = {
+  Enable = {"enable_param"},
+  Reference = {"parameters"},
+  SampleMode = {"modes"},
+  CalculationMode = {"modes"},
+}
+
+bulk_helper.SetProfileMap(Device_PeriodicStatistics_SampleSet_i_Parameter_i_, {get=getMap, set=setMap}, commitapply)
+
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.entries = function(mapping, parentkey)
+  return mapping._profile:getParamKeys("parameters", parentkey)
+end
+
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.getall = bulk_helper.getall
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.get = bulk_helper.get
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.set = bulk_helper.set
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.add = function(mapping, parentkey)
+  local newprofile = bulk_helper.add_parameter("modes")(mapping, parentkey)
+  newprofile = newprofile and bulk_helper.add_parameter("enable_param")(mapping, parentkey)
+  return newprofile and bulk_helper.add_parameter("parameters")(mapping, parentkey) or nil, "Failed to add objects"
+end
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.delete = function(mapping, key, parentkey)
+  local deleteprofile = bulk_helper.delete_parameter("modes")(mapping, key, parentkey)
+  deleteprofile = deleteprofile and bulk_helper.delete_parameter("enable_param")(mapping, key, parentkey)
+  return deleteprofile and bulk_helper.delete_parameter("parameters")(mapping, key, parentkey) or nil, "Failed to delete objects"
+end
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.commit = bulk_helper.commit
+Device_PeriodicStatistics_SampleSet_i_Parameter_i_.revert = bulk_helper.revert
+
+register(Device_PeriodicStatistics_SampleSet_i_Parameter_i_)
