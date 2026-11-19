@@ -1,0 +1,26 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+start() {
+
+  STATE=`uci get wireless.global.wfa_testsuite_daemon 2> /dev/null`
+
+  if [ "$?" = "0" ] && [ "$STATE" = "1" ]; then
+    echo "Starting WFA Test Suite Daemon"
+
+    #remove ssid settings (from previous boot)
+    BOARD=`uci get env.rip.board_mnemonic`
+    /rom/etc/boards/$BOARD/config/etc/uci-defaults/tch_0050-wireless
+    /etc/init.d/hostapd reload
+
+    #start wfa
+    wfa-testsuite-daemon -b -p 9000
+  fi
+
+}
+
+stop() {
+    killall wfa-testsuite-daemon
+}
+

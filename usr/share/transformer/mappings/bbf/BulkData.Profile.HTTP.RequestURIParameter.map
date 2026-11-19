@@ -1,0 +1,132 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_ = {
+  objectType = {
+    name = "#ROOT.BulkData.Profile.{i}.HTTP.RequestURIParameter.{i}.",
+    access = "readWrite",
+    numEntriesParameter = "RequestURIParameterNumberOfEntries",
+    minEntries = 0,
+    maxEntries = math.huge,
+    parameters = {
+      Name = {
+        access = "readWrite",
+        type = "string",
+        max = "64",
+      },
+      Reference = {
+        access = "readWrite",
+        type = "string",
+        max = "256",
+        default = "",
+      },
+    }
+  }
+}
+
+local bulk_helper = require "transformer.shared.bulkhelper"
+local commitapply = commitapply
+local register = register
+local mapper = mapper
+local uciHelper = mapper("ucihelper")
+local forEachOnUci = uciHelper.foreach_on_uci
+local isConfigChanged = false
+
+local map = {
+  Name = {"http_uri"},
+  Reference = {"http_uri"}
+}
+
+bulk_helper.SetProfileMap(Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_, {get=map, set=map}, commitapply)
+
+local bulkdataBinding = { config = "bulkdata" }
+local function getUciValue(binding, section, option)
+  local binding = { config = "bulkdata" }
+  binding.sectionname = section
+  binding.option = option
+  return uciHelper.get_from_uci(binding)
+end
+
+local function setUciValue(binding, section, option, value)
+  binding.sectionname = section
+  binding.option = option
+  uciHelper.set_on_uci(binding, value, commitapply)
+  isConfigChanged = true
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.entries = function(mapping, parentkey)
+  local entries = {}
+  local entries_key = {}
+  local entries = getUciValue(bulkdataBinding, parentkey, 'http_uri_instances', true)
+  if type(entries) ~= "table" or entries[1] == "" then
+    return {}
+  end
+  for i, v in pairs(entries) do
+    entries_key[#entries_key + 1] = string.format("%s|%s|%d", parentkey, "http_uri", v)
+  end
+  return entries_key
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.getall = bulk_helper.http_uri_getall
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.get = bulk_helper.http_uri_get
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.set = function(mapping, param, value, key, parentkey)
+  isConfigChanged = true
+  local instance = getUciValue(bulkdataBinding, parentkey, "http_uri_instances", true) or {}
+  bulk_helper.set(mapping, param, value, key, instance)
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.add = function(mapping, parentkey)
+  local max = getUciValue(bulkdataBinding, "global", "max_num_parameters")
+  local instance = getUciValue(bulkdataBinding, parentkey, "http_uri_instances", true) or {}
+  instance = instance == "" and {} or instance
+  local count = tonumber(getUciValue(bulkdataBinding, parentkey, "http_uri_count")) or 0
+  if #instance >= tonumber(max) then
+    return nil, "The parameter's instance number has reached the maximize and can't add any new!"
+  end
+
+  count = count and count + 1
+  if #instance < count then
+    instance[ #instance + 1 ] = count
+  end
+  setUciValue(bulkdataBinding, parentkey, "http_uri_instances", instance)
+  setUciValue(bulkdataBinding, parentkey, "http_uri_count", tostring(count))
+
+  bulk_helper.add_param_elements(mapping, parentkey, "http_uri")
+  return string.format("%s|%s|%d", parentkey, "http_uri", count)
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.delete = function(mapping, key, parentkey)
+  bulk_helper.delete_parameter("http_uri")
+  key = key .. '|'
+  local num = 0
+  for w in key:gmatch("(.-)|") do
+    num = num + 1
+    if (num == 3) then
+      key = w
+    end
+  end
+  local instance = getUciValue(bulkdataBinding, parentkey, "http_uri_instances") or {}
+  local count = getUciValue(bulkdataBinding, parentkey, "parameter_count") or {}
+  local parameters = getUciValue(bulkdataBinding, parentkey, "http_uri") or {}
+  for i, v in ipairs(instance) do
+    if v == key then
+      table.remove(instance, i)
+      table.remove(parameters, i)
+    end
+  end
+  setUciValue(bulkdataBinding, parentkey, "http_uri_instances", instance, log)
+  setUciValue(bulkdataBinding, parentkey, "http_uri", parameters, log)
+  return true
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(bulkdataBinding)
+    isConfigChanged = false
+  end
+end
+
+Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_.revert = bulk_helper.revert
+
+bulk_helper.register(Multi_BulkData_Profile_i_HTTP_RequestURIParameter_i_, register)

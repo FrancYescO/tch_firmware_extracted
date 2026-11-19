@@ -1,0 +1,428 @@
+#!/bin/sh
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+PROG="/usr/bin/tr143_diag"
+PROG_UDP_ECHO_DIAG="/usr/bin/udp_echo_diag"
+PROG_SERVER_SELECTION_DIAG="/usr/bin/server_selection_diag.lua"
+RES="/tmp/tr143.out"
+RES_UDP_ECHO="/tmp/tr143_udp_echo.out"
+PKG="tr143"
+MAX_CONNECTION=32
+MAX_INC_RESULT=32
+UDPECHO_DIAG_IPR="IndividualPacketResult"
+RES_SERVER_SELECTION="/tmp/serverselection.out"
+
+trace() {
+	logger -t $PKG "\"$1\""
+}
+
+xappend() {
+	local section="$1"
+	local option="$2"
+	local switch="$3"
+	local default="$4"
+	local _loctmp
+	config_get _loctmp "$section" "$option" "$default"
+	[ -z "$_loctmp" ] && return 0
+	[ "$_loctmp" = "''" ] && [ -z "$default" ] && return 0
+	OPT="$OPT $switch $_loctmp"
+}
+
+append_dir() {
+	local section="$1"
+	local dir
+	if [ "$section" = "DownloadDiagnostics" ]; then
+		dir="--dir down"
+	elif [ "$section" = "UploadDiagnostics" ]; then
+		dir="--dir up"
+	fi
+	OPT="$OPT $dir"
+}
+
+append_intf() {
+	local section="$1"
+	local _intf
+	config_get _intf "$section" "Interface" ""
+	[ -z "$_intf" ] && return 0
+	[ "$_intf" = "''" ] && return 0
+	local lower_intf=$(ubus call network.interface.$_intf status | grep l3_device | cut -d"\"" -f4)
+	[ -z "$lower_intf" ] && return 0
+	OPT="$OPT --intf $lower_intf"
+}
+
+udp_echo_diag_res_to_uci() {
+	local config="UDPEchoDiagnostics"
+	local option
+	local value
+	local i="0"
+	while read line; do
+		if  echo $line | grep -q "$UDPECHO_DIAG_IPR="; then
+			config="$UDPECHO_DIAG_IPR"
+			uci_add $PKG $config
+			config="@$config[$i]"
+			i=`expr $i + 1`
+		else
+			option=`echo $line | awk -F '=' '{print $1}'`
+			value=`echo $line | awk -F '=' '{print $2}'`
+			uci_set $PKG $config $option $value
+		fi
+	done < $RES_UDP_ECHO
+	uci_commit $PKG
+}
+
+res_to_uci() {
+	local sect="$1"
+	local option
+	local value
+	local config
+	local i
+	local j
+	local pcr="${sect}PCR"
+	local ir="${sect}IR"
+	i=0;j=0;
+	while read line; do
+		if  echo $line | grep -q "\[Root"; then
+			config="$sect"
+			continue
+		elif  echo $line | grep -q "\[Connection"; then
+			uci_add $PKG $pcr
+			config="@$pcr[$i]"
+			i=`expr $i + 1`
+			continue
+		elif  echo $line | grep -q "\[Incremental"; then
+			uci_add $PKG $ir
+			config="@$ir[$j]"
+			j=`expr $j + 1`
+		else
+			option=`echo $line | awk -F '=' '{print $1}'`
+			value=`echo $line | awk -F '=' '{print $2}'`
+			uci_set $PKG $config $option $value
+		fi
+	done < $RES
+	uci_commit $PKG
+}
+
+reset_pcr_ir() {
+	local sect=$1
+	local pcr="${sect}PCR"
+	local ir="${sect}IR"
+	while uci_get $PKG "@$pcr[0]"; do
+		uci_remove $PKG "@$pcr[0]"
+	done
+	while uci_get $PKG "@$ir[0]"; do
+		uci_remove $PKG "@$ir[0]"
+	done
+	uci_commit $PKG
+}
+
+reset_ipr() {
+	while uci_get $PKG "@$UDPECHO_DIAG_IPR[0]"; do
+		uci_remove $PKG "@$UDPECHO_DIAG_IPR[0]"
+	done
+}
+
+clean_res_value() {
+	local sect="UDPEchoDiagnostics"
+	[ -n `uci_get $PKG $sect IPAddressUsed` ] && uci_remove $PKG $sect IPAddressUsed
+	[ -n `uci_get $PKG $sect SuccessCount` ] && uci_remove $PKG $sect SuccessCount
+	[ -n `uci_get $PKG $sect FailureCount` ] && uci_remove $PKG $sect FailureCount
+	[ -n `uci_get $PKG $sect AverageResponseTime` ] && uci_remove $PKG $sect AverageResponseTime
+	[ -n `uci_get $PKG $sect MinimumResponseTime` ] && uci_remove $PKG $sect MinimumResponseTime
+	[ -n `uci_get $PKG $sect MaximumResponseTime` ] && uci_remove $PKG $sect MaximumResponseTime
+	[ -n `uci_get $PKG $sect IndividualPacketResultNumberOfEntries` ] && uci_remove $PKG $sect IndividualPacketResultNumberOfEntries
+	uci_commit $PKG
+}
+
+reset_results() {
+
+	local sect=$1
+	reset_pcr_ir $sect
+	[ -n `uci_get $PKG $sect ROMTime` ] && uci_remove $PKG $sect ROMTime
+	[ -n `uci_get $PKG $sect BOMTime` ] && uci_remove $PKG $sect BOMTime
+	[ -n `uci_get $PKG $sect EOMTime` ] && uci_remove $PKG $sect EOMTime
+	[ -n `uci_get $PKG $sect TCPOpenRequestTime` ] && uci_remove $PKG $sect TCPOpenRequestTime
+	[ -n `uci_get $PKG $sect TCPOpenResponseTime` ] && uci_remove $PKG $sect TCPOpenResponseTime
+	[ -n `uci_get $PKG $sect TotalBytesReceived` ] && uci_remove $PKG $sect TotalBytesReceived
+	[ -n `uci_get $PKG $sect TotalBytesSent` ] && uci_remove $PKG $sect TotalBytesSent
+	[ -n `uci_get $PKG $sect TotalBytesReceivedUnderFullLoading` ] && uci_remove $PKG $sect TotalBytesReceivedUnderFullLoading
+	[ -n `uci_get $PKG $sect TotalBytesSentUnderFullLoading` ] && uci_remove $PKG $sect TotalBytesSentUnderFullLoading
+	[ -n `uci_get $PKG $sect PeriodOfFullLoading` ] && uci_remove $PKG $sect PeriodOfFullLoading
+	[ -n `uci_get $PKG $sect FullLoadingSpeed` ] && uci_remove $PKG $sect FullLoadingSpeed
+	[ -n `uci_get $PKG $sect IPAddressUsed` ] && uci_remove $PKG $sect IPAddressUsed
+	[ -n `uci_get $PKG $sect TestBytesSent` ] && uci_remove $PKG $sect TestBytesSent
+	[ -n `uci_get $PKG $sect TestBytesSentUnderFullLoading` ] && uci_remove $PKG $sect TestBytesSentUnderFullLoading
+	[ -n `uci_get $PKG $sect TestBytesReceived` ] && uci_remove $PKG $sect TestBytesReceived
+	[ -n `uci_get $PKG $sect TestBytesReceivedUnderFullLoading` ] && uci_remove $PKG $sect TestBytesReceivedUnderFullLoading
+	uci_commit $PKG
+}
+
+ss_reset_results() {
+	local sect="ServerSelectionDiagnostics"
+	[ -n `uci_get $PKG $sect IPAddressUsed` ] && uci_remove $PKG $sect IPAddressUsed
+	[ -n `uci_get $PKG $sect FastestHost` ] && uci_remove $PKG $sect FastestHost
+	[ -n `uci_get $PKG $sect AverageResponseTime` ] && uci_remove $PKG $sect AverageResponseTime
+	[ -n `uci_get $PKG $sect MinimumResponseTime` ] && uci_remove $PKG $sect MinimumResponseTime
+	[ -n `uci_get $PKG $sect MaximumResponseTime` ] && uci_remove $PKG $sect MaximumResponseTime
+	uci_commit $PKG
+}
+
+perform_test()
+{
+	local prog=$1
+	local opt=$2
+	local sect=$3
+	local ubusev=$4
+
+	trace "$prog $opt"
+	$prog $opt
+	rv=$?
+
+	if [ $rv = "0" ]; then
+                if [ $4 = "udpecho" ]; then
+                        udp_echo_diag_res_to_uci $sect
+                elif [ $4 != "serverselection" ]; then
+			res_to_uci $sect
+		fi
+	else
+		uci_set $PKG $sect "DiagnosticsState" "Error_Internal"
+	fi
+
+	#Only set State to 'Idle' when test is finished
+	uci_set $PKG $sect "State" "Idle"
+	uci_commit $PKG
+	ubus send "$ubusev"."$ubusev"_dm
+}
+
+download_start()
+{
+	trace "Start tr143 Download Diagnostics"
+	local sect="DownloadDiagnostics"
+	reset_results $sect
+        [ -f $RES ] && rm $RES
+
+	config_load $PKG
+	local diag_state
+	local running_state
+	config_get diag_state $sect "DiagnosticsState" "None"
+	config_get running_state $sect "State" "Idle"
+	if [ "${diag_state-None}" = "Requested" ] && [ "$running_state" = "Idle" ]; then
+		#Only run the test when diag_state is set to Requested and currently no test is running
+		local url
+		config_get url $sect "DownloadURL" ""
+		[ "$url" = "" ] && uci_set $PKG $sect "DiagnosticsState" "Error_Other" && uci_commit && ubus send download.download_dm && return 0
+
+		OPT="--resfile $RES"
+		append_dir $sect
+		append_intf $sect
+		xappend $sect "DownloadURL" "--url" ""
+		xappend $sect "DSCP" "--dscp" "0"
+		xappend $sect "TimeBasedTestDuration" "--tb_duration" "0"
+		xappend $sect "TimeBasedTestMeasurementInterval" "--tb_interval" "0"
+		xappend $sect "TimeBasedTestMeasurementOffset" "--tb_offset" "0"
+		xappend $sect "ProtocolVersion" "--ip_version" "any"
+		xappend $sect "NumberOfConnections" "--noc" "1"
+		xappend $sect "EnablePerConnectionResults" "--enable_pcr" "0"
+		xappend $sect "DownloadDiagnosticMaxConnections" "--max_conn" "$MAX_CONNECTION"
+		xappend $sect "DownloadDiagnosticsMaxIncrementalResult" "--max_ir" "$MAX_INC_RESULT"
+
+		if [ -f "/etc/licenses/license.txt" ]; then
+			local i enable_offload rwnd_size
+			config_get_bool enable_offload $sect "EnableOffload"
+			if [ "$enable_offload" = 0 ]; then
+				OPT="$OPT --offload 0"
+			else
+				# bcm_tcpspdtest stream pool get depleted sometimes;
+				# reload this kernel module when at least one stream is still active
+				echo stats > /proc/driver/tcpspdtest/cmd
+				if logread -l 256 -e "is_active: [01], protocol" | tail -n 4 | grep "kernel:.*[[:blank:]]is_active: 1, protocol" ; then
+					rmmod bcm_tcpspdtest
+					insmod $(find /lib/modules -name bcm_tcpspdtest.ko)
+				fi
+
+				config_get rwnd_size $sect "ReceiveWindowSize"
+				if [ -n "$rwnd_size" ]; then
+					for i in $(seq 0 3); do
+						echo rwnd $i $rwnd_size 0 > /proc/driver/tcpspdtest/cmd
+					done
+				fi
+			fi
+		fi
+
+		uci_set $PKG $sect "State" "Running"
+		uci_commit $PKG
+		perform_test "$PROG" "$OPT" "$sect" "download" &
+	else
+		#Set DiagnosticsState to None and Set State to Idle
+		uci_set $PKG $sect "DiagnosticsState" "None"
+		uci_set $PKG $sect "State" "Idle"
+		uci_commit $PKG
+		trace "Diagnostics test doesn't run since diag_state isn't set to Requested. And now set diag_state to None"
+	fi
+}
+
+upload_start()
+{
+	trace "Start tr143 Upload Diagnostics"
+	local sect="UploadDiagnostics"
+	reset_results $sect
+        [ -f $RES ] && rm $RES
+
+	config_load $PKG
+	local diag_state
+	local running_state
+	config_get diag_state $sect "DiagnosticsState" "None"
+	config_get running_state $sect "State" "Idle"
+
+	if [ "${diag_state-None}" = "Requested" ] && [ "$running_state" = "Idle" ]; then
+		#Only run the test when diag_state is set to Requested and currently no test is running
+		local url
+		config_get url $sect "UploadURL" ""
+		[ "$url" = "" ] && uci_set $PKG $sect "DiagnosticsState" "Error_Other" && uci_commit && ubus send upload.upload_dm && return 0
+		local length
+		config_get length $sect "TestFileLength" "0"
+		[ "$length" = "0" ] && uci_set $PKG $sect "DiagnosticsState" "Error_Other" && uci_commit && ubus send upload.upload_dm && return 0
+
+		OPT="--resfile $RES"
+		append_dir $sect
+		append_intf $sect
+		xappend $sect "UploadURL" "--url" " "
+		xappend $sect "TestFileLength" "--upsize" "0"
+		xappend $sect "DSCP" "--dscp" "0"
+		xappend $sect "TimeBasedTestDuration" "--tb_duration" "0"
+		xappend $sect "TimeBasedTestMeasurementInterval" "--tb_interval" "0"
+		xappend $sect "TimeBasedTestMeasurementOffset" "--tb_offset" "0"
+		xappend $sect "ProtocolVersion" "--ip_version" "any"
+		xappend $sect "NumberOfConnections" "--noc" "1"
+		xappend $sect "EnablePerConnectionResults" "--enable_pcr" "0"
+		xappend $sect "UploadDiagnosticsMaxConnections" "--max_conn" "$MAX_CONNECTION"
+		xappend $sect "UploadDiagnosticsMaxIncrementalResult" "--max_ir" "$MAX_INC_RESULT"
+
+		uci_set $PKG $sect "State" "Running"
+		uci_commit $PKG
+		perform_test "$PROG" "$OPT" "$sect" "upload" &
+	else
+		#Set DiagnosticsState to None and Set State to Idle
+		uci_set $PKG $sect "DiagnosticsState" "None"
+		uci_set $PKG $sect "State" "Idle"
+		uci_commit $PKG
+		trace "Diagnostics test doesn't run since diag_state isn't set to Requested. And now set diag_state to None"
+	fi
+}
+
+udp_echo_start()
+{
+	trace "Start tr143 UDP ECHO Diagnostics"
+	local sect="UDPEchoDiagnostics"
+	reset_ipr
+	clean_res_value
+        [ -f $RES_UDP_ECHO ] && rm $RES_UDP_ECHO
+
+	config_load $PKG
+	local diag_state
+	local running_state
+	config_get diag_state $sect "DiagnosticsState" "None"
+	config_get running_state $sect "State" "Idle"
+
+	if [ "${diag_state-None}" = "Requested" ] && [ "$running_state" = "Idle" ]; then
+		#Only run the test when diag_state is set to Requested and currently no test is running
+		local host
+		config_get host $sect "Host" ""
+		[ "$host" = "" ] && uci_set $PKG $sect "DiagnosticsState" "Error_Other" && uci_commit && ubus send udpecho.udpecho_dm && return 0
+
+		OPT="--resfile $RES_UDP_ECHO"
+		append_intf $sect
+		xappend $sect "Host" "--host"
+		xappend $sect "Port" "--port" "7"
+		xappend $sect "NumberOfRepetitions" "--repetitions" "1"
+		xappend $sect "Timeout" "--timeout" "5000"
+		xappend $sect "DataBlockSize" "--blocksize" "24"
+		xappend $sect "DSCP" "--dscp" "0"
+		xappend $sect "InterTransmissionTime" "--intertime" "1000"
+		xappend $sect "ProtocolVersion" "--protocol" "Any"
+		xappend $sect "EnableIndividualPacketResults" "--individual" "0"
+
+		uci_set $PKG $sect "State" "Running"
+		uci_commit $PKG
+		perform_test "$PROG_UDP_ECHO_DIAG" "$OPT" "$sect" "udpecho" &
+	else
+		#Set DiagnosticsState to None and Set State to Idle
+		uci_set $PKG $sect "DiagnosticsState" "None"
+		uci_set $PKG $sect "State" "Idle"
+		uci_commit $PKG
+		trace "Diagnostics test doesn't run since diag_state isn't set to Requested. And now set diag_state to None"
+	fi
+}
+
+server_selection_start()
+{
+	trace "Start tr143 SERVER SELECTION Diagnostics"
+	local sect="ServerSelectionDiagnostics"
+        ss_reset_results
+        [ -f $RES_SERVER_SELECTION ] && rm $RES_SERVER_SELECTION
+
+        config_load $PKG
+	local diag_state
+	local running_state
+	config_get diag_state $sect "DiagnosticsState" "None"
+	config_get running_state $sect "State" "Idle"
+	if [ "${diag_state-None}" = "Requested" ] && [ "$running_state" = "Idle" ]; then
+		#Only run the test when diag_state is set to Requested and currently no test is running
+                OPT="$PROG_UDP_ECHO_DIAG $RES_SERVER_SELECTION"
+		uci_set $PKG $sect "State" "Running"
+		uci_commit $PKG
+		perform_test "$PROG_SERVER_SELECTION_DIAG" "$OPT" "$sect" "serverselection" &
+	else
+		#Set DiagnosticsState to None and Set State to Idle
+		uci_set $PKG $sect "DiagnosticsState" "None"
+		uci_set $PKG $sect "State" "Idle"
+		uci_commit $PKG
+		trace "Diagnostics test doesn't run since diag_state isn't set to Requested. And now set diag_state to None"
+	fi
+}
+
+start() {
+	local option="$1"
+
+        if [ "$option" = "DownloadDiagnostics" ]; then
+		download_start
+        elif [ "$option" = "UploadDiagnostics" ]; then
+		upload_start
+        elif [ "$option" = "UDPEchoDiagnostics" ]; then
+		udp_echo_start
+        elif [ "$option" = "ServerSelectionDiagnostics" ]; then
+		server_selection_start
+	fi
+}
+
+stop() {
+	local option="$1"
+
+	if [ "$option" = "DownloadDiagnostics" ] || [ "$option" = "UploadDiagnostics" ]; then
+		trace "Stop tr143 Download/Upload Diagnostics..."
+		kill -9 `pgrep $PROG`
+	fi
+	if [ "$option" = "UDPEchoDiagnostics" ]; then
+		trace "Stop tr143 UDP Echo Diagnostics..."
+		kill -9 `pgrep $PROG_UDP_ECHO_DIAG`
+	fi
+	if [ "$option" = "ServerSelectionDiagnostics" ]; then
+		trace "Stop tr143 Server Selection Diagnostics..."
+		kill -9 `pgrep -f $PROG_SERVER_SELECTION_DIAG`
+	fi
+}
+
+case $1 in
+	start) start $2
+	;;
+	stop) stop $2
+	;;
+	restart)
+		stop $2
+		start $2
+	;;
+	*)
+		stop $1
+		start $1
+	;;
+esac

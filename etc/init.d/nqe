@@ -1,0 +1,192 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008-2011 OpenWrt.org
+
+#********** COPYRIGHT AND CONFIDENTIALITY INFORMATION NOTICE *************
+#** Copyright (c) 2014 - Technicolor Delivery Technologies, SAS         **
+#** All Rights Reserved                                                 **
+
+START=76
+STOP=35
+SERVICE_DAEMONIZE=1
+USE_PROCD=1
+
+. $IPKG_INSTROOT/lib/functions/contentsharing.sh
+
+add_samba_firewall_rules() {
+
+    local enable_wan=$(uci get samba.userauth.wan_access)
+      
+    if [ $enable_wan != 0 ] ; then
+       
+      procd_open_data
+
+      json_add_array firewall
+
+        json_add_object ""
+        json_add_string type rule
+        json_add_string src "lan"
+        json_add_string family any
+        json_add_string proto tcp
+        json_add_string dest_port "445"
+        json_add_string target accept
+        json_close_object
+
+        json_add_object ""
+        json_add_string type rule
+        json_add_string src "wan"
+        json_add_string family any
+        json_add_string proto tcp
+        json_add_string target accept
+        json_add_string dest_port "445" 
+        json_close_object
+
+      json_close_array
+
+      procd_close_data
+     
+
+    elif [ $enable_wan == 0 ] ; then
+
+      procd_open_data
+
+      json_add_array firewall
+
+        json_add_object ""
+        json_add_string type rule
+        json_add_string src "wan"
+        json_add_string family any
+        json_add_string proto tcp
+        json_add_string dest_port "445"
+        json_add_string target drop
+        json_close_object
+     
+      json_close_array
+
+      procd_close_data
+
+    fi
+}
+
+load_share() {
+        local share_name
+        local share_path
+        local share_present
+        local load_share
+
+        config_get share_name $1 name
+        config_get share_path $1 path
+
+        load_share=$2
+        share_present=$(/usr/bin/nqcsctrl ES | grep -c $share_name)
+
+        if [ $load_share == samba_share ];then
+
+               if [[ $sambasharing_enabled == 1 && $filesharing_enabled == 0 ]] ; then
+                        if [ $share_present != 0 ] ; then
+                          /usr/bin/nqcsctrl -S $share_name
+                        fi
+                elif [[ $sambasharing_enabled == 1 && $filesharing_enabled == 1 ]] ; then
+                        if [[ $share_present == 0 && $share_path != "/var/spool/samba" ]] ; then
+                          /usr/bin/nqcsctrl +S $share_name $share_path $share_name
+                        fi
+                fi
+        elif [ $load_share == printer_share ]; then
+
+                if [[  $sambashare_printer_enabled == 1 && $printersharing_enabled == 0  ]] ; then
+                        if [ $share_present != 0 ] ; then
+                          /usr/bin/nqcsctrl -S $share_name
+                        fi
+                elif [[  $sambashare_printer_enabled == 1 && $printersharing_enabled == 1  ]] ; then
+                        if [[ $share_present == 0 && -n "$share_path" ]] ; then
+                          /usr/bin/nqcsctrl +S $share_name $share_path $share_name
+                        fi
+                fi
+        fi
+
+}
+
+service_started() {
+
+  procd_set_config_changed firewall
+}
+
+stop_service() {
+
+  procd_set_config_changed firewall
+}
+
+start_service() {
+        ln -sf /etc/init.d/nqe /etc/init.d/samba
+
+        local sambaEnabled
+        local printerEnabled
+        config_load samba
+        config_load printers
+        config_get_bool sambaEnabled samba enabled '0'
+	config_get_bool printerEnabled printers enabled '0'
+        echo "sambaEnabled:$sambaEnabled"
+
+        [ "$sambaEnabled" -eq 0 ] && return 1
+
+        # call a contentsharing function to set 'available' to yes or no for each of the shares depending on the value of samba.samba.filesharing
+        cs_update_sharesconfig
+
+        #removing nqe_nqnd_ready file created by nddaemon process previosly 
+        rm -rf /tmp/nqe_nqnd_ready
+
+        if [ ! -f /tmp/printerexists ]  &&  [  $printerEnabled -eq 1  ]   ; then
+        echo "0" > /sys/bus/usb/devices/usb1/bConfigurationValue
+        echo "1" > /sys/bus/usb/devices/usb1/bConfigurationValue
+        touch /tmp/printerexists
+        fi
+
+
+       procd_open_instance
+       procd_set_param command /usr/bin/nqnd
+       procd_set_param respawn
+       add_samba_firewall_rules
+       procd_close_instance
+
+
+       procd_open_instance
+       procd_set_param command /usr/bin/nqcs
+       procd_set_param respawn 3600 5 0
+       procd_close_instance
+
+}
+
+reload_service() {
+        local filesharing_enabled
+        local printersharing_enabled
+        local sambasharing_enabled
+        local sambashare_printer_enabled
+
+        # add/remove samba share
+        config_load samba
+        config_get filesharing_enabled samba filesharing
+        config_get sambasharing_enabled samba enabled
+        config_foreach load_share  sambashare  samba_share
+
+        # add/remove printer share
+        config_load printersharing
+        config_get printersharing_enabled config  enabled
+        config_get sambashare_printer_enabled printers enabled
+        config_foreach load_share  printers  printer_share
+
+        #signal message
+        procd_send_signal samba
+
+        if [ $? -eq 0 ]; then
+                # We need to call the start function once again in order to overwrite
+                # firewall rules.
+                # Because the process is already there, procd will not actually restart
+                start
+        else
+                echo "Reload of samba failed. nqcs/nqnd not yet running?"
+        fi
+        # make sure the last statement of the reload function is always true
+        # otherwise init.d will restart samba/nqe on failure of the reload function
+        # and that can lead to an unwanted racecondition during boot time
+        true
+
+}

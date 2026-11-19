@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# This script is to delete the content from the /etc/bulkdata/ of both the bank_1 & bank_2
+
+MAX_USE_PERCENTAGE=90
+get_use_percentage=$(df -h | awk '$NF == "/overlay" {print $(NF-1)}' | tr -d '%')
+echo "get_use_percentage start -> $get_use_percentage"
+
+# receives one or more mtd volume names as argument(s)
+mtd_erase() {
+	echo "Entering mtd_erase func "
+        sync # Flush unexpected pending writes before erasing any MTD
+        local BEFORE=$(date +%s)
+        local deleted_mtd_cnt=0
+        for mtd in "$@" ; do
+        if  grep -q $mtd /proc/mtd ; then
+                        echo "mtd erase $mtd"
+                        mtd erase $mtd
+			E=$?
+		        if [ "${E}" == "0" ]; then
+				echo "mtd erase $mtd deleted "
+			else
+				echo "mtd erase $mtd failed to erase with $E"
+			fi
+                deleted_mtd_cnt=$((deleted_mtd_cnt+1))
+        fi
+        done
+        local AFTER=$(date +%s)
+        echo "erased ${deleted_mtd_cnt} MTD(s) in $((AFTER-BEFORE))s"
+        [ ${deleted_mtd_cnt} -eq 0 ] && return 1 || return 0
+}
+
+erase_jffs2_partition() {
+	echo "Entering erase_jffs2_partition func"
+        local mount_point="$1"
+        # Unmount the overlay seems to be not working, instead set it as read only
+                mount -type overlayfs -o ro,remount /
+
+                # unmount the overlay lower filesystem
+        umount -r "${mount_point}"
+
+                mount | grep 'jffs2\|overlay' > /dev/console
+
+        if mtd_erase 'rootfs_data' ; then
+                echo "deleted jffs2 partition(s)"
+        else
+                echo "erase failed, use fallback mechanism"
+        fi
+}
+
+if [ "$get_use_percentage" -gt "$MAX_USE_PERCENTAGE" ]; then
+  echo "Invoking RTFD --all CMD through the Overlay Script"
+  erase_jffs2_partition /overlay
+  sync
+  reboot -f
+  echo "Rebooting the system due to erase rootfs_data"
+else
+  echo "Overlay not full, just skip erasing the rootfs_data"
+fi

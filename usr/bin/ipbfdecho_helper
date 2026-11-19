@@ -1,0 +1,24 @@
+#!/usr/bin/env lua
+local cursor = require("uci").cursor()
+local config = "bfdecho"
+local sectiontype = "user"
+-- reload
+cursor:load(config)
+-- iterate over all sections
+cursor:foreach(config, sectiontype, function(s)
+  local user=s['.name']
+  if s['state']=='Requested' then
+    -- stop running bfdecho
+    os.execute("start-stop-daemon -K -p /var/run/bfdecho_" .. user ..".pid")
+    -- start it again
+    os.execute("start-stop-daemon -S -b -p /var/run/bfdecho_" .. user .. ".pid -m -x /usr/bin/ipbfdecho -- " .. user)
+    -- update state
+    cursor:set(config,user,"state",'InProgress')
+    return false
+  elseif s['state']=='None' then
+    -- stop running bfdecho
+    os.execute("start-stop-daemon -K -p /var/run/bfdecho_" .. user ..".pid")
+  end
+end)
+
+

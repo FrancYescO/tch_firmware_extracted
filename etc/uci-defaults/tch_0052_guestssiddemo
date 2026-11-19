@@ -1,0 +1,893 @@
+#!/bin/sh
+#/******************************************************************
+#/*       Version Controle
+#/*     V4: network name set to "guest" since this is a predifined hardcoded value in th eSystem similar to lan/wan; the original network name wlnet_b has been renamed to guest
+#/*     V5: supported security modes alligned with th emodes on AP0 and AP1, since the Guest should minimum have the same as the main, also added possibility for wpa3 depending on platform, also taken from main
+#/+     V6: made in wifi-ap-credential to be concardinated string and made added double highquote to the supported_security_modes to avoid error due to spaces ind calle value
+#/*     V7/V7a: Dynamic adaptation of multiap due Guest to be proper supported by R1+ features on EasyMesh
+#/x     V8: correcting order to assure correct Interface added to
+#/*     V9: Introduction of vlan/vlan devices for the GuestSSID, this is needed to sparate Main and Guest also when Extender is connected wired, the VLAN also needed on backhaul
+#/*     V10: Adopt Network and Firewall for Extender
+#/*     V11: GPON based platforms require gponl3 configuration for the lan side VLAN and not network defevice, this has been introduced respectively
+#/+     V12: Introduction of dynamic check, if a Guest SSID already exists and if it is fully prepared for EasyMEsh already
+#/*     V12a: dynamic Ethernet Port adaptation with respect to No of boards
+#/*     V12b: modified setting for identifiing the Guest Multiap is set/configured
+#/*********************************************************************************
+
+
+. /lib/functions/custo_lib.sh
+
+#Debugging possibilities
+#os.execute("echo Script was triggered so proofed > /dev/console")
+
+ap_lower_ceiling=0
+ap_upper_ceiling=7
+wl_lower_ceiling=1
+wl_upper_ceiling=4
+prefix_wl="wl1"
+prefix_wl24="wl0"
+
+# bh-radio will calcualted to be a 5 GHz Radio on the dualband CPE and third radio on a Triband radio
+bh_radio="radio_5G"
+tri_allow=$(uci get -q env.var.tri_allow)
+tri_enable=$(uci get -q env.var.tri_enable)
+
+#Check for triband
+wireless_radios=$(_get_instance_name wireless "wifi-device")
+for i in $wireless_radios
+do
+	if [ "$i" == "radio2" ]
+	# Triband detected since radio2 seen
+	then
+		prefix_wl="wl2"
+		# Triband detected
+		bh_radio="radio2"
+		ap_upper_ceiling=13
+		uci set env.var.tri_allow="0"
+		tri_allow='0'
+	fi
+done
+
+if [ "$tri_allow" == "1" ] && [ "$tri_enable" == "1" ]
+then
+	high5g="uci get -q env.var.high5g"
+	low5g="uci get -q env.var.low5g"
+
+	if [ "$high5g" != "" ]
+	then
+		uci set wireless.radio_5G.acs_allowed_channels="$high5g"
+		uci set wireless.radio_5G.allowed_channels="$high5g"
+	fi
+
+fi
+
+#*********************************************************************************************************
+#/*     The Guest SSID shall only be created, incase a Guest is not existing already
+#/*      This situation can happen, due to already set config by custo, or due to different Generic Config
+#/*      for the respective Device
+#/*     If the Guest is already existing, it also needs to be checked, if the the SSID of the 2.4 GHz and the 5 GHz are identical as well as the respective passphrases
+#/*     Example: gcnt-w-Genie
+#*******************************************************************************************************
+
+wireless_wls=$(_get_instance_name wireless "wifi-iface")
+wireless_aps=$(_get_instance_name wireless "wifi-ap")
+tmp_guest=""
+guest_exists="0"
+tmp_radio=""
+tmp_wl_iface24=''
+tmp_wl_inst24=''
+tmp_ap_inst24=''
+tmp_ap_inst5=''
+tmp_wl_inst5=''
+tmp_wl_iface5=''
+tmp_wl_device=''
+tmp_ap_ifaceloop=''
+tmp_ap_wpa_psk_key24=''
+tmp_ap_wpa_psk_key5=''
+
+
+for i in $wireless_wls
+do
+
+echo WL-Instance: $i
+
+tmp_guest=`uci -q get wireless.$i.network`
+
+echo Network Parameter: $tmp_guest
+
+	if [ "$tmp_guest" == "guest" ] || [ "$tmp_guest" == "wlnet_b_24" ] || [ "$tmp_guest" == "wlnet_b_5" ]
+	then
+
+echo Found Guest $i
+
+			guest_exists="1"
+# since also all the Guest-SSID need to be compared to be identical, the SSID's need to be retreived , therefore no break is needed
+#			break
+			tmp_wl_device=`uci -q get wireless.$i.device`
+			if [ "$tmp_wl_device" == "radio_2G" ]
+			then
+echo
+echo Checking Guest on 2.4
+echo
+
+				tmp_wl_iface24=`uci -q get wireless.$i.ssid`
+				tmp_wl_inst24=$i
+			elif [ "$tmp_wl_device" == "radio_5G" ]
+			then
+echo
+echo Checking Guest on 5
+echo
+				tmp_wl_iface5=`uci -q get wireless.$i.ssid`
+				tmp_wl_inst5=$i
+			fi
+		for j in $wireless_aps
+		do
+#/*   seraching for the respective ap-Istances which are needed to check and modify Security passphrases
+			tmp_ap_ifaceloop=`uci -q get wireless.$j.iface`
+echo
+echo Searching for the AP-Instance holding the Guest Passphrase
+echo AP-Iface Parameter: $tmp_ap_ifaceloop
+echo tmp_wl_instance 24: $tmp_wl_inst24
+echo tmp_wl_instance 5: $tmp_wl_inst5
+
+			if [ "$tmp_ap_ifaceloop" == "$tmp_wl_inst24" ]
+			then
+				tmp_ap_inst24=$j
+				tmp_ap_wpa_psk_key24=`uci -q get wireless.$j.wpa_psk_key`
+
+			elif [ "$tmp_ap_ifaceloop" == "$tmp_wl_inst5" ]
+			then
+				tmp_ap_inst5=$j
+				tmp_ap_wpa_psk_key5=`uci -q get wireless.$j.wpa_psk_key`
+			fi
+		done
+	fi
+done
+
+if 	[ "$guest_exists" == "1" ]; then
+	if 	[ "$tmp_wl_iface24" != "$tmp_wl_iface5" ]
+	then
+
+echo
+echo Guest SSID are different and are set to unsplit
+echo
+
+		uci set wireless.$tmp_wl_inst5.ssid=$tmp_wl_iface24
+		uci set multiap.cred3.ssid=$tmp_wl_iface24
+		uci set multiap.cred4.ssid=$tmp_wl_iface24
+
+echo
+echo set passphrease
+echo AP-Intance: $tmp_ap_inst5
+echo
+
+		uci set wireless.$tmp_ap_inst5.wpa_psk_key=$tmp_ap_wpa_psk_key24
+echo
+echo set WiFi6 Passphrase
+echo
+		concat_ap_inst5=$tmp_ap_inst5"_credential0"
+
+echo concat_Instance : $concat_ap_inst5
+
+		uci set wireless.$concat_ap_inst5.passphrase=$tmp_ap_wpa_psk_key24
+
+echo
+echo set passphrase on multiap
+echo
+
+		uci set multiap.cred3.wpa_psk_key=$tmp_ap_wpa_psk_key24
+		uci set multiap.cred4.wpa_psk_key=$tmp_ap_wpa_psk_key24
+
+	fi
+
+
+
+elif 	[ "$guest_exists" == "0" ]; then
+# Guest SSID/Interface only needs to be created, if not already available
+
+echo Guest SSID/Interface will be created new
+
+
+	#/********************************************************************************************
+	#/*   calculation for the 2.4 WL and ap iface
+
+	# wl_iface will be calculated and will be the first not used WL on the 2.4 GHz, in case of Dual Band CPE or the first free one
+	# on a triband CPE
+	wl_iface24=''
+	wireless_wls=$(_get_instance_name wireless "wifi-iface")
+	found="0"
+	for i in $wireless_wls
+	do
+		if [ "$i" == "$prefix_wl24" ]
+		then
+			found="1"
+			break
+		fi
+	done
+
+	if [ "$found" == "1" ]
+	# create the Wifi-Instance
+	then
+		full_wl_prefix=$prefix_wl24"_"
+		wl_iface24=$(_get_next_free $wl_lower_ceiling $wl_upper_ceiling "$full_wl_prefix" "$wireless_wls")
+	else
+		wl_iface=$prefix_wl24
+	fi
+
+	# ap_iface will be calculated and will be the first not used ap
+	wireless_aps=$(_get_instance_name wireless "wifi-ap")
+	ap_iface24=$(_get_next_free $ap_lower_ceiling $ap_upper_ceiling "ap" "$wireless_aps")
+
+	#/********************************************
+
+
+
+
+	# CPE_type will be calculated to know, if the actual CPE is used as Extender(Station) "sta" or as Gateway
+	cpe_type=`uci get wireless.wl1.mode`
+	if [ "$bh_radio" == "radio2" ]
+	then
+		cpe_type=`uci get wireless.wl2.mode`
+	fi
+
+	#/************************************Still to be cleaned*****************************************************************************************************
+
+	# check which GUI and respective config is needed OldGUI: value "0" new GUI value "1"
+	gui_type=$(uci get -q env.var.em_new_ui_layout)
+
+	# wl_ap_state will be calculated based on the Controler settings in on a Controle CPE or on the Agent setting on a Extender
+	# Extender will be identified by the sta setting on the mode of the WL1 Interface
+	wl_ap_state="0"
+
+	# CPE_function will be calulated, to identify, weather the CPE will be used as Controler, Agent or both(Agent and Controller)
+	# posible values: Cont,Agent,ContAgent,none
+	cpe_function="none"
+
+	#/******************************************************************************************************************************
+
+
+	#/*******************************************************************/
+	#/*             Move Wireless settings of Hotspot		            */
+	#/* 			to be after the Guest WiFi
+	#/*           Hotspot config will be left as is and dynamically taken into account					*/
+	#/*******************************************************************/
+
+	#uci delete wireless.wl0_1
+	#uci delete wireless.ap2
+
+	#uci set wireless.ap4=wifi-ap
+	#uci set wireless.ap4.iface='wl0_2'
+	#uci set wireless.ap4.state='1'
+	#uci set wireless.ap4.public='1'
+	#uci set wireless.ap4.ap_isolation='1'
+	#uci set wireless.ap4.station_history='1'
+	#uci set wireless.ap4.max_assoc='8'
+	#uci set wireless.ap4.security_mode='none'
+	#uci set wireless.ap4.pmf='disabled'
+	#uci set wireless.ap4.pmksa_cache='1'
+	#uci set wireless.ap4.wps_state='0'
+	#uci set wireless.ap4.wps_w7pbc='1'
+	#uci set wireless.ap4.wsc_state='configured'
+	#uci set wireless.ap4.wps_ap_setup_locked='0'
+	#uci set wireless.ap4.acl_mode='unlock'
+	#uci set wireless.ap4.acl_registration_time='60'
+	#uci set wireless.ap4.trace_modules=' '
+	#uci set wireless.ap4.trace_level='some'
+
+	#uci set wireless.wl0_2=wifi-iface
+	#uci set wireless.wl0_2.device='radio_2G'
+	#uci set wireless.wl0_2.mode='ap'
+	#uci set wireless.wl0_2.ssid='Hotspot'
+	#uci set wireless.wl0_2.network='hotspot'
+	#uci set wireless.wl0_2.state='0'
+
+	#uci commit wireless
+
+
+	#/*******************************************************************/
+	#/		Guest-Network: Network Interface definition				*/
+	#/*******************************************************************/
+
+	uci set network.guest=interface
+	uci set network.guest.type='bridge'
+	uci add_list network.guest.ifname=$wl_iface24
+	uci set network.guest.macaddr=$(uci get env.var.local_wifi_mac)
+
+
+	if [ $cpe_type == "ap" ]; then
+		uci set network.guest.proto=static
+		uci set network.guest.ip6assign=64
+		uci set network.guest.ipv6=0
+		uci set network.guest.force_link=0
+		uci set network.guest.neighlocktime='-1'
+		uci set network.guest.netmask=255.255.255.0
+		uci set network.guest.ipaddr=192.168.168.1
+
+		uci commit network
+
+	#/*******************************************************************/
+	#/		Guest-Network: DHCP-Server									*/
+	#/*******************************************************************/
+		uci add_list dhcp.dnsmasq.interface=br-lan
+		uci add_list dhcp.dnsmasq.interface=br-guest
+
+
+		uci set dhcp.guest=dhcp
+		uci set dhcp.guest.interface='guest'
+		uci set dhcp.guest.start='2'
+		uci set dhcp.guest.limit='253'
+		uci set dhcp.guest.leasetime='12h'
+		uci set dhcp.guest.dhcpv6='server'
+		uci set dhcp.guest.ra='server'
+		uci set dhcp.guest.ra_management='0'
+		uci set dhcp.guest.ra_mininterval='200'
+		uci set dhcp.guest.ra_maxinterval='600'
+		uci set dhcp.guest.ra_lifetime='1800'
+		uci set dhcp.guest.ra_hoplimit='64'
+		uci set dhcp.guest.force='1'
+
+		uci commit dhcp
+
+
+	#/*******************************************************************/
+	#/		Guest-Firewall Definition				*/
+	#/*******************************************************************/
+		uci set firewall.z_wlnetb=zone
+		uci set firewall.z_wlnetb.name='z_wlnetb'
+		uci add_list firewall.z_wlnetb.network='guest'
+		uci set firewall.z_wlnetb.input='DROP'
+		uci set firewall.z_wlnetb.output='ACCEPT'
+		uci set firewall.z_wlnetb.forward='REJECT'
+		uci set firewall.z_wlnetb.mtu_fix='1'
+		#this zone is a lan zone (for IGD/Device:2)
+		uci set firewall.z_wlnetb.wan='0'
+
+		uci set firewall.for_wlnetb=forwarding
+		uci set firewall.for_wlnetb.src='z_wlnetb'
+		uci set firewall.for_wlnetb.dest='wan'
+
+		uci set firewall.drop_lan_2_z_wlnetb=rule
+		uci set firewall.drop_lan_2_z_wlnetb.name='drop_lan_2_z_wlnetb'
+		uci set firewall.drop_lan_2_z_wlnetb.src='lan'
+		uci set firewall.drop_lan_2_z_wlnetb.dest='z_wlnetb'
+		uci set firewall.drop_lan_2_z_wlnetb.proto='all'
+		uci set firewall.drop_lan_2_z_wlnetb.target='DROP'
+
+
+		uci set firewall.drop_z_wlnetb_2_lan=rule
+		uci set firewall.drop_z_wlnetb_2_lan.name='drop_z_wlnetb_2_lan'
+		uci set firewall.drop_z_wlnetb_2_lan.src='z_wlnetb'
+		uci set firewall.drop_z_wlnetb_2_lan.dest='lan'
+		uci set firewall.drop_z_wlnetb_2_lan.proto='all'
+		uci set firewall.drop_z_wlnetb_2_lan.target='DROP'
+
+		uci set firewall.Allow_z_wlnetb_DHCP=rule
+		uci set firewall.Allow_z_wlnetb_DHCP.name='Allow_z_wlnetb_DHCP'
+		uci set firewall.Allow_z_wlnetb_DHCP.src='z_wlnetb'
+		uci set firewall.Allow_z_wlnetb_DHCP.proto='udp'
+		uci set firewall.Allow_z_wlnetb_DHCP.dest_port='67'
+		uci set firewall.Allow_z_wlnetb_DHCP.target='ACCEPT'
+		uci set firewall.Allow_z_wlnetb_DHCP.family='ipv4'
+
+		uci set firewall.Allow_z_wlnetb_ICMP=rule
+		uci set firewall.Allow_z_wlnetb_ICMP.name='Allow_z_wlnetb_ICMP'
+		uci set firewall.Allow_z_wlnetb_ICMP.src='z_wlnetb'
+		uci set firewall.Allow_z_wlnetb_ICMP.proto='igmp'
+		uci set firewall.Allow_z_wlnetb_ICMP.target='ACCEPT'
+		uci set firewall.Allow_z_wlnetb_ICMP.family='ipv4'
+		uci set firewall.Allow_z_wlnetb_ICMP.dest_ip=`uci get network.guest.ipaddr`
+
+		uci set firewall.Allow_z_wlnetb_DNS=rule
+		uci set firewall.Allow_z_wlnetb_DNS.name='Allow_z_wlnetb_DNS'
+		uci set firewall.Allow_z_wlnetb_DNS.src='z_wlnetb'
+		uci set firewall.Allow_z_wlnetb_DNS.proto='udp'
+		uci set firewall.Allow_z_wlnetb_DNS.dest_port='53'
+		uci set firewall.Allow_z_wlnetb_DNS.target='ACCEPT'
+		uci set firewall.Allow_z_wlnetb_DNS.family='ipv4'
+
+		uci set firewall.drop_lan_2_z_wlnetb_GW=rule
+		uci set firewall.drop_lan_2_z_wlnetb_GW.name='drop_lan_2_z_wlnetb_GW'
+		uci set firewall.drop_lan_2_z_wlnetb_GW.src='lan'
+		uci set firewall.drop_lan_2_z_wlnetb_GW.proto='all'
+		uci set firewall.drop_lan_2_z_wlnetb_GW.target='DROP'
+		uci set firewall.drop_lan_2_z_wlnetb_GW.family='ipv4'
+		uci set firewall.drop_lan_2_z_wlnetb_GW.dest_ip=`uci get network.guest.ipaddr`
+
+
+		# Reject LAN access to TCP services on CPE WAN address(es)
+		uci set firewall.rest_TCP_wlnetb_Input=rule
+		uci set firewall.rest_TCP_wlnetb_Input.name='Rest_TCP_wlnetb_Input'
+		uci set firewall.rest_TCP_wlnetb_Input.src='z_wlnetb'
+		uci set firewall.rest_TCP_wlnetb_Input.dest_ip='!guest'
+		uci set firewall.rest_TCP_wlnetb_Input.proto='tcp'
+		uci set firewall.rest_TCP_wlnetb_Input.family='ipv4'
+		uci set firewall.rest_TCP_wlnetb_Input.extra='-m mark --mark 0/0x8000000'
+		uci set firewall.rest_TCP_wlnetb_Input.target='REJECT'
+
+		uci commit firewall
+
+	else
+	#/*******************************************************************
+	#/+   Extender specific settings
+	#/*******************************************************************
+
+		uci set network.guest.proto=none
+		uci set network.guest.ipv6='0'
+		uci set network.guest.stp='1'
+	fi
+
+
+
+
+	#/*******************************************************************/
+	#/*             Guest SSID: Part 2.4GHz					            */
+	#/*******************************************************************/
+
+	#echo Guest24-wifi Iface:  $wl_iface24
+
+
+	uci set wireless.$wl_iface24=wifi-iface
+	uci set wireless.$wl_iface24.device='radio_2G'
+	uci set wireless.$wl_iface24.mode='ap'
+	uci set wireless.$wl_iface24.state='1'
+	uci set wireless.$wl_iface24.network='guest'
+	uci set wireless.$wl_iface24.reliable_multicast='0'
+	uci set wireless.$wl_iface24.ssid='SET_BY_SCRIPT'
+
+	#echo Guest24-ap Iface:  $ap_iface24
+
+	uci set wireless.$ap_iface24=wifi-ap
+	uci set wireless.$ap_iface24.iface=$wl_iface24
+	# to have SSID disabled in factory default
+	uci set wireless.$ap_iface24.state='0'
+	uci set wireless.$ap_iface24.public='1'
+	uci set wireless.$ap_iface24.ap_isolation='1'
+	uci set wireless.$ap_iface24.station_history='1'
+	uci set wireless.$ap_iface24.max_assoc='0'
+	uci set wireless.$ap_iface24.security_mode='wpa2-psk'
+	#to assure that the space is not creating an error and it must be set in dobble Highquotes to not take it as string
+	uci set wireless.$ap_iface24.supported_security_modes="`uci get wireless.ap0.supported_security_modes`"
+	uci set wireless.$ap_iface24.pmf='disabled'
+	uci set wireless.$ap_iface24.wep_key='SET_BY_SCRIPT'
+	uci set wireless.$ap_iface24.wpa_psk_key='SET_BY_SCRIPT'
+	uci set wireless.$ap_iface24.pmksa_cache='1'
+	# WPS can only be done on one SSID, therefore disable
+	uci set wireless.$ap_iface24.wps_state='0'
+	uci set wireless.$ap_iface24.wps_w7pbc='1'
+	uci set wireless.$ap_iface24.wsc_state='configured'
+	uci set wireless.$ap_iface24.wps_ap_setup_locked='0'
+	uci set wireless.$ap_iface24.wps_ap_pin='SET_BY_SCRIPT'
+	uci set wireless.$ap_iface24.acl_mode='unlock'
+	uci set wireless.$ap_iface24.acl_registration_time='60'
+	uci set wireless.$ap_iface24.trace_modules=' '
+	uci set wireless.$ap_iface24.trace_level='some'
+
+	#echo Basic Config 24gHz
+
+
+	#/*******************************************************************/
+	#/*             Guest SSID: Part 2.4GHz					            */
+	#/*******************************************************************/
+
+	uci set wireless.$wl_iface24.ssid=Guest-`uci get env.var.ssid_mac_postfix_r0`
+	uci set wireless.$ap_iface24.wep_key=`uci get env.var.default_wep_key_r0_s1`
+	uci set wireless.$ap_iface24.wpa_psk_key=`uci get env.var.default_key_r0_s1`
+	uci set wireless.$ap_iface24.wps_ap_pin=`uci get env.var.default_wps_ap_pin_r0_s1`
+	#uci set wireless.$ap_iface24_auth0.secret=`uci get env.var.default_key_r0_s1`
+
+	#/***********************************************************
+	#/*  check if the platform supports wpa3 and set adopt the config respectively
+	#/***************************************************************************
+	SUPPORTED=`uci get wireless.ap0.supported_security_modes`
+	for security in $SUPPORTED
+	do
+	  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+
+	#echo SecurityModes: $SUPPORTED
+
+		uci set wireless.$ap_iface24'_credential0'=wifi-ap-credential
+		uci set wireless.$ap_iface24'_credential0'.passphrase=`uci get wireless.$ap_iface24.wpa_psk_key`
+	  fi
+	done
+
+	#/*******************************************************************/
+	#/*             Guest SSID: Part 5GHz					            */
+	#/*******************************************************************/
+
+	#/********************************************************************************************
+	#/*   calculation for the 5g WL and ap iface
+
+	# wl_iface will be calculated and will be the first not used WL on the 5 GHz, in case of Dual Band CPE or the first free one
+	# on a triband CPE
+	wl_iface=''
+	wireless_wls=$(_get_instance_name wireless "wifi-iface")
+	found="0"
+	for i in $wireless_wls
+	do
+		if [ "$i" == "$prefix_wl" ]
+		then
+			found="1"
+			break
+		fi
+	done
+
+	if [ "$found" == "1" ]
+	# create the Wifi-Instance
+	then
+		full_wl_prefix=$prefix_wl"_"
+		wl_iface=$(_get_next_free $wl_lower_ceiling $wl_upper_ceiling "$full_wl_prefix" "$wireless_wls")
+	else
+		wl_iface=$prefix_wl
+	fi
+
+	# ap_iface will be calculated and will be the first not used ap
+	wireless_aps=$(_get_instance_name wireless "wifi-ap")
+	ap_iface=$(_get_next_free $ap_lower_ceiling $ap_upper_ceiling "ap" "$wireless_aps")
+
+
+
+	#/*******************************************************************/
+	#/*             Guest SSID Implementation				            */
+	#/*taking into account all needed config, also reflecting board specifica*/
+	#/*******************************************************************/
+
+	board=`wireless_get_radio_type.sh radio_5G`
+
+
+	# Is there a dual radio config ?
+	#/*******************************************************************/
+	#/*             Is there a dual radio config ?			            */
+	#/*******************************************************************/
+	DUMMY=`uci get wireless.radio_5G`
+
+	if [ "$?" == "0" ] ; then
+
+	uci add_list network.guest.ifname=$wl_iface
+
+	#/*******************************************************************/
+	#/		Guest-Network: Quantenna specific vlan device				*/
+
+	if [ $board == "quantenna" ]; then
+		uci set network.guest_eth5=device
+		uci set network.guest_eth5.type=8021q
+		uci set network.guest_eth5.name=wl1_1
+		uci set network.guest_eth5.macaddr=`uci get env.rip.eth_mac`
+		uci set network.guest_eth5.enable=1
+		uci set network.guest_eth5.ipv6='0'
+		uci set network.guest_eth5.ifname=eth5
+		uci set network.guest_eth5.vid=3
+	fi
+
+
+
+	uci commit network
+
+
+
+
+	#echo Guest5-wifi Iface:  $wl_iface
+
+	uci set wireless.$wl_iface=wifi-iface
+	uci set wireless.$wl_iface.device='radio_5G'
+	uci set wireless.$wl_iface.mode='ap'
+	uci set wireless.$wl_iface.state='1'
+	uci set wireless.$wl_iface.network='guest'
+	uci set wireless.$wl_iface.ssid='SET_BY_SCRIPT'
+	uci set wireless.$wl_iface.reliable_multicast='1'
+
+
+	if [ $board == "quantenna" ]; then
+	#/*******************************************************************/
+	#/*		Guest SSID: Part 5GHz - Quantenna specifc part	            */
+
+		uci set wireless.$wl_iface.vlan_id=`uci get network.guest_eth5.vid`
+
+		uci set wireless.$ap_iface=wifi-ap
+		uci set wireless.$ap_iface.iface=$wl_iface
+	# to have SSID disabled in factory default
+		uci set wireless.$ap_iface.state='0'
+		uci set wireless.$ap_iface.public='1'
+		uci set wireless.$ap_iface.ap_isolation='0'
+		uci set wireless.$ap_iface.station_history='1'
+		uci set wireless.$ap_iface.max_assoc='0'
+		uci set wireless.$ap_iface.security_mode='wpa2-psk'
+		uci set wireless.$ap_iface.pmf='disabled'
+		uci set wireless.$ap_iface.wep_key='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.wpa_psk_key='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.pmksa_cache='1'
+	# WPS can only be done on one SSID, therefore disable
+		uci set wireless.$ap_iface.wps_state='0'
+		uci set wireless.$ap_iface.wps_w7pbc='1'
+		uci set wireless.$ap_iface.wsc_state='configured'
+		uci set wireless.$ap_iface.wps_ap_setup_locked='0'
+		uci set wireless.$ap_iface.wps_ap_pin='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.acl_mode='unlock'
+		uci set wireless.$ap_iface.acl_registration_time='60'
+		uci set wireless.$ap_iface.acl_accept_list=''
+		uci set wireless.$ap_iface.acl_deny_list=''
+		uci set wireless.$ap_iface.trace_modules=' '
+		uci set wireless.$ap_iface.trace_level='some'
+	#to assure that the space is not creating an error and it must be set in dobble Highquotes to not take it as string
+		uci set wireless.$ap_iface.supported_security_modes="`uci get wireless.ap1.supported_security_modes`"
+
+	else
+	#/*******************************************************************/
+	#/*		Guest SSID: Part 5GHz - Broadcom based part	    	        */
+
+	#Test
+	#echo Test1 WL für wireless 5G guest
+	#Test
+
+	#echo Guest5-ap Iface:  $ap_iface
+
+		uci set wireless.$ap_iface=wifi-ap
+		uci set wireless.$ap_iface.iface=$wl_iface
+	# to have SSID disabled in factory default
+		uci set wireless.$ap_iface.state='0'
+		uci set wireless.$ap_iface.public='1'
+		uci set wireless.$ap_iface.ap_isolation='0'
+		uci set wireless.$ap_iface.station_history='1'
+		uci set wireless.$ap_iface.max_assoc='0'
+		uci set wireless.$ap_iface.security_mode='wpa2-psk'
+		#to assure that the space is not creating an error and it must be set in dobble Highquotes to not take it as string
+		uci set wireless.$ap_iface.supported_security_modes="`uci get wireless.ap1.supported_security_modes`"
+		uci set wireless.$ap_iface.pmf='disabled'
+		uci set wireless.$ap_iface.wep_key='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.wpa_psk_key='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.pmksa_cache='1'
+	# WPS can only be done on one SSID, therefore disable
+
+	#Test
+	#echo Test1a WL für wireless 5G guest
+	#Test
+
+		uci set wireless.$ap_iface.wps_state='0'
+		uci set wireless.$ap_iface.wps_w7pbc='1'
+		uci set wireless.$ap_iface.wsc_state='configured'
+		uci set wireless.$ap_iface.wps_ap_setup_locked='0'
+		uci set wireless.$ap_iface.wps_ap_pin='SET_BY_SCRIPT'
+		uci set wireless.$ap_iface.acl_mode='unlock'
+		uci set wireless.$ap_iface.acl_registration_time='60'
+		uci set wireless.$ap_iface.acl_accept_list=''
+		uci set wireless.$ap_iface.acl_deny_list=''
+		uci set wireless.$ap_iface.trace_modules=' '
+		uci set wireless.$ap_iface.trace_level='some'
+		uci set wireless.$ap_iface.bandsteer_id='off'
+
+	fi
+
+	#Test
+	#echo Test2 WL für wireless 5G guest
+	#Test
+
+	#/*******************************************************************/
+	#/*             Guest SSID: Part 5GHz					            */
+	#/*******************************************************************/
+	uci set wireless.$wl_iface.ssid=Guest-`uci get env.var.ssid_mac_postfix_r0`
+	uci set wireless.$ap_iface.wep_key=`uci get wireless.$ap_iface24.wep_key`
+	uci set wireless.$ap_iface.wpa_psk_key=`uci get wireless.$ap_iface24.wpa_psk_key`
+	uci set wireless.$ap_iface.wps_ap_pin=`uci get wireless.$ap_iface24.wps_ap_pin`
+	#uci set wireless.$ap_iface_auth0.secret=`uci get wireless.$ap_iface24_auth0.secret`
+
+	#/***********************************************************
+	#/*  check if the platform supports wpa3 and set adopt the config respectively
+	#/***************************************************************************
+	SUPPORTED=`uci get wireless.ap1.supported_security_modes`
+	for security in $SUPPORTED
+	do
+	  if [ "$security" == "wpa3" ] || [ "$security" == "wpa3-psk" ] || [ "$security" == "wpa2-wpa3" ] || [ "$security" == "wpa2-wpa3-psk" ]; then
+		uci set wireless.$ap_iface'_credential0'=wifi-ap-credential
+		uci set wireless.$ap_iface'_credential0'.passphrase=`uci get wireless.$ap_iface24.wpa_psk_key`
+	  fi
+	done
+
+	fi
+
+	uci commit wireless
+
+echo End of pure Guest SSID creation
+
+fi   # End of pure Guest SSID creation
+#/********************************************************
+#/      Settings for GUI Management
+
+#/**************************************
+#/+ The network guest should be created, in case the network name is different than guest and to assure, that if more than only one additional Interface is is used  only one is created
+#/  since the tch_0071_web.password file is creating it but would propably create several ones, if multipe networks are there
+
+# the following three lines are not nneded, since the config is done before the tch_0071-web.passwords file is called, since NEtwork name changed to guest
+
+#uci set web.guest=network
+#uci add_list web.guest.cred='cred3'
+#uci add_list web.guest.cred='cred4'
+
+
+#uci add_list web.guest.intf=$wl_iface24
+#uci add_list web.guest.intf=$wl_iface
+#uci set web.guest.splitssid='0'
+
+#uci commit web
+
+
+
+
+
+
+#/*************************************************************************
+#/* additional config to separate the Guest Traffic in a meshed Network
+#/* for separation, vlan is used on th eBAckhaul Interface as well as on the ethernet Interfaces to assure in case of wired connection of Extender the two pools are speparated
+#/* for gpon based products, the lan vlan must be configured via gponl3 instead of device
+#/+ guest list in multiap_agent seems to be created only in case the Guests are enabled. therefor this parameter can not be used to identify if the EM Guest is configured
+#/* therefor the wireless.global.backhaul_vlan will be used to identify
+#/***********************************************************************
+
+guest_exists="0"
+tmp_guest_list=""
+
+tmp_guest_list=`uci -q get wireless.global.backhaul_vlan`
+
+echo Guest EM already configured?: $tmp_guest_list
+
+
+if [ "$tmp_guest_list" == ""  ]; then
+# The guest has not yeen configured to be used with EM R1
+
+echo Modification/creation of Config to be compliant with EM for Guest SSID
+
+	sep_vlan_id=10
+
+	#*************************************************
+	#   check if Device is a GPON based device, this will be checked via existance of gponl3 config file
+	#*********************************************
+
+	board_type=''
+	if [ -f /etc/config/gponl3 ]; then
+		board_type="gpon"
+	else
+		board_type="other"
+	fi
+
+echo Detected Boardtype: $board_type
+
+#*******************************************************************************
+#     Check how many ethernet Ports are supported on the Device on the lan side
+#*******************************************************************************
+
+echo
+echo "check for existing lan ports"
+echo
+
+# Check how many Ethernet Ports are added on the lan bridge
+
+Port_set=$(_filter_for "eth" "$(uci get -q network.lan.ifname)")
+lan_wl_set=$(_filter_for "wl" "$(uci get -q network.lan.ifname)")
+guest_wl_set=$(_filter_for "wl" "$(uci get -q network.guest.ifname)")
+
+
+echo
+echo "the following Network Interfaces are on the lan bridge: $(uci get -q network.lan.ifname)"
+echo "the following Network Interfaces are on the Guest bridge: $(uci get -q network.guest.ifname)"
+echo
+echo "the following lan Ethernet Ports are existing: $Port_set"
+echo "the following lan Ethernet Ports are existing: $lan_wl_set"
+echo "the following lan Ethernet Ports are existing: $guest_wl_set"
+echo
+
+
+
+	if [ $board_type == "gpon"  ]; then
+	# create the gponl3 for the untagged lan ports
+
+echo
+echo "GPON Board"
+echo
+echo "LanIfname befor while loop:$(uci get network.lan.ifname)"
+
+
+#		while [  $lfd_nr -lt  $ethport_count ]
+#		do
+echo
+echo GPONL3
+echo
+		for i in $Port_set
+		do
+echo
+echo "The actual ethport looked at: $i"
+echo
+
+			uci set gponl3."$i"_main=interface
+			uci set gponl3."$i"_main.l3dev="$i"
+			uci set gponl3."$i"_main.ifname="$i"_main
+			uci set gponl3."$i"_main.defact='1'
+			uci set gponl3."$i"_main.mode='bridged'
+			uci set gponl3."$i"_main.univlan='untagged'
+
+
+			uci set gponl3."$i"_guest=interface
+			uci set gponl3."$i"_guest.l3dev="$i"
+			uci set gponl3."$i"_guest.ifname="$i"_guest
+			uci set gponl3."$i"_guest.defact='1'
+			uci set gponl3."$i"_guest.mode='bridged'
+			uci set gponl3."$i"_guest.univlan='10'
+
+
+		done
+# since the GPON device is created based on the varaible Port_set the network ifnames can be created
+# via the string2table function, based on the $Port_set extended by the respective extention
+
+		uci set network.lan.ifname="$(_add_postfix "$Port_set" "_main")"
+		uci set network.guest.ifname="$(_add_postfix "$Port_set" "_guest")"" ""$guest_wl_set"
+
+
+
+	else
+
+
+		for i in $Port_set
+		do
+echo
+echo "The actual ethport looked at: $i"
+echo
+
+			uci set network."$i"_guest=device
+			uci set network."$i"_guest.type=8021q
+			uci set network."$i"_guest.ifname="$i"
+			uci set network."$i"_guest.name="$i"_guest
+			uci set network."$i"_guest.vid=$sep_vlan_id
+
+		done
+# since the GPON device is created based on the varaible Port_set the network ifnames can be created
+# via the string2table function, based on the $Port_set extended by the respective extention
+
+		uci set network.guest.ifname="$(_add_postfix "$Port_set" "_guest")"" ""$guest_wl_set"
+
+echo "Guest NetworkNames: $(uci get -q network.guest.ifname)"
+
+	fi
+
+	uci set network.lan.priority='1'
+
+	uci add_list wireless.global.backhaul_vlan="$sep_vlan_id guest"
+
+
+
+	#/**********************************************************************
+	#/*     Per definition, multiap.cred3 and Multiap.cred4 are reserved for guest SSID
+	#/+ this will be overwritten, incase this uci default file is placed before tch-0099-wifi_multiap
+	#/* the respective settings in the tch-0099 must be modified, either to be commented or to be dynamic to identify the real used SSID
+	#/*   in this case th erespective lines in tch-0099 will be commented, to assure that this settings are applied
+
+	uci set multiap.cred3.frequency_bands='radio_2G'
+	uci set multiap.cred3.state='1'
+	uci set multiap.cred4.state='1'
+	uci set multiap.cred3.ssid=`uci get wireless.$wl_iface24.ssid`
+	uci set multiap.cred4.ssid=`uci get wireless.$wl_iface24.ssid`
+	uci set multiap.cred3.wpa_psk_key=`uci get wireless.$ap_iface24.wpa_psk_key`
+	uci set multiap.cred4.wpa_psk_key=`uci get wireless.$ap_iface24.wpa_psk_key`
+
+	#/***************************************************************************************
+	#/*              V7 additional config due to EM R1+
+	#/***********************************************************************************
+
+	uci set multiap.agent.bss_list=`uci get multiap.agent.bss_list`,$wl_iface24,$wl_iface
+	uci set multiap.agent.fronthaul_list=`uci get multiap.agent.fronthaul_list`,$wl_iface24,$wl_iface
+	uci set multiap.agent.guest_list=$wl_iface24,$wl_iface
+
+	#/*   since the plan to have guest disabled in factory Default, the operational state mist be set to "0" since it is in EM enabled the Master and would reconfig the Wireless to enable the ap
+	uci set multiap.cred3.operational_state='0'
+
+	uci set wireless.$wl_iface24.fronthaul='1'
+	uci set wireless.$wl_iface.fronthaul='1'
+
+	#*****************************************
+	# [GHG-14007] - Netlynk EasyMesh - Block Guest 1905 messages
+	#************************************************************
+	uci set multiap.al_entity.exclusion_iface='-guest$'
+
+	uci commit multiap
+fi
+
+
+echo Script has finished
+
+

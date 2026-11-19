@@ -1,0 +1,159 @@
+-- Automatically generated from Device:2.10
+-- using generator version 2.3
+local Device_DNS_Relay_Forwarding_i_ = {
+  objectType = {
+    name = "Device.DNS.Relay.Forwarding.{i}.",
+    access = "readOnly", -- readWrite not supported
+    numEntriesParameter = "FowardNumberOfEntries",
+    enableParameter = "Enable",
+    minEntries = 0,
+    maxEntries = math.huge,
+    aliasParameter = "Alias",
+    parameters = {
+      Enable = {
+        access = "readOnly", -- no way to enable/disable the DNS server in GW
+        type = "boolean",
+        default = "false"
+      },
+      Status = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "Disabled",
+          "Enabled",
+          "Error"
+        },
+        default = "Disabled"
+      },
+      Alias = {
+        access = "readWrite",
+        activeNotify = "canDeny",
+        type = "string",
+        max = "64"
+      },
+      DNSServer = {
+        access = "readWrite",
+        type = "string",
+        max = "45"
+      },
+      Interface = {
+        access = "readOnly", --readwrite not supported
+        type = "string",
+        max = "256",
+        pathRef = true,
+        targetParent = "Device.IP.Interface.{i}.",
+        default = ""
+      },
+      Type = {
+        access = "readOnly",
+        type = "string",
+        enumeration = {
+          "DHCPv4",
+          "DHCPv6",
+          "RouterAdvertisement",
+          "IPCP",
+          "Static"
+        },
+        default = "Static"
+      }
+    }
+  }
+}
+
+local mapper = mapper
+local nwCommon = mapper("nwcommon")
+local splitKey = nwCommon.split_key
+local pairs, resolve, commitapply = pairs, resolve, commitapply
+local nwCommon = require('transformer.mapper.nwcommon')
+local ubusConnection = mapper("ubus").connect()
+local uciHelper = mapper("ucihelper")
+local networkBinding = { config = "network" }
+local isConfigChanged = false
+
+local typeMap = {
+  ["static"] = "Static",
+  ["dhcp"] = "DHCPv4",
+  ["dhcpv6"] = "DHCPv6",
+  ["ppp"] = "IPCP",
+  ["pppoe"] = "IPCP",
+  ["pppoa"] = "IPCP"
+}
+
+Device_DNS_Relay_Forwarding_i_.entries = function()
+local interface
+local entries = {}
+local ubusStatus = ubusConnection:call("network.interface", "dump", {}) or {}
+  for _, data in ipairs(ubusStatus.interface or {}) do
+    local interface = data["interface"]
+    local dnsServers = data["dns-server"] or {}
+    for index, server in ipairs(dnsServers) do
+      if interface and server then
+        entries[#entries + 1] = server .. "|" .. interface.."|"..index
+      end
+    end
+  end
+  return(entries)
+end
+
+Device_DNS_Relay_Forwarding_i_.get = {
+  Enable = "1",
+  Status = "Enabled",
+  Interface = function(mapping, param, key)
+    local _, interfaceData = splitKey(key)
+    interfaceData = splitKey(interfaceData)
+    return resolve("Device.IP.Interface.{i}.", interfaceData) or ""
+  end,
+  Type = function(mapping, param, key)
+    local _, interfaceData = splitKey(key)
+    interfaceData = splitKey(interfaceData)
+    local ubusStatus = ubusConnection:call("network.interface", "dump", {}) or {}
+    for _, data in ipairs(ubusStatus.interface or {}) do
+      for interfaceList, interfaceName in pairs(data) do
+        if interfaceList == "interface" and interfaceData == interfaceName then
+          return typeMap[data["proto"]] or ""
+        end
+      end
+    end
+  end,
+  DNSServer = function(mapping, param, key)
+    local dnsServer = splitKey(key)
+    return dnsServer
+  end
+}
+
+Device_DNS_Relay_Forwarding_i_.set = {
+  DNSServer = function(mapping, param, value, key)
+    local _, interfaceData = splitKey(key)
+    interfaceData = splitKey(interfaceData)
+    local ubusStatus = ubusConnection:call("network.interface", "dump", {}) or {}
+    for _, data in pairs(ubusStatus.interface or {}) do
+      if interfaceList == "interface" and interfaceData == interfaceName then
+        if data["proto"] == "static" then
+          networkBinding.sectionname = interfaceData
+          networkBinding.option = "dns"
+          uciHelper.set_on_uci(networkBinding, value, commitapply)
+          isConfigChanged = true
+          return true
+        else
+          return nil, "Dynamic DNSServers cannot be modified"
+        end
+      end
+    end
+  end
+}
+
+Device_DNS_Relay_Forwarding_i_.commit = function()
+  if isConfigChanged then
+    uciHelper.commit(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+Device_DNS_Relay_Forwarding_i_.revert = function()
+  if isConfigChanged then
+    uciHelper.revert(networkBinding)
+    isConfigChanged = false
+  end
+end
+
+register(Device_DNS_Relay_Forwarding_i_)

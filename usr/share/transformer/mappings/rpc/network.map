@@ -1,0 +1,189 @@
+local network_ = {
+  objectType = {
+    name = "rpc.network.",
+    access = "readOnly",
+    minEntries = 1,
+    maxEntries = 1,
+    parameters = {
+      -- to enable/disable ipv6 globally for all interfaces
+      ipv6_enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      release_renew = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      wan_up = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      ula_enable = {
+        access = "readWrite",
+        type = "boolean",
+      },
+      ula_prefix = {
+        access = "readWrite",
+        type = "string",
+      }
+    },
+  }
+}
+
+local networkBinding = { config = "network", state = false }
+local cwmpdBinding = { config = "cwmpd", sectionname = "cwmpd_config", option = "interface" }
+local envBinding = { config = "env", sectionname = "var", option = "unlockedstatus" }
+local conn = mapper("ubus").connect()
+local process = require 'tch.process'
+local uciHelper = mapper("ucihelper")
+local uciCommit = uciHelper.commit
+local uciSet = uciHelper.set_on_uci
+local uciGet = uciHelper.get_from_uci
+local network = require("transformer.shared.common.network")
+local configChanged
+
+local function getFromUci(intf, option, default)
+  networkBinding.sectionname = intf
+  networkBinding.option = option
+  networkBinding.default = default
+  return uciGet(networkBinding)
+end
+
+local function setOnUci(intf, option, value)
+  networkBinding.sectionname = intf
+  networkBinding.option = option
+  uciSet(networkBinding, value, commitapply)
+end
+
+-- Returns ipv6_enable as "1" only if network.wan.ipv6='1', network.lan.ipv6='1' & network.wan6.auto='1'
+local function getIPv6Value()
+  local value = "0"
+  local wanIPv6, lanIPv6, wan6Auto
+  wanIPv6 = getFromUci("wan", "ipv6", "1")
+  lanIPv6 = getFromUci("lan", "ipv6", "1")
+  wan6Auto = getFromUci("wan6", "auto", "1")
+  if wanIPv6 ~= "0" and lanIPv6 ~= "0" and wan6Auto ~= "0" then
+    value = "1"
+  end
+  return value
+end
+
+network_.get = {
+  ipv6_enable = getIPv6Value,
+  ula_enable = network.getULAEnable,
+  ula_prefix = network.getULAPrefix,
+  release_renew = "0",
+  wan_up = "0"
+}
+
+network_.set = {
+  release_renew = function(mapping, param, value, key)
+    commitapply:newset("rpc.network.release_renew")
+    return true
+  end,
+  ipv6_enable = function(mapping, param, value)
+    setOnUci("wan", "ipv6", value)
+    setOnUci("lan", "ipv6", value)
+    setOnUci("wan6", "auto", value)
+    configChanged = true
+  end,
+  wan_up = function(mapping, param, value, key)
+    if value == "1" then
+      commitapply:newset("rpc.network.wan_up")
+    end
+    return true
+  end,
+  ula_enable = function(mapping, param, value, key)
+    network.setULAEnable(value, commitapply)
+  end,
+  ula_prefix = function(mapping, param, value, key)
+    local result, err = network.setULAPrefix(value, commitapply)
+    if not result then
+      return result, err
+    end
+  end
+}
+
+local function setMobiledConfig(ubusVal)
+   local value = (ubusVal == "down") and "none" or "detach"
+   local mobiledBinding = { config = "mobiled", sectionname = "device" }
+   uciHelper.foreach_on_uci(mobiledBinding, function(s)
+     mobiledBinding.sectionname = s[".name"]
+     mobiledBinding.option = "detach_mode"
+     uciSet(mobiledBinding, value, commitapply)
+     uciCommit(mobiledBinding)
+     process.execute("/etc/init.d/mobiled", {"reload"})
+   end)
+end
+
+local function getMobiledConfig()
+  local mobiledBinding = { config = "mobiled", sectionname = "device" }
+  uciHelper.foreach_on_uci(mobiledBinding, function(s)
+    mobiledBinding.sectionname = s[".name"]
+    mobiledBinding.option = "detach_mode"
+    return uciGet(mobiledBinding) or ""
+  end)
+end
+
+local function wwanSetting(ubusVal)
+   local intfVal = (ubusVal == "up") and "wwan" or "wan"
+   conn:call("network.interface.wwan", ubusVal, { })
+   uciSet(cwmpdBinding, intfVal, commitapply)
+   uciCommit(cwmpdBinding)
+   process.execute("/etc/init.d/cwmpd", {"reload"})
+end
+
+local function checkWanEvent(mapping, action, data)
+  local unlockStatus = uciGet(envBinding) or ""
+  if data and data["interface"] == "wan" then
+    if data["action"] == "ifdown" then
+      process.execute("ifup wwan")
+      if unlockStatus == "1" then
+        wwanSetting("up")
+      end
+      setMobiledConfig("up")
+    elseif data["action"] == "ifup" then
+      process.execute("ifdown wwan")
+      if unlockStatus == "1" then
+        wwanSetting("down")
+      end
+      setMobiledConfig("down")
+    end
+  end
+end
+
+local function checkMobiledEvent(mapping, action, data)
+  if data and data["radio"] == "no_service" then
+    local mode = getMobiledConfig()
+    local isWanUp = getFromUci("wan", "auto", "1")
+    if (isWanUp == "1" and mode ~= "none") then
+      process.execute("ifdown wwan")
+      setMobiledConfig("down")
+    elseif (isWanUp ~= "1" and mode ~= "detach") then
+      process.execute("ifup wwan")
+      setMobiledConfig("up")
+    end
+  end
+end
+
+network_.add_watchers = function(mapping, param, key)
+  local ubusEventSource = eventsource("ubus")
+  ubusEventSource.watch_event(mapping, checkWanEvent, "network.interface")
+  ubusEventSource.watch_event(mapping, checkMobiledEvent, "mobiled.leds")
+end
+
+network_.commit = function()
+  if configChanged then
+    uciCommit(networkBinding)
+  end
+  configChanged = false
+end
+
+network_.revert = function()
+  if configChanged then
+    uciHelper.revert(networkBinding)
+  end
+  configChanged = false
+end
+
+register(network_)
